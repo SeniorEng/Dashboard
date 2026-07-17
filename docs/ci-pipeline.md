@@ -7,7 +7,7 @@ Dependency-Automatisierung siehe [`dependency-management.md`](dependency-managem
 
 ## Pflicht-Gates
 
-GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Request mit 10 Pflicht-Gates:
+GitHub Actions (`.github/workflows/ci.yml`) läuft auf jedem **Pull-Request** sowie auf **Push nach `main`** (Trigger-Modell siehe [Kosten-Optimierung](#kosten-optimierung-task-1799)) mit 10 Pflicht-Gates:
 
 1. `npm ci`
 2. `tsc --noEmit`
@@ -23,6 +23,18 @@ GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Reque
 12. `vitest run tests/architecture/sweep-dev-guard.test.ts` (Sweep-Skript-Prod-Guards, DB-frei, statisch, **immer** — eigener Step im `static-analysis`-Job; Detail siehe unten)
 
 Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_USER_EMAIL` + `TEST_USER_PASSWORD` (Login gegen den in CI gestarteten App-Server) — fehlen sie (z.B. in Forks), werden diese Schritte sauber übersprungen, die statischen Gates (1, 2, 3, 6, 10, 11, 12) laufen immer (Gate 10 lädt zur Laufzeit Mustang + veraPDF und braucht Java, aber keine Test-User-Secrets).
+
+### Kosten-Optimierung (Task #1799)
+
+Fünf Verbrauchs-Hebel, die **keinen** der Pflicht-Gates und **nicht** die Branch-Protection schwächen:
+
+- **Keine doppelten Runs (Trigger-Modell).** `push` triggert nur noch auf `main`, dazu `pull_request`. Vorher liefen Feature-Branch-Commits mit offenem PR **doppelt** (je ein `push`- UND ein `pull_request`-Run), weil die `concurrency`-Gruppe auf `github.ref` keyte und beide Events sich dort unterscheiden. Jetzt deckt ein Feature-Branch ausschließlich das `pull_request`-Event ab; direkte Pushes/Merges nach `main` laufen weiter die volle Suite. Die `concurrency`-Gruppe keyt für PRs auf die PR-Nummer (`github.event.pull_request.number`), für `main`-Pushes auf die Ref — superseded Runs des überlebenden Triggers werden korrekt gecancelt, ohne dass PR- und Push-Runs sich gegenseitig abbrechen. **Was auf `main` bzw. auf PRs nach `main` geprüft wird, ändert sich nicht.**
+- **`timeout-minutes` pro Job.** Jeder Job hat ein großzügiges Hard-Limit (weit über der beobachteten Laufzeit, aber weit unter dem 6-h-Default): `static-analysis` 20, `tests` 40, `e2e-smoke` 30, `template-cache-verify` 30, `mutation` 25, `erechnung-validation` 25, `changes` 5. Ein hängender Prozess (Server/Vitest/Browser/Download) wird so nach Minuten gekillt statt bis zum Default weiterzubillen.
+- **Dependency-Installation: bewusst bei `npm ci` + `cache: npm` belassen.** Der `node_modules`-Cache-Hebel (Install über die 6 Jobs skippen) wurde **verworfen**: Ein restaurierter `node_modules` würde sowohl `npm ci` als auch den `postinstall`-Hook `normalize-lockfile.mjs` überspringen, und native/Toolchain-Binaries (esbuild, Playwright/Chromium, drizzle-kit) sind cache-empfindlich. Ohne beweisbare Cache-Sicherheit kostet ein Cache-Bug (flaky Jobs) mehr als die gesparte Installation. `cache: npm` (Download-Tarball-Cache) + `npm ci` + Lockfile-Registry-Guard + `postinstall`-Normalize-Hook bleiben unverändert.
+- **Path-Gating der optionalen Schwer-Jobs (Branch-Protection-sicher).** Ein leichter `changes`-Job (`dorny/paths-filter`) ermittelt zentral, ob e-rechnungs- bzw. cache-relevante Pfade geändert wurden. `template-cache-verify` (KEIN Required-Check) wird bei irrelevanten PR-Änderungen komplett übersprungen (`if: push || template_cache` ⇒ ein Skip lässt keinen Merge „pending" hängen). `erechnung-validation` (**Required-Check**) läuft dagegen **immer** als Job und meldet grün — das Java-freie **Strict-WASM-XSD-Gate läuft unbedingt**; nur der teure Java-Download + Mustang/veraPDF-Lauf ist auf relevante Pfade (oder `main`-Push) gegated. So bleibt kein Required-Kontext „pending", aber ein docs-only-PR spart den Java-Teil.
+- **Artefakte schlanker.** Schwere Artefakte (Playwright-Report/Traces/Video, Coverage, Test-Reports, knip-, mutation-Report) werden nur noch **bei Fehlschlag** (`if: failure()`) hochgeladen und die Retention auf 3 Tage gekürzt (vorher 7).
+
+**Deployment-Build (Autoscale, `npm run build`):** bewusst **nicht** angefasst — kein klar sicherer Cheap-Win ohne Prod-Debuggability-Verlust (Vite + esbuild-Minify + hidden Sourcemaps + OpenAPI-Gen), Scope bleibt CI-seitig.
 
 ### Dev-DB-Skript-Prod-Guards als eigenes Gate (Task #1436)
 

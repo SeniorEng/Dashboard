@@ -30,18 +30,95 @@ name: CI
 # die statischen Gates (1, 2, 3, 6, 11, 12) laufen immer.
 
 on:
+  # Kosten-Optimierung (Task #1799): `push` NUR noch auf dem Default-Branch
+  # (`main`). Feature-Branch-Commits mit offenem PR wurden vorher DOPPELT
+  # getestet (je ein `push`- UND ein `pull_request`-Run), weil die
+  # `concurrency`-Gruppe auf `github.ref` keyte und sich beide Events dort
+  # unterscheiden — keiner brach den anderen ab, jeder PR zahlte doppelt.
+  # Jetzt decken Feature-Branches ausschließlich das `pull_request`-Event ab;
+  # direkte Pushes/Merges nach `main` laufen weiter die volle Suite. Damit
+  # halbiert sich der CI-Verbrauch pro PR-Branch, ohne dass sich ändert, was auf
+  # `main` oder auf PRs nach `main` läuft.
   push:
+    branches:
+      - main
   pull_request:
 
-# Laufende Runs für denselben Branch/PR abbrechen, sobald ein neuer Push kommt.
+# Laufende Runs für denselben PR/Branch abbrechen, sobald ein neuer Push kommt.
+# Für PRs keyt die Gruppe auf die PR-Nummer, für Pushes auf `main` auf die Ref —
+# so werden superseded Runs des ÜBERLEBENDEN Triggers (PR bzw. main-Push)
+# korrekt gecancelt, ohne dass PR- und Push-Runs sich gegenseitig abbrechen.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   NODE_VERSION: "20"
 
 jobs:
+  # -------------------------------------------------------------------------
+  # Change-Detection (Task #1799): ermittelt einmal zentral, ob die für die
+  # OPTIONALEN Schwer-Jobs (`template-cache-verify`, der Java-Download-/Validate-
+  # Teil von `erechnung-validation`) relevanten Pfade in diesem PR geändert
+  # wurden. Die Schwer-Jobs nutzen diese Ausgaben, um teure Schritte NUR bei
+  # relevanter Änderung (oder auf Push nach `main`) auszuführen — ohne je einen
+  # Required-Check „pending" hängen zu lassen (erechnung-validation bleibt als
+  # Job präsent und meldet grün, siehe unten). Reiner, sekundenschneller Job.
+  # -------------------------------------------------------------------------
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      erechnung: ${{ steps.filter.outputs.erechnung }}
+      template_cache: ${{ steps.filter.outputs.template_cache }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Vollständige History, damit der Base-Branch für den PR-Diff da ist
+          # (gleiche Technik wie der mutation-Job — kein neues Fremd-Action-
+          # Dependency, das einen Required-Check brechen könnte).
+          fetch-depth: 0
+
+      # Rein git-basierte Change-Detection (analog zum mutation-Job). Auf Push
+      # nach `main` sind die Ausgaben irrelevant, weil die Schwer-Jobs dort
+      # ohnehin über `github.event_name == 'push'` voll laufen — daher hier
+      # fail-safe auf `false` und die eigentliche Diff-Logik nur für PRs.
+      - name: Detect relevant path changes
+        id: filter
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "Kein pull_request — Schwer-Jobs laufen ohnehin voll (push→main)."
+            echo "erechnung=false" >> "$GITHUB_OUTPUT"
+            echo "template_cache=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_REF" || true
+          CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD 2>/dev/null || true)
+          echo "Geänderte Dateien in diesem PR:"
+          echo "$CHANGED"
+          # E-Rechnungs-/PDF-/ZUGFeRD-relevante Pfade: nur wenn diese sich
+          # ändern, lohnt der teure Java-Download + Mustang/veraPDF-Lauf. Das
+          # Java-freie Strict-WASM-XSD-Gate läuft IMMER (erechnung-validation).
+          ERECHNUNG_RE='^(shared/domain/(invoice-line-items|invoice-line-aggregation|budget-invoice-split|document-page-geometry)\.ts|shared/schema/billing\.ts|shared/api/billing\.ts|server/services/|server/routes/billing\.ts|scripts/validate-erechnung(-strict)?\.ts|package-lock\.json|\.github/workflows/ci\.yml)'
+          # Cache-Template-/Orchestrator-relevante Pfade: nur wenn die Ephemeral-
+          # DB-/Seed-/Schema-Maschinerie sich ändert, muss der Orchestrator 3×.
+          TEMPLATE_RE='^(scripts/(with-ephemeral-db|verify-template-cache|verify-concurrent-cache-build|verify-concurrent-template-clone|ci-seed-superadmin|seed-test-reference-data)\.ts|script/server-bundle\.ts|shared/schema(\.ts|/)|drizzle\.config\.ts|package-lock\.json|\.github/workflows/ci\.yml)'
+          if echo "$CHANGED" | grep -qE "$ERECHNUNG_RE"; then
+            echo "erechnung=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "erechnung=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$CHANGED" | grep -qE "$TEMPLATE_RE"; then
+            echo "template_cache=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "template_cache=false" >> "$GITHUB_OUTPUT"
+          fi
   # -------------------------------------------------------------------------
   # Statische Gates: brauchen weder DB noch laufenden Server. Laufen immer.
   # Gates: 1 (npm ci), 2 (tsc), 3 (eslint), 6 (npm run audit:ci)
@@ -51,6 +128,10 @@ jobs:
     # (Typecheck · Lint · Audit — Details siehe Steps + Gate-Übersicht oben).
     name: static-analysis
     runs-on: ubuntu-latest
+    # Generöses Hard-Limit (Task #1799): rein statische Gates (tsc/eslint/audit/
+    # OpenAPI-Drift) laufen in wenigen Minuten; ein hängender Step wird so nach
+    # Minuten gekillt statt bis zum 6-h-Default zu billen.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -131,13 +212,17 @@ jobs:
         continue-on-error: true
         run: npx --yes knip@5.88.1 --reporter json > knip-report.json
 
+      # Kosten-Optimierung (Task #1799): Report nur bei Job-Fehlschlag hochladen
+      # (knip ist warning-only ⇒ auf grünen Läufen braucht niemand das Artefakt)
+      # und Retention kurz halten.
       - name: Upload knip report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: knip-report
           path: knip-report.json
           if-no-files-found: ignore
+          retention-days: 3
 
   # -------------------------------------------------------------------------
   # DB-/Server-abhängige Gates: Vitest, Architektur-Fitness-Functions und
@@ -149,6 +234,11 @@ jobs:
     # (Vitest · Architecture-Fitness · Coverage — Details siehe Steps).
     name: tests
     runs-on: ubuntu-latest
+    # Hard-Limit (Task #1799): voller Vitest-Lauf + Architektur-Fitness +
+    # Coverage-Gates gegen den gebooteten App-Server. Großzügig über der
+    # beobachteten Laufzeit, aber weit unter dem 6-h-Default — ein hängender
+    # Server/Vitest-Prozess wird so nach Minuten gekillt.
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
@@ -289,8 +379,10 @@ jobs:
         run: |
           echo "::warning::DB-/Server-Gates übersprungen — TEST_USER_PASSWORD/TEST_USER_EMAIL Secrets nicht gesetzt."
 
+      # Kosten-Optimierung (Task #1799): Test-/Coverage-Artefakte nur bei
+      # Fehlschlag hochladen (auf grünen Läufen ungenutzt) + kurze Retention.
       - name: Upload test reports
-        if: ${{ always() }}
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: test-reports
@@ -299,7 +391,7 @@ jobs:
             coverage/
             server.log
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   # -------------------------------------------------------------------------
   # E2E-Smoke-Gate: Playwright gegen einen laufenden Server + Postgres.
@@ -310,6 +402,10 @@ jobs:
     # (Playwright-Smoke — Details siehe Steps).
     name: e2e-smoke
     runs-on: ubuntu-latest
+    # Hard-Limit (Task #1799): Playwright-Smoke gegen den gebooteten Server +
+    # Postgres. Deckt Chromium-Install + Boot + Smoke-Flows ab; ein hängender
+    # Browser/Server wird nach Minuten gekillt statt bis zum 6-h-Default.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -416,9 +512,10 @@ jobs:
         run: |
           echo "::warning::E2E-Smoke übersprungen — TEST_USER_PASSWORD/TEST_USER_EMAIL Secrets nicht gesetzt."
 
-      # Bei Fail: Trace/Video/Report als Artifact hochladen.
+      # Kosten-Optimierung (Task #1799): schwere Trace/Video/Report-Artefakte nur
+      # bei Fehlschlag hochladen (auf grünen Läufen ungenutzt) + kurze Retention.
       - name: Upload Playwright artifacts
-        if: ${{ always() }}
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
@@ -427,7 +524,7 @@ jobs:
             test-results/
             server.log
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   # -------------------------------------------------------------------------
   # Cache-Template-Verify-Gate (Task #910): beweist auf einem echten Runner,
@@ -447,6 +544,18 @@ jobs:
   template-cache-verify:
     name: template-cache-verify
     runs-on: ubuntu-latest
+    # Path-Gating (Task #1799): dieser Job ist KEIN Branch-Protection-Required-
+    # Check und fährt den Orchestrator 3× (schwer). Er läuft daher nur, wenn die
+    # Cache-/Orchestrator-/Schema-Maschinerie geändert wurde ODER auf Push nach
+    # `main` (merge-bound → volle Absicherung). Bei irrelevanten Änderungen wird
+    # der Job komplett übersprungen — gefahrlos, weil nicht required (ein
+    # Skip lässt hier keinen Merge „pending" hängen).
+    if: ${{ github.event_name == 'push' || needs.changes.outputs.template_cache == 'true' }}
+    needs: changes
+    # Hard-Limit (Task #1799): Orchestrator-Läufe (cold/warm/invalidation +
+    # concurrency) gegen Postgres/Neon-Proxy; ein hängender Orchestrator wird
+    # nach Minuten gekillt statt bis zum 6-h-Default.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -516,6 +625,9 @@ jobs:
     name: Mutation testing (stryker · changed files)
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
+    # Hard-Limit (Task #1799): Stryker läuft nur auf den geänderten Hotspot-
+    # Modulen (incremental); ein hängender Runner wird nach Minuten gekillt.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -579,14 +691,16 @@ jobs:
         if: ${{ steps.targets.outputs.run == 'true' }}
         run: node scripts/run-mutation.mjs --mutate ${{ steps.targets.outputs.mutate }}
 
+      # Kosten-Optimierung (Task #1799): Mutation-Report nur bei Fehlschlag des
+      # Stryker-Laufs hochladen (auf grünen Läufen ungenutzt) + kurze Retention.
       - name: Upload mutation report
-        if: ${{ always() && steps.targets.outputs.run == 'true' }}
+        if: ${{ failure() && steps.targets.outputs.run == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: mutation-report
           path: reports/mutation/
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   # -------------------------------------------------------------------------
   # E-Rechnungs-Validierungs-Gate (Task #1073): erzeugt eine Beispiel-
@@ -600,6 +714,15 @@ jobs:
   erechnung-validation:
     name: erechnung-validation
     runs-on: ubuntu-latest
+    # Required-Check (Branch-Protection): läuft IMMER als Job und meldet grün —
+    # NIE per job-level `if` überspringen (sonst bliebe der Kontext „pending"
+    # und würde jeden Merge blockieren). Das Java-freie Strict-WASM-XSD-Gate
+    # läuft unbedingt; nur der teure Java-Download + Mustang/veraPDF-Lauf ist
+    # via `needs: changes` auf relevante Pfade (oder main-Push) path-gated.
+    needs: changes
+    # Hard-Limit (Task #1799): Strict-WASM-Gate + optionaler Java-Validator-Lauf;
+    # ein hängender Download/Validator wird nach Minuten gekillt.
+    timeout-minutes: 25
     # Die externen Validatoren sind auf FESTE Versionen gepinnt (vorher
     # dynamisch aus den Maven-Metadaten / `verapdf-installer.zip` = latest).
     # Ein Versionssprung am Host kann das (branch-protected) Gate damit nicht
@@ -633,8 +756,12 @@ jobs:
       - name: Strict WASM-XSD gate (real pot/VAT scenarios)
         run: npm run validate:erechnung:strict
 
-      # Java-Runtime für Mustang + veraPDF.
+      # Java-Runtime für Mustang + veraPDF. Path-gated (Task #1799): nur bei
+      # relevanter Änderung ODER Push nach `main`. Bei irrelevanten PR-Änderungen
+      # werden die Java-Schritte übersprungen — der Job bleibt grün (Strict-Gate
+      # oben lief bereits) und der Required-Check hängt NIE „pending".
       - name: Setup Java (Temurin 17)
+        if: ${{ github.event_name == 'push' || needs.changes.outputs.erechnung == 'true' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -645,12 +772,14 @@ jobs:
       # frischer Download; sonst Cache-Hit ⇒ KEIN externer Fetch. Mustang-JAR
       # und veraPDF-Installation liegen unter VALIDATOR_CACHE_DIR.
       - name: Cache Mustang CLI (pinned)
+        if: ${{ github.event_name == 'push' || needs.changes.outputs.erechnung == 'true' }}
         uses: actions/cache@v4
         with:
           path: ${{ env.VALIDATOR_CACHE_DIR }}/mustang-cli-${{ env.MUSTANG_VERSION }}.jar
           key: mustang-cli-${{ env.MUSTANG_VERSION }}
 
       - name: Cache veraPDF (pinned)
+        if: ${{ github.event_name == 'push' || needs.changes.outputs.erechnung == 'true' }}
         uses: actions/cache@v4
         with:
           path: ${{ env.VALIDATOR_CACHE_DIR }}/verapdf-${{ env.VERAPDF_VERSION }}
@@ -663,6 +792,7 @@ jobs:
       # ungültig" (das meldet erst der validate-Step unten).
       - name: Download Mustang CLI
         id: mustang
+        if: ${{ github.event_name == 'push' || needs.changes.outputs.erechnung == 'true' }}
         run: |
           set -euo pipefail
           JAR="$VALIDATOR_CACHE_DIR/mustang-cli-$MUSTANG_VERSION.jar"
@@ -685,6 +815,7 @@ jobs:
       # gepinnt. Bei Cache-Hit wird Download + Installation übersprungen.
       - name: Install veraPDF
         id: verapdf
+        if: ${{ github.event_name == 'push' || needs.changes.outputs.erechnung == 'true' }}
         run: |
           set -euo pipefail
           DEST="$VALIDATOR_CACHE_DIR/verapdf-$VERAPDF_VERSION"
@@ -726,6 +857,7 @@ jobs:
           echo "bin=$BIN" >> "$GITHUB_OUTPUT"
 
       - name: Validate sample EN 16931 e-invoice (Mustang + veraPDF)
+        if: ${{ github.event_name == 'push' || needs.changes.outputs.erechnung == 'true' }}
         env:
           ERECHNUNG_REQUIRE_VALIDATORS: "1"
           MUSTANG_CLI_JAR: ${{ steps.mustang.outputs.jar }}
