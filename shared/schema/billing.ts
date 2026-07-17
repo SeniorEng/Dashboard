@@ -349,6 +349,21 @@ export interface InvoiceRenderSnapshot {
    * Neu erzeugte Rechnungen werden mit `true` versiegelt.
    */
   includeConformantSettlement?: boolean;
+  /**
+   * Task #1797 — eingefrorenes Flag für den prominenten Kostenträger-Topf-Label
+   * im Rechnungskopf (direkt unter "RECHNUNG"/"STORNORECHNUNG") und die damit
+   * verbundene Konsolidierung der redundanten Topf-Nennung (§-Klausel im
+   * Einleitungssatz + reine Topf-Benennung in der Notiz-Box). `true` = die
+   * Rechnung wurde MIT prominentem Kopf-Label und konsolidiertem Text
+   * versiegelt; das Re-Render reproduziert diese Darstellung. `undefined`/
+   * `false` = Bestand, der VOR dieser Änderung versiegelt wurde → MUSS ohne
+   * Kopf-Label und mit der alten Einleitung/Notiz re-gerendert werden, sonst
+   * driftet das PDF byte-weise gegen den in `pdf_hash` versiegelten Stand
+   * (GoBD-Integritäts-Verifier). Reines Anzeige-Element — das eingebettete
+   * ZUGFeRD-/EN-16931-XML bleibt unverändert. Neu erzeugte Rechnungen werden
+   * mit `true` versiegelt.
+   */
+  prominentPotLabel?: boolean;
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

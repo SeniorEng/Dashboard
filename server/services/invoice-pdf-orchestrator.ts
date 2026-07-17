@@ -483,6 +483,19 @@ export async function buildInvoicePdfData(
     ? options.snapshot.includeConformantSettlement === true
     : true;
 
+  // Task #1797 — prominenter Kostenträger-Topf-Label im Rechnungskopf +
+  // Konsolidierung der redundanten Topf-Nennung (Einleitungssatz + Notiz-Box).
+  // Liegt ein Snapshot vor (Re-Render einer versiegelten Rechnung), wird der
+  // versiegelte Zustand reproduziert: nur Rechnungen mit
+  // `snapshot.prominentPotLabel === true` re-rendern MIT dem Kopf-Label und der
+  // Konsolidierung; Bestände ohne dieses Flag behalten das alte Layout (kein
+  // Kopf-Label, alte Einleitung/Notiz) → byte-stabile PDF-Reproduktion gegen
+  // `pdf_hash`. Ohne Snapshot (Erst-Persist / Draft-Vorschau) wird das neue
+  // Layout gerendert und über `persistInvoicePdfInner` als `true` versiegelt.
+  pdfData.prominentPotLabel = options?.snapshot
+    ? options.snapshot.prominentPotLabel === true
+    : true;
+
   // Task #593: Wenn ein Render-Snapshot vorliegt (Verifier-Re-Render-Pfad),
   // werden die Kunden-Stammfelder daraus gelesen statt aus der Live-Tabelle.
   // Damit reproduziert die Re-Render-XML auch dann byte-genau die persistierte
@@ -1038,6 +1051,9 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
             strictSettlement: true,
             // Task #1106: eingefrorenes XMP-Reparatur-Flag (PDF/A-3b).
             includeConformantSettlement: true,
+            // Task #1797: eingefrorenes Flag für den prominenten Topf-Label +
+            // die Konsolidierung der redundanten Topf-Nennung.
+            prominentPotLabel: true,
           };
         }
         if (artifacts.ln && plan.needsLeistungsnachweis) applyLn(artifacts.ln);

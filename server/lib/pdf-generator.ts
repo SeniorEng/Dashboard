@@ -125,6 +125,15 @@ export interface InvoicePdfData {
   // eine vollständig EN-16931- UND PDF/A-3b-konforme Rechnung.
   includeConformantSettlement?: boolean;
 
+  // Task #1797 — prominenter Kostenträger-Topf-Label im Rechnungskopf (direkt
+  // unter der Überschrift "RECHNUNG"/"STORNORECHNUNG"). `true` für neue
+  // Rechnungen: Kopf-Label wird gezeigt UND die bisherige redundante
+  // Topf-/§-Nennung im Einleitungssatz und in der Notiz-Box (billingNote)
+  // entfällt (Konsolidierung). `undefined`/`false` für Bestände, die VOR dieser
+  // Änderung versiegelt wurden → altes Layout (kein Kopf-Label, alte Einleitung/
+  // Notiz) wird byte-stabil re-gerendert (Render-Snapshot, `pdf_hash`).
+  prominentPotLabel?: boolean;
+
   // Totals
   netAmountCents: number;
   vatAmountCents: number;
@@ -231,25 +240,31 @@ function getInvoiceTypeLabel(type: string): string {
   }
 }
 
-function getBillingTypeNote(billingType: string, insuranceProviderName: string | null, beihilfeBerechtigt?: boolean, rechnungAnKunde?: boolean, budgetType?: string | null): string {
+function getBillingTypeNote(billingType: string, insuranceProviderName: string | null, beihilfeBerechtigt?: boolean, rechnungAnKunde?: boolean, budgetType?: string | null, prominentPotLabel?: boolean): string {
   // Task #759 — Pot-spezifische §-Notiz, wenn `budgetType` gesetzt ist
   // (Variant-C-Rechnung). Bei Kassen-Pots: paragraphisch korrekt; bei
   // privatem Überschuss-Pot: Hinweis auf Budget-Überschreitung.
-  const potNote = getPotNote(budgetType);
-  if (potNote) {
-    if (isCustomerAddressedInvoice(billingType, rechnungAnKunde)) {
-      return `Zur Erstattung bei Ihrer Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen. ${potNote}${beihilfeBerechtigt ? " Diese Rechnung wurde in doppelter Ausfertigung erstellt — für Ihre Pflegekasse und Ihre Beihilfestelle." : ""}`;
-    }
-    return potNote;
-  }
+  // Task #1797 — bei prominentem Kopf-Label entfällt die reine Topf-/§-Benennung
+  // hier (steht nun oben im Rechnungskopf); nur Erstattungs-/Abtretungs-/
+  // Beihilfe-Hinweise bleiben in der Notiz-Box.
+  const potNote = getPotNote(budgetType, prominentPotLabel);
+  const beihilfeHint = beihilfeBerechtigt ? " Diese Rechnung wurde in doppelter Ausfertigung erstellt — für Ihre Pflegekasse und Ihre Beihilfestelle." : "";
   // Im Kostenerstattungsverfahren (gesetzlich + rechnungAnKunde) wird
   // dieselbe Hinweisformulierung wie bei pflegekasse_privat verwendet.
   if (isCustomerAddressedInvoice(billingType, rechnungAnKunde)) {
-    return `Zur Erstattung bei Ihrer Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen. Abrechnung des Entlastungsbetrags nach § 45b SGB XI.${beihilfeBerechtigt ? " Diese Rechnung wurde in doppelter Ausfertigung erstellt — für Ihre Pflegekasse und Ihre Beihilfestelle." : ""}`;
+    const potClause = prominentPotLabel
+      ? ""
+      : ` ${potNote || "Abrechnung des Entlastungsbetrags nach § 45b SGB XI."}`;
+    return `Zur Erstattung bei Ihrer Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen.${potClause}${beihilfeHint}`;
+  }
+  if (potNote) {
+    return potNote;
   }
   switch (billingType) {
     case "pflegekasse_gesetzlich":
-      return `Abrechnung gemäß Abtretungserklärung über den Entlastungsbetrag nach § 45b SGB XI.`;
+      return prominentPotLabel
+        ? `Abrechnung gemäß Abtretungserklärung.`
+        : `Abrechnung gemäß Abtretungserklärung über den Entlastungsbetrag nach § 45b SGB XI.`;
     case "selbstzahler":
       return "";
     default:
@@ -257,7 +272,10 @@ function getBillingTypeNote(billingType: string, insuranceProviderName: string |
   }
 }
 
-function getPotNote(budgetType?: string | null): string {
+function getPotNote(budgetType?: string | null, prominentPotLabel?: boolean): string {
+  // Task #1797 — bei prominentem Kopf-Label ist die reine Topf-/§-Benennung
+  // bereits im Rechnungskopf sichtbar; die Notiz-Box zeigt sie nicht mehr.
+  if (prominentPotLabel) return "";
   switch (budgetType) {
     case "entlastungsbetrag_45b":
       return "Abrechnung gemäß Abtretungserklärung über den Entlastungsbetrag nach § 45b SGB XI.";
@@ -325,8 +343,11 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   const invoiceDate = data.invoiceDate || `${today.getDate().toString().padStart(2, "0")}.${(today.getMonth() + 1).toString().padStart(2, "0")}.${today.getFullYear()}`;
   const periodLabel = `${MONTH_NAMES[data.billingMonth - 1]} ${data.billingYear}`;
   const typeLabel = getInvoiceTypeLabel(data.invoiceType);
-  const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName, data.beihilfeBerechtigt, data.rechnungAnKunde, data.budgetType);
+  const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName, data.beihilfeBerechtigt, data.rechnungAnKunde, data.budgetType, data.prominentPotLabel);
   const isStorno = data.invoiceType === "stornorechnung";
+  // Task #1797 — prominenter Kostenträger-Topf-Label im Kopf (SSoT:
+  // getBudgettopfLabel, dieselbe Quelle wie der Leistungsnachweis-Kopf).
+  const potLabel = getBudgettopfLabel(data.billingType, data.budgetType);
   const isSelbstzahler = data.billingType === "selbstzahler";
   const isCustomerInvoice = isCustomerAddressedInvoice(data.billingType, data.rechnungAnKunde);
   // Task #997: USt-Behandlung Topf-gebunden + EINE Quelle für Zeile↔Summe.
@@ -401,6 +422,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     .recipient-label { font-size: 9pt; color: #4b5563; margin-bottom: 2px; }
     .invoice-meta { display: flex; justify-content: space-between; margin-bottom: 20px; }
     .invoice-title { font-size: 16pt; font-weight: bold; color: ${isStorno ? '#dc2626' : '#0d9488'}; }
+    .invoice-pot-label { margin-top: 6px; font-size: 11pt; font-weight: 600; color: ${isStorno ? '#dc2626' : '#0d9488'}; }
     .meta-table td { padding: 2px 8px; font-size: 9pt; }
     .meta-table td:first-child { color: #1f2937; }
     .meta-table td:last-child { color: #111827; }
@@ -494,7 +516,10 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   `}
 
   <div class="invoice-meta">
-    <div class="invoice-title">${typeLabel}</div>
+    <div>
+      <div class="invoice-title">${typeLabel}</div>
+      ${data.prominentPotLabel ? `<div class="invoice-pot-label">${escapeHtml(potLabel)}</div>` : ""}
+    </div>
     <table class="meta-table">
       <tr><td>Rechnungsnr.:</td><td><strong>${data.invoiceNumber}</strong></td></tr>
       <tr><td>Rechnungsdatum:</td><td>${invoiceDate}</td></tr>
@@ -504,7 +529,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </table>
   </div>
 
-  <p>Für die im Zeitraum <strong>${periodLabel}</strong> erbrachten Leistungen${data.billingType === "pflegekasse_gesetzlich" || data.billingType === "pflegekasse_privat" ? " gemäß § 45b Abs. 1 Satz 3 Nr. 4 SGB XI (Angebote zur Unterstützung im Alltag gem. § 45a SGB XI)" : ""} berechnen wir:</p>
+  <p>Für die im Zeitraum <strong>${periodLabel}</strong> erbrachten Leistungen${!data.prominentPotLabel && (data.billingType === "pflegekasse_gesetzlich" || data.billingType === "pflegekasse_privat") ? " gemäß § 45b Abs. 1 Satz 3 Nr. 4 SGB XI (Angebote zur Unterstützung im Alltag gem. § 45a SGB XI)" : ""} berechnen wir:</p>
 
   <table class="items">
     <thead>
