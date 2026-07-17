@@ -56,3 +56,24 @@ Der Stampede entsteht nur, weil Autoscale kalt aus 0 hochfährt. Eine **Reserved
 **Entscheidung (Alrik, 2026-06-30): Autoscale bleibt.** Der Kostenvorteil wiegt schwerer als die verbleibende Cold-Start-Restwahrscheinlichkeit; ein gelegentlicher Render-Retry ist akzeptabel. Die in #1494 gebauten Hebel (Jitter, instanzübergreifender Advisory-Lock, Page-Cache-Warming, Retry-Backoff) **sind damit der bewusst gewählte, akzeptierte Ansatz** — nicht nur ein Provisorium bis zu einer VM-Migration. Das Sicherheitsnetz (Hintergrund-Retry im `invoice-pdf-orchestrator` + Startup-Backfill `backfillInvoicePdfs()`) fängt verbleibende Fehlschläge auf. `.replit` (`[deployment] deploymentTarget = "autoscale"`) bleibt unverändert.
 
 **Re-Evaluierung sinnvoll, falls** sich das Lastprofil ändert (deutlich höhere PDF-Frequenz / mehr gleichzeitige Nutzer), die #1494-Hebel die Cold-Start-Fehler nicht mehr ausreichend dämpfen, oder Reserved-VM-Kosten/Plan-Konditionen die Rechnung kippen. Dann ist der Umzug ein reiner `deployConfig({ deploymentTarget: "vm", run: [...] })`-Schritt (Run-Command aus dem `[deployment]`-Block übernehmen) plus erneuter Publish.
+
+## Autoscale-Maschinengröße (vCPU/RAM) — Right-Sizing-Sondierung (Task #1805)
+
+Autoscale rechnet **Compute-Zeit × Maschinenstärke (vCPU/RAM) × Instanzen** ab. Die Maschinengröße wurde nie gegen den echten Bedarf gemessen — Verdacht: großzügig gewählt, damit die Chromium/PDF-Spitze passt, wodurch **jeder** normale Request Headroom mitbezahlt. Diese Sondierung misst den echten Fußabdruck und leitet die kleinste sichere Stufe ab. Der Deployment-**Typ** bleibt Autoscale (siehe #1499); nur die **Größe** stand zur Debatte.
+
+**Gemessener Fußabdruck (Prod, 2026-07-17, warme Instanz):**
+
+- **Steady-State Node-RSS: ~201 MB** (heapUsed ~65 MB, heapTotal ~73 MB), über mehrere Samples praktisch konstant — abgelesen live aus `/api/health → memory` der laufenden Prod-Instanz.
+- **Memory-Watchdog: keine einzige WARN-Zeile in den Prod-Logs.** Der RSS bleibt also weit unter der Watchdog-Schwelle (`MEMORY_WATCHDOG_WARN_MB`, Default 700–1024 MB). In Prod ist niemals ein OOM oder eine RSS-Eskalation aufgetreten.
+- Die einzigen Render-Fehlschläge in den Logs sind **Chromium-Cold-Start-Timeouts** (Integrity-Check-Navigation/PDF-Timeout) — das ist die bereits in #1494/#1499 behandelte Cold-Start-Klasse, **kein Speicherproblem**.
+
+**Sizing-Treiber ist Chromium, nicht Node.** `process.memoryUsage()` (und damit `/api/health` + Watchdog) sieht nur den Node-Prozess; das gerenderte Chromium läuft als **eigener Prozess** und geht nicht in diese ~201 MB ein. Die Maschinen-RAM muss also Node (~200 MB steady) **plus** die transiente Chromium-Render-Spitze (grob ~0,3–0,7 GB pro Render, `PDF_RENDER_CONCURRENCY`-begrenzt) tragen → Peak-Bedarf grob **~1 GB**.
+
+**Empfehlung: 1 vCPU / 2 GiB (Autoscale-Default) ist die kleinste sichere Stufe — nicht kleiner gehen.**
+
+- Eine kleinere Stufe **0,5 vCPU / 1 GiB** ist riskant auf **beiden** Achsen: 1 GiB RAM deckt Node + eine gleichzeitige Chromium-Render-Spitze nur knapp → OOM-Gefahr (verstößt gegen „kein OOM reintroduzieren"); und der geteilte/fraktionale vCPU **verlangsamt den Chromium-Launch** → verschärft genau die Cold-Start-Timeouts, die wir in den Logs schon sehen (verstößt gegen „Cold-Start nicht verschlechtern").
+- 2 GiB clearen die gemessene ~1-GB-Peak mit komfortablem Watchdog-Sicherheitsabstand; die Node-Grundlast (~201 MB) lässt reichlich Luft. Da Autoscale nur bei Last und skaliert nach Instanzen abrechnet, kostet der 2-GiB-Kopfraum im Leerlauf nichts extra.
+
+**Anwendung / Grenze des Hebels:** Die Autoscale-Maschinengröße ist **kein `.replit`-Feld** und **nicht über `deployConfig()` setzbar** (das akzeptiert nur `deploymentTarget`/`run`/`build`/`publicDir`). Sie wird ausschließlich im **Publishing-Tool → Advanced (Machine power / vCPU-RAM)** durch den Nutzer beim Publish gewählt. Der Agent kann sie nicht programmatisch lesen oder ändern. Handlungsempfehlung an Alrik: beim nächsten Publish im Advanced-Bereich sicherstellen, dass **1 vCPU / 2 GiB** gewählt ist; ist bereits eine größere Stufe aktiv, auf 1 vCPU / 2 GiB reduzieren und danach eine Live-Rechnung erzeugen (PDF rendert, kein OOM, kein rotes „PDF-Fehler"-Badge). Eine noch kleinere Stufe ist aus den obigen Gründen bewusst **nicht** empfohlen — damit ist dieser Kostenhebel geschlossen.
+
+**Re-Evaluierung sinnvoll, falls** die PDF-Frequenz/Parallelität deutlich steigt (dann eher `PDF_RENDER_CONCURRENCY` + Stufe gemeinsam betrachten) oder Replit die Autoscale-Stufen-Staffelung/Preise ändert.
