@@ -41,6 +41,13 @@ import {
   PROSPECT_TEST_FILTER,
 } from "../services/test-data-cleanup";
 import { prospects } from "@shared/schema";
+import { sweepOrphans, DB_PREFIX } from "../../scripts/lib/ephemeral-db-sweep";
+
+// Name der langlebigen Cache-Template-DB (SSoT: scripts/lib/template-cache.ts
+// `CACHE_DB_NAME = ${DB_PREFIX}tmpl_cache`). Bewusst hier aus DB_PREFIX abgeleitet
+// statt template-cache.ts zu importieren — jenes Modul zieht (fs.Dirent/BigInt)
+// TS-Typen nach, die unter dem Server-tsconfig-Target nicht auflösen.
+const CACHE_DB_NAME = `${DB_PREFIX}tmpl_cache`;
 
 // Prod-Schutz-Guards liegen DB-frei in `../lib/dev-db-guard` (Ersetzungs-Regel:
 // von hier herausgelöst, damit ein IMMER laufendes CI-Gate sie ohne DB-Import
@@ -71,6 +78,7 @@ export async function runSweep(apply: boolean): Promise<void> {
     console.log(`   Test-Kunden:        ${custIds.length}`);
     console.log(`   Test-Interessenten: ${prospectCount}`);
     console.log(`   Test-User:          ${userIds.length}`);
+    sweepEphemeralOrphans(true);
     console.log("\nMit `--apply` ausführen, um den Bulk-Purge scharf zu schalten.");
     return;
   }
@@ -90,6 +98,43 @@ export async function runSweep(apply: boolean): Promise<void> {
   console.log(`   User gelöscht:          ${summary.usersDeleted} (abgelehnt: ${summary.usersRejected})`);
   if (summary.usersBlocked) {
     console.warn("   WARNUNG: Mindestens ein User-Batch wurde geblockt (Verflechtung mit echten Kunden).");
+  }
+  sweepEphemeralOrphans(false);
+}
+
+// Task #1807 — Verwaiste ephemere `cc_test_*`-Wegwerf-DBs (Worker + Template)
+// aus hart abgebrochenen Testläufen (SIGKILL/Container-Crash) reklamieren, damit
+// Neon-Storage nicht kriecht, wenn längere Zeit KEIN Testlauf startet. Bislang
+// hing die Orphan-Reklamation ausschließlich am Start des nächsten Orchestrator-
+// Laufs (`scripts/with-ephemeral-db.ts`); dieser Sweep hängt sie zusätzlich an
+// den bereits crash-unabhängig geplanten Scheduled-Deployment-Trigger dieses
+// Skripts.
+//
+// Ersetzungs-Regel: KEINE neue Sweep-Logik — dünner Wrapper um die eine SSoT
+// `sweepOrphans()` (`scripts/lib/ephemeral-db-sweep.ts`), identisch zum
+// Orchestrator: nur verbindungslose, >15 Min alte `cc_test_`-DBs; die langlebige
+// Cache-Template-DB (`CACHE_DB_NAME`) bleibt geschützt (wird auf dem nächsten
+// Lauf wiederverwendet). Ein aktiv laufender Schwester-Testlauf hält seine DBs
+// verbunden bzw. sie sind zu frisch → unberührt. Fail-safe: darf den Dev-Daten-
+// Sweep nie zum Scheitern bringen.
+function sweepEphemeralOrphans(dryRun: boolean): void {
+  const adminUrl = process.env.DATABASE_URL;
+  if (!adminUrl) return;
+  try {
+    const res = sweepOrphans(adminUrl, {
+      dryRun,
+      log: (m) => console.log(m),
+      protectedDbs: new Set([CACHE_DB_NAME]),
+    });
+    const verb = dryRun ? "würde droppen" : "gedroppt";
+    console.log(
+      `\nEphemere Test-DB-Waisen (cc_test_*): ${verb}: ${res.dropped.length}, ` +
+        `übersprungen: ${res.skipped.length}, fehlgeschlagen: ${res.failed.length}.`,
+    );
+  } catch (err) {
+    console.warn(
+      `[sweep] Ephemerer Orphan-Sweep übersprungen (nicht-fatal): ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

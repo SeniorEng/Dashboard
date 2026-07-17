@@ -170,6 +170,56 @@ laufen, nicht gegen Produktion — die Guards (Abschnitt 7) brechen sonst ab.
   entkoppelt bzw. (im Notfall) geblockt statt echte Daten zu zerstören.
 - In `NODE_ENV=production` ist der Runner zusätzlich ein No-op.
 
+### 5.5 Ephemere Test-DB-Waisen (`cc_test_*`) — crash-unabhängige Reklamation (Task #1807)
+
+Jeder Integration/e2e-Lauf legt über `scripts/with-ephemeral-db.ts` Wegwerf-DBs
+mit Präfix `cc_test_` an und droppt sie beim Teardown. Wird ein Lauf **hart**
+abgebrochen (SIGKILL, Container-Crash), läuft kein Teardown → die DB bleibt als
+Waise auf der Neon-Instanz liegen und **kostet Storage**. Bislang wurden solche
+Waisen ausschließlich beim **Start des nächsten Testlaufs** aufgeräumt — laufen
+längere Zeit **keine** Tests, kriecht der Storage nach oben.
+
+Der Dev-Sweep hängt diese Reklamation deshalb **zusätzlich** an seinen bereits
+crash-unabhängigen Trigger (Abschnitt 5.3, Scheduled Deployment):
+
+- **Dry-Run** (`npm run db:sweep-dev`) zählt die Waisen mit (`Ephemere Test-DB-Waisen (cc_test_*): würde droppen: N`).
+- **Apply** (`npm run db:sweep-dev -- --apply`) reklamiert sie nach dem Test-Daten-Purge.
+
+> **Ersetzungs-Regel:** KEINE neue Sweep-Logik — dünner Wrapper um die eine SSoT
+> `sweepOrphans()` (`scripts/lib/ephemeral-db-sweep.ts`), identisch zum
+> Orchestrator. Es werden **nur** verbindungslose, **>15 Min alte** `cc_test_`-DBs
+> gedroppt; ein aktiv laufender Schwester-Testlauf hält seine DBs verbunden bzw.
+> sie sind zu frisch → unberührt. Die langlebige Cache-Template-DB
+> (`cc_test_tmpl_cache`) bleibt **immer** geschützt (wird auf dem nächsten Lauf
+> wiederverwendet, nur ~12 MB). Fail-safe: bricht den Dev-Daten-Sweep nie ab.
+
+**Retention-Garantie:** Solange die Scheduled Deployment läuft, wird jede Waise
+spätestens im nächsten Intervall reklamiert — **unabhängig davon, ob überhaupt
+noch Testläufe stattfinden**. Manuell weiterhin: `npm run test:sweep-dbs`
+(age-gated) bzw. `npm run test:unblock` (`--force`, Notfall).
+
+---
+
+## 5a. Neon-Kosten: Pool-Warmhaltung vs. Scale-to-Zero (Task #1807)
+
+Neon berechnet **compute-hours** (Zeit, in der der Compute-Endpoint wach ist) plus
+Storage. Der Compute suspendiert (Scale-to-Zero) erst, wenn **keine offenen
+Client-Verbindungen** mehr anliegen. Ein hoher `idleTimeoutMillis` des
+Connection-Pools (früher **5 min**) hielt leere Pool-Sockets künstlich offen und
+verhinderte damit das Suspendieren in ruhigen Phasen (nachts/Wochenende), obwohl
+das Nutzungsprofil überwiegend **Bürozeiten** ist.
+
+**Entscheidung:** Default-`idleTimeoutMillis` auf **60s** gesenkt
+(`server/lib/db.ts`, override per `NEON_POOL_IDLE_TIMEOUT_MS`). Ungenutzte Sockets
+schließen zügig → Neon kann in Leerlaufphasen suspendieren und spart
+compute-hours. Die **Cold-Start-Mitigationen bleiben vollständig erhalten**:
+TLS/Auth-Pipelining + großzügiges `connectionTimeoutMillis` (15s) fangen den
+nächsten Compute-Wake ab; `keepAlive` stabilisiert **aktive** Sockets (kein
+Idle-Effekt). Der Trade-off (gelegentlicher Cold-Start nach längerer Ruhe vs.
+laufende compute-hours) ist bei diesem kleinen, bürozeit-lastigen Profil klar
+zugunsten Scale-to-Zero. Für Last-/E2E-Läufe, die viele warme Verbindungen halten
+wollen, den Wert per Env hochsetzen (z.B. `NEON_POOL_IDLE_TIMEOUT_MS=300000`).
+
 ---
 
 ## 6. Restore aus einem Backup

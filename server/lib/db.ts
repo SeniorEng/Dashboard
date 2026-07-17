@@ -35,13 +35,26 @@ if (!process.env.DATABASE_URL) {
 // Task #536 — Neon-Pool für realistische Parallelität (E2E-Tests + Browser +
 // Scheduler) dimensioniert. `connectionTimeoutMillis` hochgesetzt, damit ein
 // Neon-Compute-Wake (Cold Start) den ersten Acquire nicht killt; folgende
-// Requests benutzen die warme WebSocket-Verbindung. `idleTimeoutMillis` bewusst
-// hoch (5 min), damit wir warme Sockets nicht wegwerfen und in jedem Request
-// neu aufbauen müssen.
+// Requests benutzen die warme WebSocket-Verbindung.
+//
+// Task #1807 — Neon-Kosten-Abwägung (compute-hours):
+// Neon bricht die berechneten Compute-Stunden erst ab, wenn der Compute-
+// Endpoint autosuspendet — und das passiert nur, solange KEINE offenen Client-
+// Verbindungen mehr anliegen. Ein hoher `idleTimeoutMillis` (früher 5 min) hielt
+// leere Pool-Sockets künstlich offen und verhinderte damit das Scale-to-Zero in
+// ruhigen Phasen (nachts/Wochenende), obwohl das Nutzungsprofil überwiegend
+// Bürozeiten ist. Wir setzen den Default darum bewusst niedrig (60s), damit
+// ungenutzte Sockets zügig schließen und Neon in Leerlaufphasen suspendieren kann.
+// Die Cold-Start-Mitigationen bleiben vollständig erhalten: TLS/Auth-Pipelining
+// (siehe oben) + großzügiges `connectionTimeoutMillis` (15s) fangen den nächsten
+// Compute-Wake ab; `keepAlive` hält AKTIVE Sockets stabil (kein Idle-Effekt).
+// Override per `NEON_POOL_IDLE_TIMEOUT_MS` (z.B. für Last-/E2E-Läufe, die viele
+// warme Verbindungen halten wollen). Rationale/Runbook: docs/dev-database-runbook.md.
+const idleTimeoutMillis = Number(process.env.NEON_POOL_IDLE_TIMEOUT_MS) || 60_000;
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 20,
-  idleTimeoutMillis: 300_000,
+  idleTimeoutMillis,
   connectionTimeoutMillis: 15_000,
   keepAlive: true,
 });
@@ -60,7 +73,7 @@ export function logPoolStats(tag = "db") {
 }
 
 console.log(
-  `[db] pool configured — max=20 idleTimeout=300s connectTimeout=15s keepAlive=on`,
+  `[db] pool configured — max=20 idleTimeout=${Math.round(idleTimeoutMillis / 1000)}s connectTimeout=15s keepAlive=on`,
 );
 
 export const db = drizzle(pool);

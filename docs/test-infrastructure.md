@@ -88,6 +88,18 @@ Manuelle Werkzeuge: `npm run test:sweep-dbs` (verwaiste DBs/Logs/Prozesse aufrä
 `npm run test:unblock` (= `--force`: PID-Limit-Notfall-Aufräumung, ignoriert die
 Altersgrenze), `npm run test:verify-cache` (Warm-/Kalt-Pfad messen).
 
+### Crash-unabhängige Orphan-Reklamation (Neon-Storage, Task #1807)
+
+Der Orphan-Sweep (`sweepOrphans`) beim Orchestrator-Start räumt Waisen erst auf,
+wenn der **nächste Testlauf startet**. Laufen längere Zeit keine Tests, sitzen
+verwaiste `cc_test_*`-DBs auf der Neon-Instanz und kosten **Storage**. Deshalb
+läuft dieselbe SSoT-Sweep-Logik **zusätzlich** im geplanten Dev-Sweep
+(`npm run db:sweep-dev -- --apply`, Scheduled Deployment) — ein Trigger, der
+**nicht** vom Start eines Testlaufs abhängt. Damit gilt: solange die Scheduled
+Deployment läuft, wird jede Waise spätestens im nächsten Intervall reklamiert.
+Semantik unverändert (nur verbindungslose, >15 Min alte `cc_test_`-DBs; Cache-DB
+geschützt). Details: [`dev-database-runbook.md`](dev-database-runbook.md#55-ephemere-test-db-waisen-cc_test_--crash-unabhängige-reklamation-task-1807).
+
 ## PID-Limit & verwaiste Prozesse (Task #1489)
 
 Der Workspace-Container hat ein cgroup-PID-Limit (`pids.max`, typ. 1024). Hart

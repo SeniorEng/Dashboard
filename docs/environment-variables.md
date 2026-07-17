@@ -36,6 +36,7 @@ Projekt-README: [`../replit.md`](../replit.md) (dort nur Kurz-Verweis hierher).
 | `PDF_RENDER_CONCURRENCY` | Optional | `2` | Max. paralleler PDF-Renderings (ein laufender + ein wartender bei Default). |
 | `STATS_HEALTH_YELLOW` | Optional | `5` | Schwellwert (Tage) für gelben Health-Status in Statistik-Cockpit. |
 | `STATS_HEALTH_RED` | Optional | `20` | Schwellwert (Tage) für roten Health-Status in Statistik-Cockpit. |
+| `NEON_POOL_IDLE_TIMEOUT_MS` | Optional | `60000` (60s) | Idle-Timeout des Neon-Connection-Pools (`server/lib/db.ts`). Bewusst niedrig, damit ungenutzte Pool-Sockets zügig schließen und Neon den Compute-Endpoint in Leerlaufphasen suspendieren kann (spart compute-hours; Task #1807). Höher setzen (z.B. `300000`), wenn Last-/E2E-Läufe viele warme Verbindungen halten sollen. Cold-Start-Mitigationen (TLS-Pipelining + 15s connect-Timeout, `keepAlive`) bleiben unabhängig davon aktiv. |
 | `NEON_LOCAL_WS_PROXY` | Optional (nur CI/Local) | unset | Host:Port eines Neon-WebSocket-Proxys (z.B. `localhost:4444`). Gesetzt = `server/lib/db.ts` schaltet Secure-WS/TLS-Pipelining ab und routet den WebSocket über den Proxy, um gegen plain Postgres zu testen. NICHT in Produktion setzen (echter Neon-Host braucht Secure-WS). |
 
 > Weitere Feature-/Betriebs-Flags sind in ihren jeweiligen Runbooks dokumentiert:
