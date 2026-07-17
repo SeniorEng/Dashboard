@@ -40,7 +40,7 @@ export function isObjectStorageConfigured(): boolean {
 // `_nonprod/<NODE_ENV>/invoices/…`. Lesen erfolgt weiterhin verbatim über den
 // gespeicherten `pdf_path`, sodass Bestandszeilen ohne Migration funktionieren.
 
-const NONPROD_PDF_PREFIX = "_nonprod";
+export const NONPROD_PDF_PREFIX = "_nonprod";
 
 // Task #1051: Pro-Lauf-Isolation für Rechnungs-/LN-PDF-Objektschlüssel.
 //
@@ -143,6 +143,40 @@ export function assertInvoicePdfWriteKeyAllowed(objectKey: string): void {
         `"${objectKey}" außerhalb des Nicht-Produktions-Prefix "${prefix}/" ` +
         `schreiben. Schreiben abgebrochen, um Produktions-PDFs nicht zu ` +
         `überschreiben (Task #1042).`,
+    );
+  }
+}
+
+/**
+ * Baut den Object-Key-Prefix (relativ zum Private-Dir), unter dem SÄMTLICHE
+ * Nicht-Produktions-PDF-Artefakte liegen — umgebungs-, lauf- und worker-
+ * übergreifend. Das ist bewusst der reine `_nonprod`-Wurzel-Prefix (ohne
+ * `<NODE_ENV>`/`run-…`/`w-…`-Segmente), damit der Retention-Sweep alle
+ * Nicht-Prod-Artefakte findet und der Produktions-Key-Space (`invoices/…`)
+ * niemals unter diesen Prefix fällt.
+ */
+export function getNonprodPdfSweepPrefix(): string {
+  return `${NONPROD_PDF_PREFIX}/`;
+}
+
+/**
+ * Defense-in-Depth für den Retention-Sweep (Task #1806): verhindert, dass der
+ * Sweep jemals einen Object-Key LÖSCHT, der nicht eindeutig unter dem
+ * Nicht-Produktions-Prefix `_nonprod/` liegt. Spiegelt symmetrisch den
+ * Schreib-Guard `assertInvoicePdfWriteKeyAllowed`. Produktions-PDFs
+ * (nackter Key-Space `invoices/…`) sind damit beweisbar unerreichbar.
+ *
+ * `objectKey` ist der Key RELATIV zum Private-Dir (identisch zum Rückgabewert
+ * von `buildInvoicePdfObjectKey`).
+ */
+export function assertNonprodPdfDeleteKeyAllowed(objectKey: string): void {
+  const prefix = getNonprodPdfSweepPrefix();
+  if (!objectKey.startsWith(prefix)) {
+    throw new Error(
+      `Object-Storage-Retention verletzt: der Sweep wollte den Object-Key ` +
+        `"${objectKey}" löschen, der NICHT unter dem Nicht-Produktions-Prefix ` +
+        `"${prefix}" liegt. Löschen abgebrochen, um Produktions-PDFs ` +
+        `(GoBD-Aufbewahrung) niemals zu berühren (Task #1806).`,
     );
   }
 }

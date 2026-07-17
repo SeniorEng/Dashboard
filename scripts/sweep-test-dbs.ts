@@ -34,6 +34,7 @@ import {
   sweepOrphanProcesses,
   sweepOrphans,
 } from "./lib/ephemeral-db-sweep.ts";
+import { runNonprodPdfSweep } from "./lib/object-storage-pdf-sweep.ts";
 import { CACHE_DB_NAME } from "./lib/template-cache.ts";
 
 function fail(msg: string): never {
@@ -110,6 +111,33 @@ console.log(
     `fehlgeschlagen: ${procResult.failed.length}.`,
 );
 
+// Task #1806: ... und ZULETZT die verwaisten NICHT-PROD-PDF-Artefakte im
+// geteilten Object-Storage-Bucket (`_nonprod/…`). DB-Cleanup löscht nur Zeilen,
+// nicht die zugehörigen PDF-Objekte → ohne Retention wächst die Bucket-Rechnung
+// monoton. Produktions-PDFs (`invoices/…`) sind durch den harten Delete-Guard
+// beweisbar unerreichbar. `--dry-run` zeigt nur an; `--force` ignoriert die
+// Altersgrenze (löscht alle _nonprod-PDFs). Fail-safe: blockiert nie.
+let pdfDeleted = 0;
+let pdfFailed = 0;
+try {
+  const pdfSweep = await runNonprodPdfSweep({
+    dryRun,
+    retentionMs: force ? 0 : undefined,
+    log: (m) => console.log(m),
+  });
+  if (pdfSweep) {
+    pdfDeleted = pdfSweep.deleted.length;
+    pdfFailed = pdfSweep.failed.length;
+    console.log(
+      `[sweep] PDF-Retention: ${dryRun ? "(dry-run) " : ""}` +
+        `gescannt: ${pdfSweep.scanned}, ${dryRun ? "würde löschen" : "gelöscht"}: ${pdfDeleted}, ` +
+        `übersprungen: ${pdfSweep.skipped}, fehlgeschlagen: ${pdfFailed}.`,
+    );
+  }
+} catch (e) {
+  console.log(`[sweep] PDF-Retention übersprungen (fail-safe): ${(e as Error).message}`);
+}
+
 // Task #1489: PID-Auslastung nach dem Aufräumen melden, damit man sofort sieht,
 // ob der Workspace wieder Luft hat (cgroup pids.max). Reine Diagnose-Ausgabe.
 const pidStats = readPidStats();
@@ -128,7 +156,8 @@ process.exit(
   result.failed.length +
     logResult.failed.length +
     artifactResult.failed.length +
-    procResult.failed.length >
+    procResult.failed.length +
+    pdfFailed >
     0
     ? 1
     : 0,

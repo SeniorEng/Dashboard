@@ -69,6 +69,7 @@ import {
   computeTemplateHash,
   isCacheFresh,
 } from "./lib/template-cache.ts";
+import { runNonprodPdfSweep } from "./lib/object-storage-pdf-sweep.ts";
 import { buildServerBundle } from "../script/server-bundle";
 
 function fail(msg: string): never {
@@ -805,6 +806,29 @@ async function main(): Promise<number> {
   if (artifactSweep.dropped.length > 0) {
     console.log(
       `[ephemeral-db] Artefakt-Sweep: ${artifactSweep.dropped.length} verwaiste Build-Artefakt(e) entfernt.`,
+    );
+  }
+
+  // Task #1806: ... und die verwaisten NICHT-PROD-PDF-Artefakte im geteilten
+  // Object-Storage-Bucket (`_nonprod/…`) aus früheren Läufen. DB-Cleanup löscht
+  // nur Zeilen, nicht die zugehörigen PDF-Objekte → ohne diese Retention wächst
+  // die Bucket-Rechnung monoton. Produktions-PDFs (`invoices/…`) sind durch den
+  // harten Delete-Guard beweisbar unerreichbar. Fail-safe: blockiert den Lauf
+  // nie (Netzwerk-Fehler/kein Bucket ⇒ nur Log). Altersgrenze (24h) schützt die
+  // frischen PDFs eines parallel laufenden Schwester-Laufs.
+  try {
+    const pdfSweep = await runNonprodPdfSweep({
+      dryRun: false,
+      log: (m) => console.log(`[ephemeral-db] ${m}`),
+    });
+    if (pdfSweep && pdfSweep.deleted.length > 0) {
+      console.log(
+        `[ephemeral-db] PDF-Retention-Sweep: ${pdfSweep.deleted.length} verwaiste Nicht-Prod-PDF(s) gelöscht.`,
+      );
+    }
+  } catch (e) {
+    console.log(
+      `[ephemeral-db] PDF-Retention-Sweep übersprungen (fail-safe): ${(e as Error).message}`,
     );
   }
 

@@ -22,6 +22,7 @@
     "cleanup:selbstzahler-statutory": "tsx server/scripts/cleanup-selbstzahler-statutory-budgets.ts",
     "check:no-test-junk": "tsx scripts/check-no-test-junk.ts",
     "test:sweep-dbs": "tsx scripts/sweep-test-dbs.ts",
+    "test:sweep-pdfs": "tsx scripts/sweep-nonprod-pdfs.ts",
     "test:unblock": "tsx scripts/sweep-test-dbs.ts --force",
     "test:restart-smoke": "EPHEMERAL_RESTART_SMOKE=1 vitest run tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts --project unit",
     "test:verify-cache": "tsx scripts/verify-template-cache.ts",

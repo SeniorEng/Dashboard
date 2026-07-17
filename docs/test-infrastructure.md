@@ -188,3 +188,24 @@ Test cleanup scripts exist but require careful execution (e.g., `--apply` flag, 
 Beide Routen sind Superadmin-only, in Production via 403 deaktiviert und dünn — die gesamte DB-Logik liegt im Service-Modul `server/services/test-data-cleanup.ts` (`purgeTestServices`/`purgeTestDocumentTypes`, ESLint verbietet `db.select().from(...)` in `server/routes`). Optionales `ids`-Array scoped (max. 20000), leerer Body = kompletter Backlog. **FK-sicher statt hart-löschen-um-jeden-Preis:** Unreferenzierte Test-Rows werden hart gelöscht, referenzierte (z.B. Service mit Terminen/`customer_service_prices`, Dokumenttyp mit Dokumenten) werden NUR auf `is_active=false` soft-deaktiviert — kein FK-Bruch. Beide Funktionen liefern `{ deleted, deactivated, rejected }` zurück (`rejected` = übergebene IDs, die das Test-Pattern NICHT erfüllen → werden niemals angefasst). Safety-Pins: `tests/test-cleanup-safety.test.ts` CLEAN-1.4 (Services) und CLEAN-1.5 (Dokumenttypen) belegen, dass echte Stammdaten abgelehnt und nur Test-Pattern-Rows gelöscht werden.
 
 Das CLI-Pendant `server/scripts/cleanup-test-data.ts` (Dry-Run-Default, `--apply`, Hostname-Guard, Whitelist-Snapshot echter Stammdaten) deckt beide Tabellen ab: Test-Services + neuer Scope `documenttypes`. Wie bei den übrigen Scopes NIE `customers`/`all`/`users` ausführen, um die Budget-/Monatsabschluss-Beweisdatensätze nicht zu gefährden.
+
+## Object-Storage-Retention für Nicht-Prod-PDFs (Task #1806)
+
+Rechnungs-/Leistungsnachweis-PDFs liegen in EINEM geteilten Object-Storage-Bucket. Produktion schreibt in den nackten Key-Space `invoices/…` (**GoBD-aufbewahrt, UNANTASTBAR**); alle Nicht-Prod-/Test-Läufe isolieren ihre Keys unter `_nonprod/<NODE_ENV>[/run-<RUN_ID>][/w-<WORKER_ID>]/…` (Task #1042/#1051/#1263). Diese Isolation verhindert Kollisionen — aber es gab **keine Retention/TTL**: es wurde nie ein `.delete()` abgesetzt, und die DB-Cleanup-Pfade hart-löschen zwar Zeilen, lassen die zugehörigen PDF-Objekte aber verwaist zurück. Jeder Dev-/Test-/CI-Lauf füllte den Bucket also dauerhaft weiter → die Object-Storage-Kosten wuchsen monoton.
+
+**Retention-Sweep:** `runNonprodPdfSweep`/`sweepNonprodPdfArtifacts` (`scripts/lib/object-storage-pdf-sweep.ts`) enumerieren Objekte unter dem `_nonprod/`-Prefix und löschen NUR die ausreichend ALTEN (Default-Aufbewahrung **24h**, `DEFAULT_PDF_RETENTION_MS`). Die Altersgrenze schützt frisch geschriebene PDFs eines parallel laufenden Schwester-Laufs (analog zum DB-Orphan-Sweep). Alters-unbekannte Objekte werden konservativ übersprungen.
+
+**Sicherheitsschichten (spiegeln den Schreib-Guard `assertInvoicePdfWriteKeyAllowed`):**
+- Läuft NIEMALS in Production (harter `NODE_ENV`-Guard im Wrapper UND im CLI).
+- Dry-Run per Default; echtes Löschen nur mit `--apply` (CLI) bzw. `dryRun:false` (Wrapper).
+- Der Listen-Prefix MUSS `_nonprod/` enthalten, sonst Abbruch (kein Enumerieren des Prod-Key-Space).
+- Jeder zu löschende Key wird über `assertNonprodPdfDeleteKeyAllowed` geprüft — Nicht-`_nonprod/`-Keys (z.B. Produktions-`invoices/…`) sind beweisbar unerreichbar.
+- Kurzer No-op ohne konfiguriertes Object-Storage (z.B. GitHub-Actions-CI ohne Sidecar).
+
+**Cadence/Verdrahtung:** Der Sweep läuft auf derselben Kadenz wie die bestehenden Test-DB-Sweeps — automatisch beim Start des Ephemeral-Orchestrators (`scripts/with-ephemeral-db.ts`, fail-safe, blockiert den Lauf nie) und im Sammel-Unblock `scripts/sweep-test-dbs.ts` (`npm run test:unblock`, dort `--force` ⇒ Altersgrenze 0). Manuell:
+
+- `npm run test:sweep-pdfs` — Dry-Run (nur anzeigen, was gelöscht würde).
+- `tsx scripts/sweep-nonprod-pdfs.ts --apply` — wirklich löschen.
+- `tsx scripts/sweep-nonprod-pdfs.ts --retention-ms=0 --apply` — alle `_nonprod/`-PDFs (Altersgrenze aus).
+
+DB-Cleanup und Object-Cleanup bleiben bewusst getrennte, je eigenständig sichere Mechanismen (die Row-Level-`test-data-cleanup` fasst keine Objekte an).
