@@ -14,6 +14,8 @@ import {
   classifyBillingMaturity,
   isPflegekasseBillingType,
   isServiceRecordSignedForBilling,
+  isLateSignedFollowUp,
+  lateSignedFollowUpCount,
 } from "@shared/domain/billing-eligibility";
 
 describe("isPflegekasseBillingType", () => {
@@ -185,5 +187,25 @@ describe("BILLING_BLOCK_SHORT_LABELS", () => {
     expect(BILLING_BLOCK_SHORT_LABELS.not_signed).toBeTruthy();
     expect(BILLING_BLOCK_SHORT_LABELS.no_appointments).toBeTruthy();
     expect(BILLING_BLOCK_SHORT_LABELS.already_billed).toBeTruthy();
+  });
+});
+
+describe("isLateSignedFollowUp / lateSignedFollowUpCount (Task #1813)", () => {
+  it("Nachberechnung: unbilled>0 und signed>unbilled ⇒ true, Anzahl = jetzt abzurechnende (unbilled)", () => {
+    const facts = { signedAppointmentCount: 5, unbilledAppointmentCount: 2 };
+    expect(isLateSignedFollowUp(facts)).toBe(true);
+    expect(lateSignedFollowUpCount(facts)).toBe(2);
+  });
+
+  it("keine unabgerechneten Termine ⇒ keine Nachberechnung", () => {
+    const facts = { signedAppointmentCount: 4, unbilledAppointmentCount: 0 };
+    expect(isLateSignedFollowUp(facts)).toBe(false);
+    expect(lateSignedFollowUpCount(facts)).toBe(0);
+  });
+
+  it("noch nie abgerechnet (signed === unbilled) ⇒ keine Nachberechnung", () => {
+    const facts = { signedAppointmentCount: 3, unbilledAppointmentCount: 3 };
+    expect(isLateSignedFollowUp(facts)).toBe(false);
+    expect(lateSignedFollowUpCount(facts)).toBe(0);
   });
 });

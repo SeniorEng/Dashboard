@@ -785,6 +785,12 @@
           "openAppointments": {
             "type": "integer"
           },
+          "signedAppointmentCount": {
+            "type": "integer"
+          },
+          "unbilledAppointmentCount": {
+            "type": "integer"
+          },
           "eligibility": {
             "type": "object",
             "properties": {
@@ -822,6 +828,8 @@
           "completedAppointments",
           "coveredAppointments",
           "openAppointments",
+          "signedAppointmentCount",
+          "unbilledAppointmentCount",
           "eligibility"
         ]
       },
@@ -1087,6 +1095,9 @@
           "completedAppointments": {
             "type": "integer"
           },
+          "alreadyBilledAppointments": {
+            "type": "integer"
+          },
           "totalCents": {
             "type": "integer"
           },
@@ -1110,6 +1121,7 @@
           "serviceRecordCount",
           "coveredAppointments",
           "completedAppointments",
+          "alreadyBilledAppointments",
           "totalCents",
           "splitInvoices",
           "splitPots"

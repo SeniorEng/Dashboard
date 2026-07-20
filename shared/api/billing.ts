@@ -34,6 +34,15 @@ export interface BillingCustomerItem {
     status: BillingEligibilityStatus;
     reason: BillingBlockReason | null;
   };
+  // Task #1813 — Termin-Fakten für die „Nachberechnung"-Kennzeichnung
+  // (spät unterschriebene Nachzügler). `signedAppointmentCount` = Termine unter
+  // signierten LNs (bereits abgerechnete + noch offene), `unbilledAppointmentCount`
+  // = davon noch nicht abgerechnet. Aus DERSELBEN SSoT
+  // (`getUnbilledSignedAppointmentFactsByCustomer`), die der Server bereits für
+  // die Eligibilität nutzt — die Liste konsumiert sie über den gemeinsamen
+  // Helper `isLateSignedFollowUp`/`lateSignedFollowUpCount`.
+  signedAppointmentCount: number;
+  unbilledAppointmentCount: number;
 }
 
 export interface InvoiceItem {
@@ -128,6 +137,14 @@ export interface BillingInvoicePreview {
   // Dokumentierte Termine (`status = 'completed'`) im Monat — Sekundärwert
   // für den Partial-Signing-Hinweis im UI.
   completedAppointments: number;
+  // Task #1813 — Termine, die bereits in einer früheren Rechnung dieses
+  // Zeitraums abgerechnet wurden. Neutraler „N bereits abgerechnet"-Wert; er
+  // ERSETZT die bisherige mehrdeutige Ableitung
+  // (`completedAppointments − coveredAppointments`), die spät unterschriebene
+  // Nachzügler-Termine fälschlich als amber „unvollständig dokumentiert"
+  // erscheinen ließ. Der amber-Hinweis feuert jetzt nur noch für wirklich
+  // un-/unterdokumentierte Termine (`completed − covered − alreadyBilled > 0`).
+  alreadyBilledAppointments: number;
   // Brutto-Summe über alle entstehenden Folge-Rechnungen
   // (bei Budget-Split: Kasse + Privat).
   totalCents: number;

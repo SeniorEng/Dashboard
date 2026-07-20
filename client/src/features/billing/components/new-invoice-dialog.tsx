@@ -20,6 +20,7 @@ import type {
   GenerateInvoiceResponse,
 } from "@shared/api";
 import { POT_DISPLAY_LABELS, type InvoicePotKey } from "@shared/domain/budget-invoice-split";
+import { isLateSignedFollowUp } from "@shared/domain/billing-eligibility";
 import { MONTH_NAMES } from "../constants";
 import { getCustomerName } from "../utils";
 
@@ -197,12 +198,27 @@ export function NewInvoiceDialog({
                     <div className="text-xs text-gray-500">Termine</div>
                     <div className="font-semibold text-gray-900">
                       {invoicePreview.coveredAppointments}
-                      {invoicePreview.completedAppointments > invoicePreview.coveredAppointments && (
+                      {/* Task #1813 — amber-Hinweis NUR noch für wirklich
+                          un-/unterdokumentierte Termine: dokumentiert minus
+                          jetzt-abgerechnet minus bereits-abgerechnet. Bereits
+                          abgerechnete (Nachberechnung) werden neutral separat
+                          ausgewiesen, nicht mehr als Warnung. */}
+                      {invoicePreview.completedAppointments
+                        - invoicePreview.coveredAppointments
+                        - invoicePreview.alreadyBilledAppointments > 0 && (
                         <span className="ml-1 text-xs font-normal text-amber-700">
                           von {invoicePreview.completedAppointments} dokumentiert
                         </span>
                       )}
                     </div>
+                    {invoicePreview.alreadyBilledAppointments > 0 && (
+                      <div
+                        className="mt-0.5 text-xs font-normal text-gray-500"
+                        data-testid="text-preview-already-billed"
+                      >
+                        {invoicePreview.alreadyBilledAppointments} bereits abgerechnet
+                      </div>
+                    )}
                   </div>
                   <div data-testid="text-preview-total">
                     <div className="text-xs text-gray-500">Summe (brutto)</div>
@@ -210,6 +226,21 @@ export function NewInvoiceDialog({
                       {formatEuroDE(invoicePreview.totalCents)}
                     </div>
                   </div>
+                </div>
+              )}
+              {/* Task #1813 — Beruhigender Hinweis bei einer Nachberechnung
+                  (spät unterschriebene Nachzügler). Gemeinsame SSoT-Regel
+                  `isLateSignedFollowUp`, dieselbe wie in der Liste. */}
+              {invoicePreview && isLateSignedFollowUp({
+                signedAppointmentCount:
+                  invoicePreview.coveredAppointments + invoicePreview.alreadyBilledAppointments,
+                unbilledAppointmentCount: invoicePreview.coveredAppointments,
+              }) && (
+                <div className="text-xs text-sky-700" data-testid="text-preview-followup-hint">
+                  Nachberechnung: {invoicePreview.coveredAppointments}{" "}
+                  {invoicePreview.coveredAppointments === 1 ? "Termin wurde" : "Termine wurden"}{" "}
+                  nachträglich unterschrieben und waren nicht Teil der früheren Rechnung. Sie werden
+                  nicht doppelt abgerechnet.
                 </div>
               )}
               {invoicePreview?.splitInvoices && invoicePreview.splitPots?.length > 0 && (

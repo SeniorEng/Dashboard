@@ -109,6 +109,40 @@ export function hasOpenAppointments(c: { openAppointments?: number | null }): bo
   return (c.openAppointments ?? 0) > 0;
 }
 
+/**
+ * Task #1813 — PURE SSoT der „Nachberechnung"-Regel (spät unterschriebene
+ * Nachzügler). Ein Kunde ist eine Nachberechnung, wenn im Zeitraum bereits
+ * eine Rechnung existiert (also ein Teil der signierten Termine schon
+ * abgerechnet ist) UND weitere signierte Termine noch offen sind. Genau dieser
+ * Fall entsteht seit dem Late-Signing-Fix (spät unterschriebene Termine tauchen
+ * korrekt wieder zur Abrechnung auf) — er ist KEIN Fehler und KEINE
+ * Doppelabrechnung. Sowohl die Liste („Noch zu erstellen") als auch der
+ * Vorschau-Dialog konsumieren DIESE eine Regel, damit die Kennzeichnung nie
+ * auseinanderläuft.
+ */
+export interface LateSignedFollowUpFacts {
+  /** Termine unter signierten LNs (bereits abgerechnete + noch offene). */
+  signedAppointmentCount: number;
+  /** Davon NOCH NICHT abgerechnet (= wird jetzt abgerechnet). */
+  unbilledAppointmentCount: number;
+}
+
+export function isLateSignedFollowUp(f: LateSignedFollowUpFacts): boolean {
+  return (
+    f.unbilledAppointmentCount > 0 &&
+    f.signedAppointmentCount > f.unbilledAppointmentCount
+  );
+}
+
+/**
+ * Anzahl der nachträglich unterschriebenen Termine, die jetzt abgerechnet
+ * werden (= die noch nicht abgerechneten signierten Termine). 0, wenn es sich
+ * nicht um eine Nachberechnung handelt.
+ */
+export function lateSignedFollowUpCount(f: LateSignedFollowUpFacts): number {
+  return isLateSignedFollowUp(f) ? f.unbilledAppointmentCount : 0;
+}
+
 export type BillingEligibilityStatus = "eligible" | "blocked";
 
 /** Eingangsfakten der Klassifikation (vom Server aus denselben Readern gefüllt). */

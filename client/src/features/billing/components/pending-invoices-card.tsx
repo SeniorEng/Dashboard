@@ -18,6 +18,8 @@ import {
   isPartiallyDocumented,
   hasOpenAppointments,
   classifyBillingMaturity,
+  isLateSignedFollowUp,
+  lateSignedFollowUpCount,
   BILLING_BLOCK_SHORT_LABELS,
 } from "@shared/domain/billing-eligibility";
 import { BILLING_TYPE_LABELS } from "../constants";
@@ -62,6 +64,14 @@ function PendingCustomerRow({
   // `/billing/eligible-customers` für den „nur X/Y dokumentiert"-Hinweis nutzt.
   const partial = isPartiallyDocumented(c);
   const openCount = c.openAppointments ?? 0;
+  // Task #1813: Nachberechnung (spät unterschriebene Nachzügler) — der Kunde
+  // hat im Monat bereits eine Rechnung UND weitere signierte Termine, die noch
+  // nicht abgerechnet sind. Gemeinsame SSoT-Regel `isLateSignedFollowUp`
+  // (@shared/domain/billing-eligibility), dieselbe, die der Vorschau-Dialog
+  // nutzt. Neutrale Kennzeichnung (kein amber) — es ist KEIN Fehler und KEINE
+  // Doppelabrechnung.
+  const followUp = isLateSignedFollowUp(c);
+  const followUpCount = lateSignedFollowUpCount(c);
   // Task #1786: Kurz-Hinweis für unterschrifts-blockierte Zeilen (z.B.
   // „Kundenunterschrift fehlt"). Nur relevant, wenn keine offenen Termine mehr
   // anstehen (sonst dominiert der „noch X geplante Termine"-Vermerk) und der
@@ -109,6 +119,14 @@ function PendingCustomerRow({
             data-testid={`text-pending-block-${c.id}`}
           >
             {blockLabel}
+          </div>
+        )}
+        {followUp && (
+          <div
+            className="mt-0.5 text-xs text-sky-700"
+            data-testid={`text-pending-followup-${c.id}`}
+          >
+            Nachberechnung — {followUpCount} {followUpCount === 1 ? "Termin" : "Termine"} nachträglich unterschrieben
           </div>
         )}
         {openCount > 0 && (

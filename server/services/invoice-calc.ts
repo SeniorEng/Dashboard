@@ -102,6 +102,13 @@ export interface InvoiceDraft {
   apptIds: number[];                       // nach Filter „bereits abgerechnet"
   alreadyInvoicedIds: number[];
   completedAppointmentsInPeriod: number;   // dokumentierte Termine im Monat (für Partial-Signing-Hinweis)
+  // Task #1813 — Termine unter signierten LNs, die bereits in einer früheren
+  // Rechnung dieses Zeitraums abgerechnet wurden (Nachberechnungs-Erkennung).
+  // Ersetzt die bisherige mehrdeutige Ableitung
+  // (`completedAppointmentsInPeriod − coveredAppointments`), die spät
+  // unterschriebene Nachzügler fälschlich als „unvollständig dokumentiert"
+  // erscheinen ließ.
+  alreadyBilledAppointmentCount: number;
   insuranceInfo: Awaited<ReturnType<typeof getInsuranceData>>;
   // Task #759 — Variant C: Pot-Items sind die Wahrheits-Quelle. Wenn nur
   // ein Pot belegt ist, wird der Legacy-Single-Invoice-Pfad verwendet
@@ -220,6 +227,14 @@ export async function buildInvoiceDraft(input: {
   }
 
   const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
+
+  // Task #1813 — Termine unter den signierten LNs, die bereits in einer
+  // früheren Rechnung des Zeitraums abgerechnet wurden. Basis der
+  // „Nachberechnung"-Erkennung und des neutralen „N bereits abgerechnet"-Werts
+  // in der Vorschau (ersetzt die mehrdeutige Doku-Lücken-Ableitung).
+  const alreadyBilledAppointmentCount = alreadyInvoicedIds.length > 0
+    ? allApptIds.filter(id => alreadyInvoicedIds.includes(id)).length
+    : 0;
 
   // T05/K3: Storno-then-rebill — bereits stornierte Original-Rechnungen
   // verlinken (Task #585).
@@ -344,6 +359,7 @@ export async function buildInvoiceDraft(input: {
       apptIds,
       alreadyInvoicedIds,
       completedAppointmentsInPeriod,
+      alreadyBilledAppointmentCount,
       insuranceInfo,
       potItems,
       needsBudgetSplit: false,
@@ -388,6 +404,7 @@ export async function buildInvoiceDraft(input: {
     apptIds,
     alreadyInvoicedIds,
     completedAppointmentsInPeriod,
+    alreadyBilledAppointmentCount,
     insuranceInfo,
     potItems,
     needsBudgetSplit: true,

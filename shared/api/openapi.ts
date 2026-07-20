@@ -355,6 +355,8 @@ export const BillingCustomerItemSchema = component(
     completedAppointments: z.number().int(),
     coveredAppointments: z.number().int(),
     openAppointments: z.number().int(),
+    signedAppointmentCount: z.number().int(),
+    unbilledAppointmentCount: z.number().int(),
     eligibility: z.object({
       status: z.enum(["eligible", "blocked"]),
       reason: z
@@ -444,6 +446,7 @@ export const BillingInvoicePreviewSchema = component(
     serviceRecordCount: z.number().int(),
     coveredAppointments: z.number().int(),
     completedAppointments: z.number().int(),
+    alreadyBilledAppointments: z.number().int(),
     totalCents: z.number().int(),
     splitInvoices: z.boolean(),
     splitPots: z.array(

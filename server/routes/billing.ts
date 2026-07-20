@@ -516,6 +516,10 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
       coveredAppointments: coverageByCustomer.get(c.id)?.coveredAppointments ?? 0,
       openAppointments: openByCustomer.get(c.id) ?? 0,
       eligibility: { status, reason },
+      // Task #1813 — Termin-Fakten für die „Nachberechnung"-Kennzeichnung aus
+      // DERSELBEN SSoT (`unbilledFacts`), die auch die Eligibilität speist.
+      signedAppointmentCount: facts?.signedAppointmentCount ?? 0,
+      unbilledAppointmentCount: facts?.unbilledAppointmentCount ?? 0,
     };
   });
 
@@ -548,6 +552,10 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
     serviceRecordCount: draft.signedRecordCount,
     coveredAppointments: draft.apptIds.length,
     completedAppointments: draft.completedAppointmentsInPeriod,
+    // Task #1813 — Termine, die bereits in einer früheren Rechnung des Zeitraums
+    // abgerechnet wurden (neutraler „N bereits abgerechnet"-Wert; ersetzt die
+    // mehrdeutige Doku-Lücken-Ableitung, die Nachberechnungen als Warnung zeigte).
+    alreadyBilledAppointments: draft.alreadyBilledAppointmentCount,
     totalCents: draft.grossAmountCents,
     splitInvoices: draft.needsBudgetSplit,
     // Task #1010: Töpfe der erzeugten Folge-Rechnungen — nach POT_ORDER
