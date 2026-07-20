@@ -300,15 +300,17 @@ function BudgetPot45b({
     onRefresh();
   };
 
-  // Task #1766 — Karten-Konsistenz: „zugewiesen − verbraucht (angerechnet) =
-  // verfügbar" muss auf der Karte aufgehen. `totalUsedCents` ist die ROHE
-  // Verbrauchs-Summe (inkl. Buchungen gegen einen inzwischen verfallenen
-  // Übertrag), während `availableCents` diesen verfallenen Verbrauch bereits
-  // symmetrisch herausrechnet (#1340). Ohne Trennung zeigte die Karte
-  // „Davon 1.226,74 € verbraucht" bei nur 917 € zugewiesen — verwirrend.
-  // Der angerechnete Verbrauch ist daher „zugewiesen − verfügbar"; die
-  // Differenz zur rohen Summe ist der Verbrauch aus verfallenem Übertrag.
-  // Er wird nur als eigene Zeile ausgewiesen, wenn er real existiert
+  // Task #1812 (konsolidiert #1766) — Karten-Konsistenz: „zugewiesen −
+  // verbraucht (angerechnet) = verfügbar" muss auf der Karte aufgehen.
+  // `totalUsedCents` ist die ROHE Verbrauchs-Summe (inkl. Buchungen gegen einen
+  // inzwischen verfallenen Übertrag ODER gegen einen durch den Startwert/Reset
+  // ersetzten Zeitraum), während `availableCents` diesen nicht-angerechneten
+  // Verbrauch bereits symmetrisch herausrechnet (#1340 Verfall / #1812 Reset).
+  // Ohne Trennung zeigte die Karte „Davon 1.226,74 € verbraucht" bei nur 917 €
+  // zugewiesen — verwirrend. Der angerechnete Verbrauch ist daher „zugewiesen −
+  // verfügbar"; die Differenz zur rohen Summe ist der Verbrauch aus einem
+  // abgeschlossenen Zeitraum (verfallener Übertrag oder vor dem Restguthaben-
+  // Stichtag). Er wird nur als eigene Zeile ausgewiesen, wenn er real existiert
   // (verfügbar > 0 UND roh > angerechnet — nur bei tatsächlicher Exklusion
   // möglich, nicht bei echter Budget-Überschreitung).
   const attributedUsedCents = Math.max(0, data.totalAllocatedCents - data.availableCents);
@@ -406,7 +408,7 @@ function BudgetPot45b({
             </p>
             {hasExpiredUsage && (
               <p className="text-xs text-amber-600 mt-1" data-testid="text-45b-used-expired">
-                + {formatCurrency(expiredUsedCents)} aus verfallenem Übertrag
+                + {formatCurrency(expiredUsedCents)} aus abgeschlossenem Zeitraum
               </p>
             )}
           </CardContent>

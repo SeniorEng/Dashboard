@@ -1,28 +1,47 @@
 ---
-name: §45b mid-year Startwert allocStart-shift undercount
-description: calculateAllocated45b's initial_balance allocStart-shift must be gated to IB-derived anchors only, else mid-year Startwert cuts off preceding months.
+name: §45b Startwert = Reset/Re-Baseline (nicht additiv)
+description: A §45b "Startwert (Restguthaben)" reported at month M REPLACES all accumulation ≤ M (new baseline); only months after M keep accruing. Consumption before M must not be double-subtracted.
 ---
 
-The `initialBalanceMonths` allocStart-shift in `calculateAllocated45b`
-(server/storage/budget/allocation-storage.ts) pushes allocStart to the month
-AFTER the latest initial_balance row. If the accrual anchor comes from
-pflegegrad history (not the IB), a mid-year Startwert then cut off ALL preceding
-months' accumulation (an affected customer: 131 € instead of ~917 €, false "über Budget").
+The §45b "Startwert (Restguthaben)" (an `initial_balance` allocation row) is a
+RESET / re-baseline, NOT an additive top-up. The LATEST §45b Startwert whose
+month-start ≤ the read's `asOfDate` (month M) becomes the new baseline for the
+pot: it replaces ALL accumulation ≤ M (monthly accruals AND carryovers). Only
+months AFTER M keep accruing (clamped to the yearly statutory max).
 
-**Rule:** gate the shift with `anchorFromInitialBalance` — apply it ONLY when the
-anchor was actually derived from an active initial_balance row. The
-`initialBalanceSet` skip-set already prevents double-counting the Startwert month
-independently, so the shift is not needed for correctness when the anchor is
-pflegegrad-derived.
+**Model:** available(N≥M) = Startwert(M) + Ansammlung(M+1…N) − Verbrauch(≥M) −
+geplant(≥M).
 
-**Why:** the shift exists to avoid double-counting an IB-anchored month; when the
-anchor is pflegegrad-derived the shift is pure loss (drops real accrual months).
+**Where (calculateAllocated45b, server/storage/budget/allocation-storage.ts):**
+- Reset month M = latest active `initialBalanceMonths` row with month-start ≤
+  `resetDateLimit` (= `opts.asOfDate`), computed AFTER all allocStart shifts
+  (expiryFloor/carryover) to avoid the expiryFloor collision that reset
+  allocStartMonth→1. Gated on `opts.year == null` (NOT in `{year}` pool mode).
+- `enumStart = max(allocStart-after-all-shifts, M+1)` is passed to
+  `enumerate45bStatutoryMonths` as a LOCAL var — never mutate the shared
+  `allocStart`.
+- `ibCounted` additionally requires `hasReset && a.year===resetYear &&
+  a.month===resetMonth` so ONLY the latest Startwert is the baseline; earlier
+  IBs auto-fall into `excludedSpecialAllocationIds`.
+- `Allocated45bResult.resetCutoffDate` (= `${M}-01`, else null) is consumed by
+  `getExcluded45bConsumption`, which net-excludes consumption where
+  `allocationId IN excludedIds OR transactionDate < resetCutoffDate` in ONE
+  OR'd query (dedup) — so pre-reset consumption is never double-subtracted.
+  Symmetric across unified-reader + consumption-engine (both call it).
 
-**How to apply:** for a prior-year IB the shift is a no-op regardless (afterYear <
-current allocStartYear), so gating it changes nothing there; the observable fix is
-only for CURRENT-year mid-year Startwert on a pflegegrad-anchored customer.
+**Why:** a reported remaining balance at M already reflects everything spent
+before M; adding the full pflegegrad-anchored accrual on top (old #1766 additive
+behavior) overstated the pot (prod: 835,68 € Startwert from July showed as
+1.621,68 € at anchor 01/2026).
 
-**Display:** BudgetLedgerSection derives attributedUsed = max(0, allocated -
-available), expiredUsed = totalUsed - attributed, and splits the card into
-"Davon X verbraucht" + amber "+ Y aus verfallenem Übertrag" so expired-carryover
-consumption never reads as over-budget. Client-only, no DTO change.
+**How to apply:** backdated reads BEFORE M see no reset (Startwert not yet
+effective) → normal accrual up to that date. `{year}` pool mode (carryover
+computation) is out of scope — keep allocStart there. Do NOT re-introduce the
+old additive `anchorFromInitialBalance` allocStart-shift or expect the full
+7×131 € accrual after a mid-year Startwert.
+
+**Display coherence caveat:** overview `totalAllocatedCents` reflects the reset,
+but legacy `totalUsedCents` still sums ALL consumption (not excluding pre-reset);
+only served `availableCents` is corrected via the unified reader (same pattern as
+the #1340 carryover exclusion). Assert on `availableCents`, not `allocated −
+used`. BudgetLedgerSection labels the pre-reset consumption line accordingly.

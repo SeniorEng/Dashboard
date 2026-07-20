@@ -8,7 +8,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, isNotNull, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lt, lte, gte, isNull, isNotNull, desc, asc, inArray, or } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
@@ -577,6 +577,12 @@ export async function calculateAllocatedCents(
 interface Allocated45bResult {
   allocatedCents: number;
   excludedSpecialAllocationIds: number[];
+  // Task #1812 — Reset-Stichtag (Monatsanfang des spätesten wirksamen §45b-
+  // Startwerts M). Verbrauch mit `transactionDate < resetCutoffDate` ist bereits
+  // in der neuen Startwert-Basis abgebildet und darf NICHT erneut abgezogen
+  // werden (`getExcluded45bConsumption`). `null`, wenn kein Reset wirksam ist
+  // bzw. im `{year}`-Pool-Modus.
+  resetCutoffDate: string | null;
 }
 
 async function calculateAllocated45b(
@@ -618,15 +624,6 @@ async function calculateAllocated45b(
   // anders als §45a greift hier KEIN `monthlyAmount==0`-Schutz. Echte
   // persistierte Mittel (initial_balance/carryover) ankern weiterhin
   // unabhängig vom Gate über die Fallbacks unten.
-  // Task #1766 — Herkunft des Ankers festhalten. Der `initialBalanceMonths`-
-  // `allocStart`-Shift (unten) darf die Monatsansammlung der Monate VOR einem
-  // Startwert nur dann wegschneiden, wenn der Startwert SELBST die Anker-Herkunft
-  // ist (Onboarding ohne frühere Eligibility). Liegt eine frühere Eligibility vor
-  // (Pflegegrad-Historie / Carryover / gelöschter Startwert / Fallback), akkumulieren
-  // die Monate davor weiter; die Doppelzählung des Startwert-Monats verhindert allein
-  // der `initialBalanceSet`-Skip-Set (Antje Jungnickel: Anker 01/2026, Startwert
-  // 07/2026 → 917 € statt fälschlich 131 €).
-  let anchorFromInitialBalance = false;
   const s45bEnabled = all45bSettings.some(s => s.enabled);
   const pgStart = await getEarliestCareLevelStart(customerId, d);
   if (pgStart && s45bEnabled) {
@@ -640,7 +637,6 @@ async function calculateAllocated45b(
       budgetStartDate = initialBalances.reduce((min, a) =>
         a.validFrom < min.validFrom ? a : min
       ).validFrom;
-      anchorFromInitialBalance = true;
     }
   }
 
@@ -695,7 +691,7 @@ async function calculateAllocated45b(
     // verschwände komplett. Wir prüfen daher gegen ALLE §45b-Zeilen
     // (`all45bSettings`, datumsunabhängig). Das Windowing übernimmt weiterhin
     // der allocStart/end-Shift weiter unten (validFrom/validTo-Klammer).
-    if (!s45bEnabled) return { allocatedCents: 0, excludedSpecialAllocationIds: [] };
+    if (!s45bEnabled) return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetCutoffDate: null };
     // Task #1204 — kein Pflegegrad und keine Allokation: Jahresanfang als Anker.
     budgetStartDate = `${curYear}-01-01`;
   }
@@ -714,29 +710,13 @@ async function calculateAllocated45b(
     .filter(a => a.source === "initial_balance" && a.month != null)
     .map(a => ({ year: a.year, month: a.month! }));
 
-  // Task #1766 — Der Shift greift NUR NOCH, wenn der Startwert selbst die
-  // Anker-Herkunft ist (`anchorFromInitialBalance`, Onboarding ohne frühere
-  // Eligibility). Existiert eine frühere Eligibility (Pflegegrad-Historie o.Ä.),
-  // schöbe der Shift `allocStart` auf den Monat NACH dem spätesten Startwert und
-  // schnitte damit die komplette davorliegende Monatsansammlung weg (Antje: Anker
-  // 01/2026, Startwert 07/2026 → allocStart 08/2026 > Horizont 07/2026 → 0 Monate,
-  // nur 131 € statt 917 €). Die Doppelzählung des Startwert-Monats verhindert
-  // unabhängig davon der `initialBalanceSet`-Skip-Set unten.
-  if (anchorFromInitialBalance && initialBalanceMonths.length > 0) {
-    let latestIbYear = 0, latestIbMonth = 0;
-    for (const ib of initialBalanceMonths) {
-      if (ib.year > latestIbYear || (ib.year === latestIbYear && ib.month > latestIbMonth)) {
-        latestIbYear = ib.year;
-        latestIbMonth = ib.month;
-      }
-    }
-    let afterMonth = latestIbMonth + 1, afterYear = latestIbYear;
-    if (afterMonth > 12) { afterMonth = 1; afterYear++; }
-    if (afterYear > allocStartYear || (afterYear === allocStartYear && afterMonth > allocStartMonth)) {
-      allocStartYear = afterYear;
-      allocStartMonth = afterMonth;
-    }
-  }
+  // Task #1812 — §45b-Startwert = Reset/Re-Baseline (nicht mehr additiv).
+  // Der `allocStart`-Shift auf den Monat NACH dem Startwert wird NICHT mehr hier
+  // auf die geteilte `allocStart`-Variable angewendet (er kollidierte mit dem
+  // expiryFloor-Shift, der `allocStartMonth` wieder auf 1 setzt und damit die
+  // Monate vor dem Startwert wieder einließ). Stattdessen wird der Reset erst
+  // unmittelbar vor der Enumeration als lokale Start-Grenze berechnet
+  // (`enumStartYear/Month`, siehe unten) — nach ALLEN allocStart-Manipulationen.
 
   // Task #696 — Carryover-aware allocStart-Shift.
   //
@@ -936,14 +916,53 @@ async function calculateAllocated45b(
     }
   }
 
+  // Task #1812 — §45b-Startwert = Reset/Re-Baseline. Der SPÄTESTE zum Stichtag
+  // (`ibDateLimit`) bereits wirksame Startwert-Monat M ist die neue Basis: er
+  // ERSETZT jede Ansammlung <= M. Nur Monate NACH M akkumulieren weiter. Wir
+  // berechnen daher eine LOKALE Enumerations-Startgrenze `enumStart = max(
+  // allocStart-nach-allen-Shifts, M+1)` — bewusst NICHT auf der geteilten
+  // `allocStart`-Variable (kollidierte mit dem expiryFloor-Reset auf Monat 1).
+  // Gilt NUR im laufenden/`asOfDate`-Modus, NICHT im `{year}`-Pool-Modus
+  // (Carryover-Berechnung, out of scope) — dort bleibt allocStart maßgeblich.
+  // Ein rein zukünftiger Startwert (M-Start > Stichtag) ist noch nicht wirksam
+  // und löst keinen Reset aus (rückdatierte Reads bleiben korrekt).
+  const resetDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
+  let resetYear = 0, resetMonth = 0;
+  let hasReset = false;
+  if (opts.year == null) {
+    for (const ib of initialBalanceMonths) {
+      const ibStart = `${ib.year}-${String(ib.month).padStart(2, "0")}-01`;
+      if (ibStart > resetDateLimit) continue;
+      if (!hasReset || ib.year > resetYear || (ib.year === resetYear && ib.month > resetMonth)) {
+        resetYear = ib.year;
+        resetMonth = ib.month;
+        hasReset = true;
+      }
+    }
+  }
+  const resetCutoffDate = hasReset
+    ? `${resetYear}-${String(resetMonth).padStart(2, "0")}-01`
+    : null;
+
+  let enumStartYear = allocStartYear;
+  let enumStartMonth = allocStartMonth;
+  if (hasReset) {
+    let afterMonth = resetMonth + 1, afterYear = resetYear;
+    if (afterMonth > 12) { afterMonth = 1; afterYear++; }
+    if (afterYear > enumStartYear || (afterYear === enumStartYear && afterMonth > enumStartMonth)) {
+      enumStartYear = afterYear;
+      enumStartMonth = afterMonth;
+    }
+  }
+
   // Task #872 — §45b-Monatsaufstockung als reine SSoT-Aufzählung. Identisch zur
   // historischen Monat-für-Monat-Schleife (allocStart→end, Startwert-Monate
   // übersprungen, historisierter Monatsbetrag pro Monat), nur ausgelagert in
   // `enumerate45bStatutoryMonths` — gleichzeitig die Quelle der materialisierten
   // `statutory_monthly`-Zeilen und der Backfill-Reconciliation.
   const statutoryMonths = enumerate45bStatutoryMonths({
-    allocStartYear,
-    allocStartMonth,
+    allocStartYear: enumStartYear,
+    allocStartMonth: enumStartMonth,
     endYear,
     endMonth,
     initialBalanceMonthKeys: initialBalanceSet,
@@ -957,6 +976,7 @@ async function calculateAllocated45b(
     return {
       allocatedCents: yearMonthlyTotal + sumInitialBalancesForYear(existingAllocations, opts.year),
       excludedSpecialAllocationIds: [],
+      resetCutoffDate: null,
     };
   }
 
@@ -1002,11 +1022,18 @@ async function calculateAllocated45b(
   // IDs, damit der gegen sie gebuchte Verbrauch nicht weiter vom laufenden Topf
   // abgezogen wird (Allocated und ConsumedNet folgen denselben
   // Fenster-/Supersession-Regeln).
-  const ibCounted = (a: { source: string; validFrom: string; year: number }) =>
+  // Task #1812 — Reset-Semantik: NUR der Startwert des spätesten wirksamen
+  // Reset-Monats M ist die Basis. Frühere Startwerte (< M) sind durch die neue
+  // Baseline ersetzt und fallen aus `initialBalanceTotal` heraus (landen in
+  // `excludedSpecialAllocationIds`, damit ihr Verbrauch symmetrisch nicht mehr
+  // abgezogen wird). Die bisherigen Verfalls-/Supersession-Prädikate bleiben als
+  // zusätzliche Schranke erhalten.
+  const ibCounted = (a: { source: string; validFrom: string; year: number; month: number | null }) =>
     a.source === "initial_balance" &&
     a.validFrom <= ibDateLimit &&
     a.year >= ibFloorYear &&
-    !supersededIbYears.has(a.year);
+    !supersededIbYears.has(a.year) &&
+    hasReset && a.year === resetYear && a.month === resetMonth;
   const initialBalanceTotal = existingAllocations
     .filter(ibCounted)
     .reduce((sum, a) => sum + a.amountCents, 0);
@@ -1020,6 +1047,7 @@ async function calculateAllocated45b(
   return {
     allocatedCents: totalCalculated + initialBalanceTotal + carryoverTotal,
     excludedSpecialAllocationIds,
+    resetCutoffDate,
   };
 }
 
@@ -1048,15 +1076,34 @@ export async function getExcluded45bConsumption(
   // (z.B. Forecast-Projektion in `getBudgetSummary` rechnet mit
   // `projectFuture: true`). Default (undefined) = bisheriges Verhalten der
   // Lese-/Buchungs-Pfade (`unified-reader`, `consumption-engine`).
-  const { excludedSpecialAllocationIds } = await calculateAllocated45b(
+  const { excludedSpecialAllocationIds, resetCutoffDate } = await calculateAllocated45b(
     customerId,
     { asOfDate, projectFuture: opts?.projectFuture },
     d,
     typeSettings,
   );
-  if (excludedSpecialAllocationIds.length === 0) {
+  if (excludedSpecialAllocationIds.length === 0 && !resetCutoffDate) {
     return { excludedSpecialAllocationIds, excludedConsumedNetCents: 0 };
   }
+
+  // Task #1812 — Zwei symmetrische Exklusions-Quellen in EINER Bedingung
+  // (die ODER-Verknüpfung dedupliziert Zeilen, die beides erfüllen):
+  //  (a) Verbrauch gegen eine aus `Allocated` entfernte Spezial-Allocation
+  //      (abgelaufener Übertrag / vom Reset verdrängter früherer Startwert),
+  //  (b) Verbrauch VOR dem Reset-Stichtag M — bereits in der neuen Startwert-
+  //      Basis abgebildet, darf also nicht erneut vom laufenden Topf abgezogen
+  //      werden.
+  const exclusionParts = [
+    excludedSpecialAllocationIds.length > 0
+      ? inArray(budgetTransactions.allocationId, excludedSpecialAllocationIds)
+      : undefined,
+    resetCutoffDate
+      ? lt(budgetTransactions.transactionDate, resetCutoffDate)
+      : undefined,
+  ].filter((p): p is NonNullable<typeof p> => p != null);
+  const exclusionCond = exclusionParts.length === 1
+    ? exclusionParts[0]
+    : or(...exclusionParts);
 
   const [consumed, reversed] = await Promise.all([
     d.select({
@@ -1065,7 +1112,7 @@ export async function getExcluded45bConsumption(
       eq(budgetTransactions.customerId, customerId),
       eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
       sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
-      inArray(budgetTransactions.allocationId, excludedSpecialAllocationIds),
+      exclusionCond,
       lte(budgetTransactions.transactionDate, asOfDate),
     )),
     d.select({
@@ -1074,7 +1121,7 @@ export async function getExcluded45bConsumption(
       eq(budgetTransactions.customerId, customerId),
       eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
       eq(budgetTransactions.transactionType, "reversal"),
-      inArray(budgetTransactions.allocationId, excludedSpecialAllocationIds),
+      exclusionCond,
       lte(budgetTransactions.transactionDate, asOfDate),
     )),
   ]);

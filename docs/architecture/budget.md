@@ -268,6 +268,22 @@ Zwei Wurzeln führten zu falschen §45b-Anzeigen (z.B. „−2.012 €", obwohl 
 
 **Entfernte Legacy-Helfer:** `clampDerived45bAnchor` / `earliest45bRelevantAnchor` (`shared/domain/budgets.ts`) und `resolveBudgetAnchor` (`shared/domain/budget/budget-anchor.ts`) wurden ersatzlos entfernt — sie waren seit dem zur Laufzeit pro Topf abgeleiteten Anker (Task #1204) nicht mehr im Runtime-Pfad und überlebten nur in Unit-Tests bzw. im obsoleten Anker-Backfill-Skript (das gegen die gedroppten `budget_start_date`-Spalten schrieb und mitsamt Wrapper/Runbook entfernt wurde). Der §45b-Verfalls-Boden lebt inline in `allocation-storage.ts`; der Auto-Fallback bodet über `floorAutoAnchor45bToCurrentYear`. Drift-Guard gegen ein Wiedereinführen des persistierten Ankers: `tests/architecture/budget-anchor-ssot.test.ts`.
 
+### §45b Startwert (Restguthaben) = Reset/Re-Baseline, nicht additiv (Task #1812, konsolidiert #1766)
+
+Ein gemeldeter §45b-**Startwert (Restguthaben)** zu einem Monat M ist ein **Reset** des Topfes, **kein** additiver Aufschlag. Der Startwert bildet bereits den Stand **nach** allem Verbrauch bis M ab; ihn zusätzlich auf die aus der Pflegegrad-Historie abgeleitete Voll-Ansammlung zu addieren (altes #1766-Verhalten) überzeichnete den Topf (Prod: Startwert 835,68 € ab Juli erschien am Anker 01/2026 als 1.621,68 €).
+
+**Modell A:** `verfügbar(N≥M) = Startwert(M) + Ansammlung(M+1…N) − Verbrauch(≥M) − geplant(≥M)`. Der jüngste Startwert-Monat M (letzte aktive `initial_balance`-Zeile mit Monatsbeginn ≤ `asOfDate`) ersetzt **alle** Ansammlung UND Überträge ≤ M; nur Monate **nach** M stocken weiter auf (auf den Jahres-Cap geklemmt).
+
+**Wo umgesetzt (SSoT, `server/storage/budget/allocation-storage.ts`):**
+- **Reset-Monat M** wird in `calculateAllocated45b` **nach** allen `allocStart`-Shifts (Verfalls-Boden/Carryover) bestimmt, um die Kollision mit dem expiryFloor zu vermeiden. Nur im As-of-Modus (`opts.year == null`), **nicht** im `{year}`-Pool-Modus (Carryover-Berechnung).
+- `enumStart = max(allocStart-nach-allen-Shifts, M+1)` wird als **lokale** Variable an `enumerate45bStatutoryMonths` übergeben — `allocStart` selbst bleibt unangetastet.
+- `ibCounted` verlangt zusätzlich `hasReset && a.year===resetYear && a.month===resetMonth`, sodass **nur** der jüngste Startwert die neue Basis ist; ältere IBs fallen in `excludedSpecialAllocationIds`.
+- `Allocated45bResult.resetCutoffDate` (= `${M}-01`, sonst null) steuert `getExcluded45bConsumption`: dieser rechnet in **einer** OR-verknüpften Query (`allocationId IN excludedIds OR transactionDate < resetCutoffDate`) den Vor-Reset-Verbrauch symmetrisch heraus, sodass er **nicht doppelt** abgezogen wird. Symmetrisch über Unified-Reader + Consumption-Engine + `net-available-45b.ts` (alle rufen dieselbe Funktion).
+
+**Anzeige-Kohärenz-Vorbehalt:** Overview `totalAllocatedCents` spiegelt den Reset; das Legacy-`totalUsedCents` summiert weiterhin **allen** Verbrauch (schließt Vor-Reset nicht aus) — nur das servierte `availableCents` ist über den Unified-Reader korrigiert (gleiches Muster wie die #1340-Carryover-Exklusion). `BudgetLedgerSection` weist die Differenz als „aus abgeschlossenem Zeitraum" aus. Tests asserten auf `availableCents`, nicht auf `allocated − used`.
+
+**Nicht angefasst:** Carryover-`allocStart`-Shift (#696/#959), expiryFloor (#959), IB-Supersession (#1392), backdatierte Reads (vor M sehen keinen Reset), §45a/§39, `{year}`-Pool-Modus (Reset dort ausgeschaltet).
+
 ### §45b hat KEINEN Fenster-Cap — Monatslimit = akkumulierende Aufstockungsrate
 
 **Entscheidung (Alrik-Direktive):** Für §45b darf es **kein reines Monatslimit** (per-Kalendermonat-Buchungs-Cap) geben. Das §45b-Budget akkumuliert bis zum Stichtag; das per-Kunde konfigurierte §45b-Monatslimit („Unser Anteil") wirkt **ausschließlich** als die monatliche **Aufstockungsrate**, die in die Allocation einfließt (`server/storage/budget/allocation-storage.ts` → `monthlyAmountFor` / `enumerate45bStatutoryMonths`). Es ist **kein** zweiter Buchungs-Cap.

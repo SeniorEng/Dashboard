@@ -1,21 +1,20 @@
 /**
- * Task #1766 — §45b-Allocated-Unterzählung bei Anker VOR einem mittjährigen
- * Startwert.
+ * Task #1812 (konsolidiert #1766) — §45b-Startwert = RESET / Re-Baseline.
  *
- * Reproduzierte Fehlsituation: Ein Kunde hat einen §45b-Eligibility-Anker aus
- * der Pflegegrad-Historie (Pflegegrad seit Vorjahr → Anker auf den 1.1. des
- * laufenden Jahres gebodet) UND einen mittjährigen §45b-Startwert
- * (`initial_balance`, z.B. Juli). Der frühere `initialBalanceMonths`-
- * `allocStart`-Shift schob `allocStart` auf den Monat NACH dem Startwert (August)
- * und schnitt damit die komplette davorliegende Monatsansammlung (Jan–Jun) weg
- * → „Gesamt zugewiesen" zeigte nur den einzelnen Startwert-Monat (131 €) statt
- * der vollen Ansammlung (7 × 131 € = 917 €).
+ * Frühere Semantik (#1766): Ein mittjähriger §45b-Startwert war ADDITIV — die
+ * volle Monatsansammlung ab dem Eligibility-Anker (Jan–Jul = 7 × 131 €) blieb
+ * bestehen und der Startwert ersetzte nur die virtuelle Aufstockung SEINES
+ * Monats.
  *
- * Fix: Der Shift greift nur noch, wenn der Startwert SELBST die Anker-Herkunft
- * ist (Onboarding ohne frühere Eligibility). Liegt eine frühere Eligibility vor,
- * akkumulieren die Monate davor weiter; die Doppelzählung des Startwert-Monats
- * verhindert unverändert der `initialBalanceSet`-Skip-Set (Startwert-Monat ersetzt
- * die virtuelle Monatsaufstockung dieses Monats — kein Doppelzählen).
+ * Neue Semantik (#1812): Der zum Stichtag späteste wirksame Startwert-Monat M
+ * ist eine NEUE BASIS. Er ERSETZT jede Ansammlung <= M (inkl. Überträge). Nur
+ * Monate NACH M akkumulieren weiter (auf den Jahres-Cap begrenzt). Verbrauch
+ * VOR M ist bereits in der neuen Basis abgebildet und darf NICHT erneut vom
+ * laufenden Topf abgezogen werden.
+ *
+ * Konkret hier: Startwert 131 € im Juli, Stichtag Mitte Juli → allocated = 131 €
+ * (die neue Basis), NICHT 917 €. Ein rückdatierter Read VOR Juli sieht den Reset
+ * noch nicht (Startwert noch nicht wirksam).
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
@@ -47,8 +46,11 @@ const STARTWERT_MONAT = 7; // Juli
 const AS_OF = `${YEAR}-0${STARTWERT_MONAT}-15`;
 // Pflegegrad seit Vorjahr → §45b-Anker gebodet auf 1.1. laufendes Jahr.
 const PFLEGEGRAD_SEIT = `${YEAR - 1}-10-01`;
-// Anker Januar, Stichtag Mitte Juli → 7 berechtigte Monate (Jan–Jul).
-const EXPECTED_FULL_ACCRUAL = STARTWERT_MONAT * MONTHLY_45B_CENTS;
+// Anker Januar, Stichtag Mitte Juli → OHNE Reset wären das 7 berechtigte Monate.
+const FULL_ACCRUAL = STARTWERT_MONAT * MONTHLY_45B_CENTS;
+// MIT Reset (Startwert im Juli, Stichtag Mitte Juli, keine Monate nach Juli):
+// die neue Basis ist der Startwert selbst.
+const EXPECTED_RESET_BASELINE = MONTHLY_45B_CENTS;
 
 interface OverviewDTO {
   entlastungsbetrag45b: {
@@ -78,7 +80,7 @@ afterAll(async () => {
 async function freshCustomer(prefix: string): Promise<number> {
   const c = await createTestCustomer({
     vorname: prefix,
-    nachname: `T1766_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    nachname: `T1812_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     pflegegrad: 3,
     pflegegradSeit: PFLEGEGRAD_SEIT,
     billingType: "pflegekasse_gesetzlich",
@@ -100,44 +102,44 @@ async function enable45b(customerId: number): Promise<void> {
   expect(res.status, `type-settings: ${res.status} ${JSON.stringify(res.data)}`).toBe(200);
 }
 
-async function get45bAllocated(customerId: number): Promise<number> {
-  const res = await apiGet<OverviewDTO>(`/api/budget/${customerId}/overview?date=${AS_OF}`);
+async function get45bAllocatedAt(customerId: number, asOf: string): Promise<number> {
+  const res = await apiGet<OverviewDTO>(`/api/budget/${customerId}/overview?date=${asOf}`);
   expect(res.status, `overview: ${res.status} ${JSON.stringify(res.data)}`).toBe(200);
   return res.data.entlastungsbetrag45b.totalAllocatedCents;
 }
 
-describe("Task #1766 — §45b-Ansammlung bei Anker vor mittjährigem Startwert", () => {
-  it("Startwert im Juli + Anker aus Pflegegrad-Historie → volle Ansammlung (7 × 131 €), nicht nur der Startwert-Monat", async () => {
-    const customerId = await freshCustomer("T1766-anchor-before-startwert");
+describe("Task #1812 — §45b-Startwert als Reset/Re-Baseline", () => {
+  it("Startwert im Juli setzt die Basis zurück → allocated = 131 € (Startwert), NICHT die volle Ansammlung (917 €)", async () => {
+    const customerId = await freshCustomer("T1812-reset-baseline");
     await enable45b(customerId);
 
-    // Voller Laufzeit-Anker-Baseline (Anker 1.1. → 7 × 131 € bis Mitte Juli).
-    expect(await get45bAllocated(customerId)).toBe(EXPECTED_FULL_ACCRUAL);
+    // OHNE Startwert: voller Laufzeit-Anker (Anker 1.1. → 7 × 131 € bis Mitte Juli).
+    expect(await get45bAllocatedAt(customerId, AS_OF)).toBe(FULL_ACCRUAL);
 
-    // Mittjähriger §45b-Startwert (Juli, = eine Monatsaufstockung 131 €).
-    // Er ersetzt die virtuelle Juli-Aufstockung (Skip-Set), darf aber die
-    // davorliegende Ansammlung (Jan–Jun) NICHT wegschneiden.
+    // Mittjähriger §45b-Startwert (Juli) — meldet ein Restguthaben von 131 €.
     const res = await apiPost(
       `/api/budget/${customerId}/initial-balance/entlastungsbetrag_45b`,
       { amountCents: MONTHLY_45B_CENTS, validFrom: `${YEAR}-0${STARTWERT_MONAT}` },
     );
     expect([200, 201], `initial-balance: ${res.status} ${JSON.stringify(res.data)}`).toContain(res.status);
 
-    // Regressions-Kern: allocated bleibt die volle Ansammlung (917 €), NICHT
-    // der einzelne Startwert-Monat (131 €).
-    expect(await get45bAllocated(customerId)).toBe(EXPECTED_FULL_ACCRUAL);
+    // Kern von #1812: allocated ist die NEUE BASIS (131 €), die gesamte
+    // Ansammlung <= Juli ist ersetzt.
+    expect(await get45bAllocatedAt(customerId, AS_OF)).toBe(EXPECTED_RESET_BASELINE);
+
+    // Rückdatierter Read VOR dem Startwert-Monat: der Reset ist noch nicht
+    // wirksam → normale Ansammlung bis dahin (Jan–Jun = 6 × 131 €).
+    const preResetAsOf = `${YEAR}-06-15`;
+    expect(await get45bAllocatedAt(customerId, preResetAsOf)).toBe(6 * MONTHLY_45B_CENTS);
   }, 60_000);
 
-  // Voller Inzident-Nachbau (der ursprüngliche „702,74 € über Budget"-Fall):
-  // frühere Eligibility (Pflegegrad-Anker Vorjahr) + abgelaufener Vorjahres-
-  // Übertrag (Fenster Jan–Jun) + mittjähriger Startwert (Juli) + Verbrauch im
-  // 1. Halbjahr (gegen den Übertrag) UND im Juli (gegen den laufenden Topf).
-  // Vor dem Fix kollabierte allocated auf den einzelnen Startwert-Monat, sodass
-  // der (teils gegen den abgelaufenen Übertrag gebuchte) Verbrauch eine falsche
-  // „über Budget"-Warnung erzeugte.
-  it("voller Szenario-Nachbau: abgelaufener Übertrag + Startwert + Mischverbrauch → volle Ansammlung, KEINE falsche „über Budget\"-Warnung", async () => {
+  // Voller Inzident-Nachbau: früherer Übertrag + mittjähriger Startwert (Reset)
+  // + Verbrauch VOR dem Reset (1. Halbjahr) UND im Reset-Monat. Der Verbrauch
+  // vor dem Reset ist bereits in der neuen Basis abgebildet und darf NICHT
+  // erneut abgezogen werden → keine falsche „über Budget"-Warnung.
+  it("Übertrag + Reset-Startwert + Mischverbrauch → Basis = 131 €, Vor-Reset-Verbrauch nicht doppelt abgezogen", async () => {
     const handle: BudgetScenarioHandle = await setupBudgetScenario({
-      customerNamePrefix: "T1766-full",
+      customerNamePrefix: "T1812-full",
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
@@ -161,7 +163,7 @@ describe("Task #1766 — §45b-Ansammlung bei Anker vor mittjährigem Startwert"
         scheduledEnd: "11:00:00",
         durationPromised: minutes,
         status: "scheduled",
-        notes: "T1766 Mischverbrauch",
+        notes: "T1812 Mischverbrauch",
       }).returning();
       apptIds.push(appt.id);
       const services = await apiGet<Array<{ id: number; code: string }>>("/api/services/all");
@@ -183,14 +185,14 @@ describe("Task #1766 — §45b-Ansammlung bei Anker vor mittjährigem Startwert"
     }
 
     try {
-      // Abgelaufener Vorjahres-Übertrag (Fenster Jan–Jun laufendes Jahr).
+      // Vorjahres-Übertrag (Fenster Jan–Jun laufendes Jahr) — vom Reset ersetzt.
       await upsertCarryoverAllocation({
         customerId,
         budgetType: "entlastungsbetrag_45b",
         sourceYear: YEAR - 1,
         amountCents: MONTHLY_45B_CENTS,
       });
-      // Mittjähriger §45b-Startwert (Juli) — der Auslöser des allocStart-Shifts.
+      // Mittjähriger §45b-Startwert (Juli) — der Reset-Anker.
       await upsertInitialBalanceAllocation({
         customerId,
         budgetType: "entlastungsbetrag_45b",
@@ -201,10 +203,10 @@ describe("Task #1766 — §45b-Ansammlung bei Anker vor mittjährigem Startwert"
         expiresAt: null,
       });
 
-      // Verbrauch im 1. Halbjahr (FIFO → gegen den Übertrag, priority 0) …
+      // Verbrauch im 1. Halbjahr (VOR dem Reset) …
       const h1Consumed = await book(`${YEAR}-02-16`, 60);
       expect(h1Consumed).toBeGreaterThan(0);
-      // … und im Juli (gegen den laufenden Jahrestopf).
+      // … und im Juli (im Reset-Monat, gegen die neue Basis).
       const julyConsumed = await book(`${YEAR}-07-10`, 30);
       expect(julyConsumed).toBeGreaterThan(0);
 
@@ -212,13 +214,14 @@ describe("Task #1766 — §45b-Ansammlung bei Anker vor mittjährigem Startwert"
       expect(res.status, `overview: ${res.status} ${JSON.stringify(res.data)}`).toBe(200);
       const pot = res.data.entlastungsbetrag45b;
 
-      // (1) Kern-Fix: allocated ist die volle Jahres-Ansammlung (7 × 131 €), der
-      //     ab Juli abgelaufene Übertrag ist korrekt NICHT mitgezählt.
-      expect(pot.totalAllocatedCents).toBe(EXPECTED_FULL_ACCRUAL);
+      // (1) Kern-Fix #1812: allocated ist die neue Basis (131 €), Übertrag +
+      //     Vor-Reset-Ansammlung sind ersetzt.
+      expect(pot.totalAllocatedCents).toBe(EXPECTED_RESET_BASELINE);
 
-      // (2) Keine falsche „über Budget"-Warnung: die Planungs-Projektion (das
-      //     Client-Gate für „über Budget") bleibt ≥ 0. Vor dem Fix war allocated
-      //     nur 131 € → availableAfterPlanned massiv negativ → Falschwarnung.
+      // (2) Nur der Reset-Monats-Verbrauch (Juli) zählt gegen den laufenden
+      //     Topf; der Vor-Reset-Verbrauch (Februar) ist in der Basis enthalten
+      //     und wird NICHT erneut abgezogen → Verfügbar = Basis − Juli-Verbrauch.
+      expect(pot.availableCents).toBe(EXPECTED_RESET_BASELINE - julyConsumed);
       expect(pot.availableAfterPlannedCents).toBeGreaterThanOrEqual(0);
       expect(pot.availableCents).toBeGreaterThanOrEqual(0);
 
