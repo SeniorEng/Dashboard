@@ -1,0 +1,58 @@
+# Arbeitsanweisung für Replit AI — §45b-Startwert = Budget-Reset korrekt (führt #1766 zusammen)
+
+**Repo:** Care-Connect / Senioren Engel. **Charakter:** read-only Inventur zuerst (inkl. Prod-Daten + Schreibpfad), dann Fix. Ersetzungs-Regel: **konsolidiert #1766**, kein Parallelmodell.
+
+---
+
+## What & Why — der §45b-„Startwert" ist ein Reset, kein Add-on
+Fachlicher Hintergrund (bestätigt von Alrik): Ein Kunde kann einen **zweiten Pflegedienst** haben, der auf **dieselben §45b-Töpfe** bucht. Senioren Engel sieht diesen Fremdverbrauch **nicht**, also driftet die interne Rechnung („Ansammlung − *unser* Verbrauch") von der Realität weg. In Monat M nennt der Kunde/die Kasse den **tatsächlichen Restbetrag**; darauf muss das System **zurücksetzen** (Re-Baseline). Der „Startwert (ab Monat M)" = „ab M ist der echte §45b-Rest = X €".
+
+**Der Bug (Prod bestätigt):** Das Feld ist als **„Restguthaben (€)"** mit **„Maximal 917 € (rechtlich mögliche Ansammlung bis M)"** beschriftet — also ein **kumulierter Reset-Wert**. Der Reader **addiert** ihn aber auf die Ansammlung der Vor-Monate, statt sie zu ersetzen:
+`allocated = Ansammlung(alle Monate außer dem Startwert-Monat) + Startwert + Übertrag` (`allocation-storage.ts:1021`; Skip-Set `:795` überspringt nur den Startwert-Monat).
+- Beispiel Prod: Startwert **835,68 € ab Juli** → Jan–Jun (786) + 835,68 = **1.621,68 €** angezeigt. **Richtig wären 835,68 €.**
+
+**Zusammenhang mit #1766 (dieselbe Codestelle):** #1766 will das `initialBalanceMonths`-`allocStart`-Shift **entfernen**, um Antje Jungnickels Unterzählung („131 statt 917") zu heilen. Aber genau dieses Shift war faktisch **der Reset** (es setzte `allocStart` auf M+1 und ersetzte damit alles ≤ M). #1766 schaltet also auf das **additive** Modell um — und erzeugt exakt den Überzähl-Fall oben. Unter dem Reset-Modell ist Antjes Restwert der **korrekte** Wert (kein Bug „131→917"), **es sei denn**, ihre Startwert-Zeile #828 wurde vom Schreibpfad falsch erzeugt. **#1766 und dieser Fall sind zwei Seiten einer Medaille und werden hier gemeinsam gelöst.**
+
+## Entschieden (Alrik): Reset-Modell (Modell A)
+Der Startwert **ersetzt** die Ansammlung **bis einschließlich** seines Monats. Monate **danach** akkumulieren normal weiter (§45b läuft monatlich auf, geclampt gegen das gesetzliche Jahres-Maximum). Formel:
+```
+available(ab Monat N ≥ M) = Startwert(M)
+                          + Ansammlung(M+1 … N)         // spätere Monate laufen weiter
+                          − Verbrauch(ab M)             // NUR ab dem Reset
+                          − geplant(ab M)
+```
+Monate **und** Verbrauch **vor** M sind irrelevant — sie stecken bereits im gemeldeten Restbetrag.
+
+## Steps
+1. **Read-only: Schreibpfad + Prod-Daten klären.** Woher kommen die Startwert-Zeilen? Warum ist Antjes #828 = 131 € (sieht nach Monatswert/Auto-Renewal aus), aber der Prod-Kunde 835,68 € (echter Restbetrag)? Bestimmen, ob ein Schreibpfad (Renewal/Carryover-Verfall/Monatsabschluss) fälschlich **Monatswerte** als „Startwert" materialisiert, obwohl das Feld ein **Restguthaben-Reset** ist. Ergebnis dokumentieren, **bevor** gefixt wird (read-first, kein Prod-Schreiben ohne Sign-off).
+2. **Reader-Fix (Kern).** In `calculateAllocated45b` den Skip-Set so ausweiten, dass **alle Monate ≤ dem spätesten Startwert-Monat** aus der Ansammlung fallen (nicht nur der Startwert-Monat). Ergebnis: `allocated = Startwert + Ansammlung(M+1 … Horizont)`. Das **ersetzt** #1766s additiven Ansatz. Das alte `allocStart`-Shift-Verhalten war richtungsrichtig (Reset), aber überzog beim Horizont-Rand (#1766 Root-Cause b) — daher **nicht** zurück zum Shift, sondern die Skip-Semantik sauber auf „≤ M" setzen und den Horizont korrekt behandeln (Startwert bleibt sichtbar, auch wenn Horizont = Startwert-Monat).
+3. **Verbrauchs-Verrechnung symmetrisch.** Verbrauch **vor** dem Reset-Monat darf **nicht** nochmal vom Startwert abgezogen werden (er ist im gemeldeten Rest schon drin). Nur Verbrauch **ab** M reduziert die Basis. `consumedNet` und die Exklusions-Logik (`getExcluded45bConsumption`) so anpassen, dass sie derselben „≤ M wird durch Reset ersetzt"-Regel folgen wie `allocated` (Allocated und ConsumedNet müssen denselben Fenster-Regeln folgen — sonst Anzeige-Drift).
+4. **#1766s Erwartung korrigieren.** Die #1766-Zielvorgabe „Antje allocated = 917" wird **zurückgenommen** — unter dem Reset-Modell ist ihr Restwert die Basis. Falls Step 1 zeigt, dass #828 fälschlich als Monatswert geschrieben wurde, ist **das** der eigentliche Fehler (Schreibpfad), nicht der Reader. Entscheidung dokumentieren.
+5. **Karten-Anzeige konsistent (#1766 Root-Cause a).** `zugewiesen − verbraucht(angerechnet) = verfügbar` muss aufgehen; Verbrauch aus verfallenem Übertrag bzw. vor dem Reset als **eigene, klar beschriftete** Zeile (nicht stumm im „verbraucht"-Wert). Beschriftungen in einfacher Sprache; ggf. das Feld selbst klarer benennen („Restguthaben zum Stichtag / Budget-Reset").
+6. **Tests.**
+   - **Prod-Fall (Reset):** Startwert 835,68 € ab Juli, Anker 01/2026 → `allocated = 835,68` (NICHT 1.621,68); `verfügbar = 835,68 − Verbrauch(ab Juli) − geplant`. Kein „über Budget".
+   - **Folge-Monat:** derselbe Kunde im August → `allocated = 835,68 + 131` (spätere Monate laufen weiter), geclampt gegen das Jahres-Max.
+   - **Antje-Shape unter Reset:** kein falscher Add-on; Verhalten entspricht dem in Step 1/4 festgelegten Modell.
+   - **Nicht brechen:** Carryover-`allocStart`-Shift (#696/#959), `expiryFloor` (#959), IB-Supersession (#1392), **rückdatierte Buchungen** (`allocStart` nie über den `asOfDate`-Horizont), §45a/§39-Logik unverändert.
+
+## Out of scope
+- Übertrags-(Carryover-)Topf-Regeln und §45a/§39/§42a — der Reset betrifft die **laufende §45b-Ansammlung**; der Übertrag bleibt sein eigener, verfallender Posten nach bestehenden Regeln.
+- Neustrukturierung des §45b-Modells jenseits der Reset-Semantik.
+- Prod-Daten-Migration außer zwingend nötig (dann read-first + Sign-off, `--apply` nur nach Freigabe).
+
+## Relevant files
+- `server/storage/budget/allocation-storage.ts` (Skip-Set `:795`, Kombination `:1021`, Shift `:703-721`, `carryoverCounted`/`ibCounted`)
+- `shared/domain/budget/statutory-45b.ts` (`enumerate45bStatutoryMonths`)
+- `server/storage/budget/summary-queries.ts` (Karten-Kennzahlen, consumedNet)
+- `server/storage/budget/net-available-45b.ts`, `shared/domain/budget/net-available-45b.ts`
+- `client/src/components/budget/BudgetLedgerSection.tsx` (Anzeige + Feld-Beschriftung)
+- der Startwert-Schreibpfad (Renewal/Carryover-Verfall/Wizard — in Step 1 zu identifizieren)
+- `.agents/memory/45b-*.md` (nach dem Fix aktualisieren)
+- §45b-Boundary-/Equality-Tests
+
+## Definition of Done
+- [ ] Startwert **ersetzt** die Ansammlung ≤ seinem Monat (kein Add-on); Prod-Fall zeigt 835,68 €, nicht 1.621,68 €.
+- [ ] Verbrauch vor dem Reset wird nicht doppelt abgezogen; Allocated und ConsumedNet folgen denselben Reset-Fenster-Regeln.
+- [ ] Karten-Zahlen gehen auf (`zugewiesen − verbraucht = verfügbar`), verfallener/pre-Reset-Verbrauch separat beschriftet.
+- [ ] Schreibpfad-Herkunft (131 vs. 835,68) geklärt und dokumentiert; #1766s „Antje = 917"-Erwartung bewusst korrigiert.
+- [ ] Spätere Monate akkumulieren weiter (Jahres-Max-Clamp); Carryover/expiryFloor/backdated/§45a/§39 unverändert grün.
