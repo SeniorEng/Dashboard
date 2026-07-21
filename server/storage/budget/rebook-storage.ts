@@ -6,25 +6,187 @@ import {
   customers,
   type BudgetTransaction,
 } from "@shared/schema";
-import { eq, and, sql, or, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, sql, or, inArray, isNotNull, gte, lte, ne } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, lastDayOfMonth } from "@shared/utils/datetime";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
+import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "./unified-reader";
 import { formatEuroDE } from "@shared/utils/money";
 import { appointmentsRepo, customersRepo } from "../../repos";
 import {
   isPrivatePaymentAllowed,
   isSelbstzahlerBillingType,
 } from "@shared/domain/budget-selbstzahler-validator";
+import { BUDGET_TYPES, effectiveDefaultPots } from "@shared/domain/budgets";
+import { assertRebookAllowed, type RebookGuardOptions } from "./rebook-guards";
+
+/**
+ * Task #440/#1785 — SSoT für „darf zum Buchungsdatum auf diesen Ziel-Topf
+ * umgebucht werden?". EINE Gültigkeits-Prüfung, die sowohl der Einzel-Rebook
+ * (ungültig ⇒ Fehler) als auch die Monats-/Sammel-Umbuchung (ungültig ⇒ Zeile
+ * bleibt stehen) nutzen — keine zwei parallelen Ableitungen der Topf-Gültigkeit.
+ */
+async function resolveRebookTargetValidity(
+  tx: DbClient,
+  customerId: number,
+  targetBudgetType: string,
+  txDate: string,
+): Promise<{ valid: true } | { valid: false; reason: string }> {
+  const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: txDate }, tx);
+  const targetSetting = typeSettings.find(s => s.budgetType === targetBudgetType);
+  if (!targetSetting || !targetSetting.enabled) {
+    return { valid: false, reason: "Ziel-Topf ist nicht aktiviert" };
+  }
+  if (targetSetting.validFrom && txDate < targetSetting.validFrom) {
+    return { valid: false, reason: "Ziel-Topf ist für das Buchungsdatum noch nicht gültig" };
+  }
+  if (targetSetting.validTo && txDate > targetSetting.validTo) {
+    return { valid: false, reason: "Ziel-Topf ist für das Buchungsdatum abgelaufen" };
+  }
+  return { valid: true };
+}
+
+/**
+ * Task #1785 — Kern der Einzelumbuchung OHNE eigene Transaktion/Advisory-Lock,
+ * damit die Monats-/Sammel-Umbuchung viele Zeilen in EINER Transaktion unter
+ * EINEM Lock verarbeiten kann. Storno der Original-Buchung (append-only,
+ * Original-Datum + appointmentId erhalten) + Neubuchung via `consumeFifo` in den
+ * Ziel-Topf. `skipGuard` überspringt das Schutzgitter, weil der Sammel-Pfad es
+ * EINMAL vorab über alle Termine prüft.
+ */
+export async function rebookSingleTransactionCore(
+  tx: DbClient,
+  params: {
+    customerId: number;
+    transactionId: number;
+    targetBudgetType: string;
+    userId: number;
+    isSuperAdmin: boolean;
+    skipGuard?: boolean;
+  },
+): Promise<{ reversalTransaction: BudgetTransaction; newTransaction: BudgetTransaction | null; amountCents: number }> {
+  const { customerId, transactionId, targetBudgetType, userId, isSuperAdmin, skipGuard } = params;
+
+  const [original] = await tx.select()
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.id, transactionId),
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.transactionType, "consumption"),
+    ))
+    .limit(1);
+
+  if (!original) {
+    throw new Error("Transaktion nicht gefunden oder keine Verbrauchsbuchung");
+  }
+
+  // Task #1785 — Schutzgitter (Monatsabschluss + gestellte Rechnung) VOR jeder
+  // Mutation im selben Tx-Snapshot. Beim Sammel-Pfad einmal vorab geprüft.
+  if (!skipGuard) {
+    await assertRebookAllowed([original.appointmentId], { userId, isSuperAdmin }, tx);
+  }
+
+  if (original.budgetType === targetBudgetType) {
+    throw new Error("Ziel-Topf ist gleich dem aktuellen Topf");
+  }
+
+  // Historisierungs-aware (Task #440): die zum ursprünglichen Buchungsdatum
+  // gültige Topf-Konfiguration entscheidet, ob die Umbuchung erlaubt ist.
+  const txDate = original.transactionDate;
+  const validity = await resolveRebookTargetValidity(tx, customerId, targetBudgetType, txDate);
+  if (!validity.valid) {
+    throw new Error(validity.reason);
+  }
+
+  const existingReversal = await tx.select({ id: budgetTransactions.id })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.transactionType, "reversal"),
+      or(
+        eq(budgetTransactions.reversedTransactionId, transactionId),
+        sql`${budgetTransactions.notes} LIKE ${'%Transaktion #' + transactionId + ')%'}`,
+        sql`${budgetTransactions.notes} LIKE ${'%Transaktion #' + transactionId}`,
+      ),
+    ))
+    .limit(1);
+
+  if (existingReversal.length > 0) {
+    throw new Error("Diese Buchung wurde bereits storniert oder umgebucht");
+  }
+
+  const absAmount = Math.abs(original.amountCents);
+
+  // Task #754 (BUG-14 / BUG-10b) — Service-Cent-/Minuten-/km-Spalten der
+  // Original-Consumption spiegeln (vorzeichen-invertiert), damit Σ je
+  // Service-Spalte über {original consumption + reversal} = 0. Andernfalls
+  // bleibt der Termin in Lexware/Statistik als „voll gebucht" sichtbar,
+  // obwohl der Umbuchungs-Storno die Zahlung zurückgenommen hat.
+  const negate = (v: number | null | undefined) => (v == null ? null : -v);
+  const [reversalTransaction] = await tx.insert(budgetTransactions)
+    .values({
+      customerId,
+      budgetType: original.budgetType,
+      transactionDate: original.transactionDate,
+      transactionType: "reversal",
+      amountCents: absAmount,
+      appointmentId: original.appointmentId,
+      allocationId: original.allocationId,
+      reversedTransactionId: transactionId,
+      hauswirtschaftMinutes: negate(original.hauswirtschaftMinutes),
+      hauswirtschaftCents: negate(original.hauswirtschaftCents),
+      alltagsbegleitungMinutes: negate(original.alltagsbegleitungMinutes),
+      alltagsbegleitungCents: negate(original.alltagsbegleitungCents),
+      travelKilometers: negate(original.travelKilometers),
+      travelCents: negate(original.travelCents),
+      customerKilometers: negate(original.customerKilometers),
+      customerKilometersCents: negate(original.customerKilometersCents),
+      notes: `Storno für Umbuchung nach ${targetBudgetType} (Transaktion #${transactionId})`,
+      createdByUserId: userId,
+    })
+    .returning();
+
+  const fifoResult = await consumeFifo(
+    customerId,
+    targetBudgetType,
+    absAmount,
+    original.transactionDate,
+    {
+      appointmentId: original.appointmentId ?? undefined,
+      userId,
+      hauswirtschaftMinutes: original.hauswirtschaftMinutes ?? undefined,
+      hauswirtschaftCents: original.hauswirtschaftCents ?? undefined,
+      alltagsbegleitungMinutes: original.alltagsbegleitungMinutes ?? undefined,
+      alltagsbegleitungCents: original.alltagsbegleitungCents ?? undefined,
+      travelKilometers: original.travelKilometers ?? undefined,
+      travelCents: original.travelCents ?? undefined,
+      customerKilometers: original.customerKilometers ?? undefined,
+      customerKilometersCents: original.customerKilometersCents ?? undefined,
+      notes: `Umbuchung von ${original.budgetType} (Transaktion #${transactionId})`,
+    },
+    tx
+  );
+
+  if (fifoResult.consumedCents < absAmount) {
+    throw new Error(`Ziel-Topf hat nicht genug Budget. Verfügbar: ${formatEuroDE(fifoResult.consumedCents)}, benötigt: ${formatEuroDE(absAmount)}`);
+  }
+
+  return {
+    reversalTransaction,
+    newTransaction: fifoResult.transactions[0] ?? null,
+    amountCents: absAmount,
+  };
+}
 
 export async function rebookSingleTransaction(
   customerId: number,
   transactionId: number,
   targetBudgetType: string,
-  userId: number
+  userId: number,
+  isSuperAdmin: boolean
 ): Promise<{ reversalTransaction: BudgetTransaction; newTransaction: BudgetTransaction | null; amountCents: number }> {
   return await db.transaction(async (tx) => {
     // Gleicher Advisory-Lock-Namespace wie in createConsumptionTransaction:
@@ -33,118 +195,262 @@ export async function rebookSingleTransaction(
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`
     );
+    return await rebookSingleTransactionCore(tx, {
+      customerId, transactionId, targetBudgetType, userId, isSuperAdmin,
+    });
+  });
+}
 
-    const [original] = await tx.select()
+/**
+ * Task #1785 — Monats-Umwidmung: bucht ALLE Verbrauchsbuchungen eines Kunden in
+ * einem Kalendermonat, die noch nicht im Ziel-Topf liegen, in EINER Transaktion
+ * unter EINEM Advisory-Lock auf den Ziel-Topf um (all-or-nothing). Datumsgenau:
+ * Zeilen an Tagen, an denen der Ziel-Topf nicht gültig ist, bleiben stehen
+ * (`skipped`). Ein Kapazitäts-Engpass wirft ⇒ Rollback der gesamten Umbuchung.
+ */
+export interface RebookMonthResult {
+  rebookedCount: number;
+  skippedCount: number;
+  movedAmountCents: number;
+  affectedAppointmentIds: number[];
+  skipped: Array<{ transactionId: number; appointmentId: number | null; reason: string }>;
+}
+
+export interface RebookMonthParams {
+  customerId: number;
+  year: number;
+  month: number;
+  targetBudgetType: string;
+  userId: number;
+  isSuperAdmin: boolean;
+}
+
+/**
+ * Task #1785 — Kern der Monats-Umwidmung OHNE eigene Transaktion/Advisory-Lock,
+ * damit der Kürzungs-Ablauf (#1785 P4) Storno + Umbuchung + Neuausstellung in
+ * EINER Transaktion unter EINEM Lock komponieren kann (analog
+ * `rebookSingleTransactionCore`). Der AUFRUFER MUSS bereits in einer Transaktion
+ * sein UND den Kunden-Advisory-Lock halten. `options.allowIssuedInvoices` NUR für
+ * den Storno-zuerst-Ablauf, der die Rechnung im selben Tx vorher storniert.
+ */
+export async function rebookCustomerMonthCore(
+  tx: DbClient,
+  params: RebookMonthParams,
+  options: RebookGuardOptions = {},
+): Promise<RebookMonthResult> {
+  const { customerId, year, month, targetBudgetType, userId, isSuperAdmin } = params;
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const monthEnd = lastDayOfMonth(year, month);
+
+  {
+    // Verbrauchsbuchungen des Monats, die NICHT bereits im Ziel-Topf liegen.
+    const candidates = await tx.select()
       .from(budgetTransactions)
       .where(and(
-        eq(budgetTransactions.id, transactionId),
         eq(budgetTransactions.customerId, customerId),
         eq(budgetTransactions.transactionType, "consumption"),
-      ))
-      .limit(1);
+        gte(budgetTransactions.transactionDate, monthStart),
+        lte(budgetTransactions.transactionDate, monthEnd),
+        ne(budgetTransactions.budgetType, targetBudgetType),
+      ));
 
-    if (!original) {
-      throw new Error("Transaktion nicht gefunden oder keine Verbrauchsbuchung");
-    }
-
-    if (original.budgetType === targetBudgetType) {
-      throw new Error("Ziel-Topf ist gleich dem aktuellen Topf");
-    }
-
-    // Historisierungs-aware (Task #440): die zum ursprünglichen Buchungsdatum
-    // gültige Topf-Konfiguration entscheidet, ob die Umbuchung erlaubt ist.
-    const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: original.transactionDate }, tx);
-    const targetSetting = typeSettings.find(s => s.budgetType === targetBudgetType);
-    if (!targetSetting || !targetSetting.enabled) {
-      throw new Error("Ziel-Topf ist nicht aktiviert");
-    }
-    const txDate = original.transactionDate;
-    if (targetSetting.validFrom && txDate < targetSetting.validFrom) {
-      throw new Error("Ziel-Topf ist für das Buchungsdatum noch nicht gültig");
-    }
-    if (targetSetting.validTo && txDate > targetSetting.validTo) {
-      throw new Error("Ziel-Topf ist für das Buchungsdatum abgelaufen");
-    }
-
-    const existingReversal = await tx.select({ id: budgetTransactions.id })
+    // Bereits stornierte/umgebuchte Zeilen ausschließen — gleiche Ableitung wie
+    // die Einzel-Rebook-Prüfung (`reversedTransactionId` ODER Notiz „… #N").
+    const reversals = await tx.select({
+      reversedTransactionId: budgetTransactions.reversedTransactionId,
+      notes: budgetTransactions.notes,
+    })
       .from(budgetTransactions)
       .where(and(
         eq(budgetTransactions.customerId, customerId),
         eq(budgetTransactions.transactionType, "reversal"),
-        or(
-          eq(budgetTransactions.reversedTransactionId, transactionId),
-          sql`${budgetTransactions.notes} LIKE ${'%Transaktion #' + transactionId + ')%'}`,
-          sql`${budgetTransactions.notes} LIKE ${'%Transaktion #' + transactionId}`,
-        ),
-      ))
-      .limit(1);
+      ));
+    const reversedIds = new Set<number>();
+    for (const r of reversals) {
+      if (r.reversedTransactionId != null) reversedIds.add(r.reversedTransactionId);
+      const m = r.notes?.match(/Transaktion #(\d+)/);
+      if (m) reversedIds.add(Number(m[1]));
+    }
+    const live = candidates.filter(c => !reversedIds.has(c.id));
 
-    if (existingReversal.length > 0) {
-      throw new Error("Diese Buchung wurde bereits storniert oder umgebucht");
+    // Datumsgenaue Zielgültigkeit (Cache pro Datum). Ungültige Tage ⇒ skip,
+    // damit sich ein Monat legitim auf zwei Töpfe aufteilen kann.
+    const validityByDate = new Map<string, { valid: true } | { valid: false; reason: string }>();
+    const toMove: typeof live = [];
+    const skipped: Array<{ transactionId: number; appointmentId: number | null; reason: string }> = [];
+    for (const row of live) {
+      let v = validityByDate.get(row.transactionDate);
+      if (!v) {
+        v = await resolveRebookTargetValidity(tx, customerId, targetBudgetType, row.transactionDate);
+        validityByDate.set(row.transactionDate, v);
+      }
+      if (v.valid) {
+        toMove.push(row);
+      } else {
+        skipped.push({ transactionId: row.id, appointmentId: row.appointmentId, reason: v.reason });
+      }
     }
 
-    const absAmount = Math.abs(original.amountCents);
+    // Schutzgitter EINMAL über alle betroffenen Termine (fail-fast); wirft
+    // RebookMonthClosedError/RebookIssuedInvoiceError ⇒ Rollback. `options`
+    // (z. B. `allowIssuedInvoices`) wird weitergereicht — der Kürzungs-Ablauf
+    // storniert die Rechnung im selben Tx bereits vorher.
+    await assertRebookAllowed(toMove.map(r => r.appointmentId), { userId, isSuperAdmin }, tx, options);
 
-    // Task #754 (BUG-14 / BUG-10b) — Service-Cent-/Minuten-/km-Spalten der
-    // Original-Consumption spiegeln (vorzeichen-invertiert), damit Σ je
-    // Service-Spalte über {original consumption + reversal} = 0. Andernfalls
-    // bleibt der Termin in Lexware/Statistik als „voll gebucht" sichtbar,
-    // obwohl der Umbuchungs-Storno die Zahlung zurückgenommen hat.
-    const negate = (v: number | null | undefined) => (v == null ? null : -v);
-    const [reversalTransaction] = await tx.insert(budgetTransactions)
-      .values({
+    let movedAmountCents = 0;
+    for (const row of toMove) {
+      const result = await rebookSingleTransactionCore(tx, {
         customerId,
-        budgetType: original.budgetType,
-        transactionDate: original.transactionDate,
-        transactionType: "reversal",
-        amountCents: absAmount,
-        appointmentId: original.appointmentId,
-        allocationId: original.allocationId,
-        reversedTransactionId: transactionId,
-        hauswirtschaftMinutes: negate(original.hauswirtschaftMinutes),
-        hauswirtschaftCents: negate(original.hauswirtschaftCents),
-        alltagsbegleitungMinutes: negate(original.alltagsbegleitungMinutes),
-        alltagsbegleitungCents: negate(original.alltagsbegleitungCents),
-        travelKilometers: negate(original.travelKilometers),
-        travelCents: negate(original.travelCents),
-        customerKilometers: negate(original.customerKilometers),
-        customerKilometersCents: negate(original.customerKilometersCents),
-        notes: `Storno für Umbuchung nach ${targetBudgetType} (Transaktion #${transactionId})`,
-        createdByUserId: userId,
-      })
-      .returning();
-
-    const fifoResult = await consumeFifo(
-      customerId,
-      targetBudgetType,
-      absAmount,
-      original.transactionDate,
-      {
-        appointmentId: original.appointmentId ?? undefined,
+        transactionId: row.id,
+        targetBudgetType,
         userId,
-        hauswirtschaftMinutes: original.hauswirtschaftMinutes ?? undefined,
-        hauswirtschaftCents: original.hauswirtschaftCents ?? undefined,
-        alltagsbegleitungMinutes: original.alltagsbegleitungMinutes ?? undefined,
-        alltagsbegleitungCents: original.alltagsbegleitungCents ?? undefined,
-        travelKilometers: original.travelKilometers ?? undefined,
-        travelCents: original.travelCents ?? undefined,
-        customerKilometers: original.customerKilometers ?? undefined,
-        customerKilometersCents: original.customerKilometersCents ?? undefined,
-        notes: `Umbuchung von ${original.budgetType} (Transaktion #${transactionId})`,
-      },
-      tx
-    );
-
-    if (fifoResult.consumedCents < absAmount) {
-      throw new Error(`Ziel-Topf hat nicht genug Budget. Verfügbar: ${formatEuroDE(fifoResult.consumedCents)}, benötigt: ${formatEuroDE(absAmount)}`);
+        isSuperAdmin,
+        skipGuard: true,
+      });
+      movedAmountCents += result.amountCents;
     }
+
+    const affectedAppointmentIds = Array.from(new Set(
+      toMove.map(r => r.appointmentId).filter((id): id is number => id != null),
+    ));
 
     return {
-      reversalTransaction,
-      newTransaction: fifoResult.transactions[0] ?? null,
-      amountCents: absAmount,
+      rebookedCount: toMove.length,
+      skippedCount: skipped.length,
+      movedAmountCents,
+      affectedAppointmentIds,
+      skipped,
     };
+  }
+}
+
+/**
+ * Task #1785 — Monats-Umwidmung (öffentlicher Einstieg): öffnet die Transaktion
+ * und den Kunden-Advisory-Lock und delegiert an `rebookCustomerMonthCore`. Für
+ * den Kürzungs-Ablauf (#1785 P4), der zusätzlich eine Rechnung storniert und neu
+ * ausstellt, wird stattdessen `rebookCustomerMonthCore` innerhalb dessen eigener
+ * Transaktion aufgerufen.
+ */
+export async function rebookCustomerMonth(params: RebookMonthParams): Promise<RebookMonthResult> {
+  return await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${params.customerId}::text))`
+    );
+    return await rebookCustomerMonthCore(tx, params);
   });
+}
+
+/**
+ * Task #1785 — Vorschau für die Monats-Umwidmung: aktueller Live-Verbrauch je
+ * Topf im Monat, mögliche Ziel-Töpfe (aktiviert + gültig zum Monatsende +
+ * Kapazität aus dem Unified-Reader) und ein Default-Ziel (erster berechtigter
+ * Topf nach §45b mit Kapazität). REINE Lese-Operation — keine Mutation.
+ */
+export async function getRebookMonthPreview(params: {
+  customerId: number;
+  year: number;
+  month: number;
+}): Promise<{
+  year: number;
+  month: number;
+  source: { totalAmountCents: number; appointmentCount: number; byPot: Array<{ budgetType: string; amountCents: number; count: number }> };
+  eligibleTargets: Array<{ budgetType: string; availableCents: number; eligible: boolean }>;
+  defaultTarget: string | null;
+}> {
+  const { customerId, year, month } = params;
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const monthEnd = lastDayOfMonth(year, month);
+
+  // Live-Verbrauch des Monats je Topf (stornierte/umgebuchte Zeilen raus).
+  const rows = await db.select({
+    id: budgetTransactions.id,
+    budgetType: budgetTransactions.budgetType,
+    amountCents: budgetTransactions.amountCents,
+    appointmentId: budgetTransactions.appointmentId,
+  })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.transactionType, "consumption"),
+      gte(budgetTransactions.transactionDate, monthStart),
+      lte(budgetTransactions.transactionDate, monthEnd),
+    ));
+  const reversals = await db.select({
+    reversedTransactionId: budgetTransactions.reversedTransactionId,
+    notes: budgetTransactions.notes,
+  })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.transactionType, "reversal"),
+    ));
+  const reversedIds = new Set<number>();
+  for (const r of reversals) {
+    if (r.reversedTransactionId != null) reversedIds.add(r.reversedTransactionId);
+    const m = r.notes?.match(/Transaktion #(\d+)/);
+    if (m) reversedIds.add(Number(m[1]));
+  }
+  const live = rows.filter(r => !reversedIds.has(r.id));
+
+  const byPotMap = new Map<string, { amountCents: number; count: number }>();
+  const apptSet = new Set<number>();
+  let totalAmountCents = 0;
+  for (const r of live) {
+    const abs = Math.abs(r.amountCents);
+    totalAmountCents += abs;
+    const cur = byPotMap.get(r.budgetType) ?? { amountCents: 0, count: 0 };
+    cur.amountCents += abs;
+    cur.count += 1;
+    byPotMap.set(r.budgetType, cur);
+    if (r.appointmentId != null) apptSet.add(r.appointmentId);
+  }
+  const byPot = Array.from(byPotMap.entries()).map(([budgetType, v]) => ({ budgetType, amountCents: v.amountCents, count: v.count }));
+
+  // Berechtigte Ziel-Töpfe: aktiviert + im Gültigkeitsfenster zum Monatsende,
+  // plus verfügbare Kapazität aus dem Unified-Reader (Projektions-aware).
+  const [cust] = await customersRepo
+    .selectColumnsFrom({ billingType: customers.billingType, pflegegrad: customers.pflegegrad }, db)
+    .where(eq(customers.id, customerId))
+    .limit(1);
+  const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: monthEnd });
+  const availability = await readUnifiedBudgetAvailability(customerId, monthEnd);
+
+  const eligibleTargets = BUDGET_TYPES.map((budgetType) => {
+    const setting = typeSettings.find(s => s.budgetType === budgetType);
+    let eligible = !!setting?.enabled;
+    if (eligible && setting) {
+      if (setting.validFrom && monthEnd < setting.validFrom) eligible = false;
+      if (setting.validTo && monthEnd > setting.validTo) eligible = false;
+    }
+    const availableCents = availability.pots[budgetType as CappedBudgetPot]?.availableCents ?? 0;
+    return { budgetType: budgetType as string, availableCents, eligible };
+  });
+
+  // Default-Ziel: in Default-Prioritätsreihenfolge der erste berechtigte Topf
+  // NACH §45b mit Kapazität; Fallback erster berechtigter Topf ≠ §45b.
+  const order = effectiveDefaultPots({ billingType: cust?.billingType, pflegegrad: cust?.pflegegrad })
+    .map(p => p.budgetType)
+    .filter(bt => bt !== "entlastungsbetrag_45b");
+  const eligibleByType = new Map(eligibleTargets.map(t => [t.budgetType, t]));
+  let defaultTarget: string | null = null;
+  for (const bt of order) {
+    const t = eligibleByType.get(bt);
+    if (t?.eligible && t.availableCents > 0) { defaultTarget = bt; break; }
+  }
+  if (!defaultTarget) {
+    for (const bt of order) {
+      const t = eligibleByType.get(bt);
+      if (t?.eligible) { defaultTarget = bt; break; }
+    }
+  }
+
+  return {
+    year,
+    month,
+    source: { totalAmountCents, appointmentCount: apptSet.size, byPot },
+    eligibleTargets,
+    defaultTarget,
+  };
 }
 
 export async function getRebookPreview(customerId: number): Promise<{
@@ -205,7 +511,7 @@ export async function getRebookPreview(customerId: number): Promise<{
   };
 }
 
-export async function rebookDisabledBudgetTransactions(customerId: number, userId: number): Promise<{
+export async function rebookDisabledBudgetTransactions(customerId: number, userId: number, isSuperAdmin: boolean): Promise<{
   reversedCount: number;
   rebookedCount: number;
   totalOldAmountCents: number;
@@ -216,6 +522,14 @@ export async function rebookDisabledBudgetTransactions(customerId: number, userI
   if (preview.transactions.length === 0) {
     return { reversedCount: 0, rebookedCount: 0, totalOldAmountCents: 0, totalNewAmountCents: 0, errors: [] };
   }
+
+  // Task #1785 — Schutzgitter fail-fast über ALLE betroffenen Termine, bevor
+  // die per-Termin-Transaktionsschleife irgendetwas mutiert (all-or-nothing
+  // Gate; einzelne Termine schlagen sonst erst mitten im Lauf fehl).
+  const affectedAppointmentIds = preview.transactions
+    .map((t) => t.appointmentId)
+    .filter((id): id is number => id != null);
+  await assertRebookAllowed(affectedAppointmentIds, { userId, isSuperAdmin });
 
   const byAppointment = new Map<number, typeof preview.transactions>();
   for (const tx of preview.transactions) {

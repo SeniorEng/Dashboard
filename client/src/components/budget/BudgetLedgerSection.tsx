@@ -16,7 +16,7 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
 import { formatKmQuantityDisplay } from "@shared/domain/invoice-line-items";
-import { formatDateForDisplay, parseLocalDate, todayISO } from "@shared/utils/datetime";
+import { currentYearAndMonth, formatDateForDisplay, parseLocalDate, todayISO } from "@shared/utils/datetime";
 import { SectionCard } from "@/components/patterns/section-card";
 import type { BudgetOverviewDTO } from "@shared/api/budget";
 
@@ -190,6 +190,11 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
 
   return (
     <div className="space-y-4">
+      {/* Task #1785 — Monats-Umwidmung: alle Verbrauchsbuchungen eines Monats
+          gebündelt in einen anderen Topf umbuchen (Storno + Neubuchung). */}
+      <div className="flex justify-end">
+        <RebookMonthDialog customerId={customerId} onDone={handleRefresh} />
+      </div>
       {enabledTypes.map(setting => {
         const budgetType = setting.budgetType;
         const label = BUDGET_TYPE_LABELS[budgetType] || budgetType;
@@ -833,6 +838,210 @@ function TransactionList({
         </DialogContent>
       </Dialog>
     </Card>
+  );
+}
+
+// Task #1785 — Vorschau-/Ergebnis-Shapes spiegeln den Server (rebook-storage.ts +
+// die Route ergänzt hasDrafts/draftCount). Bei Backend-Feldänderung fällt eine
+// Abweichung hier zur Compile-Zeit auf.
+interface RebookMonthPreview {
+  source: {
+    totalAmountCents: number;
+    appointmentCount: number;
+    byPot: { budgetType: string; amountCents: number; count: number }[];
+  };
+  eligibleTargets: { budgetType: string; availableCents: number; eligible: boolean }[];
+  defaultTarget: string | null;
+  hasDrafts: boolean;
+  draftCount: number;
+}
+
+interface RebookMonthResult {
+  rebookedCount: number;
+  skippedCount: number;
+  movedAmountCents: number;
+  affectedAppointmentIds: number[];
+  draftRegen: { discardedInvoiceNumbers: string[]; regenerated: boolean };
+}
+
+function RebookMonthDialog({ customerId, onDone }: { customerId: number; onDone: () => void }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+
+  // Default: Vormonat — der mit Abstand häufigste Umbuchungs-Zeitraum. Über den
+  // zentralen Datums-Helfer (kein rohes `new Date()`), damit der Monats-Rollover
+  // (Januar → Dezember Vorjahr) konventionskonform und zeitzonenstabil ist.
+  const defaultMonthStr = (() => {
+    const { year, month } = currentYearAndMonth();
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    return `${prevYear}-${String(prevMonth).padStart(2, "0")}`;
+  })();
+  const [monthStr, setMonthStr] = useState(defaultMonthStr);
+  const [targetBudgetType, setTargetBudgetType] = useState<string>("");
+
+  const parsed = /^(\d{4})-(\d{2})$/.exec(monthStr);
+  const year = parsed ? Number(parsed[1]) : null;
+  const month = parsed ? Number(parsed[2]) : null;
+  const validMonth = year !== null && month !== null && month >= 1 && month <= 12;
+
+  const { data: preview, isLoading: previewLoading } = useQuery<RebookMonthPreview>({
+    queryKey: ["rebook-month-preview", customerId, year, month],
+    queryFn: async () => unwrapResult(await api.get<RebookMonthPreview>(
+      `/budget/${customerId}/rebook-month-preview?year=${year}&month=${month}`
+    )),
+    enabled: open && validMonth,
+    staleTime: 0,
+  });
+
+  // Kein useEffect: solange der Admin nichts gewählt hat, gilt das Server-Default.
+  const effectiveTarget = targetBudgetType || preview?.defaultTarget || "";
+  const hasMovable = (preview?.source.appointmentCount ?? 0) > 0;
+  const chosenTarget = preview?.eligibleTargets.find(t => t.budgetType === effectiveTarget);
+  const targetInsufficient = chosenTarget != null && chosenTarget.eligible
+    && chosenTarget.availableCents < (preview?.source.totalAmountCents ?? 0);
+
+  const mutation = useMutation({
+    mutationFn: async () => unwrapResult(await api.post<RebookMonthResult>(
+      `/budget/${customerId}/rebook-month`,
+      { year, month, targetBudgetType: effectiveTarget }
+    )),
+    onSuccess: async (res) => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
+      const moved = res?.rebookedCount ?? 0;
+      const skipped = res?.skippedCount ?? 0;
+      const regen = res?.draftRegen?.discardedInvoiceNumbers?.length ?? 0;
+      toast({
+        title: "Monat umgebucht",
+        description: `${moved} Buchung(en) umgebucht`
+          + (skipped ? `, ${skipped} übersprungen` : "")
+          + (regen ? `; ${regen} Entwurfs-Rechnung(en) neu erzeugt` : ""),
+      });
+      setOpen(false);
+      setTargetBudgetType("");
+      onDone();
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler bei Monats-Umbuchung", description: error.message });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setTargetBudgetType(""); }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" data-testid="button-rebook-month">
+          <Calendar className={iconSize.sm} />
+          Monat umbuchen
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowRightLeft className="h-5 w-5" />
+            Ganzen Monat umbuchen
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-sm">Monat</Label>
+            <Input
+              type="month"
+              value={monthStr}
+              onChange={(e) => { setMonthStr(e.target.value); setTargetBudgetType(""); }}
+              className="mt-1"
+              data-testid="input-rebook-month"
+            />
+          </div>
+
+          {!validMonth ? (
+            <p className="text-sm text-amber-700">Bitte einen gültigen Monat wählen.</p>
+          ) : previewLoading ? (
+            <p className="text-sm text-gray-500" data-testid="text-rebook-preview-loading">Vorschau wird geladen…</p>
+          ) : !preview ? null : !hasMovable ? (
+            <p className="text-sm text-gray-500" data-testid="text-rebook-no-movable">
+              Keine umbuchbaren Verbrauchsbuchungen in diesem Monat.
+            </p>
+          ) : (
+            <>
+              <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-2" data-testid="box-rebook-source">
+                <p className="text-gray-500">Aktueller Verbrauch in diesem Monat:</p>
+                {preview.source.byPot.map(p => (
+                  <div key={p.budgetType} className="flex justify-between" data-testid={`row-rebook-source-${p.budgetType}`}>
+                    <span>{BUDGET_TYPE_LABELS[p.budgetType] || p.budgetType} ({p.count})</span>
+                    <span className="font-medium">{formatCurrency(p.amountCents)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t pt-1 font-medium">
+                  <span>Summe ({preview.source.appointmentCount} Termine)</span>
+                  <span data-testid="text-rebook-total">{formatCurrency(preview.source.totalAmountCents)}</span>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-sm">Ziel-Topf (alles zusammenführen in)</Label>
+                <Select value={effectiveTarget} onValueChange={setTargetBudgetType}>
+                  <SelectTrigger className="mt-1" data-testid="select-rebook-month-target">
+                    <SelectValue placeholder="Topf auswählen…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {preview.eligibleTargets.map(t => (
+                      <SelectItem
+                        key={t.budgetType}
+                        value={t.budgetType}
+                        disabled={!t.eligible}
+                        data-testid={`option-rebook-month-${t.budgetType}`}
+                      >
+                        {(BUDGET_TYPE_LABELS[t.budgetType] || t.budgetType)}
+                        {t.eligible ? ` — ${formatCurrency(t.availableCents)} frei` : " — nicht verfügbar"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {targetInsufficient && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3" data-testid="warn-rebook-insufficient">
+                  <p className="text-xs text-amber-800 flex items-start gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    Der Ziel-Topf hat möglicherweise nicht genug Budget für die gesamte Summe. Die Umbuchung wird bei Überschreitung serverseitig abgelehnt.
+                  </p>
+                </div>
+              )}
+
+              {preview.hasDrafts && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3" data-testid="warn-rebook-drafts">
+                  <p className="text-xs text-amber-800">
+                    Für diesen Monat existieren {preview.draftCount} Entwurfs-Rechnung(en). Diese werden verworfen und nach der Umbuchung automatisch neu erzeugt.
+                  </p>
+                </div>
+              )}
+
+              <div className="bg-gray-50 border rounded-lg p-3">
+                <p className="text-xs text-gray-600">
+                  Alle Verbrauchsbuchungen des Monats werden storniert und auf den gewählten Topf neu gebucht (GoBD-konform, nachvollziehbar).
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => { setOpen(false); setTargetBudgetType(""); }}>
+            Abbrechen
+          </Button>
+          <Button
+            size="sm"
+            disabled={!validMonth || !hasMovable || !effectiveTarget || mutation.isPending}
+            onClick={() => mutation.mutate()}
+            data-testid="btn-confirm-month-rebook"
+          >
+            <ArrowRightLeft className={`h-3.5 w-3.5 mr-1.5 ${mutation.isPending ? "animate-spin" : ""}`} />
+            {mutation.isPending ? "Wird umgebucht…" : "Monat umbuchen"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

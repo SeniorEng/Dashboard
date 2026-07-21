@@ -49,6 +49,7 @@ export const AUDIT_ACTIONS = [
   "employee_handover",
   "budget_rebook",
   "budget_rebook_single",
+  "budget_rebook_month",
   "invoice_sent",
   "customer_merged",
   "budget_carryover_cleanup_soft_deleted",

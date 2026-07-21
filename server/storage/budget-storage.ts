@@ -98,9 +98,12 @@ interface BudgetStorage {
     userId?: number;
   }, outerTx?: DbClient): Promise<BudgetTransaction>;
 
-  rebookSingleTransaction(customerId: number, transactionId: number, targetBudgetType: string, userId: number): Promise<{ reversalTransaction: BudgetTransaction; newTransaction: BudgetTransaction | null; amountCents: number }>;
+  rebookSingleTransaction(customerId: number, transactionId: number, targetBudgetType: string, userId: number, isSuperAdmin: boolean): Promise<{ reversalTransaction: BudgetTransaction; newTransaction: BudgetTransaction | null; amountCents: number }>;
   getRebookPreview(customerId: number): Promise<{ disabledTypes: string[]; affectedAppointments: number; totalAmountCents: number; transactions: Array<{ id: number; budgetType: string; amountCents: number; appointmentId: number | null; transactionDate: string }> }>;
-  rebookDisabledBudgetTransactions(customerId: number, userId: number): Promise<{ reversedCount: number; rebookedCount: number; totalOldAmountCents: number; totalNewAmountCents: number; errors: Array<{ appointmentId: number; error: string }> }>;
+  rebookDisabledBudgetTransactions(customerId: number, userId: number, isSuperAdmin: boolean): Promise<{ reversedCount: number; rebookedCount: number; totalOldAmountCents: number; totalNewAmountCents: number; errors: Array<{ appointmentId: number; error: string }> }>;
+  // Task #1785 — Monats-Umwidmung (Vorschau + Ausführung).
+  rebookCustomerMonth: typeof rebook.rebookCustomerMonth;
+  getRebookMonthPreview: typeof rebook.getRebookMonthPreview;
 
   // Task #875 — Hard-hold reservations (gated via BUDGET_HARD_HOLDS).
   hardHoldsEnabled: typeof reservation.hardHoldsEnabled;
@@ -159,6 +162,8 @@ export const budgetStorage: BudgetStorage = {
   rebookSingleTransaction: rebook.rebookSingleTransaction,
   getRebookPreview: rebook.getRebookPreview,
   rebookDisabledBudgetTransactions: rebook.rebookDisabledBudgetTransactions,
+  rebookCustomerMonth: rebook.rebookCustomerMonth,
+  getRebookMonthPreview: rebook.getRebookMonthPreview,
 
   hardHoldsEnabled: reservation.hardHoldsEnabled,
   planHold: reservation.planHold,

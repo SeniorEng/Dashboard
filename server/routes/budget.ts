@@ -24,6 +24,9 @@ import {
   validate45bInitialBalanceNotPriorYear,
 } from "@shared/domain/budget/carryover-eligibility";
 import { applyInitialBudget, BudgetInitialSetupError } from "../services/budget-initial-setup";
+import { discardAndRegenerateDrafts } from "../services/draft-invoice-regen";
+import { getBlockingDraftInvoices } from "../services/invoice-data";
+import { readTestFaults } from "../lib/test-fault-injector";
 import type { BudgetOverviewDTO } from "@shared/api/budget";
 
 /**
@@ -1209,7 +1212,7 @@ router.post("/:customerId/rebook-transaction", requireAdmin, asyncHandler("Einze
   const { transactionId, targetBudgetType } = result.data;
   const userId = req.user!.id;
 
-  const rebookResult = await budgetStorage.rebookSingleTransaction(customerId, transactionId, targetBudgetType, userId);
+  const rebookResult = await budgetStorage.rebookSingleTransaction(customerId, transactionId, targetBudgetType, userId, req.user!.isSuperAdmin === true);
 
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   await auditService.log(userId, "budget_rebook_single", "budget", customerId, {
@@ -1236,7 +1239,7 @@ router.post("/:customerId/rebook", requireAdmin, asyncHandler("Umbuchung konnte 
   if (customerId === null) return;
 
   const userId = req.user!.id;
-  const result = await budgetStorage.rebookDisabledBudgetTransactions(customerId, userId);
+  const result = await budgetStorage.rebookDisabledBudgetTransactions(customerId, userId, req.user!.isSuperAdmin === true);
 
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   await auditService.log(userId, "budget_rebook", "budget", customerId, {
@@ -1248,6 +1251,82 @@ router.post("/:customerId/rebook", requireAdmin, asyncHandler("Umbuchung konnte 
   }, ip);
 
   res.json(result);
+}));
+
+// Task #1785 — Monats-Umwidmung: Vorschau (aktueller Verbrauch je Topf, mögliche
+// Ziel-Töpfe inkl. Kapazität, Default-Ziel, ob Entwurfs-Rechnungen betroffen sind).
+router.get("/:customerId/rebook-month-preview", requireAdmin, asyncHandler("Monats-Umbuchungs-Vorschau konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+
+  const year = parseInt(String(req.query.year ?? ""), 10);
+  const month = parseInt(String(req.query.month ?? ""), 10);
+  if (!Number.isFinite(year) || year < 2000 || year > 2100 || !Number.isFinite(month) || month < 1 || month > 12) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Parameter — year und month (1-12) sind erforderlich." });
+    return;
+  }
+
+  const preview = await budgetStorage.getRebookMonthPreview({ customerId, year, month });
+  // Betroffene Entwurfs-Rechnungen des Monats mitliefern, damit das UI vorwarnen
+  // kann, dass die Rechnung(en) nach der Umbuchung neu erzeugt werden.
+  const drafts = await getBlockingDraftInvoices(customerId, year, month);
+  res.json({ ...preview, hasDrafts: drafts.length > 0, draftCount: drafts.length });
+}));
+
+const rebookMonthSchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+  targetBudgetType: z.enum(BUDGET_TYPES),
+});
+
+// Task #1785 — Monats-Umwidmung ausführen: Guard + Storno/Neubuchung aller
+// Verbrauchsbuchungen des Monats in EINER Transaktion (all-or-nothing), danach —
+// außerhalb der Tx — verwaiste Entwurfs-Rechnungen verwerfen + neu erzeugen.
+router.post("/:customerId/rebook-month", requireAdmin, asyncHandler("Monats-Umbuchung konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+
+  const parsed = rebookMonthSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: parsed.error.issues });
+    return;
+  }
+
+  const { year, month, targetBudgetType } = parsed.data;
+  const userId = req.user!.id;
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+
+  // (1) Umbuchung (Schutzgitter + append-only Storno/Neubuchung, all-or-nothing).
+  const result = await budgetStorage.rebookCustomerMonth({
+    customerId, year, month, targetBudgetType,
+    userId, isSuperAdmin: req.user!.isSuperAdmin === true,
+  });
+
+  await auditService.log(userId, "budget_rebook_month", "budget", customerId, {
+    year, month, targetBudgetType,
+    rebookedCount: result.rebookedCount,
+    skippedCount: result.skippedCount,
+    movedAmountCents: result.movedAmountCents,
+    affectedAppointmentIds: result.affectedAppointmentIds,
+  }, ip);
+
+  // (2) Verwaiste Entwurfs-Rechnungen des Monats verwerfen + aus den umgebuchten
+  // Live-Zeilen neu erzeugen (nach Commit, außerhalb jeder DB-Transaktion).
+  let draftRegen: { discardedInvoiceNumbers: string[]; regenerated: boolean } = {
+    discardedInvoiceNumbers: [], regenerated: false,
+  };
+  if (result.rebookedCount > 0) {
+    const regen = await discardAndRegenerateDrafts({
+      customerId, year, month, userId, ipAddress: req.ip,
+      reason: "rebook_month", testFaults: readTestFaults(req),
+    });
+    draftRegen = {
+      discardedInvoiceNumbers: regen.discardedInvoiceNumbers,
+      regenerated: regen.regenerated !== null,
+    };
+  }
+
+  res.json({ ...result, draftRegen });
 }));
 
 router.post("/admin/repair-orphaned-transactions", requireAdmin, asyncHandler("Budget-Reparatur fehlgeschlagen", async (req: Request, res: Response) => {
