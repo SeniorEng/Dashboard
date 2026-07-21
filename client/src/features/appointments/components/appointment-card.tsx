@@ -169,11 +169,11 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQue
                 <span
                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-700 text-[10px] font-bold uppercase tracking-wide shrink-0"
                   data-testid={`pill-co-visit-${appointment.id}`}
-                  title="Zwei-Kräfte-Einsatz: Dieser Termin wird gemeinsam mit einem zweiten Mitarbeiter durchgeführt"
+                  title="Zwei-Kräfte-Einsatz: Dieser Termin wird gemeinsam mit einer zweiten Kraft durchgeführt. Der genannte Name ist die andere Kraft (Partner)."
                 >
                   <Users className="w-3 h-3" />
                   {appointment.coVisitPartnerName
-                    ? `Zwei Kräfte: ${appointment.coVisitPartnerName}`
+                    ? `Zwei Kräfte · Partner: ${appointment.coVisitPartnerName}`
                     : "Zwei Kräfte"}
                 </span>
               )}
@@ -210,10 +210,18 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQue
                 </span>
               </div>
             )}
-            {!isSubstitute && user?.isAdmin && appointment.assignedEmployeeName && (
+            {!isSubstitute && (user?.isAdmin || user?.isTeamLead) && appointment.assignedEmployeeName && (
               <div className="flex items-center text-xs text-muted-foreground mt-0.5" data-testid={`text-employee-${appointment.id}`}>
                 <User className="w-3 h-3 mr-1 shrink-0" />
                 <span className="truncate">{appointment.assignedEmployeeName}</span>
+                {appointment.assignedEmployeeId === user?.id && (
+                  <span
+                    className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wide shrink-0"
+                    data-testid={`pill-own-leg-${appointment.id}`}
+                  >
+                    Ihr Einsatz
+                  </span>
+                )}
               </div>
             )}
             {!serviceInfo.hasErstberatung && serviceInfo.label !== "Kundentermin" && (

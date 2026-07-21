@@ -257,6 +257,42 @@ export default function AppointmentDetail() {
           isErstberatung={isErstberatung}
           canConvert={!!canConvert}
         />
+
+        {(user?.isAdmin || user?.isTeamLead) && appointment.assignedEmployeeName && (
+          <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground" data-testid="text-assigned-employee">
+            <Users className={`${iconSize.sm} text-primary shrink-0`} />
+            <span>
+              Zugewiesen: <span className="font-medium text-foreground">{appointment.assignedEmployeeName}</span>
+            </span>
+            {appointment.assignedEmployeeId === user?.id && (
+              <span
+                className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wide"
+                data-testid="pill-own-leg-detail"
+              >
+                Ihr Einsatz
+              </span>
+            )}
+          </div>
+        )}
+
+        {appointment.coVisitGroupId && appointment.coVisitPartnerName && (
+          <div className="mt-2 p-3 bg-teal-50 border border-teal-200 rounded-lg" data-testid="banner-co-visit">
+            <div className="flex items-start gap-2">
+              <Users className={`${iconSize.sm} text-teal-600 shrink-0 mt-0.5`} />
+              <p className="text-sm text-teal-800">
+                Zwei-Kräfte-Einsatz. Die zweite Kraft (Partner) ist{" "}
+                <span className="font-medium">{appointment.coVisitPartnerName}</span>.
+                {(user?.isAdmin || user?.isTeamLead)
+                  && appointment.assignedEmployeeId !== user?.id
+                  && !canDocument && (
+                  <>
+                    {" "}Dies ist nicht Ihr Einsatz — Ihr eigenes Bein trägt Ihren Namen unter „Zugewiesen".
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {seriesId && seriesDetail && (
