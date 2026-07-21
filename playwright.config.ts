@@ -1,5 +1,7 @@
 import { defineConfig } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 // In Replit liegt Chromium im Nix-Store; in CI (GitHub Actions) wird es per
 // `npx playwright install --with-deps chromium` an Playwrights Standardpfad
@@ -12,6 +14,44 @@ const NIX_CHROMIUM =
 const chromiumExecutablePath =
   process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
   (existsSync(NIX_CHROMIUM) ? NIX_CHROMIUM : undefined);
+
+// Task #1818: Video-Aufnahme braucht Playwrights EIGENE gebündelte ffmpeg-Binary
+// (nicht die System-ffmpeg). Fehlt sie (Agent-/Validation-Umgebung ohne
+// `npx playwright install ffmpeg`), wirft `context.newPage()` bei aktivem Video
+// hart — das ließ `e2e-smoke` reproduzierbar schon vor dem ersten Test rotbrechen.
+// Wir prüfen daher, ob die gebündelte ffmpeg vorhanden ist, und schalten die
+// Video-Aufnahme sonst sauber ab (statt zu crashen). In Replit/CI mit installierter
+// ffmpeg bleibt „retain-on-failure" aktiv. Override: `PLAYWRIGHT_FORCE_VIDEO=off|on`.
+function hasPlaywrightFfmpeg(): boolean {
+  const base =
+    process.env.PLAYWRIGHT_BROWSERS_PATH?.trim() ||
+    path.join(os.homedir(), ".cache", "ms-playwright");
+  try {
+    return readdirSync(base).some((entry) => {
+      if (!entry.startsWith("ffmpeg-")) return false;
+      try {
+        return readdirSync(path.join(base, entry)).some((f) =>
+          f.startsWith("ffmpeg"),
+        );
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+const forceVideo = process.env.PLAYWRIGHT_FORCE_VIDEO?.trim().toLowerCase();
+const videoEnabled =
+  forceVideo === "on" ? true : forceVideo === "off" ? false : hasPlaywrightFfmpeg();
+if (!videoEnabled) {
+  console.warn(
+    "[playwright] Video-Aufnahme deaktiviert — Playwrights gebündelte ffmpeg-Binary " +
+      "ist nicht installiert. Einmalig `npx playwright install ffmpeg` ausführen, " +
+      "um Fehler-Videos wieder zu aktivieren (oder PLAYWRIGHT_FORCE_VIDEO=on erzwingen).",
+  );
+}
 
 export default defineConfig({
   testDir: "./e2e",
@@ -47,7 +87,7 @@ export default defineConfig({
     // damit jeder Flake-Retry diagnostizierbar ist.
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    video: videoEnabled ? "retain-on-failure" : "off",
   },
   projects: [
     {

@@ -155,4 +155,14 @@ export const WORKER_SLOT_LOCK_BASE = advisoryLockKey("cc_test_worker_slot");
 // Konservativer, dokumentierter Default für das gemeinsame Worker-Budget über
 // ALLE gleichzeitig laufenden Orchestrator-Läufe hinweg. Override via
 // `EPHEMERAL_GLOBAL_WORKER_BUDGET`; `0` deaktiviert das Gate (volle Worker-Zahl).
-export const DEFAULT_GLOBAL_WORKER_BUDGET = 4;
+//
+// Task #1818: Von 4 → 2 gesenkt. Bei 4 konnten `test` (Default 2 Worker) und
+// `e2e-smoke` (1 Worker) GLEICHZEITIG jeweils ihre volle Worker-Zahl belegen —
+// in Summe 3 App-Server + Vite-Client-Build + Chromium-Browser gleichzeitig,
+// was im Agent-/Validation-Harness den Memory-Watchdog-/Overload-Restart-Loop
+// auslöste. Mit Budget 2 bekommt ein ALLEIN laufender `test` weiterhin seine
+// vollen 2 Worker (voller Parallel-Win), aber sobald ein zweiter Lauf parallel
+// dazukommt, teilen sie sich das Budget (je min. 1 Worker, garantiert in
+// acquireWorkerSlots) → die addierte Spitzenlast bleibt gedeckelt. Wer bewusst
+// mehr Parallelität will, setzt `EPHEMERAL_GLOBAL_WORKER_BUDGET` höher.
+export const DEFAULT_GLOBAL_WORKER_BUDGET = 2;

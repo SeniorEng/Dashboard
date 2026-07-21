@@ -73,6 +73,28 @@ Boot-Disziplin und das Emergency-Restart-Playbook stehen in `replit.md`
 ### L7 — Dieser Präventionsplan
 Diese Datei ist die zentrale Referenz für Ursache, Schutzschichten und Betrieb.
 
+### L8 — Footprint der Checks gedeckelt (Task #1818)
+Damit `test` und `e2e-smoke` — die der Agent-/Validation-Harness teils
+gleichzeitig fährt — koexistieren können, ohne den Overload-/Restart-Loop
+auszulösen, ist das **gemeinsame Worker-Budget** über alle parallelen
+Orchestrator-Läufe hinweg von 4 auf **2** gesenkt
+(`DEFAULT_GLOBAL_WORKER_BUDGET` in `scripts/lib/template-cache.ts`, Override
+`EPHEMERAL_GLOBAL_WORKER_BUDGET`). Ein allein laufender `test` behält seine
+vollen 2 Worker; läuft `e2e-smoke` parallel, teilen sich beide das Budget (je
+min. 1 Worker) statt in Summe 3+ App-Server + Vite-Build + Chromium hochzufahren.
+Zusätzlich schaltet `playwright.config.ts` die **Video-Aufnahme** sauber ab, wenn
+Playwrights gebündelte ffmpeg-Binary fehlt (sonst crashte `e2e-smoke` schon bei
+`newPage`), und `script/coverage-gate.ts` (`billing-cov`) **skippt sauber** statt
+rot zu werden, wenn kein Object Storage konfiguriert ist.
+
+> **Verbleibende Plattform-Grenze (bewusst außerhalb des Scopes):** Welche
+> Workflows der Agent-/Validation-Harness bzw. der Legacy-`Project`-Boot
+> *gleichzeitig* startet, entscheidet die Replit-Plattform — das lässt sich
+> agent-seitig nicht steuern. Das Worker-Budget deckelt nur die *addierte* Last,
+> wenn mehrere Läufe koexistieren; es verhindert nicht, dass die Plattform sie
+> überhaupt parallel startet. Für einen geordneten Komplettlauf weiterhin
+> `Full QA Check` (sequentiell) nutzen und `Project` nicht anfassen.
+
 ## Emergency-Restart-Playbook
 
 Wenn der Workspace hängt / Preview tot ist / `spawn EAGAIN` auftritt:

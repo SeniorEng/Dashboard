@@ -123,8 +123,12 @@ Schutz (alles fail-safe, blockiert Tests nie):
   Abschaltbar via `EPHEMERAL_PID_PREFLIGHT=0`.
 - **Worker-Slot-Gate**: Mehrere gleichzeitige Orchestrator-Läufe (Auto-Run +
   Validation) teilen sich ein gemeinsames Worker-Budget per Postgres-Advisory-Lock
-  (`EPHEMERAL_GLOBAL_WORKER_BUDGET`, Default 4; `0` deaktiviert), damit ihre
-  Worker-Server-/Chromium-Bäume in Summe das PID-Limit nicht sprengen.
+  (`EPHEMERAL_GLOBAL_WORKER_BUDGET`, Default 2; `0` deaktiviert), damit ihre
+  Worker-Server-/Chromium-Bäume in Summe weder das PID-Limit sprengen noch den
+  Memory-Watchdog-/Overload-Restart-Loop auslösen. Ein allein laufender `test`
+  bekommt seine vollen 2 Worker; kommt ein zweiter Lauf (`e2e-smoke`) parallel
+  dazu, teilen sie sich das Budget (je min. 1 Worker) statt in Summe 3+ App-Server
+  gleichzeitig hochzufahren.
 
 Die reine Entscheidungslogik (`selectOrphanProcesses`, `evaluatePidPreflight`,
 `parsePsOutput`, `classifyTestProcess`) ist in
