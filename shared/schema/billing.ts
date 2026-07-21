@@ -5,13 +5,20 @@ import { customers } from "./customers";
 import { users } from "./users";
 import { appointments } from "./appointments";
 
-export const INVOICE_STATUSES = ["entwurf", "versendet", "avis_erhalten", "bezahlt", "storniert"] as const;
+// Task #1822 — "teilweise_bezahlt" (Teilzahlung): eine Rechnung, auf die schon
+// Geld eingegangen ist, aber weniger als die Brutto-Forderung (über der
+// Zahlungs-Toleranz). Liegt im Lebenszyklus zwischen "avis_erhalten" und
+// "bezahlt". Der Status ist ABGELEITET (Zahlungsabgleich), nie manuell setzbar —
+// er wird ausschließlich über die geguardeten Schreibpfade des Qonto-Abgleichs
+// vergeben (siehe shared/domain/qonto/invoice-payment-status.ts).
+export const INVOICE_STATUSES = ["entwurf", "versendet", "avis_erhalten", "teilweise_bezahlt", "bezahlt", "storniert"] as const;
 export type InvoiceStatus = typeof INVOICE_STATUSES[number];
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   entwurf: "Entwurf",
   versendet: "Versendet",
   avis_erhalten: "Avis erhalten",
+  teilweise_bezahlt: "Teilweise bezahlt",
   bezahlt: "Bezahlt",
   storniert: "Storniert",
 };

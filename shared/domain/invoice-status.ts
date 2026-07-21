@@ -17,11 +17,21 @@
  * wird `sentAt` wieder geleert (siehe `updateInvoiceStatusTx`). Bewusst NUR von
  * "versendet" aus — aus "avis_erhalten"/"bezahlt"/"storniert" gibt es kein
  * Zurück (diese Status implizieren bereits eingetretene Folgewirkungen).
+ *
+ * Task #1822: "teilweise_bezahlt" (Teilzahlung) ist ein ABGELEITETER Status —
+ * er wird NUR durch den Zahlungsabgleich vergeben (versendet/avis_erhalten →
+ * teilweise_bezahlt), niemals manuell über den Status-Endpoint. Diese Map steuert
+ * ausschließlich den MANUELLEN Statuswechsel; die Zahlungs-Schreibpfade setzen
+ * den Status über eigene geguardete Direkt-Updates (nicht über diese Map).
+ * Deshalb ist "teilweise_bezahlt" hier NUR als Ausgangs-Status (`from`)
+ * hinterlegt (manuell darf ein Sachbearbeiter eine teilbezahlte Rechnung noch
+ * auf "bezahlt" akzeptieren oder stornieren), aber NICHT als manuelles Ziel.
  */
 export const INVOICE_STATUS_TRANSITIONS: Record<string, string[]> = {
   entwurf: ["versendet", "storniert"],
   versendet: ["entwurf", "avis_erhalten", "bezahlt", "storniert"],
   avis_erhalten: ["bezahlt", "storniert"],
+  teilweise_bezahlt: ["bezahlt", "storniert"],
   bezahlt: ["storniert"],
   storniert: [],
 };
