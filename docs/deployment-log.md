@@ -17,6 +17,24 @@ Archiv-Link unten aktuell halten. So wächst diese Datei nicht unbegrenzt.
 
 Archiv: [`archive/deployment-log-2026H1.md`](archive/deployment-log-2026H1.md) (Einträge bis 2026-06).
 
+## Batch-Publish-Policy (Kosten-Disziplin)
+
+Publishes werden **gebündelt**, NICHT nach jedem einzelnen Merge. Jeder Publish
+trägt hohe Fixkosten (Deploy-Build, Image-Pack, Prod-Hochlauf, Verifikation), und
+~41 Publishes in 3 Wochen (nahezu einer pro Merge) waren einer der größten
+Kostentreiber. Regel:
+
+- **Bündeln**: einmal pro Feature-Cluster ODER einmal pro Tag — mehrere gemergte
+  Tasks sammeln und in EINEM Publish live bringen.
+- **Kein Auto-Deploy-Vorschlag pro Merge**: Der Agent schlägt NICHT nach jedem
+  einzelnen Merge ein Deployment vor; nur wenn ein Cluster fertig ist, etwas
+  zeitkritisch/produktionsblockierend ist, oder der Nutzer es ausdrücklich will.
+- **Vor dem Publish** weiterhin die stehenden Sicherheits-Schritte (Pre-Publish-
+  Backup, Replica-Diff, additiv bleiben) — siehe `docs/pre-publish-backup-runbook.md`.
+
+Diese Policy ist die Deployment-seitige Ausprägung der „Kosten-Disziplin"-Konvention
+in `replit.md` (Guards in die Eltern-Aufgabe einfalten, Publishes bündeln).
+
 ---
 
 ### 2026-06-25 (b) — Re-Publish §45b-Anzeige/Konsolidierung (Task #1422) — Publish erledigt & LIVE verifiziert (Task #1423)
