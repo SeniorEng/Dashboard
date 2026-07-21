@@ -10,7 +10,13 @@
  *  (b) ±2 ct Rundung trifft weiterhin.
  *  (c) Zwei betragsgleiche offene Avise ⇒ skip (manuelle Prüfung).
  *  (d) Diskriminator (Empfänger-IBAN) löst den mehrdeutigen Fall auf genau eines auf.
- *  (e) Zahlung mit Rechnungsnummer UND Sammel-Betrag ⇒ Einzelrechnungs-Match gewinnt.
+ *  (e) Zahlung mit Rechnungsnummer UND passendem Sammel-Betrag ⇒ Sammel-Avis-Abgleich
+ *      gewinnt (Task #1788): der ganze Stapel wird bezahlt statt Einzel-Bind+Flag.
+ *  (e2) Zahlung mit Rechnungsnummer, Betrag passt zu KEINEM Avis ⇒ Einzel-Bind+Flag
+ *      bleibt (kein Regress).
+ *  (e3) Zahlung nennt eine Rechnung, die in KEINEM Avis liegt, ihr Betrag ginge aber
+ *      bei einem FREMD-Avis triple-equal auf ⇒ der Fremd-Avis gewinnt NICHT; die
+ *      genannte Rechnung wird gebunden + geflaggt (Task #1788 Enthaltensein-Gate).
  *  (f) Storno einer Mitglieds-Rechnung ⇒ Triple-Equality bricht ⇒ manuell.
  *  (g) Eine Mitglieds-Rechnung bereits einzeln bezahlt (Σ offen < Gesamt) ⇒ manuell,
  *      kein doppeltes `bezahlt` (K2).
@@ -387,7 +393,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
     expect(await countAdviceAudit("advice_payment_reconciled", aB.adviceId)).toBe(0);
   });
 
-  it("(e) Zahlung mit Rechnungsnummer UND Sammel-Betrag ⇒ Einzelrechnungs-Match gewinnt", async () => {
+  it("(e) Zahlung mit Rechnungsnummer UND passendem Sammel-Betrag ⇒ Sammel-Avis-Abgleich gewinnt (Task #1788)", async () => {
     const numA = nextInvoiceNumber();
     const numB = nextInvoiceNumber();
     const invA = await insertInvoice({ amountCents: 50500, invoiceNumber: numA });
@@ -398,23 +404,74 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
       totalCents: 90500, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "e",
     });
 
-    // Zahlung trägt Gesamtbetrag, aber im Verwendungszweck eine Einzel-Rechnungsnummer.
+    // Zahlung trägt den Sammel-Gesamtbetrag, im Verwendungszweck aber nur EINE
+    // Einzel-Rechnungsnummer (invA). Der Betrag deckt invA nicht voll (90500 ≠
+    // 50500), aber der Sammel-Avis geht triple-equal auf ⇒ Avis-Abgleich gewinnt.
     const txId = await insertQontoTx({ amountCents: 90500, reference: `Zahlung ${numA}` });
     await autoMatch();
 
     const tx = await getTxMatch(txId);
-    // Einzelrechnungs-Match (Nummer) gewinnt ⇒ an die Rechnung gebunden, NICHT ans Avis.
+    // Sammel-Avis-Abgleich gewinnt ⇒ an das Avis gebunden, NICHT an die Einzelrechnung.
+    expect(tx.matchedPaymentAdviceId).toBe(adviceId);
+    expect(tx.matchedInvoiceId).toBeNull();
+    expect(tx.matchConfidence).toBe("auto_bulk_advice");
+    // Der ganze Stapel wird bezahlt — kein Bind+Flag mehr.
+    expect(await getInvoiceStatus(invA)).toBe("bezahlt");
+    expect(await getInvoiceStatus(invB)).toBe("bezahlt");
+    expect(await countInvoiceAudit("invoice_payment_mismatch", invA)).toBe(0);
+    expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(1);
+  });
+
+  it("(e2) Zahlung mit Rechnungsnummer, Betrag passt zu KEINEM Avis ⇒ Einzel-Bind+Flag bleibt (kein Regress)", async () => {
+    const numA = nextInvoiceNumber();
+    const invA = await insertInvoice({ amountCents: 51500, invoiceNumber: numA });
+
+    // KEIN Sammel-Avis für diese Rechnung. Die Zahlung trifft invA per Nummer,
+    // weicht aber > Toleranz vom Brutto ab (88888 ≠ 51500) und geht bei keinem
+    // Avis triple-equal auf ⇒ die Disambiguierung greift nicht, es bleibt beim
+    // bisherigen Einzel-Bind+Flag.
+    const txId = await insertQontoTx({ amountCents: 88888, reference: `Zahlung ${numA}` });
+    await autoMatch();
+
+    const tx = await getTxMatch(txId);
     expect(tx.matchedInvoiceId).toBe(invA);
     expect(tx.matchedPaymentAdviceId).toBeNull();
-    // Bekannter Bind+Flag-Fall: Der Zahlungsbetrag (90500 = Sammel-Betrag des
-    // Avis) weicht > Toleranz vom Brutto der einzeln getroffenen Rechnung invA
-    // (50500) ab. invA wird daher NICHT still auf „bezahlt" gesetzt, sondern nur
-    // gebunden und pro Rechnung zur manuellen Prüfung markiert
-    // (invoice_payment_mismatch). invB bleibt als Avis-Mitglied unangetastet.
-    expect(await getInvoiceStatus(invA)).toBe("avis_erhalten");
-    expect(await getInvoiceStatus(invB)).toBe("avis_erhalten");
+    // invA war nie einem Avis zugeordnet ⇒ bleibt „versendet", nur gebunden + geflaggt.
+    expect(await getInvoiceStatus(invA)).toBe("versendet");
     expect(await countInvoiceAudit("invoice_payment_mismatch", invA)).toBe(1);
-    expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(0);
+  });
+
+  it("(e3) Rechnung in KEINEM Avis, aber Betrag = Fremd-Avis-Gesamt ⇒ Fremd-Avis gewinnt NICHT (Enthaltensein-Gate)", async () => {
+    const numX = nextInvoiceNumber();
+    const numY = nextInvoiceNumber();
+    const numZ = nextInvoiceNumber();
+    // invX wird von KEINEM Avis referenziert.
+    const invX = await insertInvoice({ amountCents: 40000, invoiceNumber: numX });
+    // Fremd-Avis über zwei ANDERE Rechnungen; sein Gesamtbetrag entspricht exakt
+    // der Zahlung und ginge triple-equal auf — enthält invX aber nicht.
+    const invY = await insertInvoice({ amountCents: 30000, invoiceNumber: numY });
+    const invZ = await insertInvoice({ amountCents: 33700, invoiceNumber: numZ });
+    const { adviceId: foreignAdviceId } = await createAdvice({
+      items: [{ num: numY, cents: 30000 }, { num: numZ, cents: 33700 }],
+      totalCents: 63700, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "e3",
+    });
+
+    // Zahlung nennt invX, deckt sie aber nicht voll (63700 ≠ 40000). Der Betrag
+    // ginge beim Fremd-Avis triple-equal auf — dieser enthält invX jedoch nicht,
+    // also darf er NICHT gewinnen; sonst bliebe invX fälschlich offen.
+    const txId = await insertQontoTx({ amountCents: 63700, reference: `Zahlung ${numX}` });
+    await autoMatch();
+
+    const tx = await getTxMatch(txId);
+    // Enthaltensein-Gate ⇒ genannte Einzelrechnung gebunden + geflaggt, kein Fremd-Avis.
+    expect(tx.matchedInvoiceId).toBe(invX);
+    expect(tx.matchedPaymentAdviceId).toBeNull();
+    expect(await getInvoiceStatus(invX)).toBe("versendet");
+    expect(await countInvoiceAudit("invoice_payment_mismatch", invX)).toBe(1);
+    // Der Fremd-Avis bleibt unangetastet.
+    expect(await getInvoiceStatus(invY)).toBe("avis_erhalten");
+    expect(await getInvoiceStatus(invZ)).toBe("avis_erhalten");
+    expect(await countAdviceAudit("advice_payment_reconciled", foreignAdviceId)).toBe(0);
   });
 
   it("(f) Storno einer Mitglieds-Rechnung ⇒ Triple-Equality bricht ⇒ manuell", async () => {

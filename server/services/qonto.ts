@@ -385,6 +385,40 @@ class QontoService {
         }
       }
 
+      // Task #1788 — Disambiguierung Einzelrechnung vs. Sammel-Avis: Eine
+      // Sammelzahlung kann im Verwendungszweck EINE Rechnungsnummer tragen,
+      // obwohl sie einen ganzen Sammel-Avis begleicht. Trifft die Einzelrechnung
+      // zwar (per Nummer), deckt der Betrag sie aber NICHT voll (Sammelbetrag ≠
+      // Einzelbrutto), und es gibt einen Sammel-Avis, dessen Triple-Equality
+      // exakt aufgeht ⇒ hat der Avis-Abgleich Vorrang: der ganze Stapel wird
+      // „bezahlt", statt die Einzelrechnung nur zu binden und zu flaggen. Reicht
+      // KEIN Avis heran, bleibt es beim bisherigen Einzel-Bind+Flag (kein Regress).
+      if (bestMatch && openAdvices.length > 0) {
+        const matchedInvoiceId = bestMatch.invoiceId;
+        const singleInvoiceCovered = isPaymentFullyCovered(
+          classifyPaymentDifference({
+            invoiceGrossCents: bestMatch.invoiceGrossCents,
+            paidCents: Math.abs(qtx.amountCents),
+          }),
+        );
+        if (!singleInvoiceCovered) {
+          // Nur Avise, welche die getroffene Einzelrechnung tatsächlich ENTHALTEN,
+          // sind Kandidaten: die Zahlung soll GENAU den Sammel-Avis begleichen, zu
+          // dem die genannte Rechnung gehört — nicht irgendeinen betragsgleichen
+          // Fremd-Avis (der die genannte Rechnung fälschlich offen ließe).
+          const memberAdvices = openAdvices.filter(a => a.openInvoiceIds.includes(matchedInvoiceId));
+          if (memberAdvices.length > 0) {
+            const didBulk = await this.tryBulkAdviceMatch(qtx, memberAdvices, userId, ipAddress);
+            if (didBulk) {
+              matched++;
+              openAdvices = openAdvices.filter(a => a.id !== didBulk.adviceId);
+              continue;
+            }
+          }
+          // Kein passender Avis geht triple-equal auf ⇒ Einzel-Bind+Flag unten.
+        }
+      }
+
       // Task #1672 — Bulk-Avis-Strategie NACH den Einzelrechnungs-Strategien:
       // nur versuchen, wenn keine Rechnungsnummer/Betrag-Einzelrechnung traf.
       if (!bestMatch && openAdvices.length > 0) {
@@ -470,10 +504,11 @@ class QontoService {
         } else {
           // Über-Toleranz-Abweichung: Transaktion bleibt an die Rechnung
           // gebunden, aber die Rechnung wird NICHT still auf „bezahlt" gesetzt,
-          // sondern nur zur manuellen Prüfung markiert. Bekannter Fall: eine
-          // Sammelzahlung trägt im Verwendungszweck EINE Einzel-Rechnungsnummer
-          // (Einzel-Match gewinnt), obwohl der Betrag dem Avis-Gesamtbetrag über
-          // mehrere Rechnungen entspricht — Freigabe erfolgt nach Prüfung per
+          // sondern nur zur manuellen Prüfung markiert. Seit Task #1788 wird der
+          // Sonderfall „Sammelzahlung nennt EINE Rechnungsnummer, begleicht aber
+          // einen ganzen Sammel-Avis" bereits oben abgefangen (Avis-Abgleich hat
+          // Vorrang); hier landen nur noch echte Abweichungen (Kürzung/Über-/
+          // Unterzahlung ohne passenden Avis) — Freigabe nach Prüfung per
           // confirm-paid (oder Unmatch + korrekte Avis-Zuordnung).
           audit.record({
             userId,

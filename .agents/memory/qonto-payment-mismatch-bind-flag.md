@@ -39,7 +39,24 @@ over-tolerance ⇒ bind + flag, never `bezahlt`. Tests that assert an invoice
 goes `bezahlt` on a mismatched payment are encoding the OLD bug — update them to
 assert bind+flag + `confirm-paid`, don't "fix" the gate.
 
-**Known open item (follow-up, not a bug):** a Sammelzahlung whose reference
-names ONE invoice number but whose amount equals the multi-invoice Avis total
-stays flagged (single-invoice match wins over advice reconciliation). The
-"advice-match wins when it reconciles" disambiguation is deferred.
+**Sammel-Avis wins over single-invoice bind+flag (disambiguation):** when a
+payment names ONE invoice number but its amount does NOT fully cover that single
+invoice, `autoMatch` first tries a bulk-advice reconciliation BEFORE falling back
+to single-invoice bind+flag. Two guards keep it honest:
+- **Containment gate:** only advices whose `openInvoiceIds` actually INCLUDE the
+  matched single invoice are candidates. A foreign advice that merely happens to
+  total the payment amount must NOT win — otherwise the named invoice would be
+  left falsely open. (Capture `bestMatch.invoiceId` into a const first; passing
+  `bestMatch.invoiceId` inside the `.filter` closure trips TS narrowing.)
+- **Triple-equality:** the candidate advice still binds only on payment = advice
+  total = Σ open invoices (±2 ct). If none reconciles, it stays the old
+  single-invoice bind+flag (no regression).
+
+**Why:** a Sammelzahlung referencing one member invoice number should settle the
+whole Avis, not just flag one invoice as a mismatch. But amount-equality alone is
+ambiguous (a different Avis can share the total), so containment is required.
+
+**How to apply:** the disambiguation block sits BEFORE the `#1672` bulk block in
+`autoMatch`; it's gated on `!isPaymentFullyCovered(...)` so covered single-invoice
+payments are untouched. Tests locking this: `tests/billing/bulk-advice-match.test.ts`
+cases (e) advice-wins, (e2) no-regression bind+flag, (e3) foreign-advice-containment.
