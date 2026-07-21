@@ -618,6 +618,86 @@ class QontoStorage {
     return { matchType, transactionAmountCents, invoices: displayInvoices, sumCents };
   }
 
+  /**
+   * Task #1822 — kumulierter Zahlungsstand je Rechnung (Integer-Cents) aus ALLEN
+   * echten Geld-Kanälen:
+   *   (1) direkt zugeordnete Qonto-Transaktionen (echtes Geld, kein Skonto),
+   *   (2) Avis-Positionen aus qonto-hinterlegten, nicht gelöschten Zahlungsavisen
+   *       (Betrag = Geld, Skonto separat) — „qonto-hinterlegt" heißt: eine
+   *       Transaktion zeigt via matched_payment_advice_id auf das Avis, das Geld
+   *       ist also tatsächlich eingegangen.
+   *
+   * Genutzt vom Einzelrechnungs-Match-Schreibpfad, um über die SSoT
+   * `resolveInvoicePaymentStatus` „teilweise_bezahlt" vs. „bezahlt" abzuleiten —
+   * mehrere Teilüberweisungen summieren sich auf denselben Restbetrag. `exec`
+   * erlaubt die Ausführung IN der Match-Transaktion, damit die soeben gebundene
+   * Zahlung mitgezählt wird.
+   *
+   * Skonto bleibt bewusst GETRENNT vom gezahlten Betrag, weil
+   * `classifyPaymentDifference` `gross − skonto − paid` rechnet (Skonto = legitime
+   * Minderung der Forderung, kein eingegangenes Geld).
+   */
+  async getInvoicePaymentTotals(
+    invoiceIds: number[],
+    exec: DbOrTx = db,
+  ): Promise<Map<number, { paidCents: number; skontoCents: number }>> {
+    const totals = new Map<number, { paidCents: number; skontoCents: number }>();
+    if (invoiceIds.length === 0) return totals;
+
+    const ensure = (id: number) => {
+      let cur = totals.get(id);
+      if (!cur) {
+        cur = { paidCents: 0, skontoCents: 0 };
+        totals.set(id, cur);
+      }
+      return cur;
+    };
+
+    // (1) Direkt zugeordnete Qonto-Transaktionen — echtes Geld, Skonto = 0.
+    // Als nicht abrechnungsrelevant markierte Transaktionen zählen nicht.
+    const txRows = await exec
+      .select({
+        invoiceId: qontoTransactions.matchedInvoiceId,
+        paidCents: sql<number>`coalesce(sum(abs(${qontoTransactions.amountCents})), 0)`,
+      })
+      .from(qontoTransactions)
+      .where(and(
+        inArray(qontoTransactions.matchedInvoiceId, invoiceIds),
+        isNull(qontoTransactions.billingIrrelevantAt),
+      ))
+      .groupBy(qontoTransactions.matchedInvoiceId);
+
+    for (const r of txRows) {
+      if (r.invoiceId == null) continue;
+      ensure(r.invoiceId).paidCents += Number(r.paidCents);
+    }
+
+    // (2) Avis-Positionen aus qonto-hinterlegten, nicht gelöschten Avisen.
+    const adviceRows = await exec
+      .select({
+        invoiceId: paymentAdviceItems.matchedInvoiceId,
+        paidCents: sql<number>`coalesce(sum(${paymentAdviceItems.betragCents}), 0)`,
+        skontoCents: sql<number>`coalesce(sum(${paymentAdviceItems.skontoCents}), 0)`,
+      })
+      .from(paymentAdviceItems)
+      .innerJoin(paymentAdvices, eq(paymentAdvices.id, paymentAdviceItems.paymentAdviceId))
+      .where(and(
+        inArray(paymentAdviceItems.matchedInvoiceId, invoiceIds),
+        isNull(paymentAdvices.deletedAt),
+        sql`exists (select 1 from ${qontoTransactions} where ${qontoTransactions.matchedPaymentAdviceId} = ${paymentAdvices.id})`,
+      ))
+      .groupBy(paymentAdviceItems.matchedInvoiceId);
+
+    for (const r of adviceRows) {
+      if (r.invoiceId == null) continue;
+      const cur = ensure(r.invoiceId);
+      cur.paidCents += Number(r.paidCents);
+      cur.skontoCents += Number(r.skontoCents);
+    }
+
+    return totals;
+  }
+
   async deletePaymentAdvice(id: number): Promise<boolean> {
     const [result] = await db.update(paymentAdvices)
       .set({ deletedAt: new Date() })

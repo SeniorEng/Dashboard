@@ -7,6 +7,7 @@ export const STATUS_LABELS: Record<string, string> = {
   entwurf: "Entwurf",
   versendet: "Versendet",
   avis_erhalten: "Avis erhalten",
+  teilweise_bezahlt: "Teilweise bezahlt",
   bezahlt: "Bezahlt",
   storniert: "Storniert",
 };
@@ -15,6 +16,7 @@ export const STATUS_COLORS: Record<string, string> = {
   entwurf: "bg-amber-50 text-amber-700 border-amber-200",
   versendet: "bg-blue-50 text-blue-700 border-blue-200",
   avis_erhalten: "bg-purple-50 text-purple-700 border-purple-200",
+  teilweise_bezahlt: "bg-cyan-50 text-cyan-700 border-cyan-200",
   bezahlt: "bg-green-50 text-green-700 border-green-200",
   storniert: "bg-red-50 text-red-700 border-red-200",
 };

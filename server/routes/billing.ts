@@ -47,6 +47,7 @@ import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { qontoStorage } from "../storage/qonto";
+import { classifyPaymentDifference } from "@shared/domain/qonto/payment-difference";
 import { db } from "../lib/db";
 import { monthlyServiceRecordsRepo, appointmentsRepo } from "../repos";
 import {
@@ -209,6 +210,29 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
     filters.dateTo = req.query.dateTo;
   }
   const invoices = await storage.getInvoices(filters);
+
+  // Task #1822: Teilzahlungs-Rechnungen mit dem bereits eingegangenen Betrag und
+  // dem offenen Rest anreichern — aus DERSELBEN SSoT wie der Status-Schreibpfad
+  // (`getInvoicePaymentTotals` summiert alle gebundenen Zahlungen,
+  // `classifyPaymentDifference` rechnet Brutto − Skonto − gezahlt). Mehrere
+  // Teilüberweisungen ergeben so denselben Restbetrag wie beim Statuswechsel.
+  const partialIds = invoices.filter(inv => inv.status === "teilweise_bezahlt").map(inv => inv.id);
+  if (partialIds.length > 0) {
+    const totals = await qontoStorage.getInvoicePaymentTotals(partialIds);
+    const enriched = invoices.map(inv => {
+      if (inv.status !== "teilweise_bezahlt") return inv;
+      const t = totals.get(inv.id) ?? { paidCents: 0, skontoCents: 0 };
+      const cls = classifyPaymentDifference({
+        invoiceGrossCents: inv.grossAmountCents,
+        paidCents: t.paidCents,
+        skontoCents: t.skontoCents,
+      });
+      return { ...inv, paidCents: t.paidCents, openAmountCents: cls.differenceCents };
+    });
+    res.json(enriched);
+    return;
+  }
+
   res.json(invoices);
 }));
 

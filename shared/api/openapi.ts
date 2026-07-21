@@ -396,6 +396,9 @@ export const InvoiceItemSchema = component(
     createdAt: z.string(),
     billingRunId: nullableString(),
     budgetType: nullableString(),
+    // Task #1822: nur im Zustand `teilweise_bezahlt` gesetzt (bereits gezahlt / offener Rest).
+    paidCents: z.number().int().optional(),
+    openAmountCents: z.number().int().optional(),
   }),
 );
 

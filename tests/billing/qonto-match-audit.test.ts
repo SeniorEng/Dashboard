@@ -13,8 +13,11 @@
  *     Transaktion → höchstens ein Erfolg, höchstens ein Audit-Eintrag.
  *  5. Idempotenz: Re-Match derselben (transaction, invoice)-Kombination
  *     ist no-op und schreibt keinen zweiten Audit-Eintrag.
- *  6. Partial-Unique-Index `qonto_transactions_matched_invoice_unique_idx`
- *     existiert und verhindert Doppel-Matches derselben Rechnung.
+ *  6. Task #1822 — der frühere Partial-Unique-Index
+ *     `qonto_transactions_matched_invoice_unique_idx` wurde ENTFERNT: mehrere
+ *     Teilüberweisungen dürfen sich auf DIESELBE Rechnung legen (Aggregation
+ *     zum Restbetrag). Der Test verifiziert, dass zwei Transaktionen auf
+ *     dieselbe Rechnung gebunden werden können (kein Constraint-Fehler mehr).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -247,15 +250,15 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
     expect(inv.status).toBe("bezahlt");
   });
 
-  it("partial-unique-Index verhindert Doppel-Matches derselben Rechnung", async () => {
+  it("Task #1822: zwei Teilüberweisungen dürfen sich auf dieselbe Rechnung legen (kein Unique-Constraint mehr)", async () => {
     const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 66666, suffix: "PU" });
-    const txA = await insertQontoTx({ amountCents: 66666 });
-    const txB = await insertQontoTx({ amountCents: 66666 });
+    const txA = await insertQontoTx({ amountCents: 30000 });
+    const txB = await insertQontoTx({ amountCents: 20000 });
     seeded.invoiceIds.push(invoiceId);
     seeded.qontoTxIds.push(txA, txB);
 
-    // Direkter DB-Setzversuch auf zwei Transaktionen → der zweite muss
-    // an `qonto_transactions_matched_invoice_unique_idx` scheitern.
+    // Beide Transaktionen auf dieselbe Rechnung binden — für Teilzahlungen muss
+    // das jetzt erlaubt sein (der frühere partielle Unique-Index ist entfernt).
     await db.update(qontoTransactions)
       .set({ matchedInvoiceId: invoiceId, matchConfidence: "test" })
       .where(eq(qontoTransactions.id, txA));
@@ -268,12 +271,156 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
     } catch {
       threw = true;
     }
-    expect(threw).toBe(true);
+    expect(threw).toBe(false);
 
-    // Cleanup: lösen, damit afterAll die FK-Reihenfolge sauber abräumen kann.
+    // Beide Bindungen sind persistiert.
+    const bound = await db.select({ id: qontoTransactions.id })
+      .from(qontoTransactions)
+      .where(and(
+        inArray(qontoTransactions.id, [txA, txB]),
+        eq(qontoTransactions.matchedInvoiceId, invoiceId),
+      ));
+    expect(bound.length).toBe(2);
+
+    // Cleanup: beide lösen, sonst schlägt der Audit-Regressionstest weiter unten
+    // fehl (direkt gesetzte matchedInvoiceId ohne Audit-Eintrag) und afterAll
+    // kann die FK-Reihenfolge sauber abräumen.
     await db.update(qontoTransactions)
       .set({ matchedInvoiceId: null, matchConfidence: null })
-      .where(eq(qontoTransactions.id, txA));
+      .where(inArray(qontoTransactions.id, [txA, txB]));
+  });
+
+  it("Task #1822: eine Teilüberweisung setzt die Rechnung auf teilweise_bezahlt (kein bezahlt, kein Mismatch)", async () => {
+    const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix: "TP1" });
+    const txId = await insertQontoTx({ amountCents: 30000 });
+    seeded.invoiceIds.push(invoiceId);
+    seeded.qontoTxIds.push(txId);
+
+    const res = await apiPost<{
+      invoicePartiallyPaid: boolean;
+      invoiceMarkedPaid: boolean;
+      paymentDifferenceResult: string;
+      paymentDifferenceCents: number;
+    }>(`/api/admin/qonto/transactions/${txId}/match`, { invoiceId });
+    expect(res.status).toBe(200);
+    const body = res.data;
+    expect(body.invoicePartiallyPaid).toBe(true);
+    expect(body.invoiceMarkedPaid).toBe(false);
+    expect(body.paymentDifferenceResult).toBe("underpaid");
+    expect(body.paymentDifferenceCents).toBe(20000); // offener Rest = Brutto − gezahlt
+
+    const [inv] = await db.select({ status: invoices.status, paidAt: invoices.paidAt })
+      .from(invoices).where(eq(invoices.id, invoiceId));
+    expect(inv.status).toBe("teilweise_bezahlt");
+    expect(inv.paidAt).toBeNull();
+
+    // Genau ein invoice_partial_payment-Audit; bewusst KEIN reconciled/mismatch.
+    expect(await countAudit("invoice_partial_payment", invoiceId, txId)).toBe(1);
+    expect(await countAudit("invoice_payment_reconciled", invoiceId, txId)).toBe(0);
+    expect(await countAudit("invoice_payment_mismatch", invoiceId, txId)).toBe(0);
+  });
+
+  it("Task #1822: zweite Teilüberweisung deckt den Rest → bezahlt (Σ-Gleichheit)", async () => {
+    const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix: "TP2" });
+    const txA = await insertQontoTx({ amountCents: 30000 });
+    const txB = await insertQontoTx({ amountCents: 20000 });
+    seeded.invoiceIds.push(invoiceId);
+    seeded.qontoTxIds.push(txA, txB);
+
+    // 1. Teilzahlung → teilweise_bezahlt.
+    const resA = await apiPost<{ invoicePartiallyPaid: boolean }>(
+      `/api/admin/qonto/transactions/${txA}/match`, { invoiceId });
+    expect(resA.status).toBe(200);
+    expect(resA.data.invoicePartiallyPaid).toBe(true);
+
+    let [inv] = await db.select({ status: invoices.status })
+      .from(invoices).where(eq(invoices.id, invoiceId));
+    expect(inv.status).toBe("teilweise_bezahlt");
+
+    // 2. Teilzahlung deckt den Rest → bezahlt.
+    const resB = await apiPost<{
+      invoiceMarkedPaid: boolean;
+      paymentDifferenceResult: string;
+      paymentDifferenceCents: number;
+    }>(`/api/admin/qonto/transactions/${txB}/match`, { invoiceId });
+    expect(resB.status).toBe(200);
+    const bodyB = resB.data;
+    expect(bodyB.invoiceMarkedPaid).toBe(true);
+    expect(bodyB.paymentDifferenceResult).toBe("exact");
+    expect(bodyB.paymentDifferenceCents).toBe(0);
+
+    [inv] = await db.select({ status: invoices.status, paidAt: invoices.paidAt })
+      .from(invoices).where(eq(invoices.id, invoiceId));
+    expect(inv.status).toBe("bezahlt");
+    expect(inv.paidAt).not.toBeNull();
+
+    // Σ-Gleichheit im Abschluss-Audit: kumuliert gezahlt === Brutto, Rest 0.
+    const [reconciled] = await db.select({ metadata: auditLog.metadata })
+      .from(auditLog).where(and(
+        eq(auditLog.action, "invoice_payment_reconciled"),
+        eq(auditLog.entityType, "invoice"),
+        eq(auditLog.entityId, invoiceId),
+      ));
+    const md = reconciled.metadata as { cumulativePaidCents: number; differenceCents: number };
+    expect(md.cumulativePaidCents).toBe(50000);
+    expect(md.differenceCents).toBe(0);
+  });
+
+  it("Task #1822: Unmatch einer Teilzahlung setzt den Status symmetrisch zurück (bezahlt → teilweise_bezahlt → versendet)", async () => {
+    const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix: "UP1" });
+    const txA = await insertQontoTx({ amountCents: 30000 });
+    const txB = await insertQontoTx({ amountCents: 20000 });
+    seeded.invoiceIds.push(invoiceId);
+    seeded.qontoTxIds.push(txA, txB);
+
+    // Zwei Teilzahlungen → voll gedeckt (bezahlt).
+    expect((await apiPost(`/api/admin/qonto/transactions/${txA}/match`, { invoiceId })).status).toBe(200);
+    expect((await apiPost(`/api/admin/qonto/transactions/${txB}/match`, { invoiceId })).status).toBe(200);
+    let [inv] = await db.select({ status: invoices.status })
+      .from(invoices).where(eq(invoices.id, invoiceId));
+    expect(inv.status).toBe("bezahlt");
+
+    // Zweite Teilzahlung lösen → verbleibt 30000 von 50000 → teilweise_bezahlt.
+    expect((await apiDelete(`/api/admin/qonto/transactions/${txB}/match`)).status).toBe(200);
+    [inv] = await db.select({ status: invoices.status, paidAt: invoices.paidAt })
+      .from(invoices).where(eq(invoices.id, invoiceId));
+    expect(inv.status).toBe("teilweise_bezahlt");
+    expect(inv.paidAt).toBeNull();
+
+    // Letzte Teilzahlung lösen → keine gebundene Zahlung mehr → versendet.
+    expect((await apiDelete(`/api/admin/qonto/transactions/${txA}/match`)).status).toBe(200);
+    [inv] = await db.select({ status: invoices.status, paidAt: invoices.paidAt })
+      .from(invoices).where(eq(invoices.id, invoiceId));
+    expect(inv.status).toBe("versendet");
+    expect(inv.paidAt).toBeNull();
+  });
+
+  it("Task #1822: Über-Toleranz-Überzahlung bleibt Mismatch (nicht bezahlt, nicht teilweise)", async () => {
+    const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix: "OV1" });
+    const txId = await insertQontoTx({ amountCents: 60000 });
+    seeded.invoiceIds.push(invoiceId);
+    seeded.qontoTxIds.push(txId);
+
+    const res = await apiPost<{
+      invoiceMarkedPaid: boolean;
+      invoicePartiallyPaid: boolean;
+      paymentDifferenceResult: string;
+      paymentDifferenceCents: number;
+    }>(`/api/admin/qonto/transactions/${txId}/match`, { invoiceId });
+    expect(res.status).toBe(200);
+    const body = res.data;
+    expect(body.invoiceMarkedPaid).toBe(false);
+    expect(body.invoicePartiallyPaid).toBe(false);
+    expect(body.paymentDifferenceResult).toBe("overpaid");
+    expect(body.paymentDifferenceCents).toBe(-10000);
+
+    // Status bleibt offen (versendet) — die Über-Toleranz-Abweichung wird geflaggt.
+    const [inv] = await db.select({ status: invoices.status })
+      .from(invoices).where(eq(invoices.id, invoiceId));
+    expect(inv.status).toBe("versendet");
+    expect(await countAudit("invoice_payment_mismatch", invoiceId, txId)).toBe(1);
+    expect(await countAudit("invoice_payment_reconciled", invoiceId, txId)).toBe(0);
+    expect(await countAudit("invoice_partial_payment", invoiceId, txId)).toBe(0);
   });
 
   it("Regression: jeder qonto_transactions.matched_invoice_id hat einen passenden audit_log-Eintrag", async () => {
@@ -289,7 +436,14 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
       ));
 
     for (const m of matched) {
-      const count = await countAudit("invoice_payment_reconciled", m.invoiceId!, m.id);
+      // Task #1822 — eine gebundene Transaktion kann je nach kumuliertem
+      // Zahlungsstand als Voll-Abgleich (reconciled), Teilzahlung
+      // (partial_payment) ODER Über-Toleranz-Abweichung (mismatch) verbucht
+      // sein. Der Audit-Trail muss in JEDEM dieser Fälle existieren.
+      const count =
+        (await countAudit("invoice_payment_reconciled", m.invoiceId!, m.id)) +
+        (await countAudit("invoice_partial_payment", m.invoiceId!, m.id)) +
+        (await countAudit("invoice_payment_mismatch", m.invoiceId!, m.id));
       expect(count, `audit fehlt für tx=${m.id} invoice=${m.invoiceId}`).toBeGreaterThanOrEqual(1);
     }
   });

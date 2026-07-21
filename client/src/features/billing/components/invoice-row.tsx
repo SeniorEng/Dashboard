@@ -183,6 +183,19 @@ export function InvoiceRow({
               >
                 {STATUS_LABELS[invoice.status] || invoice.status}
               </Badge>
+              {/* Task #1822: Offener Rest bei Teilzahlung — die Summe der bereits
+                  eingegangenen Zahlungen deckt die Rechnung noch nicht. Der Betrag
+                  stammt aus derselben SSoT wie der Statuswechsel
+                  (openAmountCents = Brutto − Skonto − gezahlt). */}
+              {invoice.status === "teilweise_bezahlt" && invoice.openAmountCents != null && (
+                <Badge
+                  variant="outline"
+                  className="bg-cyan-50 text-cyan-700 border-cyan-200"
+                  data-testid={`badge-open-amount-${invoice.id}`}
+                >
+                  Rest {formatAmount(invoice.openAmountCents)} offen
+                </Badge>
+              )}
               {/* Task #1412: Aging-Ampel-Badge — nur mahnende Stufen
                   (gelb/orange/rot) werden sichtbar gemacht. */}
               {aging !== "none" && aging !== "green" && (

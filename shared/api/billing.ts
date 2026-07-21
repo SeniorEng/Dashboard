@@ -83,6 +83,13 @@ export interface InvoiceItem {
   // Bestand vor #759).
   billingRunId: string | null;
   budgetType: string | null;
+  // Task #1822: Nur im Zustand `teilweise_bezahlt` gesetzt. `paidCents` = Σ der
+  // bereits eingegangenen, gebundenen Zahlungen; `openAmountCents` = offener Rest
+  // (Brutto − Skonto − gezahlt). Beide stammen aus derselben SSoT wie der
+  // Status-Schreibpfad (`getInvoicePaymentTotals` + `classifyPaymentDifference`),
+  // damit Anzeige und Buchung nie auseinanderlaufen. Sonst undefined.
+  paidCents?: number;
+  openAmountCents?: number;
 }
 
 interface InvoiceLineItem {

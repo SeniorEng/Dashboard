@@ -467,13 +467,17 @@ export function AdvicesTab() {
                             {advice.kuerzungCents > 0 ? `Kürzung: ${formatCents(advice.kuerzungCents)}` : ""}
                           </Badge>
                         )}
+                        {/* Task #1822: Offener Rest statt eines nackten „Unterzahlung"-
+                            Fehlers. Neutrale Formulierung, weil im Kassen-/Avis-Kontext
+                            noch offen ist, ob der Rest eine echte Restforderung oder eine
+                            endgültige Kürzung ist (die Topf-Umbuchung ist #1785, nicht #1822). */}
                         {(advice.unterzahlungCents ?? 0) > 0 && (
                           <Badge
                             variant="outline"
-                            className="text-xs bg-red-50 text-red-700 border-red-200"
+                            className="text-xs bg-cyan-50 text-cyan-700 border-cyan-200"
                             data-testid={`badge-advice-unterzahlung-${advice.id}`}
                           >
-                            Unterzahlung: {formatCents(advice.unterzahlungCents!)}
+                            Rest {formatCents(advice.unterzahlungCents!)} offen
                           </Badge>
                         )}
                         {(advice.ueberzahlungCents ?? 0) > 0 && (

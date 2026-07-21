@@ -532,12 +532,14 @@ export function TransactionsTab({
                           </Badge>
                         );
                       })()}
-                      {/* Betragsdifferenz: gezahlt weicht über die Toleranz hinaus von der
-                          Forderung ab. Die Rechnung wurde bewusst NICHT auf „bezahlt"
-                          gesetzt, sondern nur gebunden und zur Prüfung markiert. */}
-                      {tx.paymentDifferenceResult === "underpaid" && tx.paymentDifferenceCents != null && (
-                        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-xs" data-testid={`badge-underpaid-${tx.id}`}>
-                          −{formatCents(Math.abs(tx.paymentDifferenceCents))} Unterzahlung
+                      {/* Task #1822: Teilzahlung — die Summe der eingegangenen Zahlungen
+                          deckt die Forderung noch nicht vollständig. Statt eines nackten
+                          „Unterzahlung"-Fehlers wird der bereits gezahlte Betrag und der
+                          offene Rest gezeigt (kumuliert über alle gebundenen Zahlungen).
+                          Die Rechnung steht auf „teilweise bezahlt", nicht auf „bezahlt". */}
+                      {tx.paymentDifferenceResult === "underpaid" && tx.paymentDifferenceCents != null && tx.matchedGrossCents != null && (
+                        <Badge variant="outline" className="bg-cyan-50 text-cyan-700 border-cyan-200 text-xs" data-testid={`badge-partial-${tx.id}`}>
+                          Teilzahlung: {formatCents(tx.matchedGrossCents - tx.paymentDifferenceCents)} von {formatCents(tx.matchedGrossCents)} — Rest {formatCents(tx.paymentDifferenceCents)} offen
                         </Badge>
                       )}
                       {tx.paymentDifferenceResult === "overpaid" && tx.paymentDifferenceCents != null && (

@@ -909,6 +909,12 @@
           "budgetType": {
             "type": "string",
             "nullable": true
+          },
+          "paidCents": {
+            "type": "integer"
+          },
+          "openAmountCents": {
+            "type": "integer"
           }
         },
         "required": [

@@ -18,6 +18,7 @@ import {
   isPaymentFullyCovered,
   PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
 } from "@shared/domain/qonto/payment-difference";
+import { resolveInvoicePaymentStatus } from "@shared/domain/qonto/invoice-payment-status";
 
 const QONTO_BASE_URL = "https://thirdparty.qonto.com/v2";
 
@@ -460,21 +461,28 @@ class QontoService {
           return false;
         }
 
-        // Betrag klassifizieren (SSoT). Nur voll gedeckte Zahlungen (exakt oder
-        // tolerierbar, z.B. Skonto/Rundung) setzen die Rechnung auf „bezahlt".
-        // Über-Toleranz-Abweichungen (Kürzung/Überzahlung) werden nur gebunden
-        // und zur Prüfung markiert — nie still als Vollzahlung gebucht.
-        const classification = classifyPaymentDifference({
+        // Task #1822 — Status aus dem KUMULIERTEN Zahlungsstand ableiten (Σ aller
+        // gebundenen Zahlungen inkl. der soeben gebundenen), nicht nur aus dieser
+        // einen Transaktion. Unterzahlung ⇒ „teilweise_bezahlt", Volldeckung ⇒
+        // „bezahlt", Über-Toleranz-Überzahlung ⇒ nur binden + Mismatch-Flag
+        // (nie still als Vollzahlung gebucht).
+        const totals = (await qontoStorage.getInvoicePaymentTotals([match.invoiceId], dbTx)).get(match.invoiceId)
+          ?? { paidCents: 0, skontoCents: 0 };
+        const decision = resolveInvoicePaymentStatus({
           invoiceGrossCents: match.invoiceGrossCents,
-          paidCents: Math.abs(qtx.amountCents),
+          paidCents: totals.paidCents,
+          skontoCents: totals.skontoCents,
         });
 
-        if (isPaymentFullyCovered(classification)) {
+        if (decision.status === "bezahlt" || decision.status === "teilweise_bezahlt") {
+          const nextStatus = decision.status;
           const invoiceUpdate = await dbTx.update(invoices)
-            .set({ status: "bezahlt", paidAt: qtx.emittedAt })
+            .set(nextStatus === "bezahlt"
+              ? { status: "bezahlt", paidAt: qtx.emittedAt }
+              : { status: "teilweise_bezahlt" })
             .where(and(
               eq(invoices.id, match.invoiceId),
-              inArray(invoices.status, ["versendet", "avis_erhalten"]),
+              inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
             ))
             .returning({ id: invoices.id });
 
@@ -487,7 +495,7 @@ class QontoService {
 
           audit.record({
             userId,
-            action: "invoice_payment_reconciled",
+            action: nextStatus === "bezahlt" ? "invoice_payment_reconciled" : "invoice_partial_payment",
             entityType: "invoice",
             entityId: match.invoiceId,
             metadata: {
@@ -496,20 +504,22 @@ class QontoService {
               matchedBy: "auto",
               confidence: match.confidence,
               amountCents: qtx.amountCents,
-              differenceCents: classification.differenceCents,
-              result: classification.result,
+              cumulativePaidCents: totals.paidCents,
+              cumulativeSkontoCents: totals.skontoCents,
+              invoiceGrossCents: match.invoiceGrossCents,
+              differenceCents: decision.classification.differenceCents,
+              result: decision.classification.result,
             },
             ipAddress,
           });
         } else {
-          // Über-Toleranz-Abweichung: Transaktion bleibt an die Rechnung
-          // gebunden, aber die Rechnung wird NICHT still auf „bezahlt" gesetzt,
-          // sondern nur zur manuellen Prüfung markiert. Seit Task #1788 wird der
-          // Sonderfall „Sammelzahlung nennt EINE Rechnungsnummer, begleicht aber
-          // einen ganzen Sammel-Avis" bereits oben abgefangen (Avis-Abgleich hat
-          // Vorrang); hier landen nur noch echte Abweichungen (Kürzung/Über-/
-          // Unterzahlung ohne passenden Avis) — Freigabe nach Prüfung per
-          // confirm-paid (oder Unmatch + korrekte Avis-Zuordnung).
+          // Über-Toleranz-Überzahlung (decision.status === null): Transaktion
+          // bleibt an die Rechnung gebunden, aber die Rechnung wird NICHT still
+          // auf „bezahlt" gesetzt, sondern nur zur manuellen Prüfung markiert.
+          // Seit Task #1788 wird der Sonderfall „Sammelzahlung nennt EINE
+          // Rechnungsnummer, begleicht aber einen ganzen Sammel-Avis" bereits
+          // oben abgefangen (Avis-Abgleich hat Vorrang); hier landen nur noch
+          // echte Überzahlungen — Freigabe nach Prüfung per confirm-paid.
           audit.record({
             userId,
             action: "invoice_payment_mismatch",
@@ -522,9 +532,10 @@ class QontoService {
               confidence: match.confidence,
               amountCents: qtx.amountCents,
               paidCents: Math.abs(qtx.amountCents),
+              cumulativePaidCents: totals.paidCents,
               invoiceGrossCents: match.invoiceGrossCents,
-              differenceCents: classification.differenceCents,
-              result: classification.result,
+              differenceCents: decision.classification.differenceCents,
+              result: decision.classification.result,
               toleranceCents: PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
             },
             ipAddress,
@@ -603,7 +614,7 @@ class QontoService {
         .set({ status: "bezahlt", paidAt: qtx.emittedAt })
         .where(and(
           inArray(invoices.id, advice.openInvoiceIds),
-          inArray(invoices.status, ["versendet", "avis_erhalten"]),
+          inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
         ))
         .returning({ id: invoices.id });
 

@@ -60,13 +60,15 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   index("qonto_transactions_emitted_at_idx").on(table.emittedAt),
   index("qonto_transactions_matched_invoice_idx").on(table.matchedInvoiceId),
   index("qonto_transactions_side_idx").on(table.side),
-  // Idempotenz: pro Rechnung darf höchstens eine Qonto-Transaktion
-  // gematcht sein. Verhindert, dass parallele Match-Aufrufe denselben
-  // (qontoTransactionId, invoiceId)-Match doppelt anlegen oder zwei
-  // verschiedene Transaktionen sich auf dieselbe Rechnung legen.
-  uniqueIndex("qonto_transactions_matched_invoice_unique_idx")
-    .on(table.matchedInvoiceId)
-    .where(sql`matched_invoice_id IS NOT NULL`),
+  // Task #1822 — KEIN Unique-Index mehr auf matched_invoice_id: mehrere
+  // Teilüberweisungen dürfen sich auf DIESELBE Rechnung legen und summieren
+  // sich zum Restbetrag auf (Zustand "teilweise_bezahlt"). Der frühere
+  // partielle Unique-Index (qonto_transactions_matched_invoice_unique_idx,
+  // Task #445) wird beim Boot per Migration entfernt
+  // (server/startup/drop-qonto-match-unique-index.ts). Die Per-Transaktions-
+  // Idempotenz (dieselbe Transaktion nicht doppelt binden) bleibt über den
+  // `isNull(matchedInvoiceId)`-Guard in den Match-Schreibpfaden erhalten.
+  // Der reine Lookup ist weiterhin über den plain-Index oben abgedeckt.
   // Task #1672 — pro Avis darf höchstens eine Sammelzahlung gematcht sein
   // (eine Zahlung ↔ ein Avis), analog zum Einzelrechnungs-Index.
   uniqueIndex("qonto_transactions_matched_advice_unique_idx")

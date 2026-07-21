@@ -24,6 +24,10 @@ import {
   PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
 } from "@shared/domain/qonto/payment-difference";
 import {
+  resolveInvoicePaymentStatus,
+  type InvoicePaymentStatusResult,
+} from "@shared/domain/qonto/invoice-payment-status";
+import {
   loadFullyPaidUnlinkedAdvices,
   loadUnmatchedCredits,
   computeProposals,
@@ -170,6 +174,15 @@ router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen we
     })),
   );
 
+  // Task #1822: Für 1:1-gebundene Rechnungen den KUMULIERTEN Zahlungsstand über
+  // die SSoT `getInvoicePaymentTotals` ermitteln (statt nur diese eine Zahlung),
+  // damit mehrere Teilüberweisungen denselben offenen Rest zeigen wie der
+  // Invoice-Status. Sammel-Avis-Bindungen behalten die Avis-weite Differenz.
+  const singleInvoiceIds = Array.from(new Set(
+    result.transactions.map(t => t.matchedInvoiceId).filter((v): v is number => v != null),
+  ));
+  const paymentTotals = await qontoStorage.getInvoicePaymentTotals(singleInvoiceIds);
+
   const transactions = result.transactions.map(t => {
     const s = t.matchedPaymentAdviceId ? adviceSummaries.get(t.matchedPaymentAdviceId) : undefined;
     const matchedAdvice = s
@@ -177,9 +190,15 @@ router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen we
       : null;
 
     const gross = grossByTxId.get(t.id);
-    const cls = gross != null
-      ? classifyPaymentDifference({ invoiceGrossCents: gross, paidCents: Math.abs(t.amountCents) })
-      : null;
+    let cls = null;
+    if (gross != null) {
+      if (t.matchedInvoiceId != null) {
+        const tot = paymentTotals.get(t.matchedInvoiceId) ?? { paidCents: 0, skontoCents: 0 };
+        cls = classifyPaymentDifference({ invoiceGrossCents: gross, paidCents: tot.paidCents, skontoCents: tot.skontoCents });
+      } else {
+        cls = classifyPaymentDifference({ invoiceGrossCents: gross, paidCents: Math.abs(t.amountCents) });
+      }
+    }
 
     return {
       ...t,
@@ -242,11 +261,7 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
   }).from(invoices).where(eq(invoices.id, invoiceId));
   if (!invoice) throw notFound("Rechnung nicht gefunden");
 
-  const classification = classifyPaymentDifference({
-    invoiceGrossCents: invoice.grossAmountCents,
-    paidCents: Math.abs(tx.amountCents),
-  });
-  const fullyCovered = isPaymentFullyCovered(classification);
+  let decision!: InvoicePaymentStatusResult;
 
   const updated = await withAudit(async (dbTx, audit) => {
     // Geguarded gegen parallele Matches auf dieselbe Transaktion.
@@ -263,17 +278,31 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
       throw badRequest("Transaktion wurde zwischenzeitlich einer anderen Rechnung zugeordnet.");
     }
 
-    if (fullyCovered) {
-      // Task #1284 — Qonto-Zahlungseingang setzt bezahlt, auch wenn die Rechnung
-      // bereits über ein Zahlungsavis auf "avis_erhalten" stand. Nur bei exakt
-      // passendem oder tolerierbar abweichendem Betrag (Skonto/Rundung).
+    // Task #1822 — Status aus dem KUMULIERTEN Zahlungsstand ableiten (Σ aller
+    // gebundenen Zahlungen inkl. der soeben gebundenen), nicht nur aus dieser
+    // einen Transaktion. Aus einer Unterzahlung wird „teilweise_bezahlt" statt
+    // still offen zu bleiben; erst die Volldeckung setzt „bezahlt".
+    const totals = (await qontoStorage.getInvoicePaymentTotals([invoiceId], dbTx)).get(invoiceId)
+      ?? { paidCents: 0, skontoCents: 0 };
+    decision = resolveInvoicePaymentStatus({
+      invoiceGrossCents: invoice.grossAmountCents,
+      paidCents: totals.paidCents,
+      skontoCents: totals.skontoCents,
+    });
+
+    if (decision.status === "bezahlt") {
+      // Vollständig gedeckt (exakt/tolerierbar). Task #1284 — auch aus
+      // „avis_erhalten" bzw. „teilweise_bezahlt" heraus abschließbar.
       const invoiceUpdate = await dbTx.update(invoices)
         .set({ status: "bezahlt", paidAt: tx.emittedAt })
-        .where(and(eq(invoices.id, invoiceId), inArray(invoices.status, ["versendet", "avis_erhalten"])))
+        .where(and(
+          eq(invoices.id, invoiceId),
+          inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
+        ))
         .returning({ id: invoices.id });
 
       if (invoiceUpdate.length === 0) {
-        throw badRequest("Rechnung ist nicht im Status 'versendet' oder 'avis_erhalten' und kann nicht abgeglichen werden.");
+        throw badRequest("Rechnung ist nicht in einem offenen Status (versendet/avis_erhalten/teilweise bezahlt) und kann nicht abgeglichen werden.");
       }
 
       audit.record({
@@ -287,16 +316,54 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
           matchedBy: "manual",
           confidence: "manual",
           amountCents: tx.amountCents,
-          differenceCents: classification.differenceCents,
-          result: classification.result,
+          cumulativePaidCents: totals.paidCents,
+          cumulativeSkontoCents: totals.skontoCents,
+          invoiceGrossCents: invoice.grossAmountCents,
+          differenceCents: decision.classification.differenceCents,
+          result: decision.classification.result,
+        },
+        ipAddress: req.ip,
+      });
+    } else if (decision.status === "teilweise_bezahlt") {
+      // Task #1822 — Teilzahlung: binden + Rechnung als „teilweise_bezahlt"
+      // führen (kein paidAt, noch offen). Bewusst KEIN Mismatch-Flag — die
+      // Unterzahlung ist ein erwarteter Zwischenstand, keine Abweichung.
+      const invoiceUpdate = await dbTx.update(invoices)
+        .set({ status: "teilweise_bezahlt" })
+        .where(and(
+          eq(invoices.id, invoiceId),
+          inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
+        ))
+        .returning({ id: invoices.id });
+
+      if (invoiceUpdate.length === 0) {
+        throw badRequest("Rechnung ist nicht in einem offenen Status (versendet/avis_erhalten/teilweise bezahlt) und kann nicht abgeglichen werden.");
+      }
+
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_partial_payment",
+        entityType: "invoice",
+        entityId: invoiceId,
+        metadata: {
+          qontoTransactionId: id,
+          qontoTransactionExternalId: tx.qontoTransactionId,
+          matchedBy: "manual",
+          confidence: "manual",
+          amountCents: tx.amountCents,
+          cumulativePaidCents: totals.paidCents,
+          cumulativeSkontoCents: totals.skontoCents,
+          invoiceGrossCents: invoice.grossAmountCents,
+          differenceCents: decision.classification.differenceCents,
+          result: decision.classification.result,
         },
         ipAddress: req.ip,
       });
     } else {
-      // Über-Toleranz-Abweichung: Zahlung an die Rechnung binden, aber NICHT auf
-      // „bezahlt" setzen — die Rechnung bleibt zur manuellen Prüfung offen
-      // (Differenz-Ansicht). Bewusst gebunden, damit der Zusammenhang sichtbar
-      // ist und die Zahlung nicht als „ohne Treffer" gilt.
+      // Über-Toleranz-Überzahlung (decision.status === null): Zahlung an die
+      // Rechnung binden, aber NICHT still auf „bezahlt" setzen — sie bleibt zur
+      // manuellen Prüfung offen (Differenz-Ansicht). Invariante „niemals still
+      // bezahlt" (Task #1284).
       audit.record({
         userId: req.user!.id,
         action: "invoice_payment_mismatch",
@@ -309,9 +376,10 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
           confidence: "manual",
           amountCents: tx.amountCents,
           paidCents: Math.abs(tx.amountCents),
+          cumulativePaidCents: totals.paidCents,
           invoiceGrossCents: invoice.grossAmountCents,
-          differenceCents: classification.differenceCents,
-          result: classification.result,
+          differenceCents: decision.classification.differenceCents,
+          result: decision.classification.result,
           toleranceCents: PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
         },
         ipAddress: req.ip,
@@ -323,9 +391,10 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
 
   res.json({
     ...updated,
-    invoiceMarkedPaid: fullyCovered,
-    paymentDifferenceCents: classification.differenceCents,
-    paymentDifferenceResult: classification.result,
+    invoiceMarkedPaid: decision.status === "bezahlt",
+    invoicePartiallyPaid: decision.status === "teilweise_bezahlt",
+    paymentDifferenceCents: decision.classification.differenceCents,
+    paymentDifferenceResult: decision.classification.result,
   });
 }));
 
@@ -687,12 +756,45 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
       throw badRequest("Zuordnung wurde zwischenzeitlich verändert.");
     }
 
-    // Task #1284 — Zurücksetzen darf bezahlt/storniert nicht herabstufen und
-    // muss eine noch bestehende Avis-Zuordnung respektieren (→ avis_erhalten).
-    const resetStatus = await resolveAvisBackedStatus(dbTx, previousInvoiceId);
-    await dbTx.update(invoices)
-      .set({ status: resetStatus, paidAt: null })
-      .where(and(eq(invoices.id, previousInvoiceId), eq(invoices.status, "bezahlt")));
+    // Task #1822 / #1284 — Nach dem Lösen der Zuordnung den Rechnungs-Status aus
+    // den VERBLEIBENDEN gebundenen Zahlungen neu ableiten (dieselbe SSoT wie der
+    // Match-Schreibpfad: `getInvoicePaymentTotals` + `resolveInvoicePaymentStatus`).
+    // So fällt eine teilweise_bezahlte Rechnung nach dem Entfernen ihrer
+    // (Teil-)Zahlung korrekt zurück, statt am Status „teilweise_bezahlt" hängen zu
+    // bleiben. `versendet`/`avis_erhalten`/`storniert` bleiben unangetastet, eine
+    // noch bestehende Avis-Zuordnung wird respektiert (→ avis_erhalten).
+    let resultingStatus: string | undefined;
+    const [invRow] = await dbTx
+      .select({ status: invoices.status, grossAmountCents: invoices.grossAmountCents })
+      .from(invoices)
+      .where(eq(invoices.id, previousInvoiceId))
+      .limit(1);
+
+    if (invRow && (invRow.status === "bezahlt" || invRow.status === "teilweise_bezahlt")) {
+      const remaining = (await qontoStorage.getInvoicePaymentTotals([previousInvoiceId], dbTx))
+        .get(previousInvoiceId) ?? { paidCents: 0, skontoCents: 0 };
+      const decision = resolveInvoicePaymentStatus({
+        invoiceGrossCents: invRow.grossAmountCents,
+        paidCents: remaining.paidCents,
+        skontoCents: remaining.skontoCents,
+      });
+
+      if (remaining.paidCents <= 0) {
+        // Keine gebundene Zahlung mehr ⇒ avis-gestützter Vorstatus.
+        resultingStatus = await resolveAvisBackedStatus(dbTx, previousInvoiceId);
+        await dbTx.update(invoices)
+          .set({ status: resultingStatus, paidAt: null })
+          .where(eq(invoices.id, previousInvoiceId));
+      } else if (decision.status === "teilweise_bezahlt") {
+        // Noch Teilzahlung(en) vorhanden ⇒ teilweise_bezahlt (paidAt zurücksetzen).
+        resultingStatus = "teilweise_bezahlt";
+        await dbTx.update(invoices)
+          .set({ status: "teilweise_bezahlt", paidAt: null })
+          .where(eq(invoices.id, previousInvoiceId));
+      }
+      // Sonst (weiterhin voll gedeckt / Über-Toleranz-Rest) ⇒ Status unverändert
+      // (bleibt „bezahlt"; eine Überzahlung wird separat als Mismatch geflaggt).
+    }
 
     audit.record({
       userId: req.user!.id,
@@ -703,6 +805,7 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
         qontoTransactionId: id,
         qontoTransactionExternalId: tx.qontoTransactionId,
         previousConfidence,
+        ...(resultingStatus ? { resultingStatus } : {}),
       },
       ipAddress: req.ip,
     });
@@ -846,7 +949,7 @@ router.post("/transactions/:id/confirm-paid", asyncHandler("Rechnung konnte nich
       .set({ status: "bezahlt", paidAt: emitted })
       .where(and(
         inArray(invoices.id, boundInvoiceIds),
-        inArray(invoices.status, ["versendet", "avis_erhalten"]),
+        inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
       ))
       .returning({ id: invoices.id });
 
@@ -1539,7 +1642,7 @@ router.post("/payment-advices/:id/mark-paid", asyncHandler("Avis konnte nicht al
           .set({ status: "bezahlt", paidAt })
           .where(and(
             inArray(invoices.id, coveredIds),
-            inArray(invoices.status, ["versendet", "avis_erhalten"]),
+            inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
           ))
           .returning({ id: invoices.id });
 

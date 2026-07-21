@@ -82,7 +82,6 @@ import {
   AUDIT_PARENT_DELETION_COLUMN_SQL,
   AUDIT_PARENT_DELETION_INDEX_SQL,
 } from "../../server/startup/ensure-audit-parent-deletion";
-import { QONTO_MATCH_UNIQUE_INDEX_SQL } from "../../server/startup/ensure-qonto-match-idempotency";
 import { RESERVATION_CAPTURED_TX_INDEX_SQL } from "../../server/startup/ensure-reservation-captured-transaction-link";
 import {
   CBTS_UNIQUE_INDEX_SQL,
@@ -734,15 +733,10 @@ const INDEX_SOURCES: IndexSource[] = [
     drizzleTable: auditLog,
     tempColumns: "parent_deletion_id integer",
   },
-  {
-    label:
-      "ensure-qonto-match-idempotency: qonto_transactions_matched_invoice_unique_idx",
-    rawSql: QONTO_MATCH_UNIQUE_INDEX_SQL,
-    indexName: "qonto_transactions_matched_invoice_unique_idx",
-    realTable: "qonto_transactions",
-    drizzleTable: qontoTransactions,
-    tempColumns: "matched_invoice_id integer",
-  },
+  // Task #1822 — qonto_transactions_matched_invoice_unique_idx wurde entfernt
+  // (mehrere Teilüberweisungen pro Rechnung). Es gibt keinen Startup-Index mehr,
+  // der gegen die Drizzle-Schema-Deklaration gedriftet sein könnte; der Drop
+  // wird in tests/billing/qonto-match-audit.test.ts fachlich abgesichert.
   {
     label:
       "ensure-reservation-captured-transaction-link: budget_reservations_captured_transaction_idx",

@@ -359,11 +359,13 @@ async function runStartupTasks() {
       log(`Reservation-capturedTransactionId-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
-    const { ensureQontoMatchIdempotency } = await import("./startup/ensure-qonto-match-idempotency");
+    // Task #1822 — den partiellen Unique-Index auf matched_invoice_id entfernen,
+    // damit sich mehrere Teilüberweisungen auf dieselbe Rechnung summieren können.
+    const { dropQontoMatchUniqueIndex } = await import("./startup/drop-qonto-match-unique-index");
     try {
-      await ensureQontoMatchIdempotency();
+      await dropQontoMatchUniqueIndex();
     } catch (err) {
-      log(`Qonto-Match-Idempotenz-Migration fehlgeschlagen: ${err}`, "startup");
+      log(`Qonto-Match-Unique-Index-Drop fehlgeschlagen: ${err}`, "startup");
     }
 
     const { ensureQontoAdviceMatchSchema } = await import("./startup/ensure-qonto-advice-match-schema");
