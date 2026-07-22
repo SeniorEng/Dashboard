@@ -124,13 +124,6 @@ export function InsuranceStep({
         });
         return;
       }
-    } else if (newProvider.ikNummer.trim() && !/^\d{9}$/.test(newProvider.ikNummer)) {
-      toast({
-        title: "Ungültige IK-Nummer",
-        description: "Falls angegeben, muss die IK-Nummer genau 9 Ziffern enthalten.",
-        variant: "destructive",
-      });
-      return;
     }
 
     const plzValue = typeof newProvider.plz === 'string' ? newProvider.plz.trim() : "";
@@ -369,13 +362,13 @@ export function InsuranceStep({
               <Input
                 id="newProviderIk"
                 value={newProvider.ikNummer}
-                onChange={(e) => handleNewProviderChange("ikNummer", e.target.value.replace(/\D/g, ""))}
-                placeholder="123456789"
-                maxLength={9}
+                onChange={(e) => handleNewProviderChange("ikNummer", newProvider.isPrivate ? e.target.value : e.target.value.replace(/\D/g, ""))}
+                placeholder={newProvider.isPrivate ? "optional" : "123456789"}
+                maxLength={newProvider.isPrivate ? undefined : 9}
                 data-testid="input-new-provider-ik"
               />
               <p className="text-xs text-gray-500">
-                {newProvider.isPrivate ? "9-stelliges Institutionskennzeichen (optional bei PKV)" : "9-stelliges Institutionskennzeichen"}
+                {newProvider.isPrivate ? "Optional bei PKV – beliebiger Wert möglich" : "9-stelliges Institutionskennzeichen"}
               </p>
             </div>
 

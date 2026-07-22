@@ -129,7 +129,7 @@ router.put("/insurance-providers/:id", asyncHandler("Pflegekasse konnte nicht ak
     return;
   }
 
-  if (ikNummer) {
+  if (!isPrivate && ikNummer) {
     const ikResult = ikNummerSchema.safeParse(ikNummer);
     if (!ikResult.success) {
       res.status(400).json({ error: "VALIDATION", message: "IK-Nummer muss genau 9 Ziffern haben" });

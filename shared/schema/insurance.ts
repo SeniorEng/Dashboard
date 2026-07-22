@@ -102,7 +102,8 @@ export const insertInsuranceProviderSchema = insuranceProviderBaseSchema.refine(
     if (!data.isPrivate) {
       return data.ikNummer && /^\d{9}$/.test(data.ikNummer);
     }
-    return !data.ikNummer || data.ikNummer === "" || /^\d{9}$/.test(data.ikNummer);
+    // Private (PKV): IK-Nummer is truly optional and accepts any value.
+    return true;
   },
   { message: "IK-Nummer muss genau 9 Ziffern haben (bei gesetzlichen Kassen Pflicht)", path: ["ikNummer"] }
 );

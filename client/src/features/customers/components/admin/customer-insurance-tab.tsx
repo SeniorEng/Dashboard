@@ -129,9 +129,6 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
         toast({ title: "Ungültige IK-Nummer", description: "Die IK-Nummer muss genau 9 Ziffern enthalten.", variant: "destructive" });
         return;
       }
-    } else if (newIk.trim() && !/^\d{9}$/.test(newIk)) {
-      toast({ title: "Ungültige IK-Nummer", description: "Falls angegeben, muss die IK-Nummer genau 9 Ziffern enthalten.", variant: "destructive" });
-      return;
     }
 
     createProviderMutation.mutate(
@@ -375,10 +372,10 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
                     <Input
                       id="new-provider-ik"
                       value={newIk}
-                      onChange={(e) => setNewIk(e.target.value.replace(/\D/g, ""))}
-                      placeholder="9 Ziffern"
-                      maxLength={9}
-                      inputMode="numeric"
+                      onChange={(e) => setNewIk(newIsPrivate ? e.target.value : e.target.value.replace(/\D/g, ""))}
+                      placeholder={newIsPrivate ? "optional" : "9 Ziffern"}
+                      maxLength={newIsPrivate ? undefined : 9}
+                      inputMode={newIsPrivate ? undefined : "numeric"}
                       data-testid="input-new-provider-ik"
                     />
                   </div>
@@ -420,6 +417,8 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
               )}
             </div>
 
+            {!showNewProvider && (
+            <>
             <div className="space-y-2">
               <Label htmlFor="versichertennummer">Versichertennummer *</Label>
               <Input
@@ -479,6 +478,8 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
                 )}
               </Button>
             </div>
+            </>
+            )}
           </div>
         </DialogContent>
       </Dialog>
