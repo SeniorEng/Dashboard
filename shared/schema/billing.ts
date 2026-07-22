@@ -371,6 +371,17 @@ export interface InvoiceRenderSnapshot {
    * mit `true` versiegelt.
    */
   prominentPotLabel?: boolean;
+  /**
+   * Task #1825 — eingefrorenes Anzeige-Label der zusammengefassten Kilometer-
+   * Zeile. Neu erzeugte Rechnungen werden mit `"Fahrtkosten/Anfahrt"`
+   * versiegelt. `undefined` = Bestand, der VOR dieser Umbenennung versiegelt
+   * wurde → MUSS mit dem alten Label `"Fahrtkosten"` re-gerendert werden, sonst
+   * driftet PDF (`pdf_hash`) UND das eingebettete ZUGFeRD-/EN-16931-XML
+   * (`ram:Name`) byte-weise gegen das versiegelte Original. Der eingefrorene
+   * Wert fließt identisch durch BEIDE Aggregations-Pfade (PDF-Generator und
+   * ZUGFeRD-Builder), damit PDF und XML dasselbe Label zeigen (Parität).
+   */
+  fahrtkostenLabel?: string;
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

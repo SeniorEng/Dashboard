@@ -219,7 +219,7 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
   // sodass die Reconciliation (LineTotalSum == Nettobetrag) weiterhin hält.
   const sourceLineItems =
     data.lineAggregation === "cumulative"
-      ? aggregateInvoiceLineItems(data.lineItems)
+      ? aggregateInvoiceLineItems(data.lineItems, data.fahrtkostenLabel)
       : data.lineItems;
 
   const lineItems = sourceLineItems.map((item, index) => {

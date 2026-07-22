@@ -134,6 +134,13 @@ export interface InvoicePdfData {
   // Notiz) wird byte-stabil re-gerendert (Render-Snapshot, `pdf_hash`).
   prominentPotLabel?: boolean;
 
+  // Task #1825 — eingefrorenes Anzeige-Label der zusammengefassten Kilometer-
+  // Zeile („Fahrtkosten/Anfahrt" für neue Rechnungen). `undefined` → Default
+  // aus der SSoT (`FAHRTKOSTEN_LABEL`). Bestände re-rendern über den Render-
+  // Snapshot mit dem damals versiegelten Label (fehlt es → „Fahrtkosten"),
+  // damit `pdf_hash` und das versiegelte ZUGFeRD-XML byte-identisch bleiben.
+  fahrtkostenLabel?: string;
+
   // Totals
   netAmountCents: number;
   vatAmountCents: number;
@@ -360,7 +367,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   // byte-stabil per Render-Snapshot eingefroren). Die persistierten Line-Items
   // bleiben unangetastet — kumuliert wird nur die Anzeige.
   const aggregate = data.lineAggregation === "cumulative";
-  const renderItems = aggregate ? aggregateInvoiceLineItems(data.lineItems) : data.lineItems;
+  const renderItems = aggregate ? aggregateInvoiceLineItems(data.lineItems, data.fahrtkostenLabel) : data.lineItems;
   const lineNetCents = renderItems.map(i => i.totalCents);
   const lineVatCents = isStandard
     ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)

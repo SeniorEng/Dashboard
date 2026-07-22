@@ -1,4 +1,5 @@
 import { formatPhoneForDisplay } from "@shared/utils/phone";
+import { FAHRTKOSTEN_LABEL, LEGACY_FAHRTKOSTEN_LABEL } from "@shared/domain/invoice-line-aggregation";
   import { formatCustomerNameLastFirst } from "@shared/utils/format";
   import {
     users,
@@ -495,6 +496,18 @@ export async function buildInvoicePdfData(
   pdfData.prominentPotLabel = options?.snapshot
     ? options.snapshot.prominentPotLabel === true
     : true;
+
+  // Task #1825 — Anzeige-Label der zusammengefassten Kilometer-Zeile. Liegt ein
+  // Snapshot vor (Re-Render einer versiegelten Rechnung), wird der damals
+  // versiegelte Wert reproduziert; fehlt er (Bestand VOR dieser Umbenennung) →
+  // altes Label „Fahrtkosten" (byte-stabile PDF-/XML-Reproduktion gegen
+  // `pdf_hash` / `invoices.zugferd_xml`). Ohne Snapshot (Erst-Persist /
+  // Draft-Vorschau) wird das neue Label `FAHRTKOSTEN_LABEL` gerendert und über
+  // `persistInvoicePdfInner` im Snapshot versiegelt. Der Wert fließt identisch
+  // durch PDF-Generator und ZUGFeRD-Builder (Parität).
+  pdfData.fahrtkostenLabel = options?.snapshot
+    ? (options.snapshot.fahrtkostenLabel ?? LEGACY_FAHRTKOSTEN_LABEL)
+    : FAHRTKOSTEN_LABEL;
 
   // Task #593: Wenn ein Render-Snapshot vorliegt (Verifier-Re-Render-Pfad),
   // werden die Kunden-Stammfelder daraus gelesen statt aus der Live-Tabelle.
@@ -1054,6 +1067,8 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
             // Task #1797: eingefrorenes Flag für den prominenten Topf-Label +
             // die Konsolidierung der redundanten Topf-Nennung.
             prominentPotLabel: true,
+            // Task #1825: eingefrorenes Fahrtkosten-Zeilen-Label.
+            fahrtkostenLabel: FAHRTKOSTEN_LABEL,
           };
         }
         if (artifacts.ln && plan.needsLeistungsnachweis) applyLn(artifacts.ln);

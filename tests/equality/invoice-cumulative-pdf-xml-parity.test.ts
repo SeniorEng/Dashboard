@@ -22,6 +22,7 @@ import { generateZugferdXml } from "../../server/lib/zugferd";
 import {
   aggregateInvoiceLineItems,
   FAHRTKOSTEN_LABEL,
+  LEGACY_FAHRTKOSTEN_LABEL,
 } from "@shared/domain/invoice-line-aggregation";
 import { renderLineItemQuantity } from "@shared/domain/invoice-line-items";
 import { grossUpUnitPriceCents, resolveVatTreatment } from "@shared/domain/invoice-vat";
@@ -397,5 +398,43 @@ describe("Task #1086 — kumulierte Rechnung: PDF == E-Rechnung-XML (Werte je Po
     expect(parseEuroDE(pdf.totalText)).toBe(175);
     // BT-131 (Pro-Zeilen-Betrag) direkt aus dem XML.
     expect(xmlDecimalToCents(x.lineTotalAmount)).toBe(175);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task #1825 — Fahrtkosten-Label „Fahrtkosten/Anfahrt" (neue Rechnungen) vs.
+// Bestands-Re-Render mit dem eingefrorenen alten Label „Fahrtkosten".
+//
+// Der eingefrorene Label-Wert (Render-Snapshot) MUSS identisch durch BEIDE
+// Aggregations-Pfade (PDF-Generator und ZUGFeRD-Builder) fließen, damit PDF und
+// eingebettetes XML nicht auseinanderdriften. Fehlt der Snapshot-Wert (Bestand
+// VOR dieser Umbenennung), setzt der Orchestrator `fahrtkostenLabel` auf das
+// alte Label → byte-stabile PDF-/XML-Reproduktion.
+// ---------------------------------------------------------------------------
+describe("Task #1825 — Fahrtkosten-Label: neu vs. Bestand (Parität PDF/XML)", () => {
+  it("neue Rechnung ohne fahrtkostenLabel rendert Fahrtkosten/Anfahrt in PDF und XML", async () => {
+    const data = makeData();
+    const html = generateInvoiceHtml(data);
+    const xml = await generateZugferdXml(data);
+    if (!xml) throw new Error("ZUGFeRD-XML konnte nicht generiert werden");
+
+    expect(html).toContain(FAHRTKOSTEN_LABEL);
+    expect(html).not.toMatch(new RegExp(`>${LEGACY_FAHRTKOSTEN_LABEL}<`));
+    expect(xml).toContain(`<ram:Name>${FAHRTKOSTEN_LABEL}</ram:Name>`);
+  });
+
+  it("Bestands-Rechnung mit altem fahrtkostenLabel rendert altes Label in PDF und XML", async () => {
+    const data: InvoicePdfData = { ...makeData(), fahrtkostenLabel: LEGACY_FAHRTKOSTEN_LABEL };
+    const html = generateInvoiceHtml(data);
+    const xml = await generateZugferdXml(data);
+    if (!xml) throw new Error("ZUGFeRD-XML konnte nicht generiert werden");
+
+    // Beide Schichten zeigen das alte Label — Parität bleibt gewahrt.
+    expect(xml).toContain(`<ram:Name>${LEGACY_FAHRTKOSTEN_LABEL}</ram:Name>`);
+    expect(xml).not.toContain(`<ram:Name>${FAHRTKOSTEN_LABEL}</ram:Name>`);
+
+    const tbody = html.split("<tbody>")[1]?.split("</tbody>")[0] ?? "";
+    expect([...tbody.matchAll(new RegExp(LEGACY_FAHRTKOSTEN_LABEL, "g"))].length).toBe(1);
+    expect(tbody).not.toContain(FAHRTKOSTEN_LABEL);
   });
 });

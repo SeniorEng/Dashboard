@@ -14,6 +14,7 @@ import fc from "fast-check";
 import {
   aggregateInvoiceLineItems,
   FAHRTKOSTEN_LABEL,
+  LEGACY_FAHRTKOSTEN_LABEL,
   type AggregatableInvoiceLine,
 } from "@shared/domain/invoice-line-aggregation";
 
@@ -57,6 +58,23 @@ describe("aggregateInvoiceLineItems (Task #1083)", () => {
     ]);
     expect(out).toHaveLength(2);
     expect(out.map((l) => l.unitPriceCents).sort()).toEqual([4500, 5000]);
+  });
+
+  it("Default-Label ist Fahrtkosten/Anfahrt (Task #1825)", () => {
+    expect(FAHRTKOSTEN_LABEL).toBe("Fahrtkosten/Anfahrt");
+    expect(LEGACY_FAHRTKOSTEN_LABEL).toBe("Fahrtkosten");
+  });
+
+  it("verwendet das uebergebene Fahrtkosten-Label (Bestands-Re-Render, Task #1825)", () => {
+    const out = aggregateInvoiceLineItems(
+      [
+        line({ serviceCode: "travel_km", quantityUnit: "km", unitPriceCents: 35, quantityRaw: 3, totalCents: 105 }),
+        line({ serviceCode: "customer_km", quantityUnit: "km", unitPriceCents: 35, quantityRaw: 2, totalCents: 70 }),
+      ],
+      LEGACY_FAHRTKOSTEN_LABEL,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].serviceDescription).toBe(LEGACY_FAHRTKOSTEN_LABEL);
   });
 
   it("mergt travel_km + customer_km zu EINER Fahrtkosten-Zeile je Stückpreis", () => {

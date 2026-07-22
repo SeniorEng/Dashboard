@@ -50,8 +50,19 @@ export interface AggregatableInvoiceLine {
   serviceDetails: string | null;
 }
 
-/** Anzeige-Label der zusammengefassten Kilometer-Zeile. */
-export const FAHRTKOSTEN_LABEL = "Fahrtkosten";
+/**
+ * Anzeige-Label der zusammengefassten Kilometer-Zeile (Default für neu
+ * versiegelte Rechnungen). Task #1825: von „Fahrtkosten" auf
+ * „Fahrtkosten/Anfahrt" umbenannt.
+ */
+export const FAHRTKOSTEN_LABEL = "Fahrtkosten/Anfahrt";
+/**
+ * Task #1825: Label, mit dem Bestände (vor dieser Umbenennung versiegelt)
+ * re-gerendert werden. Der Render-Snapshot friert das damals gültige Label ein;
+ * fehlt es (Snapshot vor dieser Änderung), gilt dieser Wert → byte-stabile
+ * PDF-/ZUGFeRD-Reproduktion (`pdf_hash` / versiegeltes XML).
+ */
+export const LEGACY_FAHRTKOSTEN_LABEL = "Fahrtkosten";
 /**
  * Service-Code der zusammengefassten Fahrtkosten-Zeile. Bewusst ein
  * anerkannter km-Code (`travel_km`), damit `isKmLineItem` weiterhin greift und
@@ -106,6 +117,7 @@ function groupToLine(g: LineGroup): AggregatableInvoiceLine {
  */
 export function aggregateInvoiceLineItems<T extends AggregatableInvoiceLine>(
   items: readonly T[],
+  fahrtkostenLabel: string = FAHRTKOSTEN_LABEL,
 ): AggregatableInvoiceLine[] {
   const serviceGroups = new Map<string, LineGroup>();
   const serviceOrder: string[] = [];
@@ -124,7 +136,7 @@ export function aggregateInvoiceLineItems<T extends AggregatableInvoiceLine>(
       let g = kmGroups.get(key);
       if (!g) {
         g = {
-          serviceDescription: FAHRTKOSTEN_LABEL,
+          serviceDescription: fahrtkostenLabel,
           serviceCode: FAHRTKOSTEN_SERVICE_CODE,
           quantityUnit: "km",
           unitPriceCents: item.unitPriceCents,
