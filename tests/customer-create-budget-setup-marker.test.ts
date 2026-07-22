@@ -4,17 +4,16 @@ import { db } from "../server/lib/db";
 import { customers } from "../shared/schema";
 import { apiGet, apiPost, uniqueId, getAuthCookie } from "./test-utils";
 
-// Task #724 (BUG-4) — Reproducer + Vertrag.
+// Task #724 (BUG-4) / Task #1828 — Vertrag für den Setup-Marker.
 //
-// `POST /api/admin/customers` legt einen Pflegekasse-Kunden (PG ≥ 2) ohne
-// `budgets`-Block an. Die statutorischen Töpfe (§45b/§45a/§39-§42a) werden
-// dabei NICHT automatisch initialisiert — der Server signalisiert das aber
-// explizit über `budgetSetupRequired: true` + `requiredBudgetTypes`, damit
-// API-Konsumenten (Wizard, Skripte, Drittsysteme) ohne String-Parsing
-// erkennen, dass noch Folge-Calls (`/initial-budget` + `/type-settings`)
-// nötig sind. `GET /api/budget/:id/overview` direkt nach der Anlage liefert
-// erwartungsgemäß einen leeren Topf (Smoke-Anchor für die Kombination
-// „angelegt + Overview leer").
+// `POST /api/admin/customers` legt einen Pflegekasse-Kunden ohne `budgets`-Block
+// an. Task #1828: `budgetSetupRequired` folgt nicht mehr „gibt es eine
+// persistierte Topf-Zeile?", sondern der Aktivierungs-SSoT (`hasActiveBudgetPot`
+// / `effectiveDefaultPots`). §45b ist für jeden Pflegekassen-Kunden default-aktiv
+// (ohne persistierte Zeile), daher ist `budgetSetupRequired=false` — der Kunde
+// hat bereits einen nutzbaren Topf, auch wenn `GET /overview` (Startwert = 0)
+// noch leer ist. `budgetSetupRequired=true` gilt nur, wenn KEIN Topf aktiv ist
+// (Selbstzahler ⇒ kein Anspruch ⇒ ebenfalls false, kein Setup nötig).
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 
 let insuranceProviderId: number;
@@ -61,12 +60,13 @@ describe("Task #724 — Customer-Create Budget-Setup-Marker", () => {
     expect(res.status).toBe(201);
     createdCustomerIds.push(res.data.id);
 
-    expect(res.data.budgetSetupRequired).toBe(true);
-    expect(res.data.requiredBudgetTypes).toEqual(
-      expect.arrayContaining(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
-    );
+    // Task #1828: §45b ist default-aktiv (Aktivierungs-SSoT) ⇒ es gibt bereits
+    // einen nutzbaren Topf, auch ohne persistierte Zeile ⇒ KEIN Setup nötig.
+    expect(res.data.budgetSetupRequired).toBe(false);
+    expect(res.data.requiredBudgetTypes).toEqual([]);
 
-    // Smoke-Anchor: Overview ist tatsächlich leer — die Markierung lügt nicht.
+    // Smoke-Anchor: Overview-Startwert ist 0 (noch kein Guthaben hinterlegt) —
+    // das ist erlaubt und macht den Topf nicht „nicht eingerichtet".
     const overview = await apiGet<any>(`/api/budget/${res.data.id}/overview`);
     expect(overview.status).toBe(200);
     expect(overview.data.entlastungsbetrag45b.totalAllocatedCents).toBe(0);
@@ -92,7 +92,7 @@ describe("Task #724 — Customer-Create Budget-Setup-Marker", () => {
     expect(res.data.requiredBudgetTypes).toEqual([]);
   });
 
-  it("Pflegekasse_privat + PG4 ohne budgets → budgetSetupRequired=true (gleicher Vertrag wie gesetzlich)", async () => {
+  it("Pflegekasse_privat + PG4 ohne budgets → budgetSetupRequired=false (§45b default-aktiv, gleicher Vertrag wie gesetzlich)", async () => {
     const res = await apiPost<any>(
       "/api/admin/customers",
       pflegekassePayload(4, { billingType: "pflegekasse_privat" }),
@@ -100,13 +100,12 @@ describe("Task #724 — Customer-Create Budget-Setup-Marker", () => {
     expect(res.status).toBe(201);
     createdCustomerIds.push(res.data.id);
 
-    expect(res.data.budgetSetupRequired).toBe(true);
-    expect(res.data.requiredBudgetTypes).toEqual(
-      expect.arrayContaining(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
-    );
+    // Task #1828: default-aktiver §45b ⇒ nutzbarer Topf vorhanden ⇒ kein Setup.
+    expect(res.data.budgetSetupRequired).toBe(false);
+    expect(res.data.requiredBudgetTypes).toEqual([]);
   });
 
-  it("Pflegekasse + PG1 ohne budgets → budgetSetupRequired=false (kein Auto-§45a)", async () => {
+  it("Pflegekasse + PG1 ohne budgets → budgetSetupRequired=false (§45b gilt ab PG1, default-aktiv)", async () => {
     const res = await apiPost<any>("/api/admin/customers", pflegekassePayload(1));
     expect(res.status).toBe(201);
     createdCustomerIds.push(res.data.id);
@@ -140,20 +139,20 @@ describe("Task #724 — Customer-Create Budget-Setup-Marker", () => {
     const first = await post();
     expect(first.status).toBe(201);
     createdCustomerIds.push(first.data.id);
-    expect(first.data.budgetSetupRequired).toBe(true);
+    // Task #1828: §45b default-aktiv ⇒ false (nicht mehr true).
+    expect(first.data.budgetSetupRequired).toBe(false);
 
     // Direkter Retry mit gleichem Key + Payload — Server antwortet 200 +
     // idempotent:true, MUSS aber laut Vertrag #724 die Marker-Felder
     // mitliefern (sonst sieht ein retry-fähiger Client die Vertragslücke
-    // nicht).
+    // nicht). Der Marker wird auf Basis des IST-Zustands berechnet und ist
+    // konsistent mit dem Erst-Response.
     const replay = await post();
     expect(replay.status).toBe(200);
     expect(replay.data.idempotent).toBe(true);
     expect(replay.data.id).toBe(first.data.id);
-    expect(replay.data.budgetSetupRequired).toBe(true);
-    expect(replay.data.requiredBudgetTypes).toEqual(
-      expect.arrayContaining(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
-    );
+    expect(replay.data.budgetSetupRequired).toBe(false);
+    expect(replay.data.requiredBudgetTypes).toEqual([]);
   });
 
   it("Selbstzahler ohne budgets → budgetSetupRequired=false (kein Anspruch)", async () => {

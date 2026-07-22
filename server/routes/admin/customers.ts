@@ -10,7 +10,7 @@ import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { isPflegekasseCustomer, isSelbstzahlerCustomer } from "@shared/domain/customers";
 import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
 import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-validator";
-import { validate45aAmount, validate39_42aAmount } from "@shared/domain/budgets";
+import { validate45aAmount, validate39_42aAmount, hasActiveBudgetPot } from "@shared/domain/budgets";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
 import { BudgetInitialSetupError } from "../../services/budget-initial-setup";
 import { findCustomerDuplicates, findCustomerByVersichertennummer } from "../../lib/duplicate-check";
@@ -58,18 +58,32 @@ async function computeBudgetSetupMarkers(customer: Customer): Promise<{
   const isPflegekasse =
     customer.billingType === "pflegekasse_gesetzlich" ||
     customer.billingType === "pflegekasse_privat";
-  if (!isPflegekasse || (customer.pflegegrad ?? 0) < 2) {
+  // Selbstzahler haben keinen Anspruch auf gesetzliche Töpfe ⇒ nie „Setup nötig".
+  if (!isPflegekasse) {
     return { budgetSetupRequired: false, requiredBudgetTypes: [] };
   }
-  const activeRows = await db
-    .select({ id: customerBudgetTypeSettings.id })
+  // Task #1828 — Nicht mehr „gibt es eine persistierte DB-Zeile?", sondern die
+  // Aktivierungs-SSoT `hasActiveBudgetPot` (effectiveDefaultPots + persistierte
+  // Overrides). §45b ist für Pflegekassen-Kunden default-aktiv (ohne Zeile),
+  // daher feuert der Banner nur noch, wenn KEIN Topf aktiv ist (z. B. §45b
+  // bewusst per offener Zeile deaktiviert). Kein Pflegegrad-Gate: §45b gilt
+  // gesetzlich ab PG 1 und ist im Code nur über „Nicht-Selbstzahler" gegatet.
+  const persistedRows = await db
+    .select({
+      budgetType: customerBudgetTypeSettings.budgetType,
+      enabled: customerBudgetTypeSettings.enabled,
+      validTo: customerBudgetTypeSettings.validTo,
+    })
     .from(customerBudgetTypeSettings)
     .where(and(
       eq(customerBudgetTypeSettings.customerId, customer.id),
       isNull(customerBudgetTypeSettings.validTo),
-    ))
-    .limit(1);
-  if (activeRows.length > 0) {
+    ));
+  const hasActive = hasActiveBudgetPot({
+    customer: { billingType: customer.billingType, pflegegrad: customer.pflegegrad },
+    persisted: persistedRows,
+  });
+  if (hasActive) {
     return { budgetSetupRequired: false, requiredBudgetTypes: [] };
   }
   return {

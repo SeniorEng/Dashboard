@@ -265,6 +265,45 @@ export function resolve45bActivation(args: {
   return { enabled, inRange, active: enabled && inRange };
 }
 
+/** Persistierte `customer_budget_type_settings`-Zeile, soweit für die Aktivitäts-Auflösung des Setup-Banners relevant. */
+export interface PersistedBudgetPotRow {
+  budgetType: string;
+  enabled: boolean;
+  /** `null` ⇒ offene (aktuell wirksame) Zeile; gesetzt ⇒ geschlossen. */
+  validTo: string | null | undefined;
+}
+
+/**
+ * Task #1828 — SSoT für „Hat der Kunde mindestens einen aktiven/nutzbaren
+ * Budget-Topf?". ERSETZT die frühere „gibt es eine persistierte DB-Zeile?"-
+ * Prüfung des Setup-Banners (`computeBudgetSetupMarkers` serverseitig +
+ * `id !== null` im Frontend).
+ *
+ * Eine persistierte offene Zeile (`validTo == null`) überschreibt den Default
+ * mit ihrem `enabled`. Fehlt für einen Topf jede Zeile, gilt der effektive
+ * Default aus `effectiveDefaultPots(customer)` — §45b ist für jeden
+ * Nicht-Selbstzahler default-aktiv (ohne persistierte Zeile). Damit beantworten
+ * Anzeige-Banner, Server-Marker und Buchungs-Engine „Topf konfiguriert/aktiv?"
+ * identisch aus EINER SSoT — kein „persistierte Zeile nötig"-Drift mehr.
+ *
+ * Pure: kein DB-Zugriff.
+ */
+export function hasActiveBudgetPot(args: {
+  customer: DefaultPotCustomer;
+  persisted: PersistedBudgetPotRow[];
+}): boolean {
+  const persistedByType = new Map<string, PersistedBudgetPotRow>();
+  for (const row of args.persisted) {
+    // Nur offene Zeilen zählen; eine geschlossene Zeile (validTo gesetzt) ist
+    // nicht wirksam und darf den Default nicht überschreiben.
+    if (row.validTo == null) persistedByType.set(row.budgetType, row);
+  }
+  return effectiveDefaultPots(args.customer).some((pot) => {
+    const persisted = persistedByType.get(pot.budgetType);
+    return persisted ? persisted.enabled : pot.enabled;
+  });
+}
+
 // ============================================
 // Statutorische Cap-Clamping (Task #441)
 // ============================================

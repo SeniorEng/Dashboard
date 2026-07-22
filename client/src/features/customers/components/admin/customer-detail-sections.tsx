@@ -131,11 +131,14 @@ interface BudgetTypeSettingRow {
 
 /**
  * Banner, der angezeigt wird, sobald ein pflegekassenberechtigter Kunde
- * (Pflegegrad >= 2, billingType pflegekasse_*) noch keine aktiven Budget-
- * Topf-Konfigurationen besitzt. Spiegelt die Server-Logik aus
- * `computeBudgetSetupMarkers` (server/routes/admin/customers.ts) im UI, damit
- * Lücken aus abgebrochenen Wizard-Folge-Flows oder Imports auch ohne
- * persistiertes `setupPendingPayloads` sichtbar werden (Task #730).
+ * (billingType pflegekasse_*) KEINEN per Aktivierungs-SSoT aktiven Budget-Topf
+ * besitzt. Spiegelt die Server-Logik aus `computeBudgetSetupMarkers`
+ * (server/routes/admin/customers.ts) 1:1 im UI (`hasActiveBudgetPot`), damit
+ * Banner und Server-Marker „Topf konfiguriert/aktiv?" identisch beantworten.
+ *
+ * Task #1828: Da §45b für Pflegekassen-Kunden default-aktiv ist (kein
+ * persistiertes Row nötig), feuert der Banner NICHT mehr, nur weil keine
+ * DB-Zeile existiert — sondern nur, wenn tatsächlich kein Topf aktiv ist.
  */
 export function BudgetSetupRequiredBanner({
   customerId,
@@ -148,9 +151,11 @@ export function BudgetSetupRequiredBanner({
   pflegegrad: number | null | undefined;
   onSetup: () => void;
 }) {
-  const requiresSetup =
-    isPflegekasseCustomer((billingType ?? "") as BillingType | "") &&
-    (pflegegrad ?? 0) >= 2;
+  // Task #1828 — Nur Pflegekassen-Kunden können überhaupt gesetzliche Töpfe
+  // brauchen; Selbstzahler nie (kein API-Call). KEIN Pflegegrad-Gate mehr:
+  // §45b gilt gesetzlich ab PG 1 und ist im Code nur über „Nicht-Selbstzahler"
+  // gegatet — die Sichtbarkeit richtet sich allein nach der Aktivierungs-SSoT.
+  const requiresSetup = isPflegekasseCustomer((billingType ?? "") as BillingType | "");
 
   const { data, isLoading } = useQuery<BudgetTypeSettingRow[]>({
     queryKey: ["budget-type-settings", customerId],
@@ -161,12 +166,14 @@ export function BudgetSetupRequiredBanner({
 
   if (!requiresSetup || isLoading || !data) return null;
 
-  // Server liefert Default-Platzhalter mit id=null, wenn keine Zeile in
-  // `customer_budget_type_settings` existiert. Eine echte Konfiguration
-  // erkennen wir an mindestens einer offenen DB-Zeile (id != null, validTo
-  // = null) — dieselbe Logik wie `computeBudgetSetupMarkers` auf dem Server.
-  const hasActiveConfig = data.some(s => s.id !== null && s.validTo === null);
-  if (hasActiveConfig) return null;
+  // Task #1828 — Aktivierungs-SSoT statt „persistierte Zeile existiert": Der
+  // Server (GET type-settings) liefert bereits pro Topf den effektiven
+  // `enabled`-Zustand (default-aktiver §45b kommt als `enabled: true`, id=null).
+  // Ein aktiver/nutzbarer Topf = offene Zeile (validTo=null) mit enabled=true —
+  // identisch zu `hasActiveBudgetPot`/`computeBudgetSetupMarkers` auf dem Server,
+  // keine zweite Definition im Client. Der Banner feuert nur ohne aktiven Topf.
+  const hasActivePot = data.some(s => s.enabled && s.validTo === null);
+  if (hasActivePot) return null;
 
   return (
     <SectionCard className="mb-4 border-amber-300 bg-amber-50">
