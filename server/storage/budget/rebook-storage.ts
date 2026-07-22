@@ -100,6 +100,9 @@ export async function rebookSingleTransactionCore(
     userId: number;
     isSuperAdmin: boolean;
     skipGuard?: boolean;
+    // Task #1837 — Kunden-Kontext für den Default-Topf-Gate. Der Sammel-Pfad
+    // reicht ihn EINMAL durch; fehlt er (Einzel-Rebook), wird er hier geladen.
+    customer?: DefaultPotCustomer;
   },
 ): Promise<{ reversalTransaction: BudgetTransaction; newTransaction: BudgetTransaction | null; amountCents: number }> {
   const { customerId, transactionId, targetBudgetType, userId, isSuperAdmin, skipGuard } = params;
@@ -130,7 +133,8 @@ export async function rebookSingleTransactionCore(
   // Historisierungs-aware (Task #440): die zum ursprünglichen Buchungsdatum
   // gültige Topf-Konfiguration entscheidet, ob die Umbuchung erlaubt ist.
   const txDate = original.transactionDate;
-  const validity = await resolveRebookTargetValidity(tx, customerId, targetBudgetType, txDate);
+  const customer = params.customer ?? await loadDefaultPotCustomer(tx, customerId);
+  const validity = await resolveRebookTargetValidity(tx, customerId, targetBudgetType, txDate, customer);
   if (!validity.valid) {
     throw new Error(validity.reason);
   }
@@ -275,6 +279,9 @@ export async function rebookCustomerMonthCore(
   const { customerId, year, month, targetBudgetType, userId, isSuperAdmin } = params;
   const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
   const monthEnd = lastDayOfMonth(year, month);
+  // Task #1837 — Kunden-Kontext EINMAL laden und an per-Datum-Gültigkeit und
+  // Einzel-Umbuchung weiterreichen (nicht pro Zeile/Datum neu laden).
+  const customer = await loadDefaultPotCustomer(tx, customerId);
 
   {
     // Verbrauchsbuchungen des Monats, die NICHT bereits im Ziel-Topf liegen.
@@ -315,7 +322,7 @@ export async function rebookCustomerMonthCore(
     for (const row of live) {
       let v = validityByDate.get(row.transactionDate);
       if (!v) {
-        v = await resolveRebookTargetValidity(tx, customerId, targetBudgetType, row.transactionDate);
+        v = await resolveRebookTargetValidity(tx, customerId, targetBudgetType, row.transactionDate, customer);
         validityByDate.set(row.transactionDate, v);
       }
       if (v.valid) {
@@ -340,6 +347,7 @@ export async function rebookCustomerMonthCore(
         userId,
         isSuperAdmin,
         skipGuard: true,
+        customer,
       });
       movedAmountCents += result.amountCents;
     }
@@ -448,23 +456,28 @@ export async function getRebookMonthPreview(params: {
     .selectColumnsFrom({ billingType: customers.billingType, pflegegrad: customers.pflegegrad }, db)
     .where(eq(customers.id, customerId))
     .limit(1);
+  const customer: DefaultPotCustomer = { billingType: cust?.billingType, pflegegrad: cust?.pflegegrad };
   const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: monthEnd });
   const availability = await readUnifiedBudgetAvailability(customerId, monthEnd);
 
+  // Task #1837 — Ziel-Topf-Berechtigung über dieselbe Merge-SSoT wie Cascade und
+  // Einzel-/Monats-Umbuchung: eine FEHLENDE Type-Settings-Zeile fällt auf den
+  // (anspruchs-gegateten) Default zurück (§45b default-aktiv für
+  // Pflegekassen-Kunden), statt fälschlich „nicht verfügbar" anzuzeigen. Eine
+  // vorhandene, DEAKTIVIERTE Zeile bleibt nicht berechtigt.
+  const configByType = new Map(
+    resolveEffectivePotConfig({ customer, typeSettings }).map(p => [p.budgetType, p]),
+  );
   const eligibleTargets = BUDGET_TYPES.map((budgetType) => {
-    const setting = typeSettings.find(s => s.budgetType === budgetType);
-    let eligible = !!setting?.enabled;
-    if (eligible && setting) {
-      if (setting.validFrom && monthEnd < setting.validFrom) eligible = false;
-      if (setting.validTo && monthEnd > setting.validTo) eligible = false;
-    }
+    const cfg = configByType.get(budgetType);
+    const eligible = cfg ? isPotEligibleAt(cfg, monthEnd) : false;
     const availableCents = availability.pots[budgetType as CappedBudgetPot]?.availableCents ?? 0;
     return { budgetType: budgetType as string, availableCents, eligible };
   });
 
   // Default-Ziel: in Default-Prioritätsreihenfolge der erste berechtigte Topf
   // NACH §45b mit Kapazität; Fallback erster berechtigter Topf ≠ §45b.
-  const order = effectiveDefaultPots({ billingType: cust?.billingType, pflegegrad: cust?.pflegegrad })
+  const order = effectiveDefaultPots(customer)
     .map(p => p.budgetType)
     .filter(bt => bt !== "entlastungsbetrag_45b");
   const eligibleByType = new Map(eligibleTargets.map(t => [t.budgetType, t]));

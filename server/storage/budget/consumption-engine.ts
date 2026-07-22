@@ -15,7 +15,7 @@ import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { syncCarryoverAndExpiry, calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
-import { effectiveDefaultPots } from "@shared/domain/budgets";
+import { resolveEffectivePotConfig } from "@shared/domain/budgets";
 import { planCascade } from "@shared/domain/budget/plan-cascade";
 import { isPrivatePaymentAllowed, isSelbstzahlerBillingType } from "@shared/domain/budget-selbstzahler-validator";
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
@@ -443,9 +443,10 @@ export async function createCascadeConsumption(params: {
 
     // Task #441 / BUG-19 (Facette A) — Single Source of Truth aus
     // `shared/domain/budgets`. Keine hardcoded Reihenfolge mehr — alle Aufrufer
-    // (Cascade, Preview, Reset-Flows) lesen über `effectiveDefaultPots`, das den
-    // Selbstzahler-/Anspruchs-Gate anwendet. Ohne persistierte type-settings-Zeile
-    // darf §45b so nicht fälschlich für Selbstzahler default-aktiv sein.
+    // (Cascade, Preview, Reset-Flows) lesen über `resolveEffectivePotConfig`
+    // (bzw. `effectiveDefaultPots`), das den Selbstzahler-/Anspruchs-Gate
+    // anwendet. Ohne persistierte type-settings-Zeile darf §45b so nicht
+    // fälschlich für Selbstzahler default-aktiv sein.
     const [defaultPotCustomer] = await customersRepo
       .selectColumnsFrom(
         {
@@ -456,41 +457,30 @@ export async function createCascadeConsumption(params: {
       )
       .where(eq(customers.id, params.customerId))
       .limit(1);
-    const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> =
-      effectiveDefaultPots({
+    // Task #1837 — Topf-Merge über die EINE SSoT `resolveEffectivePotConfig`
+    // (dieselbe, die Umbuchung und Rebook-Vorschau nutzen). ERSETZT den früher
+    // hier inline wiederholten Merge aus Default (`effectiveDefaultPots`) und
+    // persistierten `customer_budget_type_settings` — kein zweiter Merge-Pfad,
+    // keine „Anzeige vs. Buchung"-Drift der Topf-Aktivierung/-Reihenfolge.
+    let priorityOrder = resolveEffectivePotConfig({
+      customer: {
         billingType: defaultPotCustomer?.billingType,
         pflegegrad: defaultPotCustomer?.pflegegrad,
-      }).map(d => ({ ...d, monthlyLimitCents: null }));
+      },
+      typeSettings,
+    });
 
-    let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null }>;
-
-    if (typeSettings.length > 0) {
-      const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
-      priorityOrder = defaultPriority.map(d => {
-        const s = settingsMap.get(d.budgetType);
-        return {
-          budgetType: d.budgetType,
-          enabled: s ? s.enabled : d.enabled,
-          monthlyLimitCents: s ? s.monthlyLimitCents : d.monthlyLimitCents,
-          yearlyLimitCents: s?.yearlyLimitCents ?? null,
-          validFrom: s?.validFrom ?? null,
-          validTo: s?.validTo ?? null,
-        };
-      });
-      priorityOrder.sort((a, b) => {
-        const aPrio = settingsMap.get(a.budgetType)?.priority ?? defaultPriority.find(d => d.budgetType === a.budgetType)!.priority;
-        const bPrio = settingsMap.get(b.budgetType)?.priority ?? defaultPriority.find(d => d.budgetType === b.budgetType)!.priority;
-        return aPrio - bPrio;
-      });
-    } else {
+    // §45b-Monatslimit („Unser Anteil") aus den Budget-Preferences greift NUR,
+    // wenn KEINE einzige type-settings-Zeile existiert (reiner Default-Kunde).
+    // Bewusst hier im Aufrufer (DB-Read) statt im puren Merge — byte-identisch
+    // zum früheren else-Zweig.
+    if (typeSettings.length === 0) {
       const preferences = await getBudgetPreferences(params.customerId, tx);
-      priorityOrder = defaultPriority.map(d => ({
-        ...d,
-        monthlyLimitCents: d.budgetType === "entlastungsbetrag_45b" ? (preferences?.monthlyLimitCents ?? null) : null,
-        yearlyLimitCents: null,
-        validFrom: null,
-        validTo: null,
-      }));
+      priorityOrder = priorityOrder.map(p =>
+        p.budgetType === "entlastungsbetrag_45b"
+          ? { ...p, monthlyLimitCents: preferences?.monthlyLimitCents ?? null }
+          : p,
+      );
     }
 
     // Task #871 — Topf-Kaskade über die EINE pure `planCascade`-Funktion.
