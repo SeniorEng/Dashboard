@@ -77,9 +77,107 @@ export class RebookIssuedInvoiceError extends AppError {
 }
 
 /**
+ * Blocker-Status einer geplanten Umbuchung — die REINE Ableitung (wirft nicht).
+ * Sowohl der ausführende Pfad (`assertRebookAllowed`) als auch die Vorschau
+ * lesen ihren Zustand hieraus — keine zweite, parallele Prüfung.
+ */
+export interface RebookBlockerStatus {
+  /** Monat für den/die verantwortliche:n Mitarbeiter:in abgeschlossen (nur relevant für Nicht-Superadmins). */
+  monthClosed: boolean;
+  monthClosedAppointmentIds: number[];
+  /** Verbrauch hängt an einer aktiven, gestellten (nicht-Entwurf, nicht-stornierten) Rechnung. */
+  issuedInvoice: boolean;
+  issuedInvoiceAppointmentIds: number[];
+}
+
+/**
+ * SSoT für „welche Blocker greifen für diese Umbuchung?". Ermittelt BEIDE
+ * Blocker-Status (Monatsabschluss + bereits gestellte Rechnung) für die
+ * gegebenen Termine, ohne zu werfen. `null`/`undefined`-IDs werden ignoriert.
+ *
+ * Der Superadmin-Bypass des Monatsabschlusses wird abgebildet: für einen
+ * Superadmin ist `monthClosed` immer `false` (leere Liste) — exakt wie im
+ * ausführenden Pfad. Der „bereits abgerechnet"-Block gilt rollenunabhängig.
+ */
+export async function evaluateRebookBlockers(
+  appointmentIds: Array<number | null | undefined>,
+  actor: RebookActor,
+  txClient: DbOrTx = db,
+): Promise<RebookBlockerStatus> {
+  const ids = Array.from(
+    new Set(appointmentIds.filter((id): id is number => id != null)),
+  );
+  const empty: RebookBlockerStatus = {
+    monthClosed: false,
+    monthClosedAppointmentIds: [],
+    issuedInvoice: false,
+    issuedInvoiceAppointmentIds: [],
+  };
+  if (ids.length === 0) return empty;
+
+  // (1) Monatsabschluss — Superadmin umgeht ihn, daher gar nicht erst prüfen.
+  const monthClosedAppointmentIds: number[] = [];
+  if (!actor.isSuperAdmin) {
+    const rows = await txClient
+      .select({
+        id: appointments.id,
+        date: appointments.date,
+        responsibleEmployeeId: sql<number | null>`COALESCE(${appointments.performedByEmployeeId}, ${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`,
+      })
+      .from(appointments)
+      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      .where(inArray(appointments.id, ids));
+
+    const closedCache = new Map<string, boolean>();
+    for (const row of rows) {
+      if (row.responsibleEmployeeId == null) continue;
+      const dateStr = typeof row.date === "string" ? row.date : String(row.date);
+      const key = `${row.responsibleEmployeeId}:${dateStr.slice(0, 7)}`;
+      let closed = closedCache.get(key);
+      if (closed === undefined) {
+        closed = await isMonthClosed(row.responsibleEmployeeId, dateStr);
+        closedCache.set(key, closed);
+      }
+      if (closed) monthClosedAppointmentIds.push(row.id);
+    }
+  }
+
+  // (2) Bereits gestellte (nicht-Entwurf, nicht-stornierte) Rechnung.
+  const issuedRows = await txClient
+    .select({ appointmentId: invoiceLineItems.appointmentId })
+    .from(invoiceLineItems)
+    .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+    .where(
+      and(
+        inArray(invoiceLineItems.appointmentId, ids),
+        ne(invoicesTable.status, "storniert"),
+        ne(invoicesTable.status, "entwurf"),
+        ne(invoicesTable.invoiceType, "stornorechnung"),
+      ),
+    );
+  const issuedInvoiceAppointmentIds = Array.from(
+    new Set(
+      issuedRows
+        .map((r) => r.appointmentId)
+        .filter((id): id is number => id != null),
+    ),
+  );
+
+  return {
+    monthClosed: monthClosedAppointmentIds.length > 0,
+    monthClosedAppointmentIds,
+    issuedInvoice: issuedInvoiceAppointmentIds.length > 0,
+    issuedInvoiceAppointmentIds,
+  };
+}
+
+/**
  * Wirft, wenn die Umbuchung der Verbrauchsbuchungen zu `appointmentIds` durch
  * einen der beiden Guards blockiert ist. `null`/`undefined`-IDs (z. B.
  * manuelle Anpassungen ohne Termin) werden ignoriert.
+ *
+ * Liest den Blocker-Status aus der gemeinsamen `evaluateRebookBlockers`-SSoT —
+ * dieselbe Ableitung, die auch die Vorschau nutzt.
  *
  * @param appointmentIds Termine, deren Verbrauch umgebucht werden soll.
  * @param actor          Akteur (für den Superadmin-Bypass des Monatsabschlusses).
@@ -93,64 +191,15 @@ export async function assertRebookAllowed(
   txClient: DbOrTx = db,
   options: RebookGuardOptions = {},
 ): Promise<void> {
-  const ids = Array.from(
-    new Set(appointmentIds.filter((id): id is number => id != null)),
-  );
-  if (ids.length === 0) return;
+  const status = await evaluateRebookBlockers(appointmentIds, actor, txClient);
 
   // (1) Monatsabschluss — nur Superadmin darf über einen abgeschlossenen Monat.
-  if (!actor.isSuperAdmin) {
-    const rows = await txClient
-      .select({
-        id: appointments.id,
-        date: appointments.date,
-        responsibleEmployeeId: sql<number | null>`COALESCE(${appointments.performedByEmployeeId}, ${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`,
-      })
-      .from(appointments)
-      .innerJoin(customers, eq(appointments.customerId, customers.id))
-      .where(inArray(appointments.id, ids));
-
-    const closedCache = new Map<string, boolean>();
-    const closedAppointmentIds: number[] = [];
-    for (const row of rows) {
-      if (row.responsibleEmployeeId == null) continue;
-      const dateStr = typeof row.date === "string" ? row.date : String(row.date);
-      const key = `${row.responsibleEmployeeId}:${dateStr.slice(0, 7)}`;
-      let closed = closedCache.get(key);
-      if (closed === undefined) {
-        closed = await isMonthClosed(row.responsibleEmployeeId, dateStr);
-        closedCache.set(key, closed);
-      }
-      if (closed) closedAppointmentIds.push(row.id);
-    }
-    if (closedAppointmentIds.length > 0) {
-      throw new RebookMonthClosedError(closedAppointmentIds);
-    }
+  if (status.monthClosed) {
+    throw new RebookMonthClosedError(status.monthClosedAppointmentIds);
   }
 
   // (2) Bereits gestellte (nicht-Entwurf, nicht-stornierte) Rechnung.
-  if (!options.allowIssuedInvoices) {
-    const issuedRows = await txClient
-      .select({ appointmentId: invoiceLineItems.appointmentId })
-      .from(invoiceLineItems)
-      .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
-      .where(
-        and(
-          inArray(invoiceLineItems.appointmentId, ids),
-          ne(invoicesTable.status, "storniert"),
-          ne(invoicesTable.status, "entwurf"),
-          ne(invoicesTable.invoiceType, "stornorechnung"),
-        ),
-      );
-    const issuedAppointmentIds = Array.from(
-      new Set(
-        issuedRows
-          .map((r) => r.appointmentId)
-          .filter((id): id is number => id != null),
-      ),
-    );
-    if (issuedAppointmentIds.length > 0) {
-      throw new RebookIssuedInvoiceError(issuedAppointmentIds);
-    }
+  if (!options.allowIssuedInvoices && status.issuedInvoice) {
+    throw new RebookIssuedInvoiceError(status.issuedInvoiceAppointmentIds);
   }
 }

@@ -854,6 +854,12 @@ interface RebookMonthPreview {
   defaultTarget: string | null;
   hasDrafts: boolean;
   draftCount: number;
+  blockers: {
+    monthClosed: boolean;
+    monthClosedAppointmentIds: number[];
+    issuedInvoice: boolean;
+    issuedInvoiceAppointmentIds: number[];
+  };
 }
 
 interface RebookMonthResult {
@@ -868,6 +874,7 @@ function RebookMonthDialog({ customerId, onDone }: { customerId: number; onDone:
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Default: Vormonat — der mit Abstand häufigste Umbuchungs-Zeitraum. Über den
   // zentralen Datums-Helfer (kein rohes `new Date()`), damit der Monats-Rollover
@@ -903,10 +910,13 @@ function RebookMonthDialog({ customerId, onDone }: { customerId: number; onDone:
     && chosenTarget.availableCents < (preview?.source.totalAmountCents ?? 0);
 
   const mutation = useMutation({
-    mutationFn: async () => unwrapResult(await api.post<RebookMonthResult>(
-      `/budget/${customerId}/rebook-month`,
-      { year, month, targetBudgetType: effectiveTarget }
-    )),
+    mutationFn: async () => {
+      setSubmitError(null);
+      return unwrapResult(await api.post<RebookMonthResult>(
+        `/budget/${customerId}/rebook-month`,
+        { year, month, targetBudgetType: effectiveTarget }
+      ));
+    },
     onSuccess: async (res) => {
       await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
       invalidateRelated(queryClient, "budget", { customerId });
@@ -921,12 +931,21 @@ function RebookMonthDialog({ customerId, onDone }: { customerId: number; onDone:
       });
       setOpen(false);
       setTargetBudgetType("");
+      setSubmitError(null);
       onDone();
     },
     onError: (error: Error) => {
+      // Ablehnung dauerhaft inline im Dialog anzeigen (zusätzlich zum Toast),
+      // damit ein serverseitiger Block nicht als „nichts passiert" wirkt.
+      setSubmitError(error.message);
       toast({ variant: "destructive", title: "Fehler bei Monats-Umbuchung", description: error.message });
     },
   });
+
+  const blockers = preview?.blockers;
+  const blockedByInvoice = blockers?.issuedInvoice === true;
+  const blockedByMonthClosed = blockers?.monthClosed === true;
+  const isBlocked = blockedByInvoice || blockedByMonthClosed;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setTargetBudgetType(""); }}>
@@ -949,11 +968,22 @@ function RebookMonthDialog({ customerId, onDone }: { customerId: number; onDone:
             <Input
               type="month"
               value={monthStr}
-              onChange={(e) => { setMonthStr(e.target.value); setTargetBudgetType(""); }}
+              onChange={(e) => { setMonthStr(e.target.value); setTargetBudgetType(""); setSubmitError(null); }}
               className="mt-1"
               data-testid="input-rebook-month"
             />
           </div>
+
+          {isBlocked && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3" data-testid="warn-rebook-blocked">
+              <p className="text-xs text-red-800 flex items-start gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                {blockedByInvoice
+                  ? "Dieser Monat ist bereits abgerechnet. Bitte zuerst die betroffene Rechnung stornieren, dann umbuchen und neu ausstellen."
+                  : "Monat abgeschlossen — Umbuchung nur durch die Geschäftsführung möglich."}
+              </p>
+            </div>
+          )}
 
           {!validMonth ? (
             <p className="text-sm text-amber-700">Bitte einen gültigen Monat wählen.</p>
@@ -1025,6 +1055,15 @@ function RebookMonthDialog({ customerId, onDone }: { customerId: number; onDone:
               </div>
             </>
           )}
+
+          {submitError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3" data-testid="text-rebook-submit-error">
+              <p className="text-xs text-red-800 flex items-start gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                {submitError}
+              </p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => { setOpen(false); setTargetBudgetType(""); }}>
@@ -1032,7 +1071,7 @@ function RebookMonthDialog({ customerId, onDone }: { customerId: number; onDone:
           </Button>
           <Button
             size="sm"
-            disabled={!validMonth || !hasMovable || !effectiveTarget || mutation.isPending}
+            disabled={!validMonth || !hasMovable || !effectiveTarget || mutation.isPending || isBlocked}
             onClick={() => mutation.mutate()}
             data-testid="btn-confirm-month-rebook"
           >

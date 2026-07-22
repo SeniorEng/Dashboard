@@ -378,7 +378,7 @@ describe("Monats-Umwidmung: Route + Entwurfs-Regen (Task #1785)", () => {
     const originalNumbers = draftsBefore.map((d) => d.invoiceNumber);
 
     // (2) Vorschau: ein gültiges Ziel ≠ §45b mit ausreichender Kapazität finden.
-    const preview = await getRebookMonthPreview({ customerId, year: YEAR, month: MONTH });
+    const preview = await getRebookMonthPreview({ customerId, year: YEAR, month: MONTH, actor: { userId, isSuperAdmin: true } });
     expect(preview.source.totalAmountCents).toBeGreaterThan(0);
     const target = preview.eligibleTargets.find(
       (t) => t.eligible && t.budgetType !== "entlastungsbetrag_45b" && t.availableCents >= preview.source.totalAmountCents,

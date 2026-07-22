@@ -1266,7 +1266,10 @@ router.get("/:customerId/rebook-month-preview", requireAdmin, asyncHandler("Mona
     return;
   }
 
-  const preview = await budgetStorage.getRebookMonthPreview({ customerId, year, month });
+  const preview = await budgetStorage.getRebookMonthPreview({
+    customerId, year, month,
+    actor: { userId: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin === true },
+  });
   // Betroffene Entwurfs-Rechnungen des Monats mitliefern, damit das UI vorwarnen
   // kann, dass die Rechnung(en) nach der Umbuchung neu erzeugt werden.
   const drafts = await getBlockingDraftInvoices(customerId, year, month);

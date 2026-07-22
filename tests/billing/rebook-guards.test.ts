@@ -24,10 +24,12 @@ import {
 } from "@shared/schema";
 import {
   rebookSingleTransaction,
+  getRebookMonthPreview,
 } from "../../server/storage/budget/rebook-storage";
 import {
   RebookIssuedInvoiceError,
   RebookMonthClosedError,
+  evaluateRebookBlockers,
 } from "../../server/storage/budget/rebook-guards";
 import {
   apiGet,
@@ -222,5 +224,66 @@ describe("Rebook-Schutzgitter: bereits gestellte Rechnung (Task #1785)", () => {
 
     // Quelle unverändert (kein Storno gebucht).
     expect(await liveConsumptionCount(apptId)).toBe(1);
+  }, 120_000);
+});
+
+describe("Rebook-Vorschau: Blocker vorab (Task #1827)", () => {
+  it("meldet den bereits-abgerechnet-Blocker für ALLE Rollen (inkl. Superadmin)", async () => {
+    const BILLED_DATE = `${YEAR}-08-14`; // Freitag
+    const { apptId } = await seedRebookable(BILLED_DATE, "11:00", "11:30");
+
+    const [inv] = await db.insert(invoices).values({
+      invoiceNumber: `TEST-RBP-${uniqueId()}`,
+      customerId,
+      billingType: "pflegekasse_gesetzlich",
+      invoiceType: "rechnung",
+      billingMonth: 8,
+      billingYear: YEAR,
+      recipientName: "Test Pflegekasse",
+      status: "versendet",
+    }).returning({ id: invoices.id });
+    await db.insert(invoiceLineItems).values({
+      invoiceId: inv.id,
+      appointmentId: apptId,
+      appointmentDate: BILLED_DATE,
+      serviceDescription: "Alltagsbegleitung",
+      durationMinutes: 30,
+      unitPriceCents: 2380,
+      totalCents: 2380,
+    });
+
+    for (const isSuperAdmin of [false, true]) {
+      const preview = await getRebookMonthPreview({ customerId, year: YEAR, month: 8, actor: { userId, isSuperAdmin } });
+      expect(preview.blockers.issuedInvoice, `issuedInvoice (superadmin=${isSuperAdmin})`).toBe(true);
+      expect(preview.blockers.issuedInvoiceAppointmentIds).toContain(apptId);
+      // (c) Vorschau- und Ausführungs-Ableitung liefern denselben Status.
+      const direct = await evaluateRebookBlockers([apptId], { userId, isSuperAdmin });
+      expect(preview.blockers).toEqual(direct);
+    }
+  }, 120_000);
+
+  it("meldet Monat-abgeschlossen nur für Nicht-Superadmins (nicht abgerechnet)", async () => {
+    const CLOSED_ONLY_DATE = `${YEAR}-09-15`; // Dienstag
+    const { apptId } = await seedRebookable(CLOSED_ONLY_DATE, "12:00", "12:30");
+
+    await db.insert(employeeMonthClosings).values({
+      userId: employeeId,
+      year: YEAR,
+      month: 9,
+      closedByUserId: userId,
+    });
+
+    const adminPreview = await getRebookMonthPreview({ customerId, year: YEAR, month: 9, actor: { userId, isSuperAdmin: false } });
+    expect(adminPreview.blockers.monthClosed).toBe(true);
+    expect(adminPreview.blockers.monthClosedAppointmentIds).toContain(apptId);
+    expect(adminPreview.blockers.issuedInvoice).toBe(false);
+
+    const superPreview = await getRebookMonthPreview({ customerId, year: YEAR, month: 9, actor: { userId, isSuperAdmin: true } });
+    expect(superPreview.blockers.monthClosed).toBe(false);
+    expect(superPreview.blockers.monthClosedAppointmentIds).toEqual([]);
+
+    // (c) Parität mit der direkten SSoT-Ableitung für beide Rollen.
+    expect(adminPreview.blockers).toEqual(await evaluateRebookBlockers([apptId], { userId, isSuperAdmin: false }));
+    expect(superPreview.blockers).toEqual(await evaluateRebookBlockers([apptId], { userId, isSuperAdmin: true }));
   }, 120_000);
 });

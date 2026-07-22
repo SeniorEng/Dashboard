@@ -21,7 +21,13 @@ import {
   isSelbstzahlerBillingType,
 } from "@shared/domain/budget-selbstzahler-validator";
 import { BUDGET_TYPES, effectiveDefaultPots } from "@shared/domain/budgets";
-import { assertRebookAllowed, type RebookGuardOptions } from "./rebook-guards";
+import {
+  assertRebookAllowed,
+  evaluateRebookBlockers,
+  type RebookGuardOptions,
+  type RebookActor,
+  type RebookBlockerStatus,
+} from "./rebook-guards";
 
 /**
  * Task #440/#1785 — SSoT für „darf zum Buchungsdatum auf diesen Ziel-Topf
@@ -350,14 +356,16 @@ export async function getRebookMonthPreview(params: {
   customerId: number;
   year: number;
   month: number;
+  actor: RebookActor;
 }): Promise<{
   year: number;
   month: number;
   source: { totalAmountCents: number; appointmentCount: number; byPot: Array<{ budgetType: string; amountCents: number; count: number }> };
   eligibleTargets: Array<{ budgetType: string; availableCents: number; eligible: boolean }>;
   defaultTarget: string | null;
+  blockers: RebookBlockerStatus;
 }> {
-  const { customerId, year, month } = params;
+  const { customerId, year, month, actor } = params;
   const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
   const monthEnd = lastDayOfMonth(year, month);
 
@@ -444,12 +452,18 @@ export async function getRebookMonthPreview(params: {
     }
   }
 
+  // Blocker-Status aus der gemeinsamen SSoT (dieselbe Ableitung wie der
+  // ausführende Pfad) über alle Termine mit Live-Verbrauch im Monat. Der
+  // Superadmin-Bypass des Monatsabschlusses wird über `actor` mitgeführt.
+  const blockers = await evaluateRebookBlockers(Array.from(apptSet), actor);
+
   return {
     year,
     month,
     source: { totalAmountCents, appointmentCount: apptSet.size, byPot },
     eligibleTargets,
     defaultTarget,
+    blockers,
   };
 }
 
