@@ -24,7 +24,6 @@ import {
   BUDGET_TYPES,
   effectiveDefaultPots,
   resolveEffectivePotConfig,
-  isPotEligibleAt,
   type DefaultPotCustomer,
 } from "@shared/domain/budgets";
 import {
@@ -41,6 +40,61 @@ import {
  * (ungültig ⇒ Fehler) als auch die Monats-/Sammel-Umbuchung (ungültig ⇒ Zeile
  * bleibt stehen) nutzen — keine zwei parallelen Ableitungen der Topf-Gültigkeit.
  */
+type PotEligibility = { eligible: true } | { eligible: false; reason: string };
+
+/**
+ * Task #1837/#1785 — EINE SSoT für „ist der Topf zum Stichtag ein gültiges
+ * Umbuchungsziel?" (aktiviert UND im Gültigkeitsfenster). Vorschau (Stichtag =
+ * Monatsende) und Ausführung (Stichtag = `transactionDate` pro Zeile) leiten die
+ * Berechtigung IDENTISCH ab — kein „Anzeige vs. Buchung"-Drift.
+ *
+ * `forDate@Stichtag` liefert die zum Stichtag gültige Zeile (Fenster-gefiltert,
+ * inkl. deaktivierter Zeilen), blendet aber (noch) nicht bzw. nicht mehr gültige
+ * Zeilen aus. Damit lässt sich „Topf NIE konfiguriert" (⇒ anspruchs-gegateter
+ * Default, §45b default-aktiv für Pflegekassen-Kunden, Task #1837) NICHT von
+ * „Topf konfiguriert, aber Fenster deckt diesen Stichtag nicht" (⇒ überspringen,
+ * Task #1785) unterscheiden. Deshalb entscheidet bei fehlender Stichtags-Zeile
+ * die Existenz IRGENDEINER Zeile (`forEdit`):
+ *   - existiert eine ⇒ außerhalb des Fensters ⇒ NICHT berechtigt (kein Default),
+ *   - existiert keine ⇒ echter Default über `resolveEffectivePotConfig`.
+ *
+ * Eine vorhandene, DEAKTIVIERTE Zeile bleibt „nicht aktiviert".
+ */
+async function resolveRebookPotEligibility(
+  tx: DbClient,
+  customerId: number,
+  customer: DefaultPotCustomer,
+  asOfDate: string,
+): Promise<Map<string, PotEligibility>> {
+  const settingsAtDate = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }, tx);
+  const rowAtDate = new Set(settingsAtDate.map(s => s.budgetType));
+  const configuredEver = new Set(
+    (await readBudgetTypeSettings(customerId, { kind: "forEdit" }, tx)).map(s => s.budgetType),
+  );
+  const result = new Map<string, PotEligibility>();
+  for (const cfg of resolveEffectivePotConfig({ customer, typeSettings: settingsAtDate })) {
+    const bt = cfg.budgetType;
+    if (!rowAtDate.has(bt) && configuredEver.has(bt)) {
+      result.set(bt, { eligible: false, reason: "Ziel-Topf ist für das Buchungsdatum nicht gültig" });
+      continue;
+    }
+    if (!cfg.enabled) {
+      result.set(bt, { eligible: false, reason: "Ziel-Topf ist nicht aktiviert" });
+      continue;
+    }
+    if (cfg.validFrom && asOfDate < cfg.validFrom) {
+      result.set(bt, { eligible: false, reason: "Ziel-Topf ist für das Buchungsdatum noch nicht gültig" });
+      continue;
+    }
+    if (cfg.validTo && asOfDate > cfg.validTo) {
+      result.set(bt, { eligible: false, reason: "Ziel-Topf ist für das Buchungsdatum abgelaufen" });
+      continue;
+    }
+    result.set(bt, { eligible: true });
+  }
+  return result;
+}
+
 async function resolveRebookTargetValidity(
   tx: DbClient,
   customerId: number,
@@ -48,23 +102,12 @@ async function resolveRebookTargetValidity(
   txDate: string,
   customer: DefaultPotCustomer,
 ): Promise<{ valid: true } | { valid: false; reason: string }> {
-  const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: txDate }, tx);
-  // Task #1837 — dieselbe Merge-SSoT wie die Cascade/Vorschau: eine FEHLENDE
-  // Type-Settings-Zeile fällt auf den (anspruchs-gegateten) Default zurück
-  // (§45b default-aktiv für Pflegekassen-Kunden), statt fälschlich „nicht
-  // aktiviert" zu melden. Eine vorhandene, DEAKTIVIERTE Zeile bleibt inaktiv.
-  const target = resolveEffectivePotConfig({ customer, typeSettings })
-    .find(p => p.budgetType === targetBudgetType);
-  if (!target || !target.enabled) {
+  const eligibility = await resolveRebookPotEligibility(tx, customerId, customer, txDate);
+  const e = eligibility.get(targetBudgetType);
+  if (!e) {
     return { valid: false, reason: "Ziel-Topf ist nicht aktiviert" };
   }
-  if (target.validFrom && txDate < target.validFrom) {
-    return { valid: false, reason: "Ziel-Topf ist für das Buchungsdatum noch nicht gültig" };
-  }
-  if (target.validTo && txDate > target.validTo) {
-    return { valid: false, reason: "Ziel-Topf ist für das Buchungsdatum abgelaufen" };
-  }
-  return { valid: true };
+  return e.eligible ? { valid: true } : { valid: false, reason: e.reason };
 }
 
 /**
@@ -457,22 +500,22 @@ export async function getRebookMonthPreview(params: {
     .where(eq(customers.id, customerId))
     .limit(1);
   const customer: DefaultPotCustomer = { billingType: cust?.billingType, pflegegrad: cust?.pflegegrad };
-  const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: monthEnd });
   const availability = await readUnifiedBudgetAvailability(customerId, monthEnd);
 
-  // Task #1837 — Ziel-Topf-Berechtigung über dieselbe Merge-SSoT wie Cascade und
-  // Einzel-/Monats-Umbuchung: eine FEHLENDE Type-Settings-Zeile fällt auf den
-  // (anspruchs-gegateten) Default zurück (§45b default-aktiv für
-  // Pflegekassen-Kunden), statt fälschlich „nicht verfügbar" anzuzeigen. Eine
-  // vorhandene, DEAKTIVIERTE Zeile bleibt nicht berechtigt.
-  const configByType = new Map(
-    resolveEffectivePotConfig({ customer, typeSettings }).map(p => [p.budgetType, p]),
-  );
+  // Task #1837/#1785 — Ziel-Topf-Berechtigung über dieselbe SSoT wie der
+  // ausführende Pfad (`resolveRebookPotEligibility`), Stichtag = Monatsende:
+  // fehlende Zeile ⇒ anspruchs-gegateter Default (§45b default-aktiv für
+  // Pflegekassen-Kunden, statt fälschlich „nicht verfügbar"); konfigurierte, aber
+  // außerhalb des Fensters liegende Zeile ⇒ nicht berechtigt; deaktivierte Zeile
+  // ⇒ nicht berechtigt. Kein „Anzeige vs. Buchung"-Drift.
+  const eligibilityByType = await resolveRebookPotEligibility(db, customerId, customer, monthEnd);
   const eligibleTargets = BUDGET_TYPES.map((budgetType) => {
-    const cfg = configByType.get(budgetType);
-    const eligible = cfg ? isPotEligibleAt(cfg, monthEnd) : false;
     const availableCents = availability.pots[budgetType as CappedBudgetPot]?.availableCents ?? 0;
-    return { budgetType: budgetType as string, availableCents, eligible };
+    return {
+      budgetType: budgetType as string,
+      availableCents,
+      eligible: eligibilityByType.get(budgetType)?.eligible ?? false,
+    };
   });
 
   // Default-Ziel: in Default-Prioritätsreihenfolge der erste berechtigte Topf

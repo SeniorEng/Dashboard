@@ -310,6 +310,85 @@ describe("Monats-Umwidmung: Kern (Task #1785)", () => {
       ));
     expect(reversals.length).toBe(0);
   }, 120_000);
+
+  it("A4 — default-abgeleiteter §45b (KEINE type-settings-Zeile) ist als Ziel berechtigt (#1837)", async () => {
+    // Repro Kunde #202 („Bauer, Ullrich"): Pflegekassen-Kunde OHNE persistierte
+    // §45b-`customer_budget_type_settings`-Zeile. §45b ist für anspruchs-
+    // berechtigte Pflegekassen-Kunden default-AKTIV — die Umbuchungs-Vorschau
+    // MUSS §45b daher als berechtigtes Ziel führen. Vor #1837 las die
+    // Eligibility nur `setting?.enabled`, sodass eine fehlende Zeile fälschlich
+    // als „nicht verfügbar" erschien. Jetzt fällt sie über die EINE Merge-SSoT
+    // (`resolveEffectivePotConfig`) auf den anspruchs-gegateten Default zurück.
+    const { customerId, employeeId } = await createCustomerWithEmployee();
+    // BEWUSST KEIN PUT /type-settings — reiner Default-Kunde.
+    await seedRebookable(customerId, employeeId, EARLY_DATE, "09:00", 2380);
+
+    const preview = await getRebookMonthPreview({
+      customerId, year: YEAR, month: MONTH, actor: { userId, isSuperAdmin: true },
+    });
+    const b45 = preview.eligibleTargets.find((t) => t.budgetType === "entlastungsbetrag_45b");
+    expect(b45, `§45b fehlt in eligibleTargets: ${JSON.stringify(preview.eligibleTargets)}`).toBeTruthy();
+    // Kern-Fix: default-abgeleiteter §45b ist berechtigt (aktiviert + im Fenster).
+    expect(b45!.eligible).toBe(true);
+    // §45a und §39/§42a sind default-DEAKTIVIERT (Opt-in pro Kunde) ⇒ korrekt
+    // NICHT berechtigt — der Default-Fallback aktiviert NUR §45b.
+    expect(preview.eligibleTargets.find((t) => t.budgetType === "umwandlung_45a")!.eligible).toBe(false);
+    expect(preview.eligibleTargets.find((t) => t.budgetType === "ersatzpflege_39_42a")!.eligible).toBe(false);
+  }, 120_000);
+
+  it("A5 — explizit DEAKTIVIERTE §45b-Zeile bleibt NICHT berechtigt (kein Default-Fallback) (#1837)", async () => {
+    // Gegenprobe zur SSoT-Regel: eine VORHANDENE, bewusst abgeschaltete
+    // §45b-Zeile darf NICHT wie eine fehlende Zeile behandelt (und über den
+    // Default wieder aktiviert) werden. Fehlende Zeile → Default; vorhandene
+    // Zeile gilt unverändert.
+    const { customerId, employeeId } = await createCustomerWithEmployee();
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+    await seedRebookable(customerId, employeeId, EARLY_DATE, "09:00", 2380);
+
+    const preview = await getRebookMonthPreview({
+      customerId, year: YEAR, month: MONTH, actor: { userId, isSuperAdmin: true },
+    });
+    const b45 = preview.eligibleTargets.find((t) => t.budgetType === "entlastungsbetrag_45b");
+    expect(b45, `§45b fehlt in eligibleTargets: ${JSON.stringify(preview.eligibleTargets)}`).toBeTruthy();
+    expect(b45!.eligible).toBe(false);
+  }, 120_000);
+
+  it("A6 — AUSFUEHRUNG: Umbuchung auf DEAKTIVIERTEN Paragraf-45b wird uebersprungen (Grund nicht aktiviert) (#1837)", async () => {
+    // Gegenprobe auf dem AUSFÜHRUNGS-Pfad (A5 pinnt nur die Vorschau): Vorschau
+    // UND Buchung leiten die Berechtigung aus derselben SSoT ab. Eine bewusst
+    // deaktivierte §45b-Zeile darf auch beim tatsächlichen Umbuchen NICHT über
+    // den Default reaktiviert werden — die Quellzeile bleibt stehen (skip), kein
+    // Verbrauch wird nach §45b gebucht.
+    const { customerId } = await createCustomerWithEmployee();
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+    const empId = cleanupEmployeeIds[cleanupEmployeeIds.length - 1];
+    const src = await seedRebookable(customerId, empId, EARLY_DATE, "09:00", 2380); // §39-Quellzeile
+
+    const result = await rebookCustomerMonth({
+      customerId, year: YEAR, month: MONTH,
+      targetBudgetType: "entlastungsbetrag_45b", userId, isSuperAdmin: false,
+    });
+    expect(result.rebookedCount).toBe(0);
+    expect(result.skippedCount).toBe(1);
+    expect(result.skipped[0].transactionId).toBe(src.txId);
+    expect(result.skipped[0].reason).toMatch(/nicht aktiviert/i);
+
+    // Quellzeile unverändert live in §39, KEINE §45b-Zeile gebucht.
+    const after = await liveConsumptionByPot(customerId);
+    expect(after.get("ersatzpflege_39_42a")?.count).toBe(1);
+    expect(after.get("entlastungsbetrag_45b")?.count ?? 0).toBe(0);
+  }, 120_000);
 });
 
 describe("Monats-Umwidmung: Route + Entwurfs-Regen (Task #1785)", () => {
