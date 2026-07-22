@@ -20,7 +20,13 @@ import {
   isPrivatePaymentAllowed,
   isSelbstzahlerBillingType,
 } from "@shared/domain/budget-selbstzahler-validator";
-import { BUDGET_TYPES, effectiveDefaultPots } from "@shared/domain/budgets";
+import {
+  BUDGET_TYPES,
+  effectiveDefaultPots,
+  resolveEffectivePotConfig,
+  isPotEligibleAt,
+  type DefaultPotCustomer,
+} from "@shared/domain/budgets";
 import {
   assertRebookAllowed,
   evaluateRebookBlockers,
@@ -40,19 +46,41 @@ async function resolveRebookTargetValidity(
   customerId: number,
   targetBudgetType: string,
   txDate: string,
+  customer: DefaultPotCustomer,
 ): Promise<{ valid: true } | { valid: false; reason: string }> {
   const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: txDate }, tx);
-  const targetSetting = typeSettings.find(s => s.budgetType === targetBudgetType);
-  if (!targetSetting || !targetSetting.enabled) {
+  // Task #1837 — dieselbe Merge-SSoT wie die Cascade/Vorschau: eine FEHLENDE
+  // Type-Settings-Zeile fällt auf den (anspruchs-gegateten) Default zurück
+  // (§45b default-aktiv für Pflegekassen-Kunden), statt fälschlich „nicht
+  // aktiviert" zu melden. Eine vorhandene, DEAKTIVIERTE Zeile bleibt inaktiv.
+  const target = resolveEffectivePotConfig({ customer, typeSettings })
+    .find(p => p.budgetType === targetBudgetType);
+  if (!target || !target.enabled) {
     return { valid: false, reason: "Ziel-Topf ist nicht aktiviert" };
   }
-  if (targetSetting.validFrom && txDate < targetSetting.validFrom) {
+  if (target.validFrom && txDate < target.validFrom) {
     return { valid: false, reason: "Ziel-Topf ist für das Buchungsdatum noch nicht gültig" };
   }
-  if (targetSetting.validTo && txDate > targetSetting.validTo) {
+  if (target.validTo && txDate > target.validTo) {
     return { valid: false, reason: "Ziel-Topf ist für das Buchungsdatum abgelaufen" };
   }
   return { valid: true };
+}
+
+/**
+ * Task #1837 — Kunden-Kontext für den Default-Topf-Gate (billingType/pflegegrad).
+ * EINMAL je Umbuchungs-Aufruf laden und weiterreichen (nicht pro Datum/Zeile),
+ * damit `resolveEffectivePotConfig` die Defaults korrekt anspruchs-gegatet
+ * anwendet. `billingType` ist nicht historisiert — der aktuelle Wert wird
+ * gelesen, konsistent zur Cascade, die historische Daten ebenfalls gegen den
+ * aktuellen `billingType` bucht.
+ */
+async function loadDefaultPotCustomer(tx: DbClient, customerId: number): Promise<DefaultPotCustomer> {
+  const [row] = await customersRepo
+    .selectColumnsFrom({ billingType: customers.billingType, pflegegrad: customers.pflegegrad }, tx)
+    .where(eq(customers.id, customerId))
+    .limit(1);
+  return { billingType: row?.billingType, pflegegrad: row?.pflegegrad };
 }
 
 /**

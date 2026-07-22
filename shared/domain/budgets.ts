@@ -210,6 +210,101 @@ export function effectiveDefaultPots(customer: DefaultPotCustomer): EffectiveDef
   }));
 }
 
+/** Persistierte `customer_budget_type_settings`-Zeile, soweit für die effektive Topf-Konfiguration relevant. */
+export interface BudgetTypeSettingRow {
+  budgetType: string;
+  enabled: boolean;
+  priority?: number | null;
+  monthlyLimitCents?: number | null;
+  yearlyLimitCents?: number | null;
+  validFrom?: string | null;
+  validTo?: string | null;
+}
+
+/**
+ * Effektive Konfiguration EINES Topfes nach Merge von persistierter Zeile und
+ * Default. Ergebnis-Reihenfolge = Prioritätsreihenfolge.
+ */
+export interface ResolvedPotConfig {
+  budgetType: BudgetType;
+  /** persistierte Zeile ⇒ deren `enabled`; fehlende Zeile ⇒ Default (`effectiveDefaultPots`). */
+  enabled: boolean;
+  priority: number;
+  monthlyLimitCents: number | null;
+  yearlyLimitCents: number | null;
+  /** `null` ⇒ offene (unbeschränkte) Grenze. */
+  validFrom: string | null;
+  validTo: string | null;
+}
+
+/**
+ * Task #1837 — SSoT für „welche Töpfe hat ein Kunde und wie sind sie
+ * konfiguriert?". Merged die persistierten `customer_budget_type_settings`-
+ * Zeilen mit den effektiven Defaults (`effectiveDefaultPots`):
+ *
+ *   - Zeile vorhanden ⇒ deren `enabled`/`validFrom`/`validTo`/`priority`/Limits.
+ *     Eine DEAKTIVIERTE Zeile (`enabled=false`) bleibt deaktiviert — sie wird
+ *     NICHT wie eine fehlende Zeile behandelt.
+ *   - Zeile fehlt ⇒ Default-`enabled` aus `effectiveDefaultPots`, Fenster offen
+ *     (unbeschränkt), keine Limits, Default-`priority`.
+ *
+ * ERSETZT den bisher inline in der Cascade (`consumption-engine.ts`) und im
+ * Umbuchungs-Pfad (`rebook-storage.ts`) wiederholten Merge, damit Buchung,
+ * Umbuchung und Vorschau die Topf-Aktivierung IDENTISCH ableiten (keine
+ * „Anzeige vs. Buchung"-Drift; ein default-abgeleiteter §45b-Topf ist überall
+ * gleich berechtigt). `resolve45bActivation` ist ein dünner Wrapper hierüber.
+ *
+ * Der §45b-Monatslimit-Sonderfall aus den Budget-Preferences (nur wenn KEINE
+ * einzige Zeile existiert) bleibt bewusst DRAUSSEN — er ist ein DB-Read und
+ * wird vom Cascade-Aufrufer NACH diesem Merge angewandt.
+ *
+ * Pure: kein DB-Zugriff.
+ */
+export function resolveEffectivePotConfig(args: {
+  customer: DefaultPotCustomer;
+  typeSettings: BudgetTypeSettingRow[];
+}): ResolvedPotConfig[] {
+  const settingsMap = new Map(args.typeSettings.map((s) => [s.budgetType, s]));
+  return effectiveDefaultPots(args.customer)
+    .map((d) => {
+      const s = settingsMap.get(d.budgetType);
+      return {
+        budgetType: d.budgetType,
+        enabled: s ? s.enabled : d.enabled,
+        priority: s?.priority ?? d.priority,
+        monthlyLimitCents: s ? (s.monthlyLimitCents ?? null) : null,
+        yearlyLimitCents: s?.yearlyLimitCents ?? null,
+        validFrom: s?.validFrom ?? null,
+        validTo: s?.validTo ?? null,
+      };
+    })
+    .sort((a, b) => a.priority - b.priority);
+}
+
+/** Liegt `asOfDate` im (offen begrenzten) `validFrom..validTo`-Fenster? */
+function isWithinPotWindow(
+  validFrom: string | null | undefined,
+  validTo: string | null | undefined,
+  asOfDate: string,
+): boolean {
+  if (validFrom && asOfDate < validFrom) return false;
+  if (validTo && asOfDate > validTo) return false;
+  return true;
+}
+
+/**
+ * Task #1837 — SSoT für „ist dieser Topf zum Stichtag ein gültiges Buchungs-/
+ * Umbuchungsziel?" (aktiviert UND im Gültigkeitsfenster). Die Kapazität
+ * (verfügbare Cents) ist eine SEPARATE Frage und wird vom Unified-Reader
+ * beantwortet — hier NICHT geprüft.
+ */
+export function isPotEligibleAt(
+  cfg: Pick<ResolvedPotConfig, "enabled" | "validFrom" | "validTo">,
+  asOfDate: string,
+): boolean {
+  return cfg.enabled && isWithinPotWindow(cfg.validFrom, cfg.validTo, asOfDate);
+}
+
 /** Persistierte (oder fehlende) §45b-Type-Settings-Zeile, soweit für die Aktivitäts-Auflösung relevant. */
 export interface Budget45bSettingRow {
   enabled: boolean;
@@ -253,16 +348,19 @@ export function resolve45bActivation(args: {
   asOfDate: string;
 }): Budget45bActivation {
   const { setting, billingType, asOfDate } = args;
-  const defaultEnabled =
-    effectiveDefaultPots({ billingType, pflegegrad: null }).find(
-      (p) => p.budgetType === "entlastungsbetrag_45b",
-    )?.enabled ?? false;
-  const enabled = setting ? setting.enabled : defaultEnabled;
-  const inRange = !setting
-    ? true
-    : (!setting.validFrom || asOfDate >= setting.validFrom) &&
-      (!setting.validTo || asOfDate <= setting.validTo);
-  return { enabled, inRange, active: enabled && inRange };
+  const cfg = resolveEffectivePotConfig({
+    customer: { billingType, pflegegrad: null },
+    typeSettings: setting
+      ? [{
+          budgetType: "entlastungsbetrag_45b",
+          enabled: setting.enabled,
+          validFrom: setting.validFrom ?? null,
+          validTo: setting.validTo ?? null,
+        }]
+      : [],
+  }).find((p) => p.budgetType === "entlastungsbetrag_45b")!;
+  const inRange = isWithinPotWindow(cfg.validFrom, cfg.validTo, asOfDate);
+  return { enabled: cfg.enabled, inRange, active: cfg.enabled && inRange };
 }
 
 /** Persistierte `customer_budget_type_settings`-Zeile, soweit für die Aktivitäts-Auflösung des Setup-Banners relevant. */
