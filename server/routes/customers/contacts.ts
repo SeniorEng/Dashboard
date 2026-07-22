@@ -4,6 +4,7 @@ import { customerManagementStorage } from "../../storage/customer-management";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../../lib/params";
 import { auditService } from "../../services/audit";
+import { actorRole } from "../../lib/team-lead";
 
 const router = Router();
 
@@ -33,6 +34,7 @@ router.post("/:id/contacts", asyncHandler("Kontakt konnte nicht hinzugefügt wer
     changedFields: ["notfallkontakt_hinzugefügt"],
     oldValues: {},
     newValues: { vorname: contact.vorname, nachname: contact.nachname, contactType: contact.contactType },
+    actor: { role: actorRole(user) },
   }, req.ip);
 
   res.status(201).json(contact);
@@ -63,6 +65,7 @@ router.patch("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktu
     changedFields: ["notfallkontakt_aktualisiert"],
     oldValues: {},
     newValues: { contactId, ...result.data },
+    actor: { role: actorRole(user) },
   }, req.ip);
 
   res.json(contact);
@@ -87,6 +90,7 @@ router.delete("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht gel
     changedFields: ["notfallkontakt_gelöscht"],
     oldValues: { contactId },
     newValues: {},
+    actor: { role: actorRole(user) },
   }, req.ip);
 
   res.json({ success: true });

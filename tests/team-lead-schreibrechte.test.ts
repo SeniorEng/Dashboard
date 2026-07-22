@@ -23,9 +23,12 @@ import {
  *    zuordnen, umplanen und löschen.
  *  - Bereits gestartete Termine bleiben für Teamleiter gesperrt.
  *  - Teamleiter dürfen Mitarbeiter-Kunden-Zuordnungen firmenweit ändern.
+ *  - Teamleiter dürfen firmenweit Kunden-Stammdaten, Pflegegrad, Vertrag,
+ *    Kontakte, Dokumente und Unterschriften bearbeiten (spiegelbildlich zum
+ *    firmenweiten Leserecht) — auch für nicht zugeordnete Kunden.
  *  - Kaufmännische Bereiche bleiben Admin-only.
- *  - Reguläre Mitarbeiter dürfen weiterhin nur eigene Termine bearbeiten und
- *    keine Kunden-Zuordnungen ändern.
+ *  - Reguläre Mitarbeiter dürfen weiterhin nur eigene Termine bearbeiten,
+ *    keine Kunden-Zuordnungen und keine fremden Kunden-Stammdaten ändern.
  */
 
 const createdEmployeeIds: number[] = [];
@@ -243,44 +246,79 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
     });
   });
 
-  describe("Kunden-Stammdaten / Dokumente / Kontakte bleiben Admin/Zugeordnete-only", () => {
-    it("Teamleiter darf KEINE Kunden-Stammdaten eines fremden Kunden ändern (PATCH /api/customers/:id)", async () => {
+  describe("Kunden-Stammdaten / Dokumente / Kontakte firmenweit für Teamleiter", () => {
+    it("Teamleiter darf Kunden-Stammdaten eines fremden Kunden ändern (PATCH /api/customers/:id)", async () => {
       const res = await apiPatchAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}`, {
         telefon: "+4917699999999",
       });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      expect(res.data.telefon).toBe("+4917699999999");
     });
 
-    it("Teamleiter darf KEINEN Pflegegrad eines fremden Kunden setzen", async () => {
+    it("Teamleiter darf Pflegegrad eines fremden Kunden setzen", async () => {
       const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/care-level`, {
         pflegegrad: 4,
         seitDatum: "2024-06-01",
       });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      expect(res.data.pflegegrad).toBe(4);
     });
 
-    it("Teamleiter darf KEINEN Vertragstext eines fremden Kunden ändern", async () => {
+    it("Teamleiter darf Vertragstext eines fremden Kunden ändern", async () => {
       const res = await apiPatchAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/contract`, {
-        vereinbarteLeistungen: "TL252 darf das nicht",
+        vereinbarteLeistungen: "TL252 darf das jetzt",
+      });
+      expect(res.status).toBe(200);
+      expect(res.data.vereinbarteLeistungen).toBe("TL252 darf das jetzt");
+    });
+
+    it("Teamleiter darf einen Kontakt eines fremden Kunden anlegen", async () => {
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/contacts`, {
+        vorname: "Test",
+        nachname: "Erlaubt",
+        telefon: "+4917600000000",
+        beziehung: "Sohn/Tochter",
+      });
+      expect(res.status).toBe(201);
+      expect(res.data.nachname).toBe("Erlaubt");
+    });
+
+    it("Teamleiter darf ein Dokument eines fremden Kunden hochladen", async () => {
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/documents`, {
+        documentTypeId: 1,
+        objectPath: ".private/test/erlaubt.pdf",
+        fileName: "erlaubt.pdf",
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it("Teamleiter wird beim Erfassen von Unterschriften eines fremden Kunden nicht mehr vom Schreib-Gate blockiert", async () => {
+      // Kein 403 mehr: das Schreib-Gate lässt Teamleiter firmenweit durch.
+      // Ein evtl. fehlschlagendes PDF-Rendering (kein Object-Storage in CI)
+      // führt zu 4xx/5xx ausserhalb des Gates, aber niemals zu 403.
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/signatures`, {
+        signatures: [
+          { templateSlug: "nicht-existierende-vorlage", customerSignatureData: "data:image/png;base64,iVBORw0KGgo=" },
+        ],
+      });
+      expect(res.status).not.toBe(403);
+    });
+  });
+
+  describe("Reguläre Mitarbeiter bleiben auf zugeordnete Kunden beschränkt", () => {
+    it("regulärer Mitarbeiter darf KEINE Stammdaten eines fremden Kunden ändern", async () => {
+      const res = await apiPatchAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerB}`, {
+        telefon: "+4917688888888",
       });
       expect(res.status).toBe(403);
     });
 
-    it("Teamleiter darf KEINEN Kontakt eines fremden Kunden anlegen", async () => {
-      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/contacts`, {
+    it("regulärer Mitarbeiter darf KEINEN Kontakt eines fremden Kunden anlegen", async () => {
+      const res = await apiPostAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerB}/contacts`, {
         vorname: "Test",
         nachname: "Forbidden",
         telefon: "+4917600000000",
         beziehung: "Sohn/Tochter",
-      });
-      expect(res.status).toBe(403);
-    });
-
-    it("Teamleiter darf KEIN Dokument eines fremden Kunden hochladen", async () => {
-      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/documents`, {
-        documentTypeId: 1,
-        objectPath: ".private/test/forbidden.pdf",
-        fileName: "forbidden.pdf",
       });
       expect(res.status).toBe(403);
     });

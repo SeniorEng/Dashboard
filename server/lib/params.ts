@@ -43,15 +43,17 @@ export function parseOptionalIntQuery(
 }
 
 /**
- * Schreibrecht auf einen Kunden: nur Admin oder Mitarbeiter, die dem Kunden
- * zugeordnet sind. Teamleitung erhält absichtlich KEIN firmenweites
- * Schreibrecht auf Kunden-Stammdaten/Dokumente/Kontakte/Signaturen — TL-
- * Schreibrechte beschränken sich auf Termine und auf
- * `PATCH /api/customers/:id/assignment` (siehe `server/routes/customers.ts`).
+ * Schreibrecht auf einen Kunden: Admin, Teamleitung (firmenweit, flacher
+ * Marker) oder Mitarbeiter, die dem Kunden zugeordnet sind. Teamleiter haben
+ * damit firmenweites Schreibrecht auf Kunden-Stammdaten/Pflegegrad/Vertrag/
+ * Kontakte/Dokumente/Signaturen — exakt spiegelbildlich zu ihrem firmenweiten
+ * Leserecht (`requireCustomerReadAccess`). Reguläre Mitarbeiter bleiben strikt
+ * auf ihre zugeordneten Kunden beschränkt. Dies ist die SSoT „darf dieser
+ * Nutzer diesen Kunden bearbeiten?".
  */
 export async function requireCustomerAccess(req: Request, res: Response, customerId: number): Promise<boolean> {
   const user = req.user!;
-  if (user.isAdmin) return true;
+  if (user.isAdmin || isTeamLead(user)) return true;
   const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
   if (!assignedCustomerIds.includes(customerId)) {
     res.status(403).json({ error: "Zugriff verweigert" });

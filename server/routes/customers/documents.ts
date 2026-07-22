@@ -6,6 +6,8 @@ import { generateAndStorePdf, getDocumentPdfBuffer, createSigningLinkAndRespond 
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../../lib/params";
 import { buildContentDisposition } from "@shared/domain/invoice-export-filename";
+import { auditService } from "../../services/audit";
+import { actorRole } from "../../lib/team-lead";
 
 const router = Router();
 
@@ -92,6 +94,14 @@ router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgela
   const batchLabel = typeof req.body.batchLabel === "string" ? req.body.batchLabel : undefined;
   const documentDate = typeof req.body.documentDate === "string" && req.body.documentDate ? req.body.documentDate : undefined;
   const doc = await documentStorage.uploadCustomerDocument(result.data, user.id, { skipDeactivation, batchId, batchLabel, documentDate });
+
+  await auditService.customerUpdated(user.id, customerId, {
+    changedFields: ["dokument_hochgeladen"],
+    oldValues: {},
+    newValues: { documentTypeId: result.data.documentTypeId, fileName: result.data.fileName },
+    actor: { role: actorRole(user) },
+  }, req.ip);
+
   res.status(201).json(doc);
 }));
 
@@ -178,6 +188,13 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
     signingIp,
     signingLocation,
   });
+
+  await auditService.customerUpdated(user.id, customerId, {
+    changedFields: ["dokument_erstellt"],
+    oldValues: {},
+    newValues: { templateId, signingStatus },
+    actor: { role: actorRole(user) },
+  }, req.ip);
 
   await createSigningLinkAndRespond(req, res, result, signingStatus, deferEmployeeSignature);
 }));

@@ -176,7 +176,7 @@ class AuditService {
   async customerCareLevelChanged(
     userId: number,
     customerId: number,
-    metadata: { oldPflegegrad: number | null; newPflegegrad: number; seitDatum: string },
+    metadata: { oldPflegegrad: number | null; newPflegegrad: number; seitDatum: string; actor?: { role: ActorRole } },
     ipAddress?: string,
     exec?: DbOrTx,
   ): Promise<void> {
@@ -296,7 +296,7 @@ class AuditService {
   async customerContractUpdated(
     userId: number,
     customerId: number,
-    metadata: { changedFields: string[]; oldValues: Record<string, unknown>; newValues: Record<string, unknown> },
+    metadata: { changedFields: string[]; oldValues: Record<string, unknown>; newValues: Record<string, unknown>; actor?: { role: ActorRole } },
     ipAddress?: string,
     exec?: DbOrTx,
   ): Promise<void> {

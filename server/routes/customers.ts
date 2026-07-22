@@ -136,7 +136,7 @@ router.patch("/:id", asyncHandler("Kundendaten konnten nicht aktualisiert werden
 
   const updated = await customerManagementStorage.updateCustomer(id, data);
 
-  await auditService.customerUpdated(user.id, id, { changedFields, oldValues, newValues }, req.ip);
+  await auditService.customerUpdated(user.id, id, { changedFields, oldValues, newValues, actor: { role: actorRole(user) } }, req.ip);
 
   res.json(updated);
 }));
@@ -169,6 +169,7 @@ router.post("/:id/care-level", asyncHandler("Pflegegrad konnte nicht aktualisier
     oldPflegegrad,
     newPflegegrad: pflegegrad,
     seitDatum,
+    actor: { role: actorRole(user) },
   }, req.ip);
 
   const updated = await storage.getCustomer(id);
@@ -202,6 +203,7 @@ router.patch("/:id/contract", asyncHandler("Vertragsdaten konnten nicht aktualis
     changedFields: ["vereinbarteLeistungen"],
     oldValues: { vereinbarteLeistungen: oldValue },
     newValues: { vereinbarteLeistungen },
+    actor: { role: actorRole(user) },
   }, req.ip);
 
   res.json({ vereinbarteLeistungen });
@@ -345,6 +347,15 @@ router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespei
   if (errors.length > 0 && results.length === 0) {
     res.status(422).json({ code: "SIGNING_FAILED", message: "Alle Unterschriften fehlgeschlagen — bitte versuchen Sie es erneut", details: errors });
     return;
+  }
+
+  if (results.length > 0) {
+    await auditService.customerUpdated(user.id, customerId, {
+      changedFields: ["kunden_unterschriften_erfasst"],
+      oldValues: {},
+      newValues: { templateSlugs: parsed.data.signatures.map((s) => s.templateSlug) },
+      actor: { role: actorRole(user) },
+    }, req.ip);
   }
 
   res.status(results.length === parsed.data.signatures.length ? 201 : 207).json({ results, errors });
