@@ -72,6 +72,9 @@ const ALLOWED_PATHS = [
   "client/src/features/time-tracking/components/day-detail-panel.tsx",
   // Fahrtdienst-Routing-Vorschau (vor dem Speichern, kein Line-Item).
   "client/src/features/appointments/components/fahrtdienst-panel.tsx",
+  // Leistungsnachweis-Übersicht: zeigt die roh erfassten Leerfahrt-km eines
+  // No-Shows als Aggregat-Anzeige, keine Rechnungs-Line-Item-Menge.
+  "client/src/pages/service-records.tsx",
   // Tests, Skripte und Build-Artefakte.
   "tests/",
   "scripts/",

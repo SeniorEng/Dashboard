@@ -13,7 +13,7 @@
 //   • „Neu-Rechnung?"  → generateInvoiceCore (Invoice-per-Pot-Split)
 // Es wird KEINE parallele Mathe eingeführt.
 
-import { sql, eq, and, or, gt, inArray, isNull } from "drizzle-orm";
+import { sql, eq, and, or, gt, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
 import { withAudit } from "../lib/with-audit";
 import { badRequest, notFound } from "../lib/errors";
@@ -30,6 +30,7 @@ import { stornoInvoiceCascade } from "./invoice-storno";
 import { generateInvoiceCore } from "./invoice-calc";
 import { upsertInitialBalanceAllocation } from "../storage/budget/allocation-storage";
 import { assertRebookAllowed } from "../storage/budget/rebook-guards";
+import { appointmentsRepo, budgetAllocationsRepo } from "../repos";
 import {
   rebookNetZeroAppointmentCore,
   type RebookPrivatePotOverride,
@@ -179,15 +180,14 @@ export async function reduceInvoice45bToPaidAmount(
 
   // Precondition: ein SPÄTERER §45b-Startwert (Monat > Abrechnungsmonat) würde
   // durch das #1812-Reset überschrieben/verfälscht → hart ablehnen.
-  const laterStartwert = await db
-    .select({ id: budgetAllocations.id })
-    .from(budgetAllocations)
+  const laterStartwert = await budgetAllocationsRepo
+    .selectColumnsFrom({ id: budgetAllocations.id })
     .where(
       and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, BUDGET_TYPE_45B),
         eq(budgetAllocations.source, "initial_balance"),
-        isNull(budgetAllocations.deletedAt),
+        budgetAllocationsRepo.activeOnly(),
         or(
           gt(budgetAllocations.year, billingYear),
           and(eq(budgetAllocations.year, billingYear), gt(budgetAllocations.month, billingMonth)),
@@ -272,9 +272,8 @@ export async function reduceInvoice45bToPaidAmount(
     // Termine in AUFSTEIGENDER Datumsreihenfolge neu buchen — die FIFO-
     // Verfügbarkeit wird je Termin as-of dessen Datum gelesen, daher muss die
     // Reihenfolge chronologisch sein, sonst driftet die Zuteilung.
-    const apptRows = await tx
-      .select({ id: appointments.id, date: appointments.date })
-      .from(appointments)
+    const apptRows = await appointmentsRepo
+      .selectColumnsFrom({ id: appointments.id, date: appointments.date }, tx)
       .where(inArray(appointments.id, apptIds));
     const orderedApptIds = apptRows
       .slice()

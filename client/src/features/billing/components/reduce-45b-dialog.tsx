@@ -15,6 +15,7 @@ import { iconSize } from "@/design-system";
 import { AlertTriangle, Loader2, Scissors } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem } from "@shared/api";
+import { parseEuroDE } from "@shared/utils/money";
 import { formatAmount } from "../utils";
 import type { Reduce45bResponse, Reduce45bTargetPot } from "../types";
 
@@ -37,15 +38,6 @@ const TARGET_POT_OPTIONS: { value: Reduce45bTargetPot; label: string; hint: stri
   { value: "private", label: "Privat (Selbstzahler, inkl. 19% MwSt.)", hint: "Kein Deckel — der Rest wird dem Kunden privat berechnet." },
 ];
 
-// „12,34" oder „12.34" → 1234 Cent. Leere/ungültige Eingabe → null.
-function parseEuroToCents(raw: string): number | null {
-  const cleaned = raw.trim().replace(/\s/g, "").replace(",", ".");
-  if (cleaned === "") return null;
-  const euro = Number(cleaned);
-  if (!Number.isFinite(euro) || euro < 0) return null;
-  return Math.round(euro * 100);
-}
-
 export function Reduce45bDialog({ target, onOpenChange, mutation }: Reduce45bDialogProps) {
   const [paidEuro, setPaidEuro] = useState("");
   const [targetPot, setTargetPot] = useState<Reduce45bTargetPot | null>(null);
@@ -59,7 +51,7 @@ export function Reduce45bDialog({ target, onOpenChange, mutation }: Reduce45bDia
   }, [target?.id]);
 
   const invoiceGrossCents = target?.grossAmountCents ?? 0;
-  const paidCents = useMemo(() => parseEuroToCents(paidEuro), [paidEuro]);
+  const paidCents = useMemo(() => parseEuroDE(paidEuro), [paidEuro]);
 
   // Y muss 0 < Y < X sein (sonst gibt es nichts zu kürzen).
   const paidValid = paidCents !== null && paidCents > 0 && paidCents < invoiceGrossCents;

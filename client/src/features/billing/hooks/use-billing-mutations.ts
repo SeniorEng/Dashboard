@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated, refetchWithPoll } from "@/lib/query-invalidation";
+import { formatEuroDE } from "@shared/utils/money";
 import type {
   InvoiceItem,
   GenerateInvoiceResponse as GenerateResponse,
@@ -582,7 +583,7 @@ export function useBillingMutations({
       if (data.reissue.ok) {
         toast({
           title: "§45b-Rechnung gekürzt",
-          description: `Storniert, neu ausgestellt. Überhang ${(data.overflowCents / 100).toFixed(2)} € umgebucht.`,
+          description: `Storniert, neu ausgestellt. Überhang ${formatEuroDE(data.overflowCents)} umgebucht.`,
         });
       } else {
         toast({

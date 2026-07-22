@@ -31,6 +31,7 @@ import {
 import { db, type DbOrTx } from "../../lib/db";
 import { AppError } from "../../lib/errors";
 import { isMonthClosed } from "../time-tracking/month-closing";
+import { appointmentsRepo } from "../../repos";
 
 export interface RebookActor {
   userId: number;
@@ -118,13 +119,12 @@ export async function evaluateRebookBlockers(
   // (1) Monatsabschluss — Superadmin umgeht ihn, daher gar nicht erst prüfen.
   const monthClosedAppointmentIds: number[] = [];
   if (!actor.isSuperAdmin) {
-    const rows = await txClient
-      .select({
+    const rows = await appointmentsRepo
+      .selectColumnsFrom({
         id: appointments.id,
         date: appointments.date,
         responsibleEmployeeId: sql<number | null>`COALESCE(${appointments.performedByEmployeeId}, ${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`,
-      })
-      .from(appointments)
+      }, txClient)
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(inArray(appointments.id, ids));
 

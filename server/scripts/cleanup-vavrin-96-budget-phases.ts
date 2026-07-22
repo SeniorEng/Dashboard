@@ -38,12 +38,13 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { customerBudgetTypeSettings, users } from "@shared/schema";
+import { SETTINGS_VALID_FROM_EPOCH } from "@shared/domain/budget-settings-sentinel";
 import { auditService } from "../services/audit";
 
 const CUSTOMER_ID = 96;
 const APPLY = process.argv.includes("--apply");
 
-const EPOCH = "1970-01-01";
+const EPOCH = SETTINGS_VALID_FROM_EPOCH;
 
 interface Row {
   id: number;
