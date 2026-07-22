@@ -158,9 +158,6 @@ export default function AdminInsuranceProviders() {
         toast({ title: "IK-Nummer muss genau 9 Ziffern haben", variant: "destructive" });
         return null;
       }
-    } else if (form.ikNummer.trim() && !/^\d{9}$/.test(form.ikNummer)) {
-      toast({ title: "Falls angegeben, muss die IK-Nummer genau 9 Ziffern haben", variant: "destructive" });
-      return null;
     }
     const plzValue = typeof form.plz === 'string' ? form.plz.trim() : "";
     if (plzValue && !/^\d{5}$/.test(plzValue)) {
@@ -528,13 +525,13 @@ export default function AdminInsuranceProviders() {
               <Input
                 id="ikNummer"
                 value={form.ikNummer}
-                onChange={(e) => handleChange("ikNummer", e.target.value.replace(/\D/g, ""))}
-                placeholder="123456789"
-                maxLength={9}
+                onChange={(e) => handleChange("ikNummer", form.isPrivate ? e.target.value : e.target.value.replace(/\D/g, ""))}
+                placeholder={form.isPrivate ? "" : "123456789"}
+                maxLength={form.isPrivate ? undefined : 9}
                 data-testid="input-provider-ik"
               />
               <p className="text-xs text-gray-500">
-                {form.isPrivate ? "9-stelliges Institutionskennzeichen (optional bei PKV)" : "9-stelliges Institutionskennzeichen"}
+                {form.isPrivate ? "Institutionskennzeichen (optional bei PKV, beliebiges Format)" : "9-stelliges Institutionskennzeichen"}
               </p>
             </div>
 

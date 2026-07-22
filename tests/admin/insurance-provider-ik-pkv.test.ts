@@ -109,3 +109,40 @@ describe("Task #1826 — Route: POST/PUT /api/admin/insurance-providers PKV-IK",
     expect(res.status).toBe(400);
   });
 });
+
+describe("Task #1831 — Kostenträger-Verwaltungsseite: PKV-IK auch nicht-numerisch beliebig", () => {
+  it("Schema akzeptiert PKV mit alphanumerischer IK ('IK-4112a')", () => {
+    const res = insertInsuranceProviderSchema.safeParse({ name: `PKV-${TAG}`, isPrivate: true, ikNummer: "IK-4112a" });
+    expect(res.success).toBe(true);
+  });
+
+  it("POST der Verwaltungsseite akzeptiert PKV mit beliebiger IK ('IK-4112a')", async () => {
+    const res = await apiPost<ProviderResponse>("/api/admin/insurance-providers", {
+      name: `PKV-Mgmt-${TAG}`,
+      isPrivate: true,
+      ikNummer: "IK-4112a",
+    });
+    expect(res.status).toBe(201);
+    expect(res.data.id).toBeTruthy();
+    createdIds.push(res.data.id!);
+  });
+
+  it("PUT der Verwaltungsseite akzeptiert PKV-Update mit beliebiger IK ('IK-9x')", async () => {
+    const [row] = await db
+      .insert(insuranceProviders)
+      .values({ name: `PKV-Mgmt-Put-${TAG}`, isPrivate: true } as any)
+      .returning({ id: insuranceProviders.id });
+    createdIds.push(row.id);
+
+    const res = await apiPut<ProviderResponse>(`/api/admin/insurance-providers/${row.id}`, {
+      ikNummer: "IK-9x",
+    });
+    expect(res.status).toBe(200);
+
+    const [updated] = await db
+      .select({ ikNummer: insuranceProviders.ikNummer })
+      .from(insuranceProviders)
+      .where(eq(insuranceProviders.id, row.id));
+    expect(updated.ikNummer).toBe("IK-9x");
+  });
+});
