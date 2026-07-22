@@ -14,6 +14,7 @@ import type {
   DiscardDraftsResponse,
   BulkDeleteResponse,
   BulkStatusResponse,
+  RepairPdfsResponse,
 } from "@shared/api";
 import type { GenerateAllResponse, Reduce45bResponse, Reduce45bTargetPot } from "../types";
 
@@ -602,6 +603,72 @@ export function useBillingMutations({
     },
   });
 
+  // Task #1834 — Sammel-Reparatur der als „PDF-Fehler"/„PDF…" markierten
+  // Rechnungen. Ersetzt das manuelle Einzel-Anklicken jeder betroffenen
+  // Rechnung. Der Server verarbeitet pro Aufruf einen beschränkten Block und
+  // meldet `remaining`; wir rufen so lange erneut auf, bis der Rückstand
+  // abgearbeitet ist, und melden dabei den Fortschritt („X von Y verarbeitet").
+  // Ohne `invoiceIds` repariert der Server den gesamten Rückstand, mit
+  // `invoiceIds` nur die aktuelle Auswahl.
+  const repairPdfsMutation = useMutation({
+    mutationFn: async (invoiceIds?: number[]) => {
+      const merged: RepairPdfsResponse = {
+        summary: { repaired: 0, failed: 0, remaining: 0, total: 0 },
+        results: [],
+      };
+      let knownTotal = 0;
+      let guard = 0;
+      // Sicherheits-Deckel gegen Endlos-Schleifen (z. B. dauerhaft fehlschlagende
+      // Rechnungen, die im Rückstand verbleiben).
+      const MAX_ROUNDS = 500;
+      while (guard++ < MAX_ROUNDS) {
+        const body = invoiceIds && invoiceIds.length > 0 ? { invoiceIds } : {};
+        const result = await api.post<RepairPdfsResponse>("/billing/repair-pdfs", body);
+        const data = unwrapResult(result);
+        merged.summary.repaired += data.summary.repaired;
+        merged.summary.failed += data.summary.failed;
+        merged.results.push(...data.results);
+        // Gesamt beim ersten Block festhalten (Nenner für den Fortschritt).
+        if (knownTotal === 0) knownTotal = data.summary.total;
+        knownTotal = Math.max(knownTotal, merged.summary.repaired + merged.summary.failed + data.summary.remaining);
+        setBulkActionProgress({
+          processed: merged.summary.repaired + merged.summary.failed,
+          total: knownTotal,
+        });
+        // Fertig, wenn nichts mehr aussteht oder dieser Block nichts erledigen
+        // konnte (nur Fehler / Chromium weg → sonst Endlos-Schleife).
+        if (data.summary.remaining === 0 || data.summary.repaired === 0) {
+          merged.summary.remaining = data.summary.remaining;
+          break;
+        }
+      }
+      merged.summary.total = knownTotal;
+      return merged;
+    },
+    onSuccess: (data: RepairPdfsResponse) => {
+      const { summary } = data;
+      if (summary.total === 0) {
+        toast({ title: "Keine PDF-Fehler gefunden", description: "Alle Rechnungen haben bereits ein PDF." });
+      } else if (summary.failed === 0 && summary.remaining === 0) {
+        toast({ title: "PDF-Fehler behoben", description: `${summary.repaired} Rechnung(en) repariert.` });
+      } else {
+        toast({
+          title: "PDF-Reparatur abgeschlossen",
+          description: `${summary.repaired} repariert, ${summary.failed} fehlgeschlagen${summary.remaining > 0 ? `, ${summary.remaining} verbleibend` : ""}.`,
+          variant: summary.failed > 0 ? "destructive" : undefined,
+        });
+      }
+      invalidateRelated(queryClient, "billing");
+      onBulkActionSuccess?.();
+    },
+    onError: (error: Error) => {
+      toast({ title: "PDF-Reparatur fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+    onSettled: () => {
+      setBulkActionProgress(null);
+    },
+  });
+
   return {
     generateMutation,
     discardDraftsMutation,
@@ -609,6 +676,7 @@ export function useBillingMutations({
     reduce45bMutation,
     bulkDeleteMutation,
     bulkStatusMutation,
+    repairPdfsMutation,
     sendInvoiceMutation,
     markSentMutation,
     generateAllMutation,

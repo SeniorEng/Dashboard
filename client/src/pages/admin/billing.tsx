@@ -23,7 +23,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
-import { ArrowLeft, CalendarDays, FileText, Printer } from "lucide-react";
+import { ArrowLeft, CalendarDays, FileText, Printer, Loader2 } from "lucide-react";
 import type { InvoiceItem } from "@shared/api";
 import { isBulkActionableDraft, isPflegekasseBatchDraft } from "@shared/domain/billing-drafts";
 import {
@@ -173,6 +173,7 @@ export default function AdminBilling() {
     reduce45bMutation,
     bulkDeleteMutation,
     bulkStatusMutation,
+    repairPdfsMutation,
     sendInvoiceMutation,
     markSentMutation,
     generateAllMutation,
@@ -494,6 +495,21 @@ export default function AdminBilling() {
               <Printer className={`${iconSize.sm} mr-1`} />
               Sammeldruck
             </Button>
+            {/* Task #1834: Sammel-Reparatur aller „PDF-Fehler"-Rechnungen in
+                einem Rutsch (ersetzt das Einzel-Anklicken jeder Rechnung). */}
+            <Button
+              variant="outline"
+              onClick={() => repairPdfsMutation.mutate(undefined)}
+              disabled={repairPdfsMutation.isPending}
+              data-testid="button-repair-pdfs"
+            >
+              {repairPdfsMutation.isPending ? (
+                <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+              ) : (
+                <FileText className={`${iconSize.sm} mr-1`} />
+              )}
+              PDF-Fehler beheben
+            </Button>
           </div>
 
           <PendingInvoicesCard
@@ -527,6 +543,8 @@ export default function AdminBilling() {
             onBulkDelete={() => setPendingBulkAction({ type: "delete" })}
             onBulkStatus={(status) => setPendingBulkAction({ type: "status", status })}
             onBulkPrint={handleBulkPrint}
+            onBulkRepairPdfs={() => repairPdfsMutation.mutate(Array.from(selectedIds))}
+            repairPdfsPending={repairPdfsMutation.isPending}
             bulkPrintPending={bulkPrintPreviewMutation.isPending}
             singlePdfExportPending={singlePdfExportMutation.isPending}
             bulkActionPending={bulkActionPending}

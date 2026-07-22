@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { iconSize } from "@/design-system";
-import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight, Printer } from "lucide-react";
+import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight, Printer, FileText } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
 import {
@@ -83,6 +83,9 @@ interface InvoiceListProps {
   // Nur Rechnungen vs + Leistungsnachweise. Ersetzt „Lexware-Export" und
   // „Drucken (inkl. Leistungsnachweise)".
   onBulkPrint: (opts: { combine: boolean; includeLeistungsnachweise: boolean }) => void;
+  // Task #1834: Sammel-Reparatur der „PDF-Fehler" für die aktuelle Auswahl.
+  onBulkRepairPdfs: () => void;
+  repairPdfsPending: boolean;
   // Laufender „Zusammengefasst"-Druck (1 PDF, /bulk-print-preview).
   bulkPrintPending: boolean;
   // Laufender „Einzeln (ZIP)"-Export (/single-pdf-export).
@@ -115,6 +118,8 @@ export function InvoiceList({
   onBulkDelete,
   onBulkStatus,
   onBulkPrint,
+  onBulkRepairPdfs,
+  repairPdfsPending,
   bulkPrintPending,
   singlePdfExportPending,
   bulkActionPending,
@@ -284,6 +289,16 @@ export function InvoiceList({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onBulkRepairPdfs}
+                  disabled={bulkActionPending || repairPdfsPending}
+                  data-testid="button-bulk-repair-pdfs"
+                >
+                  <FileText className={`${iconSize.sm} mr-1`} />
+                  PDF-Fehler beheben
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

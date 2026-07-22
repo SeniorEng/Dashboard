@@ -36,7 +36,7 @@ import {
 } from "@shared/schema";
 import type { Invoice, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
 import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
-import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse, BulkDeleteResultItem, BulkDeleteResponse, BulkStatusResultItem, BulkStatusResponse } from "@shared/api";
+import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse, BulkDeleteResultItem, BulkDeleteResponse, BulkStatusResultItem, BulkStatusResponse, RepairPdfsResultItem, RepairPdfsResponse } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
 import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
@@ -809,6 +809,86 @@ router.post("/bulk-status", asyncHandler("Status konnte nicht aktualisiert werde
   const updated = results.filter((r) => r.status === "updated").length;
   const response: BulkStatusResponse = {
     summary: { updated, skipped: results.length - updated, total: results.length },
+    results,
+  };
+  res.json(response);
+}));
+
+// Task #1834 — Sammel-Reparatur der als „PDF-Fehler"/„PDF…" markierten
+// Rechnungen. Ersetzt das manuelle Einzel-Anklicken jeder betroffenen Rechnung.
+// Nutzt exakt dieselbe „braucht PDF?"-Auswahl wie der Boot-Backfill
+// (`pdfPath IS NULL`, bei Pflegekassen zusätzlich `leistungsnachweisPath IS NULL`,
+// Stornorechnungen ausgenommen) und denselben Self-Heal-Pfad `persistInvoicePdf`
+// — KEINE zweite Render-/Persist-Logik. Verarbeitung in einem beschränkten Block
+// pro Request (kein Timeout bei großem Rückstand); der Client ruft wiederholt
+// auf, solange `remaining > 0`. Optional auf eine ID-Liste (aktuelle Auswahl)
+// einschränkbar. Rendering läuft (wie in `persistInvoicePdf`) außerhalb der
+// DB-Transaktion.
+const REPAIR_PDFS_MAX_PER_REQUEST = 25;
+router.post("/repair-pdfs", asyncHandler("PDFs konnten nicht repariert werden", async (req, res) => {
+  const parsed = z.object({
+    invoiceIds: z.array(z.number().int().positive()).max(1000).optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+  const restrictIds = parsed.data.invoiceIds
+    ? Array.from(new Set(parsed.data.invoiceIds))
+    : null;
+
+  // Dieselbe Selektions-Bedingung wie `backfillInvoicePdfs` (Boot-Backfill).
+  const needsPdf = and(
+    ne(invoicesTable.invoiceType, "stornorechnung"),
+    or(
+      isNull(invoicesTable.pdfPath),
+      and(
+        isNull(invoicesTable.leistungsnachweisPath),
+        sql`${invoicesTable.billingType} IN ('pflegekasse_privat', 'pflegekasse_gesetzlich')`,
+      ),
+    ),
+  );
+  const whereClause = restrictIds && restrictIds.length > 0
+    ? and(needsPdf, inArray(invoicesTable.id, restrictIds))
+    : needsPdf;
+
+  // Gesamt-Rückstand ermitteln (für den Fortschritts-Nenner) und den nächsten
+  // Block abholen.
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(invoicesTable)
+    .where(whereClause);
+
+  const rows = await db.select({
+    id: invoicesTable.id,
+    invoiceNumber: invoicesTable.invoiceNumber,
+  })
+    .from(invoicesTable)
+    .where(whereClause)
+    .orderBy(invoicesTable.id)
+    .limit(REPAIR_PDFS_MAX_PER_REQUEST);
+
+  const results: RepairPdfsResultItem[] = [];
+  for (const row of rows) {
+    try {
+      await persistInvoicePdf(row.id);
+      results.push({ invoiceId: row.id, invoiceNumber: row.invoiceNumber, status: "repaired" });
+    } catch (err) {
+      const reason = err instanceof ChromiumUnavailableError
+        ? "PDF-Engine (Chromium) ist nicht verfügbar."
+        : (err instanceof Error ? err.message : String(err));
+      log(`repair-pdfs: Rechnung #${row.id} (${row.invoiceNumber}) fehlgeschlagen: ${err}`, "billing");
+      results.push({ invoiceId: row.id, invoiceNumber: row.invoiceNumber, status: "failed", reason });
+      // Bei fehlendem Chromium hat jeder weitere Versuch in diesem Block keinen
+      // Sinn — Rest abbrechen, der Client meldet den Fehler.
+      if (err instanceof ChromiumUnavailableError) break;
+    }
+  }
+
+  const repaired = results.filter((r) => r.status === "repaired").length;
+  const failed = results.filter((r) => r.status === "failed").length;
+  const remaining = Math.max(0, total - repaired);
+  const response: RepairPdfsResponse = {
+    summary: { repaired, failed, remaining, total },
     results,
   };
   res.json(response);

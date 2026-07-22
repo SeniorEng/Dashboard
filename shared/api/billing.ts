@@ -218,6 +218,21 @@ export interface BulkStatusResponse {
   results: BulkStatusResultItem[];
 }
 
+// Task #1834 — Sammel-Reparatur der „PDF-Fehler"-Rechnungen (fehlender
+// `pdfPath`, bei Pflegekassen zusätzlich fehlender `leistungsnachweisPath`).
+// Verarbeitet pro Aufruf einen beschränkten Block; `remaining` sagt dem Client,
+// ob noch ein weiterer Block ansteht (großer Rückstand → Client ruft erneut auf).
+export interface RepairPdfsResultItem {
+  invoiceId: number;
+  invoiceNumber: string | null;
+  status: "repaired" | "failed";
+  reason?: string;
+}
+export interface RepairPdfsResponse {
+  summary: { repaired: number; failed: number; remaining: number; total: number };
+  results: RepairPdfsResultItem[];
+}
+
 export interface SendInvoiceResponse {
   message: string;
   invoice?: InvoiceItem;
