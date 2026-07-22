@@ -1832,6 +1832,16 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
         throw new Error(`document-no-show failed: ${doc.status} ${JSON.stringify(doc.data)}`);
       }
 
+      // Der Termin gehört dem frisch erstellten Mitarbeiter. Als Admin die
+      // Mitarbeiter-Sicht einnehmen (sessionStorage-getriebener viewAsEmployeeId),
+      // damit die Leistungsnachweis-Übersicht dessen Leerfahrt-Termin lädt.
+      await page.addInitScript((empId: number) => {
+        try {
+          sessionStorage.setItem("viewAsEmployeeId", String(empId));
+          sessionStorage.setItem("viewAsEmployeeName", "E2E Mitarbeiter");
+        } catch {}
+      }, employee.id);
+
       const [year, month] = appt.date.split("-").map(Number);
 
       // Leistungsnachweis-Übersicht des Kunden öffnen (Monat/Jahr des Termins)

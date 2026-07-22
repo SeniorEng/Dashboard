@@ -157,6 +157,10 @@ describe("Architektur — EIN Budget-Verfügbarkeits-Reader (Task #874 I1)", () 
     // die SSoT `netAvailable45bAt` ({ projectFuture: true, holds: "ignore" })
     // statt eigener `allocated − consumed`-Mathe.
     "server/storage/budget/summary-queries.ts",
+    // Die §45b-Rechnungs-Reduktion (nachträgliche Kürzung einer §45b-Position auf
+    // die tatsächlich verfügbare Deckung) liest die verfügbare §45b-Deckung über
+    // dieselbe SSoT `netAvailable45bAt` statt eigener `allocated − consumed`-Mathe.
+    "server/services/invoice-45b-reduction.ts",
   ]);
 
   it("§45b-Verfügbarkeit nur über die SSoT `netAvailable45bAt` (Task #1348)", () => {
