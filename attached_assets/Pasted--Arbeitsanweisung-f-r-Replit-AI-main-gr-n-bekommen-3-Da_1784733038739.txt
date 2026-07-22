@@ -1,0 +1,82 @@
+# Arbeitsanweisung für Replit AI — `main` grün bekommen (3 Dauerbrenner, Stand Run #138 / `5e4e849`)
+
+**Repo:** SeniorEng/Dashboard. **Charakter:** read-only Inventur zuerst, dann additiv/minimal-invasiv. Ein Anliegen je Schritt. **Kein** Auto-Akzept — jeden Fix prüfen.
+
+**Kontext:** `main` ist dauer-rot in genau **drei unabhängigen Jobs** — `static-analysis`, `tests`, `e2e-smoke`. Alle 5 zuletzt untersuchten Runs (#132 `8892e31` … #138 `5e4e849`) scheitern an denselben drei Jobs. **Keiner der drei Fehler stammt aus der Monats-Umbuchung (#1785 Teil 1, `8892e31`)** — belegt: bei Run #132 ist `budget-single-reader.test.ts` grün. Die drei Ursachen sind separat und werden hier einzeln behoben.
+
+**Reihenfolge (unabhängig, aber so am günstigsten):** Schritt 1 (CVEs, entsperrt static-analysis) → Schritt 2 (SSoT-Allowlist, 1-Zeilen-Fix) → Schritt 3 (Leerfahrt-e2e, echte Root-Cause). **Danach** grün halten (Schritt 4).
+
+---
+
+## Schritt 0 — Read-only: aktuellen Stand bestätigen
+Den neuesten CI-Run auf `main` öffnen und die tatsächlich roten Jobs/Schritte verifizieren (die Details unten stammen aus Run #138 `5e4e849`; einzelne Test-Failures können sich seither verschoben haben). Für jeden der drei Jobs die **konkret** fehlschlagende Assertion notieren, bevor gefixt wird.
+
+---
+
+## Schritt 1 — static-analysis: 7 nicht-allowlistete HIGH-CVEs
+`npm run audit:ci` (= `better-npm-audit audit --level high`) scheitert an **7 HIGH-Advisories**, die weder gepatcht noch in `.nsprc` (aktuell `{}`) gelistet sind:
+
+| Modul | aktuelle Version | Advisory | Pfad |
+|---|---|---|---|
+| `axios` | 1.17.0 (bereits via `overrides`!) | GHSA-gcfj-64vw-6mp9 | direkt |
+| `brace-expansion` | 1.1.14 | GHSA-3jxr-9vmj-r5cp | transitiv (stryker, typescript-eslint, readdir-glob, test-exclude) |
+| `fast-uri` | 3.1.2 | GHSA-v2hh-gcrm-f6hx, GHSA-4c8g-83qw-93j6 | transitiv |
+| `js-yaml` | 4.1.1 | GHSA-52cp-r559-cp3m | transitiv |
+
+**Fix (bevorzugt: patchen, nicht unterdrücken).**
+- `axios` ist bereits auf `^1.17.0` gepinnt, aber genau diese Version trägt noch das HIGH-Advisory → **auf die gepatchte axios-Version anheben** (die Version, die GHSA-gcfj-64vw-6mp9 schließt; per `npm view axios` / Advisory prüfen). Den bestehenden `overrides.axios`-Eintrag entsprechend hochziehen.
+- `brace-expansion`, `fast-uri`, `js-yaml`: je einen **`overrides`-Eintrag** auf die gepatchte Version setzen (additiv zum bestehenden `overrides`-Block in `package.json:139`). Da alle drei rein transitiv sind, ist ein Override der sauberste Hebel.
+- `npm install`, dann **`npm run audit:ci` lokal → 0 HIGH**. `npm ls brace-expansion fast-uri js-yaml axios` prüfen, dass die gepatchten Versionen greifen (keine Doppel-Bäume mit alter Version).
+- **Nur** falls für ein transitives HIGH keine gepatchte Version existiert (Upstream-Dep hält alte Version fest): dieses **einzelne** Advisory in `.nsprc` mit **Ablaufdatum + Begründung** allowlisten. Keine pauschale Unterdrückung, keine Moderates/Lows anfassen (die fallen nicht unter `--level high`).
+
+**Vorsicht:** die vielen `moderate`/`low`-Einträge (dompurify, esbuild, qs, body-parser, axios-moderates) **nicht** allowlisten — sie brechen den `--level high`-Gate nicht und würden nur Rauschen erzeugen.
+
+---
+
+## Schritt 2 — tests: §45b-SSoT-Architektur-Guard (1-Zeilen-Fix)
+`tests/architecture/budget-single-reader.test.ts` → **„§45b-Verfügbarkeit nur über die SSoT `netAvailable45bAt` (Task #1348)"** ist rot. Der Guard scannt `server/`+`shared/` nach Aufrufen von `netAvailable45bAt(` außerhalb der Allowlist.
+
+**Verstoßende Datei: `server/services/invoice-45b-reduction.ts:305`** — ruft `netAvailable45bAt(...)` auf, steht aber nicht in `ALLOWLIST_45B`. (Diese Datei kam **nach** `8892e31` dazu = §45b-Kürzungs-Feature, **nicht** die Umbuchung.)
+
+**Wichtig — der Aufruf ist fachlich korrekt, kein Bug:** die Stelle liest die §45b-SSoT bewusst, um eine **Ledger-Invariante** zu prüfen (nach der Re-Buchung muss der *ungefloorte* Saldo `allocatedCents − consumedNetCents` exakt 0 sein). `readUnifiedBudgetAvailability` liefert nur die **gefloorte** `availableCents` (`max(0, …)`) und würde eine negative Abweichung verstecken — hier also **nicht** passend. Es baut auch keine eigene Mathe, sondern nutzt die eine SSoT.
+
+**Fix:** `server/services/invoice-45b-reduction.ts` in **`ALLOWLIST_45B`** in `tests/architecture/budget-single-reader.test.ts` aufnehmen **und** als bewusst sanktionierten Leser in `docs/architecture/budget.md` dokumentieren (genau das, was die Guard-Fehlermeldung für einen „bewusst neuen Reader" verlangt). Einzeiler + Doku-Notiz — keine Code-Änderung an der Kürzungs-Logik.
+
+**Gegencheck:** nach dem Eintrag muss der Guard grün sein (`netAvailable45bAt`-Aufrufer = {net-available-45b.ts, unified-reader.ts, summary-queries.ts, invoice-45b-reduction.ts} = Allowlist). Danach die **volle `tests`-Suite** laufen lassen und prüfen, ob **weitere** vitest-Failures übrig bleiben (der CI-Log war lang; diese eine Assertion ist bestätigt, evtl. verdeckt sie weitere). Verbleibende echte Regressionen einzeln triagen — beabsichtigte neue Werte bewusst anpassen, nicht pauschal `-u`.
+
+---
+
+## Schritt 3 — e2e-smoke: Leerfahrt fehlt in der Leistungsnachweis-Übersicht
+`e2e/smoke/edit-persistence.spec.ts:1806` „Leerfahrt dokumentieren — Wartezeit + Anfahrt-km erscheinen in der Leistungsnachweis-Übersicht nach Reload" schlägt fehl (auch nach 2 Retries): `[data-testid='section-no-show-leerfahrt-${appt.id}']` wird **nicht sichtbar** (15 s Timeout).
+
+**Was der Test tut:** dokumentiert eine Leerfahrt via `POST /api/appointments/:id/document-no-show` (Wartezeit 10 Min, Anfahrt 8 km), öffnet dann `/service-records?customerId=…&year=…&month=…`, lädt hart neu, und erwartet die No-Show/Leerfahrt-Sektion.
+
+**Render-Stelle:** `client/src/pages/service-records.tsx:638` → `data-testid={\`section-no-show-leerfahrt-${ns.id}\`}`. Der Test keyt auf `appt.id`, die Komponente auf `ns.id`.
+
+**Read-only Root-Cause zuerst** (nicht raten, nicht am Test drehen):
+1. Liefert die Datenquelle der Service-Records-Seite (Query/Read-Model, gescoped auf `customerId + year + month`) den dokumentierten **`customer_no_show`**-Termin mit Leerfahrt überhaupt zurück? Prüfen, ob der Scope-Filter No-Show-/Leerfahrt-Termine ausschließt.
+2. Ist `ns.id === appt.id`? Falls das Read-Model eine andere ID (z. B. eine No-Show-/LN-Zeilen-ID) statt der `appointmentId` liefert, matcht der `data-testid`-Key nicht → Sektion „fehlt" nur scheinbar.
+3. Rendert die Sektion evtl. konditional (nur bei `waitMinutes>0 && km>0`) und greift eine Bedingung nicht?
+
+**Fix:** an der identifizierten Root-Cause — entweder das Read-Model der Service-Records-Seite muss dokumentierte Leerfahrten im Kunden-/Monats-Scope einschließen, oder das Key-/ID-Mapping (`ns.id` vs. `appointmentId`) angleichen. Bezug: No-Show/Leerfahrt-Modell (#167). **Erst wenn** sich zeigt, dass die Erwartung des Tests falsch ist (statt ein echter Anzeige-Bug), die Assertion bewusst anpassen — Default-Annahme ist ein echter Anzeige-Bug (3× deterministisch rot = kein Flake).
+
+---
+
+## Schritt 4 — grün halten
+- CI **komplett grün** verifizieren (alle Pflicht-Jobs), dann **Branch-Protection** auf `main`: nichts mergt mehr auf rot.
+- Während der Entwicklung nur die schnelle `unit`-Vitest-Suite; volle Integration/CI erst vor dem Merge.
+- Nach diesem Baseline-Grün lässt sich final bestätigen, dass die **rebook-eigenen Tests** (`tests/billing/rebook-month.test.ts`, `rebook-guards.test.ts`) auf CI durchlaufen — der letzte offene Punkt zur Abnahme von Teil 1.
+
+---
+
+## Relevant files
+- **Schritt 1:** `package.json` (`overrides`-Block ab :139, `audit:ci`-Script), `.nsprc`, `package-lock.json`
+- **Schritt 2:** `tests/architecture/budget-single-reader.test.ts` (`ALLOWLIST_45B`), `server/services/invoice-45b-reduction.ts:305`, `docs/architecture/budget.md`
+- **Schritt 3:** `e2e/smoke/edit-persistence.spec.ts:1806`, `client/src/pages/service-records.tsx:638`, das Service-Records-Read-Model/-Query, `server/routes/appointment-documentation.ts` (`document-no-show`)
+
+## Definition of Done
+- [ ] `npm run audit:ci` → 0 HIGH (gepatcht via `overrides`; nur unvermeidbare Einzel-Advisories in `.nsprc` mit Ablauf).
+- [ ] `budget-single-reader.test.ts` grün (invoice-45b-reduction.ts in `ALLOWLIST_45B` + Doku); volle `tests`-Suite ohne verbleibende echte Failures.
+- [ ] e2e `edit-persistence.spec.ts:1806` grün über echte Root-Cause (Leerfahrt erscheint in der LN-Übersicht), nicht durch Test-Weichspülen.
+- [ ] Alle CI-Pflicht-Jobs grün; Branch-Protection aktiv.
+- [ ] Bestätigt: `rebook-month.test.ts` + `rebook-guards.test.ts` laufen auf grünem CI durch.
