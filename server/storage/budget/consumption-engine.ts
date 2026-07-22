@@ -405,6 +405,16 @@ export async function createCascadeConsumption(params: {
     statutoryExcluded: boolean;
     noteKind: "selbstzahler" | "privatzahlung";
   };
+  /**
+   * Task #1785 (§45b-Kürzung) — beschränkt die statutorische Kaskade auf eine
+   * Whitelist von Töpfen (typischerweise §45b + genau EIN Ziel-Überlauftopf).
+   * Alle NICHT gelisteten statutorischen Töpfe erhalten Kapazität 0 (identisch
+   * zum deaktiviert-/außerhalb-Fenster-Gate), sodass §45b exakt bis zu seiner
+   * (auf den gezahlten Betrag zurückgesetzten) Verfügbarkeit füllt und der Rest
+   * ausschließlich in den gewählten Ziel-Topf (oder den terminalen `privatePot`)
+   * überläuft — statt breit in die Standard-Kaskade.
+   */
+  overflowRestriction?: { allowedPots: string[] };
 }, outerTx?: DbClient): Promise<CascadeResult> {
   const doWork = async (tx: DbClient) => {
     // Pro-Kunde-Advisory-Lock (Task #494): serialisiert ALLE Einstiegspunkte
@@ -507,6 +517,13 @@ export async function createCascadeConsumption(params: {
     const statutoryExcluded = params.privatePot?.statutoryExcluded === true;
 
     for (const pot of (statutoryExcluded ? [] : priorityOrder)) {
+      // Task #1785 (§45b-Kürzung): Töpfe außerhalb der Overflow-Whitelist werden
+      // wie deaktivierte Töpfe behandelt (Kapazität 0), damit der Rest gezielt in
+      // den gewählten Ziel-Topf statt breit in die Standard-Kaskade fließt.
+      if (params.overflowRestriction && !params.overflowRestriction.allowedPots.includes(pot.budgetType)) {
+        cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
+        continue;
+      }
       if (!pot.enabled) {
         cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
         continue;

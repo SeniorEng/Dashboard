@@ -8,7 +8,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, or, inArray, isNotNull, gte, lte, ne } from "drizzle-orm";
 import { db } from "../../lib/db";
-import type { DbClient } from "./types";
+import type { DbClient, CascadeResult } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
 import { todayISO, lastDayOfMonth } from "@shared/utils/datetime";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
@@ -702,6 +702,205 @@ export async function rebookDisabledBudgetTransactions(customerId: number, userI
 }
 
 /**
+ * Task #1785 P4 — überschreibt die Standard-Privattopf-Ableitung der
+ * Netto-Null-Re-Buchung. Form identisch zum `privatePot`-Parameter der Cascade.
+ */
+export type RebookPrivatePotOverride = {
+  statutoryExcluded: boolean;
+  noteKind: "selbstzahler" | "privatzahlung";
+};
+
+/**
+ * Task #1785 P4 — Kern der Netto-Null-Re-Buchung EINES Termins OHNE eigene
+ * Transaktion/Advisory-Lock-Wrapper, damit der §45b-Kürzungs-Ablauf mehrere
+ * Termine in DERSELBEN Transaktion (unter EINEM Lock, gemeinsam mit Storno +
+ * §45b-Reset) verarbeiten kann. Der xact-Advisory-Lock ist reentrant, das
+ * erneute Anfordern im selben Tx ist unschädlich.
+ *
+ * Zwei optionale Steuer-Parameter — beide vom Standard-Aufrufer
+ * (`rebookNetZeroAppointmentConsumption`) NICHT gesetzt ⇒ unverändertes
+ * Verhalten:
+ *   - `overflowRestriction`: Positivliste erlaubter Töpfe; wird an die Cascade
+ *     durchgereicht (nicht gelistete gesetzliche Töpfe erhalten Kapazität 0),
+ *     damit §45b exakt bis zur (zurückgesetzten) Verfügbarkeit füllt und der
+ *     Rest gezielt in EINEN Ziel-Topf statt breit in die Standard-Priorität
+ *     überläuft.
+ *   - `privatePotOverride`: `undefined` ⇒ Standard-Ableitung wie bisher
+ *     (`isPrivatePaymentAllowed`-Gate); `null` ⇒ KEIN Privattopf (rein
+ *     gesetzlich, ungedeckter Rest ⇒ lauter Abbruch); `{…}` ⇒ genau dieser
+ *     Privattopf.
+ *
+ * Rückgabe enthält das `cascade`-Ergebnis (Pot-Breakdown), damit der Aufrufer
+ * die §45b-Summe über alle Termine gegen den gezahlten Betrag prüfen kann.
+ */
+export async function rebookNetZeroAppointmentCore(
+  tx: DbClient,
+  params: {
+    customerId: number;
+    appointmentId: number;
+    userId: number;
+    overflowRestriction?: { allowedPots: string[] };
+    privatePotOverride?: RebookPrivatePotOverride | null;
+  },
+): Promise<{ rebooked: boolean; cascade?: CascadeResult }> {
+  const { customerId, appointmentId, userId, overflowRestriction, privatePotOverride } = params;
+
+  // Gleicher Advisory-Lock-Namespace wie createConsumptionTransaction /
+  // rebookDisabledBudgetTransactions: serialisiert Re-Buchung und parallele
+  // Konsumbuchungen pro Kunde. Reentrant im selben Tx.
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`
+  );
+
+  // Netto-Null UNTER dem Lock erneut prüfen (Concurrency-Schutz).
+  const consumptions = await tx.select({ id: budgetTransactions.id })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.appointmentId, appointmentId),
+      eq(budgetTransactions.transactionType, "consumption"),
+    ));
+  // Nie konsumiert (echter Selbstzahler / Alt-Daten) → nicht netto-null,
+  // nichts zu tun.
+  if (consumptions.length === 0) return { rebooked: false };
+
+  const consumptionIds = consumptions.map((c) => c.id);
+  const reversals = await tx.select({
+    reversedTransactionId: budgetTransactions.reversedTransactionId,
+  })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.transactionType, "reversal"),
+      isNotNull(budgetTransactions.reversedTransactionId),
+      inArray(budgetTransactions.reversedTransactionId, consumptionIds),
+    ));
+  const reversedIds = new Set(
+    reversals
+      .map((r) => r.reversedTransactionId)
+      .filter((id): id is number => id !== null),
+  );
+  const hasLiveConsumption = consumptions.some((c) => !reversedIds.has(c.id));
+  // Bereits (wieder) live belegt → nicht netto-null (z.B. paralleler Lauf
+  // war schneller). Idempotent: nichts buchen.
+  if (hasLiveConsumption) return { rebooked: false };
+
+  // Termin-Kost frisch zum Termin-Datum berechnen (temporale Preise) —
+  // identische Quelle wie der normale Konsum-Buchungspfad.
+  const [appt] = await appointmentsRepo.selectColumnsFrom({
+    date: appointments.date,
+    travelKilometers: appointments.travelKilometers,
+    customerKilometers: appointments.customerKilometers,
+  }, tx).where(eq(appointments.id, appointmentId)).limit(1);
+  if (!appt) return { rebooked: false };
+
+  const apptServices = await tx.select({
+    serviceId: appointmentServices.serviceId,
+    actualDurationMinutes: appointmentServices.actualDurationMinutes,
+  }).from(appointmentServices).where(eq(appointmentServices.appointmentId, appointmentId));
+
+  const allServices = await tx.select({
+    id: services.id,
+    code: services.code,
+  }).from(services);
+  const serviceCodeMap = new Map(allServices.map((s) => [s.id, s.code]));
+
+  let hwMinutes = 0;
+  let abMinutes = 0;
+  for (const as of apptServices) {
+    const code = serviceCodeMap.get(as.serviceId);
+    const mins = as.actualDurationMinutes ?? 0;
+    if (code === "hauswirtschaft") hwMinutes += mins;
+    else if (code === "alltagsbegleitung") abMinutes += mins;
+  }
+
+  const travelKm = appt.travelKilometers ?? 0;
+  const customerKm = appt.customerKilometers ?? 0;
+  const txDate = typeof appt.date === "string" ? appt.date : String(appt.date);
+
+  const costs = await calculateAppointmentCost({
+    customerId,
+    hauswirtschaftMinutes: hwMinutes,
+    alltagsbegleitungMinutes: abMinutes,
+    travelKilometers: travelKm,
+    customerKilometers: customerKm,
+    date: txDate,
+  });
+  if (costs.totalCents <= 0) return { rebooked: false };
+
+  // Privattopf: expliziter Override (Kürzungs-Ablauf) ODER Standard-Ableitung.
+  // Task #1353 — Standard-Gate identisch zum normalen Buchungspfad
+  // (`createConsumptionTransaction`) via `isPrivatePaymentAllowed`:
+  //   - Selbstzahler        → nur privat (statutorisch ausgelassen),
+  //   - Pflegekasse + privat → statutorische Töpfe + uncapped Privattopf,
+  //   - Pflegekasse o. privat → KEIN Privattopf; bleibt ein Rest, blockiert der
+  //                            Lauf laut (klare Sperre) statt eine verbotene
+  //                            Privatrechnung zu erzeugen.
+  // `privatePotOverride`: `undefined` ⇒ ableiten; `null`/`{…}` ⇒ direkt nutzen.
+  let privatePot: RebookPrivatePotOverride | undefined;
+  if (privatePotOverride !== undefined) {
+    privatePot = privatePotOverride ?? undefined;
+  } else {
+    const [customer] = await customersRepo
+      .selectColumnsFrom(
+        {
+          billingType: customers.billingType,
+          acceptsPrivatePayment: customers.acceptsPrivatePayment,
+        },
+        tx,
+      )
+      .where(eq(customers.id, customerId))
+      .limit(1);
+    const isSelbstzahler = isSelbstzahlerBillingType(customer?.billingType);
+    const isPrivateAllowed = isPrivatePaymentAllowed({
+      billingType: customer?.billingType,
+      acceptsPrivatePayment: customer?.acceptsPrivatePayment,
+    });
+    privatePot = isSelbstzahler
+      ? { statutoryExcluded: true, noteKind: "selbstzahler" as const }
+      : isPrivateAllowed
+        ? { statutoryExcluded: false, noteKind: "privatzahlung" as const }
+        : undefined;
+  }
+
+  const cascadeResult = await createCascadeConsumption({
+    customerId,
+    appointmentId,
+    transactionDate: txDate,
+    totalAmountCents: costs.totalCents,
+    hauswirtschaftMinutes: hwMinutes,
+    hauswirtschaftCents: costs.hauswirtschaftCents,
+    alltagsbegleitungMinutes: abMinutes,
+    alltagsbegleitungCents: costs.alltagsbegleitungCents,
+    travelKilometers: travelKm,
+    travelCents: costs.travelCents,
+    customerKilometers: customerKm,
+    customerKilometersCents: costs.customerKilometersCents,
+    userId,
+    skipExistingCheck: true,
+    privatePot,
+    overflowRestriction,
+  }, tx);
+
+  // Reiner Pflegekassen-Kunde (kein Privattopf) und die gesetzlichen Töpfe
+  // reichen nicht → outstandingCents > 0. Statt still privat abzurechnen,
+  // bricht die Re-Abrechnung laut ab (Transaktion rollt zurück). Die
+  // Rechnungserstellung scheitert mit klarer Meldung, der/die Bearbeiter:in
+  // muss die Budget-Konfiguration/Buchungen für diesen Termin prüfen.
+  if (cascadeResult.outstandingCents > 0) {
+    throw new Error(
+      `Re-Abrechnung nicht möglich: Termin #${appointmentId} kann nicht ` +
+      `vollständig aus den gesetzlichen Pflegekassen-Töpfen abgerechnet ` +
+      `werden (${formatEuroDE(cascadeResult.outstandingCents)} ohne ` +
+      `Deckung). Eine Privatabrechnung ist für diesen Kunden nicht ` +
+      `zulässig. Bitte prüfen Sie die Budget-Konfiguration und Buchungen.`,
+    );
+  }
+
+  return { rebooked: true, cascade: cascadeResult };
+}
+
+/**
  * Task #1014 — Re-Buchung netto-null-belegter Termine bei der Rechnungs-
  * ERSTELLUNG (nicht Preview).
  *
@@ -738,162 +937,10 @@ export async function rebookNetZeroAppointmentConsumption(params: {
   if (appointmentIds.length === 0) return { rebookedAppointmentIds };
 
   for (const appointmentId of appointmentIds) {
-    const didRebook = await db.transaction(async (tx) => {
-      // Gleicher Advisory-Lock-Namespace wie createConsumptionTransaction /
-      // rebookDisabledBudgetTransactions: serialisiert Re-Buchung und
-      // parallele Konsumbuchungen pro Kunde.
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`
-      );
-
-      // Netto-Null UNTER dem Lock erneut prüfen (Concurrency-Schutz).
-      const consumptions = await tx.select({ id: budgetTransactions.id })
-        .from(budgetTransactions)
-        .where(and(
-          eq(budgetTransactions.customerId, customerId),
-          eq(budgetTransactions.appointmentId, appointmentId),
-          eq(budgetTransactions.transactionType, "consumption"),
-        ));
-      // Nie konsumiert (echter Selbstzahler / Alt-Daten) → nicht netto-null,
-      // nichts zu tun.
-      if (consumptions.length === 0) return false;
-
-      const consumptionIds = consumptions.map((c) => c.id);
-      const reversals = await tx.select({
-        reversedTransactionId: budgetTransactions.reversedTransactionId,
-      })
-        .from(budgetTransactions)
-        .where(and(
-          eq(budgetTransactions.customerId, customerId),
-          eq(budgetTransactions.transactionType, "reversal"),
-          isNotNull(budgetTransactions.reversedTransactionId),
-          inArray(budgetTransactions.reversedTransactionId, consumptionIds),
-        ));
-      const reversedIds = new Set(
-        reversals
-          .map((r) => r.reversedTransactionId)
-          .filter((id): id is number => id !== null),
-      );
-      const hasLiveConsumption = consumptions.some((c) => !reversedIds.has(c.id));
-      // Bereits (wieder) live belegt → nicht netto-null (z.B. paralleler Lauf
-      // war schneller). Idempotent: nichts buchen.
-      if (hasLiveConsumption) return false;
-
-      // Termin-Kost frisch zum Termin-Datum berechnen (temporale Preise) —
-      // identische Quelle wie der normale Konsum-Buchungspfad.
-      const [appt] = await appointmentsRepo.selectColumnsFrom({
-        date: appointments.date,
-        travelKilometers: appointments.travelKilometers,
-        customerKilometers: appointments.customerKilometers,
-      }, tx).where(eq(appointments.id, appointmentId)).limit(1);
-      if (!appt) return false;
-
-      const apptServices = await tx.select({
-        serviceId: appointmentServices.serviceId,
-        actualDurationMinutes: appointmentServices.actualDurationMinutes,
-      }).from(appointmentServices).where(eq(appointmentServices.appointmentId, appointmentId));
-
-      const allServices = await tx.select({
-        id: services.id,
-        code: services.code,
-      }).from(services);
-      const serviceCodeMap = new Map(allServices.map((s) => [s.id, s.code]));
-
-      let hwMinutes = 0;
-      let abMinutes = 0;
-      for (const as of apptServices) {
-        const code = serviceCodeMap.get(as.serviceId);
-        const mins = as.actualDurationMinutes ?? 0;
-        if (code === "hauswirtschaft") hwMinutes += mins;
-        else if (code === "alltagsbegleitung") abMinutes += mins;
-      }
-
-      const travelKm = appt.travelKilometers ?? 0;
-      const customerKm = appt.customerKilometers ?? 0;
-      const txDate = typeof appt.date === "string" ? appt.date : String(appt.date);
-
-      const costs = await calculateAppointmentCost({
-        customerId,
-        hauswirtschaftMinutes: hwMinutes,
-        alltagsbegleitungMinutes: abMinutes,
-        travelKilometers: travelKm,
-        customerKilometers: customerKm,
-        date: txDate,
-      });
-      if (costs.totalCents <= 0) return false;
-
-      // Task #1353 — Privat-Topf-Gate identisch zum normalen Buchungspfad
-      // (`createConsumptionTransaction`): Der frühere bedingungslose
-      // `privatePot: { statutoryExcluded: false, noteKind: "privatzahlung" }`
-      // hat JEDEN Kunden einen uncapped Privattopf gegeben, sodass ein Rest
-      // (der bei der Re-Ableitung gegen den aktuellen Ledger entstehen kann)
-      // still als 19%-Privatrechnung abgerechnet wurde — auch bei reinen
-      // Pflegekassen-Kunden ohne `acceptsPrivatePayment` (Jungnickel-/AOK-Fall).
-      // Jetzt entscheidet derselbe zentrale Gate (`isPrivatePaymentAllowed`),
-      // ob ein privater Terminal-Topf zulässig ist:
-      //   - Selbstzahler        → nur privat (statutorisch ausgelassen),
-      //   - Pflegekasse + privat → statutorische Töpfe + uncapped Privattopf,
-      //   - Pflegekasse o. privat → KEIN Privattopf; bleibt ein Rest, blockiert
-      //                            der Lauf laut (klare Sperre) statt eine
-      //                            verbotene Privatrechnung zu erzeugen.
-      const [customer] = await customersRepo
-        .selectColumnsFrom(
-          {
-            billingType: customers.billingType,
-            acceptsPrivatePayment: customers.acceptsPrivatePayment,
-          },
-          tx,
-        )
-        .where(eq(customers.id, customerId))
-        .limit(1);
-      const isSelbstzahler = isSelbstzahlerBillingType(customer?.billingType);
-      const isPrivateAllowed = isPrivatePaymentAllowed({
-        billingType: customer?.billingType,
-        acceptsPrivatePayment: customer?.acceptsPrivatePayment,
-      });
-      const privatePot = isSelbstzahler
-        ? { statutoryExcluded: true, noteKind: "selbstzahler" as const }
-        : isPrivateAllowed
-          ? { statutoryExcluded: false, noteKind: "privatzahlung" as const }
-          : undefined;
-
-      const cascadeResult = await createCascadeConsumption({
-        customerId,
-        appointmentId,
-        transactionDate: txDate,
-        totalAmountCents: costs.totalCents,
-        hauswirtschaftMinutes: hwMinutes,
-        hauswirtschaftCents: costs.hauswirtschaftCents,
-        alltagsbegleitungMinutes: abMinutes,
-        alltagsbegleitungCents: costs.alltagsbegleitungCents,
-        travelKilometers: travelKm,
-        travelCents: costs.travelCents,
-        customerKilometers: customerKm,
-        customerKilometersCents: costs.customerKilometersCents,
-        userId,
-        skipExistingCheck: true,
-        privatePot,
-      }, tx);
-
-      // Reiner Pflegekassen-Kunde (kein Privattopf) und die gesetzlichen Töpfe
-      // reichen nicht → outstandingCents > 0. Statt still privat abzurechnen,
-      // bricht die Re-Abrechnung laut ab (Transaktion rollt zurück). Die
-      // Rechnungserstellung scheitert mit klarer Meldung, der/die Bearbeiter:in
-      // muss die Budget-Konfiguration/Buchungen für diesen Termin prüfen.
-      if (cascadeResult.outstandingCents > 0) {
-        throw new Error(
-          `Re-Abrechnung nicht möglich: Termin #${appointmentId} kann nicht ` +
-          `vollständig aus den gesetzlichen Pflegekassen-Töpfen abgerechnet ` +
-          `werden (${formatEuroDE(cascadeResult.outstandingCents)} ohne ` +
-          `Deckung). Eine Privatabrechnung ist für diesen Kunden nicht ` +
-          `zulässig. Bitte prüfen Sie die Budget-Konfiguration und Buchungen.`,
-        );
-      }
-
-      return true;
-    });
-
-    if (didRebook) rebookedAppointmentIds.push(appointmentId);
+    const { rebooked } = await db.transaction((tx) =>
+      rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, userId }),
+    );
+    if (rebooked) rebookedAppointmentIds.push(appointmentId);
   }
 
   return { rebookedAppointmentIds };
