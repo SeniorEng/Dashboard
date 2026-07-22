@@ -15,7 +15,7 @@ import type {
   BulkDeleteResponse,
   BulkStatusResponse,
 } from "@shared/api";
-import type { GenerateAllResponse } from "../types";
+import type { GenerateAllResponse, Reduce45bResponse, Reduce45bTargetPot } from "../types";
 
 // Task #1380: Sammelaktionen (Löschen / Statuswechsel) verarbeiten bis zu 200
 // Rechnungen pro Aufruf. Um bei großen Auswahlen ein laufendes Fortschritts-
@@ -47,6 +47,8 @@ interface UseBillingMutationsArgs {
   onStatusSuccess: () => void;
   // Task #1376: Auswahl zurücksetzen, nachdem eine Sammelaktion durchlief.
   onBulkActionSuccess?: () => void;
+  // Task #1785 P4: Dialog schließen, nachdem die §45b-Kürzung durchlief.
+  onReduce45bSuccess?: () => void;
 }
 
 export function useBillingMutations({
@@ -61,6 +63,7 @@ export function useBillingMutations({
   onDiscardSettled,
   onStatusSuccess,
   onBulkActionSuccess,
+  onReduce45bSuccess,
 }: UseBillingMutationsArgs) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -552,10 +555,58 @@ export function useBillingMutations({
     },
   });
 
+  // Task #1785 P4: §45b-Kürzung — Superadmin reduziert EINE ausgestellte
+  // §45b-Rechnung auf den tatsächlich von der Kasse gezahlten Betrag (Y); der
+  // Überhang (X−Y) wird in EINEN Ziel-Topf umgebucht. GoBD-konform als Storno +
+  // §45b-Reset + Neu-Buchung + Re-Rechnung. Der Server meldet `reissue`/`warnings`
+  // separat vom committeten Ledger-Teil — beides wird dem Nutzer als Toast
+  // gezeigt (Re-Rechnung-Fehler destruktiv, Hinweise/Warnungen neutral).
+  const reduce45bMutation = useMutation({
+    mutationFn: async ({
+      id,
+      paidCents,
+      targetPot,
+    }: {
+      id: number;
+      paidCents: number;
+      targetPot: Reduce45bTargetPot;
+    }) => {
+      const result = await api.post<Reduce45bResponse>(`/billing/${id}/reduce-45b`, {
+        paidCents,
+        targetPot,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: (data: Reduce45bResponse) => {
+      if (data.reissue.ok) {
+        toast({
+          title: "§45b-Rechnung gekürzt",
+          description: `Storniert, neu ausgestellt. Überhang ${(data.overflowCents / 100).toFixed(2)} € umgebucht.`,
+        });
+      } else {
+        toast({
+          title: "§45b gekürzt — Re-Rechnung fehlgeschlagen",
+          description: `${data.reissue.error} Der Budget-Stand ist korrekt; die Rechnung bitte über „Rechnung erstellen" erneut ausstellen.`,
+          variant: "destructive",
+        });
+      }
+      // Serverseitige Hinweise (z. B. gebundene Qonto-Zahlung) einzeln zeigen.
+      for (const warning of data.warnings) {
+        toast({ title: "Hinweis", description: warning });
+      }
+      invalidateRelated(queryClient, "billing");
+      onReduce45bSuccess?.();
+    },
+    onError: (error: Error) => {
+      toast({ title: "§45b-Kürzung fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
   return {
     generateMutation,
     discardDraftsMutation,
     statusMutation,
+    reduce45bMutation,
     bulkDeleteMutation,
     bulkStatusMutation,
     sendInvoiceMutation,

@@ -66,6 +66,9 @@ interface InvoiceListProps {
   statusMutation: UseMutationResult<unknown, Error, { id: number; status: string }, unknown>;
   onStorno: (invoice: InvoiceItem) => void;
   onMarkPaid: (invoice: InvoiceItem) => void;
+  // Task #1785 P4: §45b-Kürzung (superadmin-only) — durchgereicht an InvoiceRow.
+  isSuperAdmin: boolean;
+  onReduce45b: (invoice: InvoiceItem) => void;
   // Task #1376: Mehrfachauswahl + Sammelaktionen.
   selectedIds: Set<number>;
   onToggleSelect: (invoiceId: number, checked: boolean) => void;
@@ -103,6 +106,8 @@ export function InvoiceList({
   statusMutation,
   onStorno,
   onMarkPaid,
+  isSuperAdmin,
+  onReduce45b,
   selectedIds,
   onToggleSelect,
   onToggleSelectAll,
@@ -385,6 +390,8 @@ export function InvoiceList({
                     statusMutation={statusMutation}
                     onStorno={onStorno}
                     onMarkPaid={onMarkPaid}
+                    isSuperAdmin={isSuperAdmin}
+                    onReduce45b={onReduce45b}
                     selected={selectedIds.has(invoice.id)}
                     onToggleSelect={onToggleSelect}
                     aging={group.aging.get(invoice.id)}

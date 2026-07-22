@@ -1,5 +1,5 @@
 import { Router, type Response } from "express";
-import { requireAuth, requireAdmin, requireWageDataAccess } from "../middleware/auth";
+import { requireAuth, requireAdmin, requireWageDataAccess, requireSuperAdmin } from "../middleware/auth";
 import { AppError, asyncHandler, badRequest, notFound } from "../lib/errors";
 import { log } from "../lib/log";
 import { requireIntParam } from "../lib/params";
@@ -86,6 +86,7 @@ import {
 import { ChromiumUnavailableError } from "../services/pdf-generator";
 import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer, getUnbilledSignedAppointmentFactsByCustomer, type UnbilledSignedFacts } from "../services/invoice-data";
 import { buildInvoiceDraft, generateInvoiceCore } from "../services/invoice-calc";
+import { reduceInvoice45bToPaidAmount } from "../services/invoice-45b-reduction";
 import {
   MONTH_NAMES_DE,
   loadInsuranceForSend,
@@ -1375,6 +1376,31 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   const result = await generateInvoiceCore(parsed.data, {
     userId: req.user!.id,
     ipAddress: req.ip,
+    testFaults: readTestFaults(req),
+  });
+  res.json(result);
+}));
+
+// Task #1785 P4 — §45b-Kürzung: Superadmin reduziert EINE ausgestellte
+// §45b-Rechnung auf den tatsächlich von der Kasse gezahlten Betrag (Y). Der
+// Überhang (X−Y) wird in EINEN Ziel-Topf umgebucht. GoBD-konform als Storno +
+// §45b-Reset + Neu-Buchung + Re-Rechnung (SSoT `reduceInvoice45bToPaidAmount`).
+const reduce45bSchema = z.object({
+  paidCents: z.number().int("Der gezahlte Betrag muss in ganzen Cent angegeben werden.").positive("Der gezahlte Betrag muss größer als 0 sein."),
+  targetPot: z.enum(["umwandlung_45a", "ersatzpflege_39_42a", "private"]),
+});
+router.post("/:id/reduce-45b", requireSuperAdmin, asyncHandler("§45b-Kürzung fehlgeschlagen", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+  const parsed = reduce45bSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+  const result = await reduceInvoice45bToPaidAmount({
+    rootInvoiceId: id,
+    paidCents: parsed.data.paidCents,
+    targetPot: parsed.data.targetPot,
+    actor: { userId: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin, ipAddress: req.ip },
     testFaults: readTestFaults(req),
   });
   res.json(result);

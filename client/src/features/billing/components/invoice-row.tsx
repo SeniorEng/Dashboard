@@ -28,6 +28,7 @@ import {
   MailCheck,
   Banknote,
   Undo2,
+  Scissors,
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
@@ -62,6 +63,10 @@ interface InvoiceRowProps {
   // Task #1317: „Bezahlt" ist eine bewusste, bestätigungspflichtige Aktion —
   // der Row meldet nur den Wunsch, die Bestätigung läuft im MarkPaidDialog.
   onMarkPaid: (invoice: InvoiceItem) => void;
+  // Task #1785 P4: §45b-Kürzung ist superadmin-only; die Row meldet nur den
+  // Wunsch, Eingabe + Bestätigung laufen im Reduce45bDialog.
+  isSuperAdmin: boolean;
+  onReduce45b: (invoice: InvoiceItem) => void;
   // Task #1376: Mehrfachauswahl für Sammelaktionen.
   selected: boolean;
   onToggleSelect: (invoiceId: number, checked: boolean) => void;
@@ -83,10 +88,20 @@ export function InvoiceRow({
   statusMutation,
   onStorno,
   onMarkPaid,
+  isSuperAdmin,
+  onReduce45b,
   selected,
   onToggleSelect,
   aging = "none",
 }: InvoiceRowProps) {
+  // Task #1785 P4: §45b-Kürzung nur für Superadmins auf einer AUSGESTELLTEN
+  // (nicht Entwurf/storniert) originären §45b-Rechnung — nie auf Stornobelegen.
+  const canReduce45b =
+    isSuperAdmin &&
+    invoice.budgetType === "entlastungsbetrag_45b" &&
+    invoice.invoiceType !== "stornorechnung" &&
+    invoice.status !== "entwurf" &&
+    invoice.status !== "storniert";
   const { toast } = useToast();
   // Task #1349/#1696: Lädt ein Dokument-PDF (Rechnung / Leistungsnachweis /
   // Bündel) als echten Datei-Download herunter — mit dem sprechenden Dateinamen
@@ -437,6 +452,22 @@ export function InvoiceRow({
                       >
                         <Check className={`${iconSize.sm} mr-2`} />
                         Als versendet markieren
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  {/* Task #1785 P4: §45b-Kürzung (Superadmin) — storniert + kürzt
+                      die ausgestellte §45b-Rechnung auf den gezahlten Betrag und
+                      bucht den Überhang um. Eingabe/Bestätigung im Dialog. */}
+                  {canReduce45b && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => onReduce45b(invoice)}
+                        className="text-amber-700 focus:text-amber-700"
+                        data-testid={`button-reduce-45b-${invoice.id}`}
+                      >
+                        <Scissors className={`${iconSize.sm} mr-2`} />
+                        §45b kürzen (Kasse zahlte weniger)
                       </DropdownMenuItem>
                     </>
                   )}

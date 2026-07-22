@@ -14,4 +14,5 @@ export { PendingInvoicesCard } from "./pending-invoices-card";
 export { NewInvoiceDialog } from "./new-invoice-dialog";
 export { StornoDialog } from "./storno-dialog";
 export { MarkPaidDialog } from "./mark-paid-dialog";
+export { Reduce45bDialog } from "./reduce-45b-dialog";
 export { DiscardDraftsDialog } from "./discard-drafts-dialog";

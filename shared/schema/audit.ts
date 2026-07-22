@@ -21,6 +21,7 @@ export const AUDIT_ACTIONS = [
   "invoice_created",
   "invoice_cancelled",
   "invoice_status_changed",
+  "invoice_45b_reduced",
   "time_entry_created",
   "time_entry_updated",
   "time_entry_deleted",

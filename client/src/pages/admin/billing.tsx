@@ -51,6 +51,7 @@ import {
   NewInvoiceDialog,
   StornoDialog,
   MarkPaidDialog,
+  Reduce45bDialog,
   DiscardDraftsDialog,
   type BillingStatusFilter,
   type PipelineStageSelection,
@@ -83,6 +84,8 @@ export default function AdminBilling() {
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<number | null>(null);
   const [stornoTarget, setStornoTarget] = useState<InvoiceItem | null>(null);
   const [markPaidTarget, setMarkPaidTarget] = useState<InvoiceItem | null>(null);
+  // Task #1785 P4: Ziel-Rechnung der §45b-Kürzung (Superadmin), Dialog-State.
+  const [reduce45bTarget, setReduce45bTarget] = useState<InvoiceItem | null>(null);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [generateAllOpen, setGenerateAllOpen] = useState(false);
   const generateAllCloseBtnRef = useRef<HTMLButtonElement>(null);
@@ -167,6 +170,7 @@ export default function AdminBilling() {
     generateMutation,
     discardDraftsMutation,
     statusMutation,
+    reduce45bMutation,
     bulkDeleteMutation,
     bulkStatusMutation,
     sendInvoiceMutation,
@@ -198,6 +202,7 @@ export default function AdminBilling() {
     onDiscardSettled: () => setDiscardConfirmOpen(false),
     onStatusSuccess: () => setStornoTarget(null),
     onBulkActionSuccess: () => setSelectedIds(new Set()),
+    onReduce45bSuccess: () => setReduce45bTarget(null),
   });
 
   useEffect(() => {
@@ -513,6 +518,8 @@ export default function AdminBilling() {
             statusMutation={statusMutation}
             onStorno={setStornoTarget}
             onMarkPaid={setMarkPaidTarget}
+            isSuperAdmin={isSuperAdmin}
+            onReduce45b={setReduce45bTarget}
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
             onToggleSelectAll={handleToggleSelectAll}
@@ -653,6 +660,12 @@ export default function AdminBilling() {
         markPaidTarget={markPaidTarget}
         onOpenChange={(open) => !open && setMarkPaidTarget(null)}
         statusMutation={statusMutation}
+      />
+
+      <Reduce45bDialog
+        target={reduce45bTarget}
+        onOpenChange={(open) => !open && setReduce45bTarget(null)}
+        mutation={reduce45bMutation}
       />
 
       <DiscardDraftsDialog
