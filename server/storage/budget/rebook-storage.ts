@@ -23,8 +23,9 @@ import {
 import {
   BUDGET_TYPES,
   effectiveDefaultPots,
-  resolveEffectivePotConfig,
+  resolvePotEligibilityAt,
   type DefaultPotCustomer,
+  type PotIneligibleReason,
 } from "@shared/domain/budgets";
 import {
   assertRebookAllowed,
@@ -43,22 +44,24 @@ import {
 type PotEligibility = { eligible: true } | { eligible: false; reason: string };
 
 /**
- * Task #1837/#1785 — EINE SSoT für „ist der Topf zum Stichtag ein gültiges
- * Umbuchungsziel?" (aktiviert UND im Gültigkeitsfenster). Vorschau (Stichtag =
- * Monatsende) und Ausführung (Stichtag = `transactionDate` pro Zeile) leiten die
- * Berechtigung IDENTISCH ab — kein „Anzeige vs. Buchung"-Drift.
- *
- * `forDate@Stichtag` liefert die zum Stichtag gültige Zeile (Fenster-gefiltert,
- * inkl. deaktivierter Zeilen), blendet aber (noch) nicht bzw. nicht mehr gültige
- * Zeilen aus. Damit lässt sich „Topf NIE konfiguriert" (⇒ anspruchs-gegateter
- * Default, §45b default-aktiv für Pflegekassen-Kunden, Task #1837) NICHT von
- * „Topf konfiguriert, aber Fenster deckt diesen Stichtag nicht" (⇒ überspringen,
- * Task #1785) unterscheiden. Deshalb entscheidet bei fehlender Stichtags-Zeile
- * die Existenz IRGENDEINER Zeile (`forEdit`):
- *   - existiert eine ⇒ außerhalb des Fensters ⇒ NICHT berechtigt (kein Default),
- *   - existiert keine ⇒ echter Default über `resolveEffectivePotConfig`.
- *
- * Eine vorhandene, DEAKTIVIERTE Zeile bleibt „nicht aktiviert".
+ * Task #1838 — Umbuchungs-spezifische Fehlermeldungen für die gemeinsame
+ * Nutzbarkeits-Regel (`resolvePotEligibilityAt`). Die Regel selbst (Existenz-/
+ * Fenster-/Aktiviert-Logik) ist die EINE SSoT; hier wird nur der strukturierte
+ * Grund in die „Ziel-Topf …"-Wortwahl der Umbuchung übersetzt.
+ */
+const REBOOK_INELIGIBLE_MESSAGES: Record<PotIneligibleReason, string> = {
+  out_of_window_configured: "Ziel-Topf ist für das Buchungsdatum nicht gültig",
+  disabled: "Ziel-Topf ist nicht aktiviert",
+  not_yet_valid: "Ziel-Topf ist für das Buchungsdatum noch nicht gültig",
+  expired: "Ziel-Topf ist für das Buchungsdatum abgelaufen",
+};
+
+/**
+ * Task #1837/#1785/#1838 — Ziel-Topf-Nutzbarkeit zum Stichtag über die EINE
+ * gemeinsame SSoT `resolvePotEligibilityAt` (identisch zur Neu-Buchung/Cascade,
+ * die dieselbe Funktion nutzt). Vorschau (Stichtag = Monatsende) und Ausführung
+ * (Stichtag = `transactionDate` pro Zeile) leiten die Berechtigung IDENTISCH ab
+ * — kein „Anzeige vs. Buchung"- und kein „Buchung vs. Umbuchung"-Drift.
  */
 async function resolveRebookPotEligibility(
   tx: DbClient,
@@ -67,30 +70,16 @@ async function resolveRebookPotEligibility(
   asOfDate: string,
 ): Promise<Map<string, PotEligibility>> {
   const settingsAtDate = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }, tx);
-  const rowAtDate = new Set(settingsAtDate.map(s => s.budgetType));
-  const configuredEver = new Set(
-    (await readBudgetTypeSettings(customerId, { kind: "forEdit" }, tx)).map(s => s.budgetType),
-  );
+  const configuredEverTypes = (
+    await readBudgetTypeSettings(customerId, { kind: "forEdit" }, tx)
+  ).map(s => s.budgetType);
+  const eligibility = resolvePotEligibilityAt({ customer, settingsAtDate, configuredEverTypes, asOfDate });
   const result = new Map<string, PotEligibility>();
-  for (const cfg of resolveEffectivePotConfig({ customer, typeSettings: settingsAtDate })) {
-    const bt = cfg.budgetType;
-    if (!rowAtDate.has(bt) && configuredEver.has(bt)) {
-      result.set(bt, { eligible: false, reason: "Ziel-Topf ist für das Buchungsdatum nicht gültig" });
-      continue;
-    }
-    if (!cfg.enabled) {
-      result.set(bt, { eligible: false, reason: "Ziel-Topf ist nicht aktiviert" });
-      continue;
-    }
-    if (cfg.validFrom && asOfDate < cfg.validFrom) {
-      result.set(bt, { eligible: false, reason: "Ziel-Topf ist für das Buchungsdatum noch nicht gültig" });
-      continue;
-    }
-    if (cfg.validTo && asOfDate > cfg.validTo) {
-      result.set(bt, { eligible: false, reason: "Ziel-Topf ist für das Buchungsdatum abgelaufen" });
-      continue;
-    }
-    result.set(bt, { eligible: true });
+  for (const [bt, e] of eligibility) {
+    result.set(
+      bt,
+      e.eligible ? { eligible: true } : { eligible: false, reason: REBOOK_INELIGIBLE_MESSAGES[e.reason] },
+    );
   }
   return result;
 }

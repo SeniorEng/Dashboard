@@ -15,7 +15,7 @@ import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { syncCarryoverAndExpiry, calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
-import { resolveEffectivePotConfig } from "@shared/domain/budgets";
+import { resolveEffectivePotConfig, resolvePotEligibilityAt } from "@shared/domain/budgets";
 import { planCascade } from "@shared/domain/budget/plan-cascade";
 import { isPrivatePaymentAllowed, isSelbstzahlerBillingType } from "@shared/domain/budget-selbstzahler-validator";
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
@@ -483,6 +483,25 @@ export async function createCascadeConsumption(params: {
       );
     }
 
+    // Task #1838 — Topf-Nutzbarkeit zum Buchungsdatum über die EINE gemeinsame
+    // SSoT `resolvePotEligibilityAt` (identisch zur (Sammel-)Umbuchung). Dazu
+    // gehört das Existenz-Gate: ein Topf, der IRGENDWANN konfiguriert wurde,
+    // dessen Gültigkeitsfenster den Buchungstag aber NICHT abdeckt, fällt NICHT
+    // still über den Default zurück, sondern wird wie ein deaktivierter Topf
+    // (Kapazität 0) behandelt — genau wie die Umbuchung ihn ablehnen würde.
+    const configuredEverTypes = (
+      await readBudgetTypeSettings(params.customerId, { kind: "forEdit" }, tx)
+    ).map(s => s.budgetType);
+    const potEligibility = resolvePotEligibilityAt({
+      customer: {
+        billingType: defaultPotCustomer?.billingType,
+        pflegegrad: defaultPotCustomer?.pflegegrad,
+      },
+      settingsAtDate: typeSettings,
+      configuredEverTypes,
+      asOfDate: params.transactionDate,
+    });
+
     // Task #871 — Topf-Kaskade über die EINE pure `planCascade`-Funktion.
     //
     // Phase 1 (read-only): pro Topf die effektive Kapazität bestimmen
@@ -514,15 +533,10 @@ export async function createCascadeConsumption(params: {
         cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
         continue;
       }
-      if (!pot.enabled) {
-        cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
-        continue;
-      }
-      if (pot.validFrom && params.transactionDate < pot.validFrom) {
-        cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
-        continue;
-      }
-      if (pot.validTo && params.transactionDate > pot.validTo) {
+      // Task #1838 — Nutzbarkeit (deaktiviert / außerhalb Fenster / konfiguriert-
+      // aber-außerhalb-Fenster) aus der EINEN gemeinsamen SSoT. Nicht nutzbar ⇒
+      // Kapazität 0 — identisch zur (Sammel-)Umbuchung.
+      if (!potEligibility.get(pot.budgetType)?.eligible) {
         cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
         continue;
       }

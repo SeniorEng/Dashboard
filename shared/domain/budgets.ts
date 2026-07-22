@@ -305,6 +305,76 @@ export function isPotEligibleAt(
   return cfg.enabled && isWithinPotWindow(cfg.validFrom, cfg.validTo, asOfDate);
 }
 
+/** Grund, warum ein Topf zum Stichtag NICHT nutzbar ist. */
+export type PotIneligibleReason =
+  | "out_of_window_configured"
+  | "disabled"
+  | "not_yet_valid"
+  | "expired";
+
+/** Nutzbarkeit EINES Topfes zum Stichtag inkl. mitgeführter effektiver Konfiguration. */
+export type PotEligibilityAt =
+  | { config: ResolvedPotConfig; eligible: true }
+  | { config: ResolvedPotConfig; eligible: false; reason: PotIneligibleReason };
+
+/**
+ * Task #1838 — EINE SSoT für „ist Topf X am Datum Y nutzbar?", die sowohl die
+ * Neu-Buchung (Cascade in `consumption-engine.ts`) als auch die (Sammel-)
+ * Umbuchung (`rebook-storage.ts`) verwenden. Beide leiten Existenz-/Fenster-/
+ * Aktiviert-Logik IDENTISCH ab — keine zwei parallelen Ableitungen mehr.
+ *
+ * Entscheidung (dokumentiert in `docs/architecture/budget.md`): Das
+ * EXISTENZ-Gate (`forEdit`) wird in BEIDE Pfade gehoben, NICHT in beiden
+ * weggelassen. `forDate@Stichtag` liefert die zum Stichtag gültige Zeile
+ * (Fenster-gefiltert, inkl. deaktivierter Zeilen), unterscheidet aber nicht
+ * „Topf NIE konfiguriert" (⇒ anspruchs-gegateter Default) von „Topf
+ * konfiguriert, aber Fenster deckt diesen Stichtag nicht" (⇒ überspringen).
+ * Deshalb entscheidet bei fehlender Stichtags-Zeile die Existenz IRGENDEINER
+ * Zeile (`configuredEverTypes`):
+ *   - existiert eine ⇒ außerhalb des Fensters ⇒ NICHT nutzbar (kein Default),
+ *   - existiert keine ⇒ echter Default über `resolveEffectivePotConfig`.
+ * Eine vorhandene, DEAKTIVIERTE Zeile bleibt „nicht aktiviert".
+ *
+ * Rationale für „heben statt weglassen": Wenn ein Admin ein Gültigkeitsfenster
+ * bewusst gesetzt hat, soll der Topf außerhalb dieses Fensters NICHT still über
+ * den Default reaktiviert werden — weder bei der Buchung noch bei der Umbuchung.
+ *
+ * Pure: kein DB-Zugriff. Die Kapazität (verfügbare Cents) ist eine SEPARATE
+ * Frage und wird hier NICHT geprüft.
+ */
+export function resolvePotEligibilityAt(args: {
+  customer: DefaultPotCustomer;
+  settingsAtDate: BudgetTypeSettingRow[];
+  configuredEverTypes: Iterable<string>;
+  asOfDate: string;
+}): Map<BudgetType, PotEligibilityAt> {
+  const { customer, settingsAtDate, configuredEverTypes, asOfDate } = args;
+  const rowAtDate = new Set(settingsAtDate.map((s) => s.budgetType));
+  const configuredEver = new Set(configuredEverTypes);
+  const result = new Map<BudgetType, PotEligibilityAt>();
+  for (const cfg of resolveEffectivePotConfig({ customer, typeSettings: settingsAtDate })) {
+    const bt = cfg.budgetType;
+    if (!rowAtDate.has(bt) && configuredEver.has(bt)) {
+      result.set(bt, { config: cfg, eligible: false, reason: "out_of_window_configured" });
+      continue;
+    }
+    if (!cfg.enabled) {
+      result.set(bt, { config: cfg, eligible: false, reason: "disabled" });
+      continue;
+    }
+    if (cfg.validFrom && asOfDate < cfg.validFrom) {
+      result.set(bt, { config: cfg, eligible: false, reason: "not_yet_valid" });
+      continue;
+    }
+    if (cfg.validTo && asOfDate > cfg.validTo) {
+      result.set(bt, { config: cfg, eligible: false, reason: "expired" });
+      continue;
+    }
+    result.set(bt, { config: cfg, eligible: true });
+  }
+  return result;
+}
+
 /** Persistierte (oder fehlende) §45b-Type-Settings-Zeile, soweit für die Aktivitäts-Auflösung relevant. */
 export interface Budget45bSettingRow {
   enabled: boolean;

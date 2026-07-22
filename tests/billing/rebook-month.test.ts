@@ -23,13 +23,16 @@ import { db } from "../../server/lib/db";
 import {
   appointmentServices,
   auditLog,
+  budgetAllocations,
   budgetTransactions,
+  customers,
   invoices,
 } from "@shared/schema";
 import {
   getRebookMonthPreview,
   rebookCustomerMonth,
 } from "../../server/storage/budget/rebook-storage";
+import { createCascadeConsumption } from "../../server/storage/budget/consumption-engine";
 import { generateInvoiceCore } from "../../server/services/invoice-calc";
 import { setupBudgetScenario } from "../helpers/budget-scenarios";
 import { validSignatureDataUrl } from "../helpers/valid-signature";
@@ -516,5 +519,83 @@ describe("Monats-Umwidmung: Route + Entwurfs-Regen (Task #1785)", () => {
     const afterPot = await liveConsumptionByPot(customerId);
     expect(afterPot.get("entlastungsbetrag_45b")?.count ?? 0).toBe(0);
     expect(afterPot.get(target!.budgetType)?.count).toBe(2);
+  }, 180_000);
+});
+
+/**
+ * Task #1838 — EINE Nutzbarkeits-SSoT für „ist Topf X am Datum Y nutzbar?".
+ *
+ * Ein Topf, der IRGENDWANN konfiguriert wurde, dessen Gültigkeitsfenster den
+ * Buchungstag aber NICHT abdeckt („out_of_window_configured"), MUSS in BEIDEN
+ * Pfaden identisch als NICHT nutzbar behandelt werden:
+ *   - Neu-Buchung/Cascade (`createCascadeConsumption`) → Kapazität 0, kein
+ *     stiller Default-Wiederanlauf, obwohl §45b für Pflegekassen-Kunden per
+ *     Default aktiv wäre und der Topf sogar Guthaben hat.
+ *   - (Sammel-)Umbuchung (`getRebookMonthPreview`) → `eligible=false`.
+ *
+ * Regression gegen die frühere Asymmetrie (Cascade fiel auf den anspruchs-
+ * gegateten Default zurück und BUCHTE §45b, während die Umbuchung den Topf
+ * ablehnte).
+ */
+describe("Nutzbarkeits-SSoT: Buchung ≡ Umbuchung (Task #1838)", () => {
+  it("out-of-window-konfigurierter §45b-Topf ist in Cascade UND Umbuchung identisch nicht nutzbar", async () => {
+    const { customerId, employeeId } = await createCustomerWithEmployee();
+    // Selbstzahler-Überlauf zulassen, damit der Rest bei nicht nutzbarem §45b
+    // sichtbar in den privaten Topf fließt (statt hart zu blocken).
+    await db.update(customers).set({ acceptsPrivatePayment: true }).where(eq(customers.id, customerId));
+
+    // §45b konfiguriert, aber Fenster liegt VOLLSTÄNDIG VOR dem Mai-Buchungstag.
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 13100, yearlyLimitCents: null, validFrom: `${YEAR}-01-01`, validTo: `${YEAR}-03-31` },
+        { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+    // §45b MIT Guthaben — so hätte die alte, asymmetrische Cascade den Topf
+    // fälschlich konsumiert (Default-aktiv + verfügbar).
+    await db.insert(budgetAllocations).values({
+      customerId,
+      budgetType: "entlastungsbetrag_45b",
+      year: YEAR,
+      month: null,
+      amountCents: 13100,
+      source: "initial_balance",
+      validFrom: `${YEAR}-01-01`,
+      createdByUserId: userId,
+    });
+
+    // (1) Umbuchungs-Pfad: §45b als Ziel ist am Mai-Stichtag NICHT nutzbar.
+    const preview = await getRebookMonthPreview({ customerId, year: YEAR, month: MONTH });
+    const previewTarget = preview.eligibleTargets.find(t => t.budgetType === "entlastungsbetrag_45b");
+    expect(previewTarget, "§45b muss als Umbuchungsziel gelistet sein").toBeDefined();
+    expect(previewTarget!.eligible).toBe(false);
+
+    // (2) Cascade-Pfad: Neu-Buchung am Mai-Stichtag darf §45b NICHT konsumieren
+    //     (Kapazität 0) — der Betrag fließt in den privaten Topf.
+    const apptId = await createAppt(customerId, employeeId, EARLY_DATE, "09:00", "23:59");
+    await createCascadeConsumption({
+      customerId,
+      appointmentId: apptId,
+      transactionDate: EARLY_DATE,
+      totalAmountCents: 2380,
+      hauswirtschaftMinutes: 30,
+      hauswirtschaftCents: 2380,
+      alltagsbegleitungMinutes: 0,
+      alltagsbegleitungCents: 0,
+      travelKilometers: 0,
+      travelCents: 0,
+      customerKilometers: 0,
+      customerKilometersCents: 0,
+      userId,
+      skipExistingCheck: true,
+      privatePot: { statutoryExcluded: false, noteKind: "privatzahlung" },
+    });
+
+    const booked = await liveConsumptionByPot(customerId);
+    expect(booked.get("entlastungsbetrag_45b")?.count ?? 0, "§45b darf out-of-window NICHT gebucht werden").toBe(0);
+    expect(booked.get("private")?.sumAbs ?? 0, "Rest fließt in den privaten Topf").toBe(2380);
   }, 180_000);
 });
