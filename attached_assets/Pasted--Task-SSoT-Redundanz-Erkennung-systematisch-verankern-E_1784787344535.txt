@@ -1,0 +1,141 @@
+# Task: SSoT-Redundanz-Erkennung systematisch verankern (Epic: AP0–AP5 + Folge-Tickets)
+
+**Quelle/Kontext:** Plan `docs/ssot-redundancy-detection-plan.md` · Evidenz
+`docs/audits/ssot-2026-07-22/` (26 verifizierte SSoT-Verletzungen).
+**Vorbedingung:** Falls diese Dateien fehlen, zuerst Branch
+`claude/ssot-redundancy-detection-grrpph` mergen bzw. `ssot-plan-commit.patch`
+per `git am` auf `main` anwenden.
+
+**Arbeitsmodus (verbindlich):**
+- Ein Arbeitspaket (AP) = ein Commit/PR = eigener Check-Lauf (`npm run check`,
+  `npm run test`, `npm run lint` EINZELN starten — nie alle Workflows
+  parallel, siehe Workspace-Boot-Disziplin in replit.md).
+- Kosten-Disziplin: Guards/Negativ-Beweise sind Teil des jeweiligen AP —
+  keine separaten „Sicherstellen"-Tasks. Publish gebündelt am Epic-Ende.
+- Scope-Guard: In AP0–AP5 wird KEINES der 26 Audit-Findings gefixt —
+  Baselines frieren den Ist-Zustand ein; Fixes sind die Folge-Tickets W1-a…f.
+- Rule of Three: jscpd-/similarity-Hits sind Fragen, keine Aufträge.
+  Bewusste Duplizierung → `jscpd:ignore` + Begründungs-Kommentar.
+
+---
+
+## AP0 — Substrat dichtmachen
+1. `package.json`: `"lint": "eslint client/src server shared --max-warnings 0"`.
+   Bestehende Verstöße NICHT fixen: einmalig `npx eslint --suppress-all` →
+   committete `eslint-suppressions.json` (shrink-only; nur NEUE Verstöße failen).
+2. CI: `continue-on-error` am knip-Step entfernen (knip wird blockierend).
+3. `tests/helpers/known-failing.ts`: `CI=true`-Quarantäne der km-Drift-Suiten
+   auflösen. Falls dann rot: nicht fixen, sondern als Kommentar im Ticket
+   melden und Quarantäne mit Ablaufdatum + Issue-Referenz versehen.
+4. Gate-Meta-Check: CI-Step, der failt, wenn ein Pflicht-Gate (v. a. Gate 5,
+   Architektur-Guards) 0 Tests ausgeführt hat — der stille Fork/Secret-Skip
+   wird sichtbar.
+**DoD:** Lint grün über client+server+shared mit Suppressions-Baseline; knip
+blockierend; Negativ-Beweis für den Meta-Check im PR-Text (Guard-Suite einmal
+absichtlich leerlaufen lassen → CI rot, dann revertieren).
+**Ersetzt:** tote ESLint-Config für `server/storage|services`, ungelintetes
+`shared/`, knip-Warn-Modus, stumme Gate-Skips.
+
+## AP1 — Maschinenlesbare SSoT-Registry + Meta-Guard
+1. `shared/ssot-registry.ts`: `SsotEntry` = { id, question (deutsch),
+   canonicalFn, canonicalModule, importAllowlist, ownedLiterals, guardTests,
+   eslintRuleId? }.
+2. Seed aus den BESTEHENDEN Guard-Allowlists (`ssot-imports.test.ts` A1–A5,
+   `budget-single-reader`, `price-ssot-read-path`, `budget-default-pots-ssot`,
+   `appointment-signed`, Monatsabschluss-Readiness). Die Guard-Tests
+   importieren ihre Allowlists fortan aus der Registry — reine
+   Quellen-Verschiebung, Verhalten identisch.
+3. Meta-Guard `tests/architecture/ssot-registry.test.ts`: pro Eintrag —
+   Modul existiert, Funktion exportiert, ≥1 Guard-Test vorhanden. Mit
+   Negativ-Test nach `guard-helpers`-Muster.
+**DoD:** alle bisherigen Guards grün; Allowlists nur noch in der Registry.
+**Ersetzt:** verstreute Allowlists in ~45 Guard-Tests; Katalog-Rolle der
+Prosa-Dokus (`budget-ssot-inventory` bleibt als Erklärung).
+
+## AP2 — jscpd-Gate (CI-Gate #12) + sonarjs-Quick-Wins
+1. `.jscpd.json` exakt gemäß Plan §3/Schicht 1 (minTokens 70, ignore:
+   `client/src/components/ui/**`, `tests/**`, `e2e/**`, `migrations/**`,
+   `server/replit_integrations/**`).
+2. `scripts/jscpd-gate.ts` (tsx): JSON-Report → Klon-Keys
+   (`fileA+fileB+tokenHash`) gegen committete
+   `tests/architecture/jscpd-baseline.json`; neues Paar → exit 1;
+   `--update` schreibt (nur schrumpfende) Baseline. npm-Script `dup:check`.
+3. Neuer CI-Pflicht-Step `duplication`.
+4. ESLint: `sonarjs/no-identical-functions: ["error", 5]` global;
+   `sonarjs/no-duplicate-string` (threshold 3) nur für `shared/**` +
+   `server/**`; Bestand in die Suppressions-Baseline.
+**DoD:** Negativ-Beweis: künstlich eingefügter 80-Token-Klon macht CI rot
+(im PR dokumentiert, dann revertiert); `dup:check` lokal < 60 s.
+**Ersetzt:** manuelle grep-Duplikat-Scans (Refactor-Masterplan-Methodik).
+
+## AP3 — dependency-cruiser + ESLint-SSoT-Spiegel
+1. `.dependency-cruiser.cjs`: (a) forbidden: `client→server`,
+   `shared→client|server`, no-circular in `shared/`; (b) pro Registry-Eintrag
+   eine Boundary-Regel „nur Allowlist importiert canonicalModule-Interna" —
+   AUS `shared/ssot-registry.ts` GENERIERT, nicht dupliziert; (c) Pilot einer
+   required-Regel: `server/storage/budget/**` MUSS den unified-reader
+   importieren; (d) orphans in `shared/` + `server/` = error.
+2. Ist-Verstöße in `--ignore-known`-Baseline. CI-Step ergänzen.
+3. Die ~10 reinen Import-Boundary-ast-grep-Tests löschen, deren Prüfung jetzt
+   1:1 abgedeckt ist — Mapping Test→Regel im PR-Text (Ersetzungs-Nachweis).
+   Symbol-Level-Prüfungen bleiben Tests.
+4. ESLint-Spiegel für Top-10-Registry-Einträge: `no-restricted-imports`
+   mit `importNames` + Message „<Frage>: <canonicalFn> verwenden (<ID>)".
+   Autorität bleiben Tests/depcruise; ESLint ist Editor-Vorwarnung.
+**DoD:** Negativ-Beweis (verbotener Import → CI rot); jede gelöschte
+Test-Datei im PR einzeln der ersetzenden Regel zugeordnet.
+**Ersetzt:** ~10 Import-Boundary-Tests; „Richtungs-Konvention ohne Check".
+
+## AP4 — knip strict + similarity-ts-Weekly + Ratchet-Report
+1. Zweiter CI-Lauf `npx knip --production --strict` mit `!`-Entries
+   (`server/index.ts!`, `client/src/main.tsx!`, …). Erst-Findings: nur
+   trivial Totes löschen, Rest via knip-ignore mit `TODO(ssot)`-Kommentar.
+2. `ignoreExportsUsedInFile` entfernen; Blanket-Ignore
+   `client/src/components/ui/**` so verfeinern, dass ungenutzte GANZE
+   shadcn-Dateien auffallen.
+3. `scripts/similarity-report.ts` + wöchentlicher Scheduled-Workflow
+   (Mo 06:00 UTC): pinned `similarity-ts` mit `--cross-file --threshold 0.88
+   --min-tokens 30 --print` über `shared/ server/ client/src` → Markdown-
+   Report als Artefakt + gepinntes Issue. REPORT-ONLY, kein Gate.
+4. `npm run ratchet:status`: liest eslint-suppressions.json,
+   jscpd-baseline.json, dependency-cruiser-known-violations, knip-ignores →
+   EINE Trend-Tabelle.
+**DoD:** Weekly-Workflow via `workflow_dispatch` einmal erfolgreich gelaufen;
+`ratchet:status` zeigt alle vier Baseline-Größen.
+**Ersetzt:** Zufalls-Entdeckung semantischer Duplikate; Zombie-Exporte, die
+nur ihr eigener Test am Leben hält.
+
+## AP5 — Konsolidierungs-Playbook + PR-Template
+1. `docs/ssot-consolidation-playbook.md`: die 6 Schritte aus Plan §6
+   (deklarieren → SSoT segnen → Shadow-Compare → Cutover → Legacy löschen →
+   Guard + Baseline-Schrumpfung IM SELBEN PR) inkl. Anti-Über-Konsolidierung.
+2. PR-Template-Checkbox: „Neue/geänderte fachliche Frage? → Registry-Eintrag
+   + Guard im selben PR (oder explizit: keine)".
+3. replit.md-Pointer auf das Playbook ergänzen.
+**Ersetzt:** Guard-Installation als „optionales Cleanup".
+
+---
+
+## Folge-Tickets (je EIGENES Ticket, NICHT Teil dieses Epics; Playbook §6):
+- **W1-a Euro-Parsing/-Format** — findings util-reimpl-2/-3/-4/-9/-10 → EIN
+  `parseGermanDecimal` + `parseEuroDE`/`formatEuroDE`; Guard: Ban auf
+  `parseFloat`/`Number(x.replace(',','.'))` außerhalb `shared/utils`.
+- **W1-b Datums-SSoT** — util-reimpl-5/-7/-8 → `formatDateISO`/`todayISO`;
+  Guard: Ban `toISOString().slice(0,10)` in Fachdaten-Pfaden.
+- **W1-c Termin-Status** — parallel-logic-1 + drift-5 → EIN Prädikat-Set +
+  EINE Label-Map; Guard: Ban `'documented'`-Literal in SQL außerhalb SSoT.
+- **W1-d Preis-Lesepfad** — parallel-logic-2 (13 SQL-Subqueries) → eine
+  priceFor-basierte Funktion/View; Equality-Test VOR dem Umbau.
+- **W1-e Statistik-Reader** — parallel-logic-3/-4 → ein Economics-Reader,
+  ein Funnel; Drift-Test.
+- **W1-f Time-Tracking** — drift-1/-4 + util-reimpl-1 → Minuten-Attribution
+  & EU-Rentner-Regel nach `shared/domain/` + Server-Enforcement.
+
+Backlog danach (je eigenes Ticket): ts-morph-Signatur-Clustering ·
+LLM-Triage-Cron · Quartals-Audit Statistik/Ökonomie · SQL-Fingerprinting ·
+Invarianten-Assertions statt Reconcile-Einmalskripten · Query-Key-Factory ·
+Env-Zod-Modul · openapi-typescript/oasdiff · Zod-4-Kette.
+
+**Epic-Abnahme:** alle CI-Gates (11 + `duplication`) grün · `ratchet:status`
+zeigt 4 Baselines mit Startgrößen · jedes AP hat seinen Negativ-Beweis im
+PR-Text · keines der 26 Findings „nebenbei" gefixt.
