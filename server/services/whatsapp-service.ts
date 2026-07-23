@@ -182,13 +182,20 @@ class WhatsAppService {
   }
 
   buildAppUrl(path: string): string {
-    // APP_DOMAIN (Hetzner/Coolify) vorrangig; sonst unveränderte Replit-Logik
-    // (REPLIT_DEV_DOMAIN → APP_URL). Die Vereinheitlichung/der Prod-Domain-Fix
-    // folgt bewusst separat (Commit 2b), damit er eigens prüfbar ist.
-    const appBase = appDomainBaseUrl();
-    const baseUrl = appBase ?? (process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : process.env.APP_URL || "");
+    // Präzedenz: APP_DOMAIN (Hetzner/Coolify) → REPLIT_DOMAINS[0] →
+    // REPLIT_DEV_DOMAIN → APP_URL.
+    //
+    // Fix (Task #1840): Zuvor wurde in Replit-PROD (wo REPLIT_DOMAINS gesetzt,
+    // REPLIT_DEV_DOMAIN aber i.d.R. ebenfalls vorhanden ist) die DEV-Domain für
+    // WhatsApp-Deep-Links verwendet — die Links zeigten auf die Dev-Umgebung.
+    // WhatsApp folgt jetzt derselben Reihenfolge wie der E-Mail-Link-Bau
+    // (REPLIT_DOMAINS[0] vor REPLIT_DEV_DOMAIN), sodass Prod-Links auf die
+    // Prod-Domain zeigen. APP_URL bleibt als letzte Stufe erhalten.
+    const replitDomain =
+      process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN;
+    const baseUrl =
+      appDomainBaseUrl() ??
+      (replitDomain ? `https://${replitDomain}` : process.env.APP_URL || "");
     return `${baseUrl}${path}`;
   }
 

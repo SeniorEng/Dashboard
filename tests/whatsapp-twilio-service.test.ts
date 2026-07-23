@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   buildTwilioRequest,
   resolveTwilioConfigFromSettings,
   normalizeWhatsAppRecipient,
+  whatsAppService,
 } from "../server/services/whatsapp-service";
 
 const ENV_SID = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
@@ -157,5 +158,53 @@ describe("WhatsApp Twilio Service – Request-Payload", () => {
       fromConfig,
     );
     expect(payload.contentVariables).toBeUndefined();
+  });
+});
+
+describe("WhatsApp Deep-Link-Basis (buildAppUrl) – Präzedenz (Task #1840)", () => {
+  const VARS = ["APP_DOMAIN", "REPLIT_DOMAINS", "REPLIT_DEV_DOMAIN", "APP_URL"] as const;
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = {};
+    for (const k of VARS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const k of VARS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it("nutzt APP_DOMAIN vorrangig (Hetzner/Coolify)", () => {
+    process.env.APP_DOMAIN = "app.example.com";
+    process.env.REPLIT_DOMAINS = "prod.repl.example,other.repl.example";
+    process.env.REPLIT_DEV_DOMAIN = "dev.repl.example";
+    expect(whatsAppService.buildAppUrl("/tasks")).toBe("https://app.example.com/tasks");
+  });
+
+  it("Fix: nutzt in Replit-PROD die PROD-Domain (REPLIT_DOMAINS[0]) statt der DEV-Domain", () => {
+    // Beide Replit-Vars gesetzt (typisch für Prod) — vor dem Fix hätte
+    // buildAppUrl die DEV-Domain verwendet.
+    process.env.REPLIT_DOMAINS = "prod.repl.example,other.repl.example";
+    process.env.REPLIT_DEV_DOMAIN = "dev.repl.example";
+    expect(whatsAppService.buildAppUrl("/appointment/42")).toBe(
+      "https://prod.repl.example/appointment/42",
+    );
+  });
+
+  it("fällt auf REPLIT_DEV_DOMAIN zurück, wenn nur diese gesetzt ist", () => {
+    process.env.REPLIT_DEV_DOMAIN = "dev.repl.example";
+    expect(whatsAppService.buildAppUrl("/")).toBe("https://dev.repl.example/");
+  });
+
+  it("nutzt APP_URL als letzte Stufe, wenn keine Domain-Var gesetzt ist", () => {
+    process.env.APP_URL = "https://legacy.example.com";
+    expect(whatsAppService.buildAppUrl("/customers/7")).toBe(
+      "https://legacy.example.com/customers/7",
+    );
   });
 });
