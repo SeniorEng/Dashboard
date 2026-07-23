@@ -377,6 +377,15 @@ jobs:
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npm run check:no-test-junk
 
+      # Gate-Meta-Check (Task #1841): UNBEDINGT (kein `if:`-Guard!). Verriegelt
+      # den „stillen Skip"-Failure-Mode — ein grün durchlaufendes Test-Gate, das
+      # in Wahrheit 0 Tests ausgeführt hat (kaputter Project-Filter, fehlendes
+      # outputFile, kollabierte Datei, versehentlich geskippter Step). Das Skript
+      # entscheidet selbst anhand von TEST_USER_PASSWORD, ob Tests laufen mussten.
+      # Der Step MUSS ohne `if:` bleiben (siehe tests/architecture/gate-meta-check.test.ts).
+      - name: Assert test gates actually ran
+        run: npx tsx scripts/assert-gate-ran.ts
+
       - name: Stop app server
         if: ${{ always() && env.SERVER_PID != '' }}
         run: kill "$SERVER_PID" || true
