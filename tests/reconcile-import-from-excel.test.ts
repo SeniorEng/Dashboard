@@ -11,7 +11,6 @@
  *   - Geschlossene Monate werden ohne `--allow-closed-months` übersprungen.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { quarantinedInCI } from "./helpers/known-failing";
 import ExcelJS from "exceljs";
 import { and, eq, desc } from "drizzle-orm";
 import {
@@ -107,7 +106,7 @@ afterAll(async () => {
 });
 
 describe("Task #648 — Reconcile aus Original-Excel", () => {
-  it.skipIf(quarantinedInCI)("erkennt Drift in service-art, duration und km und korrigiert per --apply idempotent", async () => {
+  it("erkennt Drift in service-art, duration und km und korrigiert per --apply idempotent", async () => {
     const created = await createTestCustomer({
       vorname: "Reco",
       nachname: `T648Drift_${Date.now()}`,

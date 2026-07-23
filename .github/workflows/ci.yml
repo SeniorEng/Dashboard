@@ -204,17 +204,24 @@ jobs:
       - name: Security audit (better-npm-audit, .nsprc allowlist)
         run: npm run audit:ci
 
-      # Dead-Code-Report (Task #1238, Phase 0.2): knip läuft NUR als
-      # Warning-Artefakt — `continue-on-error: true` lässt das Gate niemals
-      # rot werden (das Aufräumen toter Dateien ist Phase 1, NICHT dieser Task).
+      # Dead-Code-Gate (Task #1841, SSoT-AP0): knip ist jetzt BLOCKIEREND.
+      # Tote Dateien, ungenutzte Exports/Dependencies und stale
+      # knip.json-Ignores (Configuration-Hints) brechen den Lauf sofort rot.
+      # Der Symbols-Reporter schreibt die Funde direkt in die Job-Konsole, damit
+      # man OHNE Artefakt-Download sieht, WAS tot ist. Bewusst gewollte, aber
+      # (noch) nicht verdrahtete Exports tragen einen `@public`-JSDoc-Tag.
       # Version exakt gepinnt auf die 5.x-Linie, die knip.json adressiert.
-      - name: Dead-code report (knip — warning-only artifact)
-        continue-on-error: true
-        run: npx --yes knip@5.88.1 --reporter json > knip-report.json
+      - name: Dead-code gate (knip — blocking, symbols to console)
+        run: npx --yes knip@5.88.1 --reporter symbols
 
-      # Kosten-Optimierung (Task #1799): Report nur bei Job-Fehlschlag hochladen
-      # (knip ist warning-only ⇒ auf grünen Läufen braucht niemand das Artefakt)
-      # und Retention kurz halten.
+      # Bei rotem Lauf zusätzlich den maschinenlesbaren JSON-Report erzeugen
+      # (`|| true`, damit der erneute knip-Exit den Artefakt-Schritt nicht
+      # abbricht) und als kurzlebiges Artefakt hochladen — nur auf Fehlschlägen
+      # relevant, deshalb `if: failure()` + kurze Retention.
+      - name: Generate knip JSON report (on failure)
+        if: failure()
+        run: npx --yes knip@5.88.1 --reporter json > knip-report.json || true
+
       - name: Upload knip report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -278,11 +285,11 @@ jobs:
       TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
       TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
       SUPER_ADMIN_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
-      # GitHub-Actions setzt CI=true ohnehin; explizit gesetzt als
-      # Dokumentation für die CI-only-Quarantäne vorbestehender
-      # km-Rebook/km-Drift-Tests (tests/helpers/known-failing.ts). Diese
-      # hängen am offenen budget_transactions_appointment_required_check-
-      # Konstrukt und werden NUR in der sauberen CI-DB übersprungen.
+      # Standard-CI-Marker. GitHub-Actions setzt CI=true ohnehin; explizit
+      # gesetzt für Determinismus (u.a. wertet der Ephemeral-DB-Fail-Fast-Guard
+      # in tests/setup diesen Flag aus). Die frühere km-Rebook/km-Drift-CI-
+      # Quarantäne (tests/helpers/known-failing.ts) wurde in SSoT-AP0 ersatzlos
+      # entfernt — siehe docs/flaky-tests.md „Known-Failing".
       CI: "true"
     steps:
       - name: Checkout

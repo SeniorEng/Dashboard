@@ -9,7 +9,6 @@
  * aktive Consumption und überspringt den Buchungsversuch.
  */
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { quarantinedInCI } from "../helpers/known-failing";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { budgetTransactions } from "@shared/schema";
@@ -72,7 +71,7 @@ describe("Task #636 — Re-Document nach Reopen+Edit", () => {
     }
   });
 
-  it.skipIf(quarantinedInCI)("Re-Document nach Reopen+km-PATCH löst KEINE budgetWarning aus und legt keine zweite aktive Consumption an", async () => {
+  it("Re-Document nach Reopen+km-PATCH löst KEINE budgetWarning aus und legt keine zweite aktive Consumption an", async () => {
     const date = pastWeekdayInCurrentMonth();
     scenario = await setupBudgetScenario({
       customerNamePrefix: "T636-REDOC",
