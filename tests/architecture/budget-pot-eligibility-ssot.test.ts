@@ -28,6 +28,7 @@
  * eine bewusst eingeschleuste Verletzung das Gate bricht.
  */
 import { describe, it, expect } from "vitest";
+import { ssotGuardAllowlist } from "@shared/ssot-registry";
 import {
   collectScanFiles,
   stripComments,
@@ -45,11 +46,11 @@ const SSOT_MODULE = "shared/domain/budgets.ts";
 
 /**
  * Die beiden wertrelevanten Entscheidungs-Pfade, die die Nutzbarkeit aus der
- * SSoT ableiten MÜSSEN: Neu-Buchungs-Cascade und (Monats-)Umbuchung.
+ * SSoT ableiten MÜSSEN: Neu-Buchungs-Cascade und (Monats-)Umbuchung. Quelle ist
+ * ab Task #1842 die maschinenlesbare SSoT-Registry (`shared/ssot-registry.ts`).
  */
 const ELIGIBILITY_DECISION_PATHS = [
-  "server/storage/budget/consumption-engine.ts",
-  "server/storage/budget/rebook-storage.ts",
+  ...ssotGuardAllowlist("pot-eligibility", "ELIGIBILITY_DECISION_PATHS"),
 ];
 
 // ---------------------------------------------------------------------------

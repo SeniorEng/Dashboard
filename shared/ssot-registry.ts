@@ -270,7 +270,11 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
   },
   {
     id: "private-payment-eligibility",
-    question: "Darf ein Kunde einen privaten (19 %-)Anteil erhalten? (acceptsPrivatePayment || selbstzahler)",
+    // Frage bewusst OHNE die wörtliche `||`-Formel formuliert: der A5-Guard in
+    // ssot-imports.test.ts verbietet die hand-gerollte Privatanteil-Formel im
+    // gesamten shared/-Baum (inkl. dieser Registry). Die kanonische Definition
+    // steht in `isPrivatePaymentAllowed`.
+    question: "Darf ein Kunde einen privaten (19 %-)Anteil erhalten? (Privatzahler-Berechtigung)",
     canonical: [{ symbol: "isPrivatePaymentAllowed", module: "shared/domain/budget-selbstzahler-validator.ts" }],
     ownedLiterals: [],
     guards: [

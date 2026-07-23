@@ -16,6 +16,12 @@
 > History).
 > **Out of scope:** Refactoring, neue Views, Architecture-Tests, andere
 > Domänen (Pricing, Zeiten, Rechnungen).
+>
+> **Maschinenlesbarer Katalog (Task #1842):** Der Katalog „fachliche Frage →
+> kanonische Funktion → Guard" ist jetzt zusätzlich maschinenlesbar in
+> [`shared/ssot-registry.ts`](../shared/ssot-registry.ts) gepflegt (Meta-Guard:
+> `tests/architecture/ssot-registry.test.ts`); diese Inventur bleibt die
+> menschenlesbare Ist-Karte.
 
 ## Lesehilfe
 

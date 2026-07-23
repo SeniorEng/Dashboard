@@ -23,18 +23,17 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative, sep } from "path";
+import { ssotGuardAllowlist } from "@shared/ssot-registry";
 
 const ROOT = process.cwd();
 
 /**
  * Allowlist: jede Datei, die den Cap-Slot-Verbrauch (`.netUsedInWindowCents`)
- * liest, um Verfügbarkeit abzuleiten, MUSS hier stehen.
+ * liest, um Verfügbarkeit abzuleiten, MUSS hier stehen. Quelle ist ab Task #1842
+ * die maschinenlesbare SSoT-Registry (`shared/ssot-registry.ts`) — die erlaubten
+ * Pfade werden hier NICHT mehr hart gehalten, sondern von dort bezogen.
  */
-const ALLOWLIST = new Set<string>([
-  "server/storage/budget/unified-reader.ts",
-  "shared/domain/budget/cap-math.ts",
-  "server/storage/budget/summary-queries.ts",
-]);
+const ALLOWLIST = new Set<string>(ssotGuardAllowlist("budget-availability", "ALLOWLIST"));
 
 function* walk(dir: string): Generator<string> {
   for (const entry of readdirSync(dir)) {
@@ -149,19 +148,12 @@ describe("Architektur — EIN Budget-Verfügbarkeits-Reader (Task #874 I1)", () 
   // keine Parallel-§45b-Reader entstehen, ist der PRODUKTIVE Aufruf von
   // `netAvailable45bAt` auf eine Allowlist beschränkt — der unified-reader delegiert,
   // alle anderen Verfügbarkeits-Anzeigen laufen über ihn.
-  const ALLOWLIST_45B = new Set<string>([
-    "server/storage/budget/net-available-45b.ts", // Definition (die §45b-SSoT).
-    "server/storage/budget/unified-reader.ts", // DER eine Reader (delegiert §45b).
-    // Task #1366 — die §45b-Forecast-Vorausschau (`getBudgetSummary` /
-    // `getMonthlyBudgetFitByAppointment`) liest pro projiziertem Monatsende über
-    // die SSoT `netAvailable45bAt` ({ projectFuture: true, holds: "ignore" })
-    // statt eigener `allocated − consumed`-Mathe.
-    "server/storage/budget/summary-queries.ts",
-    // Die §45b-Rechnungs-Reduktion (nachträgliche Kürzung einer §45b-Position auf
-    // die tatsächlich verfügbare Deckung) liest die verfügbare §45b-Deckung über
-    // dieselbe SSoT `netAvailable45bAt` statt eigener `allocated − consumed`-Mathe.
-    "server/services/invoice-45b-reduction.ts",
-  ]);
+  // Erlaubte Aufrufer ab Task #1842 aus der SSoT-Registry (`shared/ssot-registry.ts`);
+  // die Pro-Pfad-Begründung (Forecast-Vorausschau #1366, §45b-Rechnungs-Reduktion …)
+  // ist dort als Kommentar erhalten.
+  const ALLOWLIST_45B = new Set<string>(
+    ssotGuardAllowlist("budget-availability-45b", "ALLOWLIST_45B"),
+  );
 
   it("§45b-Verfügbarkeit nur über die SSoT `netAvailable45bAt` (Task #1348)", () => {
     const scanRoots = ["server", "shared"].map((p) => join(ROOT, p));
@@ -223,10 +215,10 @@ describe("Architektur — EIN Budget-Verfügbarkeits-Reader (Task #874 I1)", () 
   // verhindert dieser Guard, dass irgendwo erneut eine eigene §45b-Verfügbarkeits-
   // Mathe entsteht: jede Verwendung MUSS die pure SSoT aufrufen, und der Aufruf ist
   // auf Definition + den EINEN DB-Reader beschränkt.
-  const ALLOWLIST_COMPUTE_45B = new Set<string>([
-    "shared/domain/budget/net-available-45b.ts", // Definition (die pure §45b-Mathe-SSoT).
-    "server/storage/budget/net-available-45b.ts", // einziger DB-Reader, der sie füttert.
-  ]);
+  // Erlaubte Aufrufer ab Task #1842 aus der SSoT-Registry (`shared/ssot-registry.ts`).
+  const ALLOWLIST_COMPUTE_45B = new Set<string>(
+    ssotGuardAllowlist("budget-availability-45b", "ALLOWLIST_COMPUTE_45B"),
+  );
 
   // Aufruf der pure §45b-Mathe (Name gefolgt von `(`). Der reine Import
   // (`{ computeNetAvailable45b }`) hat kein `(` und triggert nicht.
