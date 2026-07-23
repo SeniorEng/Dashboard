@@ -61,10 +61,14 @@ export default [
     ],
   },
   {
-    files: ["client/src/**/*.{ts,tsx}"],
-    plugins: {
-      "react-hooks": reactHooks,
-    },
+    // SSoT-AP0 (Task #1841) — Basis-Block: linted die GESAMTE TS/TSX-Codebase
+    // (client/src + server + shared + tests), damit die SSoT-Schicht (`shared/`)
+    // und die Tests nicht länger ungelintet bleiben. Der TypeScript-Parser gilt
+    // hier für ALLE Dateien; spezifischere Blöcke unten legen nur zusätzliche
+    // Regeln drauf. `restrictDefaultPotOrderImport` ist semantisch überall gültig
+    // (ein Roh-Import der Konstante umgeht den Selbstzahler-/Anspruchs-Gate,
+    // egal aus welcher Schicht) und lebt deshalb im Basis-Block.
+    files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -77,8 +81,16 @@ export default [
       reportUnusedDisableDirectives: false,
     },
     rules: {
-      "no-restricted-syntax": ["error", restrictInvalidateQueries],
       "no-restricted-imports": ["error", restrictDefaultPotOrderImport],
+    },
+  },
+  {
+    files: ["client/src/**/*.{ts,tsx}"],
+    plugins: {
+      "react-hooks": reactHooks,
+    },
+    rules: {
+      "no-restricted-syntax": ["error", restrictInvalidateQueries],
       "react-hooks/rules-of-hooks": "error",
     },
   },
@@ -95,19 +107,8 @@ export default [
       "server/storage/**/*.{ts,tsx}",
       "server/services/**/*.{ts,tsx}",
     ],
-    languageOptions: {
-      parser: tsParser,
-      parserOptions: {
-        ecmaVersion: "latest",
-        sourceType: "module",
-      },
-    },
-    linterOptions: {
-      reportUnusedDisableDirectives: false,
-    },
     rules: {
       "no-restricted-syntax": ["error", restrictSoftDeleteFrom],
-      "no-restricted-imports": ["error", restrictDefaultPotOrderImport],
     },
   },
 ];
