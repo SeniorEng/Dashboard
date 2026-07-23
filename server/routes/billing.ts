@@ -56,6 +56,7 @@ import {
 } from "../storage/billing-storage";
 import { stornoInvoiceCascade } from "../services/invoice-storno";
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
+import { isStorniertInvoice } from "@shared/domain/billing-pipeline";
 import { readBillingEconomics } from "../storage/billing/economics-reader";
 import { readBillingTermine } from "../storage/billing/termine-reader";
 import { auditService } from "../services/audit";
@@ -237,14 +238,19 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   res.json(invoices);
 }));
 
-// Task #1710 — Rechnungen, die für die manuelle (Mehrfach-)Zuordnung zu einer
-// Qonto-Zahlung offen sind: Status `versendet`, aber NICHT bereits durch eine
-// Zahlung beansprucht (kein 1:1-Match, kein Mitglied eines aktiven Avis).
-// Verhindert, dass dieselbe Rechnung zwei Zahlungen zufällt.
+// Task #1710/#1859 — Rechnungen, die für die manuelle (Mehrfach-)Zuordnung zu
+// einer Qonto-Zahlung offen sind: JEDE Rechnung, die noch nicht mit einer echten
+// Bank-Zahlung abgeglichen ist. Das umfasst `versendet` UND `avis_erhalten`
+// (importiertes, aber noch nicht mit einer Zahlung abgeglichenes Avis). Entwurf,
+// bezahlt und storniert fallen raus; Gutschriften (`stornorechnung`) ebenso über
+// das geteilte Storno-Prädikat. „Beansprucht" = 1:1-Match ODER Mitglied eines an
+// eine Transaktion gebundenen Avis (getClaimedInvoiceIds, SSoT). Verhindert, dass
+// dieselbe Rechnung zwei Zahlungen zufällt.
 router.get("/open-for-match", asyncHandler("Offene Rechnungen konnten nicht geladen werden", async (_req, res) => {
-  const sent = await storage.getInvoices({ status: "versendet" });
-  const claimed = await qontoStorage.getClaimedInvoiceIds(db, sent.map(inv => inv.id));
-  res.json(sent.filter(inv => !claimed.has(inv.id)));
+  const candidates = (await storage.getInvoices({ statuses: ["versendet", "avis_erhalten"] }))
+    .filter(inv => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }));
+  const claimed = await qontoStorage.getClaimedInvoiceIds(db, candidates.map(inv => inv.id));
+  res.json(candidates.filter(inv => !claimed.has(inv.id)));
 }));
 
 // Task #1405 — Abrechnungs-Pipeline-Board (SSoT-Reader). Liefert den

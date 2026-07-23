@@ -30,6 +30,7 @@ import {
 } from "../../shared/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { withGobdMutation } from "../helpers/gobd";
+import { qontoStorage } from "../../server/storage/qonto";
 
 interface Seeded {
   customerId: number;
@@ -460,5 +461,130 @@ describe("Task #1712 — Teil-Aufhebung einer Sammelzahlung (partial-unmatch)", 
     expect(statusById.get(invA)).toBe("bezahlt");
     expect(statusById.get(invB)).toBe("bezahlt");
     expect(statusById.get(invC)).toBe("versendet");
+  });
+});
+
+/**
+ * Task #1859 — Der manuelle Zuordnungs-Picker (`/billing/open-for-match`) muss
+ * JEDE noch nicht mit einer echten Bank-Zahlung abgeglichene Rechnung anbieten.
+ *
+ * Vorher: nur `versendet` + „nicht Mitglied irgendeines Avis" — dadurch fielen
+ * Rechnungen, deren Avis importiert (Status `avis_erhalten`), aber noch nicht mit
+ * einer Zahlung verknüpft war, still aus dem Picker.
+ *
+ *  1. Rechnung in einem NICHT an eine Transaktion gebundenen (importierten) Avis
+ *     ist auswählbar.
+ *  2. Rechnung mit Status `avis_erhalten` (ohne Avis-Mitgliedschaft) ist
+ *     auswählbar.
+ *  3. Storniert / bezahlt / Gutschrift (`stornorechnung`) sind ausgeblendet.
+ *  4. Nachberechnung (`invoiceType='nachberechnung'`, versendet) ist auswählbar.
+ *  5. Invariante gegen Doppelzuordnung: eine im Picker 1:1 gebundene Rechnung,
+ *     die zufällig auch in einem noch unabgeglichenen Avis liegt, gilt für den
+ *     Avis→Zahlung-Abgleich nicht mehr als „offen".
+ */
+async function insertUnmatchedAdvice(): Promise<number> {
+  const tag = uniqueId();
+  const [row] = await db.insert(paymentAdvices).values({
+    fileName: `avis-${tag}.pdf`,
+    format: "gkv",
+    avisNummer: `AVIS-${tag}`,
+    gesamtBetragCents: 0,
+  }).returning({ id: paymentAdvices.id });
+  return row.id;
+}
+
+async function addAdviceItem(adviceId: number, invoiceId: number, betragCents: number): Promise<void> {
+  await db.insert(paymentAdviceItems).values({
+    paymentAdviceId: adviceId,
+    matchedInvoiceId: invoiceId,
+    betragCents,
+  });
+}
+
+async function insertInvoiceWith(
+  customerId: number,
+  opts: { amountCents: number; suffix: string; status?: string; invoiceType?: string },
+): Promise<number> {
+  const tag = uniqueId();
+  const [row] = await db.insert(invoices).values({
+    invoiceNumber: `QB-${opts.suffix}-${tag}`,
+    customerId,
+    billingType: "selbstzahler",
+    invoiceType: (opts.invoiceType ?? "rechnung") as "rechnung" | "stornorechnung" | "nachberechnung",
+    billingMonth: 1,
+    billingYear: 2026,
+    recipientName: "Test",
+    grossAmountCents: opts.amountCents,
+    netAmountCents: opts.amountCents,
+    status: (opts.status ?? "versendet") as "versendet" | "avis_erhalten" | "bezahlt" | "storniert",
+  }).returning({ id: invoices.id });
+  return row.id;
+}
+
+describe("Task #1859 — open-for-match zeigt alle noch nicht bank-abgeglichenen Rechnungen", () => {
+  it("Rechnung in einem NICHT gebundenen (importierten) Avis ist auswählbar", async () => {
+    const inv = await insertInvoiceWith(seeded.customerId, { amountCents: 4200, suffix: "1859-IMP", status: "avis_erhalten" });
+    seeded.invoiceIds.push(inv);
+    const adviceId = await insertUnmatchedAdvice();
+    seeded.adviceIds.push(adviceId);
+    await addAdviceItem(adviceId, inv, 4200);
+
+    const res = await apiGet<Array<{ id: number }>>(`/api/billing/open-for-match`);
+    expect(res.status).toBe(200);
+    expect(new Set(res.data.map(r => r.id)).has(inv)).toBe(true);
+  });
+
+  it("Rechnung mit Status avis_erhalten (ohne Avis-Mitgliedschaft) ist auswählbar", async () => {
+    const inv = await insertInvoiceWith(seeded.customerId, { amountCents: 3300, suffix: "1859-AV", status: "avis_erhalten" });
+    seeded.invoiceIds.push(inv);
+
+    const res = await apiGet<Array<{ id: number }>>(`/api/billing/open-for-match`);
+    expect(new Set(res.data.map(r => r.id)).has(inv)).toBe(true);
+  });
+
+  it("storniert / bezahlt / Gutschrift sind ausgeblendet; Nachberechnung ist auswählbar", async () => {
+    const paid = await insertInvoiceWith(seeded.customerId, { amountCents: 1000, suffix: "1859-PAID", status: "bezahlt" });
+    const cancelled = await insertInvoiceWith(seeded.customerId, { amountCents: 1000, suffix: "1859-CANC", status: "storniert" });
+    const credit = await insertInvoiceWith(seeded.customerId, { amountCents: 1000, suffix: "1859-CR", status: "versendet", invoiceType: "stornorechnung" });
+    const nachber = await insertInvoiceWith(seeded.customerId, { amountCents: 1000, suffix: "1859-NB", status: "versendet", invoiceType: "nachberechnung" });
+    seeded.invoiceIds.push(paid, cancelled, credit, nachber);
+
+    const res = await apiGet<Array<{ id: number }>>(`/api/billing/open-for-match`);
+    const ids = new Set(res.data.map(r => r.id));
+    expect(ids.has(paid)).toBe(false);
+    expect(ids.has(cancelled)).toBe(false);
+    expect(ids.has(credit)).toBe(false);
+    expect(ids.has(nachber)).toBe(true);
+  });
+
+  it("Invariante: 1:1 gebundene Rechnung in unabgeglichenem Avis gilt nicht mehr als offen fürs Avis", async () => {
+    const inv = await insertInvoiceWith(seeded.customerId, { amountCents: 5500, suffix: "1859-DBL", status: "avis_erhalten" });
+    seeded.invoiceIds.push(inv);
+    const adviceId = await insertUnmatchedAdvice();
+    seeded.adviceIds.push(adviceId);
+    await addAdviceItem(adviceId, inv, 5500);
+
+    // Vorher: Rechnung ist im Picker sichtbar UND das Avis führt sie als offen.
+    const before = await qontoStorage.getOpenAdvicesForMatching();
+    const adviceBefore = before.find(a => a.id === adviceId);
+    expect(adviceBefore?.openInvoiceIds).toContain(inv);
+
+    // Manueller 1:1-Match über eine Bank-Transaktion.
+    const txId = await insertQontoTx({ amountCents: 5500 });
+    seeded.qontoTxIds.push(txId);
+    const single = await apiPost(`/api/admin/qonto/transactions/${txId}/match`, { invoiceId: inv });
+    expect(single.status).toBe(200);
+
+    // Nachher: Rechnung ist beansprucht ⇒ das unabgeglichene Avis führt sie NICHT
+    // mehr als offen (kein zweiter „bezahlt"-Übergang beim späteren Avis-Abgleich).
+    const claimed = await qontoStorage.getClaimedInvoiceIds(db, [inv]);
+    expect(claimed.has(inv)).toBe(true);
+    const after = await qontoStorage.getOpenAdvicesForMatching();
+    const adviceAfter = after.find(a => a.id === adviceId);
+    expect(adviceAfter?.openInvoiceIds ?? []).not.toContain(inv);
+
+    // Und der Picker bietet sie ebenfalls nicht mehr an.
+    const res = await apiGet<Array<{ id: number }>>(`/api/billing/open-for-match`);
+    expect(new Set(res.data.map(r => r.id)).has(inv)).toBe(false);
   });
 });

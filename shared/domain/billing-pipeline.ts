@@ -149,6 +149,17 @@ export interface InvoicePipelineInput {
 }
 
 /**
+ * SSoT-Prädikat „Storniert-Side-Zustand" einer Rechnung: stornierter Status
+ * (`status='storniert'`) ODER Gutschrift-Typ (`invoiceType='stornorechnung'`).
+ * Wird von `assignInvoiceStage` UND vom Zahlungs-Zuordnungs-Picker
+ * (`/billing/open-for-match`) genutzt, damit „was ist eine stornierte
+ * Rechnung?" nur an EINER Stelle definiert ist.
+ */
+export function isStorniertInvoice(input: InvoicePipelineInput): boolean {
+  return input.status === "storniert" || input.invoiceType === "stornorechnung";
+}
+
+/**
  * Ordnet eine Rechnung GENAU einem Pipeline-Ausgang zu (total + disjunkt).
  *
  * Stornierte Rechnungen (`status='storniert'`) und Gutschriften
@@ -157,7 +168,7 @@ export interface InvoicePipelineInput {
  * ausblenden" und der Umsatz-Statistik, die stornierte Rechnungen ausschließt).
  */
 export function assignInvoiceStage(input: InvoicePipelineInput): PipelineAssignment {
-  if (input.status === "storniert" || input.invoiceType === "stornorechnung") {
+  if (isStorniertInvoice(input)) {
     return { kind: "side", state: "storniert" };
   }
   switch (input.status) {

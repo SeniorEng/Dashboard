@@ -7,14 +7,19 @@ import { db, type DbOrTx, type Tx } from "../lib/db";
 import type { InvoiceWithCustomer } from "../storage";
 import { formatInvoiceNumber } from "@shared/domain/invoice-number";
 
-export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number; dateFrom?: string; dateTo?: string }): Promise<InvoiceWithCustomer[]> {
+export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string; statuses?: string[]; insuranceProviderId?: number; dateFrom?: string; dateTo?: string }): Promise<InvoiceWithCustomer[]> {
   const { invoices, customers } = await import("@shared/schema");
-  const { eq, and, asc, desc, sql } = await import("drizzle-orm");
+  const { eq, and, asc, desc, sql, inArray } = await import("drizzle-orm");
   const conditions: Array<ReturnType<typeof eq> | ReturnType<typeof sql>> = [];
   if (filters.year) conditions.push(eq(invoices.billingYear, filters.year));
   if (filters.month) conditions.push(eq(invoices.billingMonth, filters.month));
   if (filters.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
   if (filters.status) conditions.push(eq(invoices.status, filters.status as string));
+  // Task #1859 — Mehr-Status-Filter (z.B. versendet + avis_erhalten für den
+  // Zahlungs-Zuordnungs-Picker). Wirkt zusätzlich zum Einzel-`status`.
+  if (filters.statuses && filters.statuses.length > 0) {
+    conditions.push(inArray(invoices.status, filters.statuses));
+  }
   // Task #1317: Optionaler Datumsbereich (von–bis) — engt die Liste auf
   // Rechnungen ein, die mindestens eine Leistungszeile mit einem
   // Termindatum im gewählten Bereich tragen. Wirkt ZUSÄTZLICH zu
