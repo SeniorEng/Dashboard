@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import type { CompanySettings } from "@shared/schema";
 import { loadLogoBytes } from "./logo-resolver";
+import { appDomainBaseUrl } from "../lib/app-domain";
 
 interface EmailAttachment {
   filename: string;
@@ -200,9 +201,10 @@ function toAbsoluteUrl(relativeUrl: string | null | undefined): string | null {
   if (relativeUrl.startsWith("cid:")) return relativeUrl;
   if (relativeUrl.startsWith("data:")) return relativeUrl;
   if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) return relativeUrl;
+  // APP_DOMAIN (Hetzner/Coolify) vorrangig; sonst unveränderte Replit-Reihenfolge.
   const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN;
-  if (!domain) return null;
-  const base = `https://${domain}`;
+  const base = appDomainBaseUrl() ?? (domain ? `https://${domain}` : null);
+  if (!base) return null;
   return `${base}${relativeUrl.startsWith("/") ? "" : "/"}${relativeUrl}`;
 }
 

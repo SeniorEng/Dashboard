@@ -6,6 +6,7 @@ import { withTimeout } from "../lib/with-timeout";
 import { log } from "../lib/log";
 import { escapeXml } from "../lib/xml";
 import { signCallbackToken } from "../lib/twilio-callback-token";
+import { appDomainBaseUrl } from "../lib/app-domain";
 import { auditService } from "./audit";
 
 interface CallBridgeParams {
@@ -39,6 +40,9 @@ async function getTwilioConfig() {
 }
 
 function buildCallbackBaseUrl(): string {
+  // APP_DOMAIN (Hetzner/Coolify) vorrangig; sonst unveränderte Replit-Reihenfolge.
+  const appBase = appDomainBaseUrl();
+  if (appBase) return appBase;
   const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
   if (domain) return `https://${domain}`;
   const replSlug = process.env.REPL_SLUG;

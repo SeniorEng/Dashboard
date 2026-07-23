@@ -4,6 +4,7 @@ import { db } from "../lib/db";
 import { whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings } from "@shared/schema";
 import { storage } from "../storage";
 import { normalizePhone } from "@shared/utils/phone";
+import { appDomainBaseUrl } from "../lib/app-domain";
 
 interface SendTemplateOptions {
   phoneNumber: string;
@@ -181,9 +182,13 @@ class WhatsAppService {
   }
 
   buildAppUrl(path: string): string {
-    const baseUrl = process.env.REPLIT_DEV_DOMAIN
+    // APP_DOMAIN (Hetzner/Coolify) vorrangig; sonst unveränderte Replit-Logik
+    // (REPLIT_DEV_DOMAIN → APP_URL). Die Vereinheitlichung/der Prod-Domain-Fix
+    // folgt bewusst separat (Commit 2b), damit er eigens prüfbar ist.
+    const appBase = appDomainBaseUrl();
+    const baseUrl = appBase ?? (process.env.REPLIT_DEV_DOMAIN
       ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : process.env.APP_URL || "";
+      : process.env.APP_URL || "");
     return `${baseUrl}${path}`;
   }
 

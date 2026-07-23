@@ -37,6 +37,13 @@ export function metaImagesPlugin(): Plugin {
 }
 
 function getDeploymentUrl(): string | null {
+  // APP_DOMAIN (Hetzner/Coolify) hat Vorrang; danach die Replit-Build-Vars
+  // unverändert. Bewusst inline (kein Import aus server/), da dieser Plugin-
+  // Code zur Build-Zeit in der Vite-Config läuft.
+  const appDomain = process.env.APP_DOMAIN?.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  if (appDomain) {
+    return `https://${appDomain}`;
+  }
   if (process.env.REPLIT_INTERNAL_APP_DOMAIN) {
     return `https://${process.env.REPLIT_INTERNAL_APP_DOMAIN}`;
   }
