@@ -13,7 +13,7 @@ import { autoBackfillNewIbans } from "../services/qonto-backfill-runner";
 const router = Router();
 router.use(requireAuth);
 
-const SENSITIVE_FIELDS = ["twilioAuthToken", "twilioAccountSid", "letterxpressApiKey", "qontoSecretKey", "smtpPass", "whatsappAccessToken"] as const;
+const SENSITIVE_FIELDS = ["twilioAuthToken", "twilioAccountSid", "letterxpressApiKey", "qontoSecretKey", "smtpPass", "whatsappAccessToken", "graphClientSecret"] as const;
 
 router.get("/", asyncHandler("Firmendaten konnten nicht geladen werden", async (req, res) => {
   const settings = await getCachedCompanySettings();

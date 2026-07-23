@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import type { CompanySettings } from "@shared/schema";
 import { loadLogoBytes } from "./logo-resolver";
+import { sendViaGraph, testGraphConnection, hasGraphCredentials } from "./email-graph-transport";
 
 interface EmailAttachment {
   filename: string;
@@ -99,6 +100,31 @@ function ensureSmtpConfigured(settings: CompanySettings): void {
   }
 }
 
+// Task #1856 — the active transport. `'graph'` selects Microsoft Graph, anything
+// else (incl. null/undefined for legacy rows) keeps the default SMTP path.
+function isGraphProvider(settings: CompanySettings): boolean {
+  return settings.emailProvider === "graph";
+}
+
+function ensureGraphConfigured(settings: CompanySettings): void {
+  if (!hasGraphCredentials(settings)) {
+    throw new Error(
+      "Microsoft-Graph-Konfiguration unvollständig. Bitte Tenant-ID, Client-ID, Client-Secret und Absender-UPN in den Einstellungen konfigurieren.",
+    );
+  }
+}
+
+// Provider-aware validation so Graph-mode deployments do not fail on a missing
+// SMTP config, and vice versa. This runs BEFORE the stub branch, matching the
+// previous SMTP-only behaviour.
+function ensureProviderConfigured(settings: CompanySettings): void {
+  if (isGraphProvider(settings)) {
+    ensureGraphConfigured(settings);
+  } else {
+    ensureSmtpConfigured(settings);
+  }
+}
+
 function createTransporter(settings: CompanySettings) {
   ensureSmtpConfigured(settings);
 
@@ -129,11 +155,15 @@ function createTransporter(settings: CompanySettings) {
 
 export async function sendEmail(settings: CompanySettings, options: EmailOptions): Promise<{ messageId: string }> {
   // Validation branches (BF-7-style "SMTP nicht konfiguriert") must keep working
-  // identically in stub mode, so we run the same check first.
-  ensureSmtpConfigured(settings);
+  // identically in stub mode, so we run the same check first — now provider-aware
+  // so Graph-mode does not fail on a missing SMTP config.
+  ensureProviderConfigured(settings);
 
+  const graphMode = isGraphProvider(settings);
   const fromName = settings.smtpFromName || settings.companyName || "SeniorenEngel";
-  const fromEmail = settings.smtpFromEmail || settings.smtpUser!;
+  const fromEmail = graphMode
+    ? settings.smtpFromEmail || settings.graphSenderUpn!
+    : settings.smtpFromEmail || settings.smtpUser!;
   const fromHeader = `"${fromName}" <${fromEmail}>`;
 
   if (isStubEmailTransport()) {
@@ -156,6 +186,16 @@ export async function sendEmail(settings: CompanySettings, options: EmailOptions
       sentAt: new Date().toISOString(),
     });
     return { messageId };
+  }
+
+  if (graphMode) {
+    return sendViaGraph(settings, {
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      from: fromHeader,
+      attachments: options.attachments,
+    });
   }
 
   const transporter = createTransporter(settings);
@@ -193,6 +233,27 @@ export async function testSmtpConnection(settings: CompanySettings): Promise<{ s
   } catch (error: unknown) {
     return { success: false, error: error instanceof Error ? error.message : "Verbindung fehlgeschlagen" };
   }
+}
+
+/**
+ * Task #1856 — provider-aware connection test used by the admin "Verbindung
+ * testen" button: checks whichever transport is currently active.
+ */
+export async function testEmailConnection(
+  settings: CompanySettings,
+): Promise<{ success: boolean; error?: string }> {
+  if (isGraphProvider(settings)) {
+    try {
+      ensureGraphConfigured(settings);
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : "Verbindung fehlgeschlagen" };
+    }
+    if (isStubEmailTransport()) {
+      return { success: true };
+    }
+    return testGraphConnection(settings);
+  }
+  return testSmtpConnection(settings);
 }
 
 function toAbsoluteUrl(relativeUrl: string | null | undefined): string | null {

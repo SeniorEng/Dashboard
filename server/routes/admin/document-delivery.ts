@@ -3,7 +3,7 @@ import { z } from "zod";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { deliverDocuments } from "../../services/document-delivery";
-import { testSmtpConnection } from "../../services/email-service";
+import { testEmailConnection } from "../../services/email-service";
 import { testLetterxpressConnection, checkLetterxpressHealth } from "../../services/letterxpress-service";
 import { deliveryStorage } from "../../storage/deliveries";
 import { storage } from "../../storage";
@@ -104,7 +104,8 @@ router.post("/document-delivery/test-smtp", asyncHandler("SMTP-Test fehlgeschlag
     return;
   }
 
-  const result = await testSmtpConnection(settings);
+  // Task #1856 — route the test to whichever provider is active (SMTP or Graph).
+  const result = await testEmailConnection(settings);
   res.json(result);
 }));
 

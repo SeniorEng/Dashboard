@@ -41,6 +41,15 @@ export const companySettings = pgTable("company_settings", {
   smtpFromEmail: text("smtp_from_email"),
   smtpFromName: text("smtp_from_name"),
   smtpSecure: boolean("smtp_secure").notNull().default(false),
+  // Task #1856 — E-Mail-Transport-Auswahl. `'smtp'` (Default) = bestehender
+  // nodemailer-Pfad; `'graph'` = Microsoft Graph App-only OAuth2. Microsoft
+  // schaltet Basic-Auth-SMTP Ende 2026 ab, daher Graph als zweiter Transport
+  // hinter der SSoT `sendEmail`. Client-Secret verschlüsselt wie `smtpPass`.
+  emailProvider: text("email_provider").notNull().default("smtp"),
+  graphTenantId: text("graph_tenant_id"),
+  graphClientId: text("graph_client_id"),
+  graphSenderUpn: text("graph_sender_upn"),
+  graphClientSecret: encryptedText("graph_client_secret"),
   letterxpressUsername: text("letterxpress_username"),
   letterxpressApiKey: encryptedText("letterxpress_api_key"),
   minijobEarningsLimitCents: integer("minijob_earnings_limit_cents").notNull().default(60300),
@@ -112,6 +121,11 @@ export const updateCompanySettingsSchema = z.object({
   smtpFromEmail: z.string().optional().nullable(),
   smtpFromName: z.string().optional().nullable(),
   smtpSecure: z.boolean().optional(),
+  emailProvider: z.enum(["smtp", "graph"]).optional(),
+  graphTenantId: z.string().optional().nullable(),
+  graphClientId: z.string().optional().nullable(),
+  graphSenderUpn: z.string().optional().nullable(),
+  graphClientSecret: z.string().optional().nullable(),
   letterxpressUsername: z.string().optional().nullable(),
   letterxpressApiKey: z.string().optional().nullable(),
   minijobEarningsLimitCents: z.number().int().min(0, "Betrag darf nicht negativ sein").optional(),
