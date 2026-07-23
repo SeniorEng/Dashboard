@@ -1,0 +1,98 @@
+# Arbeitsanweisung für Replit AI — E-Mail-Versand auf Microsoft Graph (OAuth2, App-only) umstellen
+
+**Repo:** SeniorEng/Dashboard. **Charakter:** read-only Inventur zuerst, dann **additiv**. **Ersetzungs-Regel:** die bestehende SSoT-Schnittstelle `sendEmail(settings, options)` bleibt unverändert — nur der Transport dahinter bekommt einen zweiten Pfad (Graph). Kein Parallelmodell, kein Aufruferumbau.
+
+**Warum:** Microsoft schaltet Basic-Auth-SMTP (Client Submission) **Ende Dezember 2026** standardmäßig ab; aktueller `5.7.139`-Fehler kommt von Tenant-Auth-Sperren (Sicherheitsstandards). App-only OAuth2 über Graph löst das dauerhaft: **kein Postfach-Passwort, kein interaktiver Login, kein MFA/Basic-Auth-Problem** — die App hat eine eigene Identität und holt/erneuert Tokens selbst (Client-Credentials-Flow).
+
+---
+
+## Ist-Zustand (verifiziert)
+- **Einziger Sende-Pfad:** `server/services/email-service.ts` → `sendEmail(settings, options)` → `createTransporter(settings)` (nodemailer). Optionen: `{ to, subject, html, attachments[] }`; Anhänge `{ filename, content: Buffer, contentType, cid?, contentDisposition? }`; **Inline-Logo via `cid` = `company-logo`** (`<img src="cid:company-logo">`). Stub-Transport (`isStubEmailTransport()`) für Tests.
+- **Config:** `CompanySettings` (`shared/schema/company.ts`): `smtpHost/smtpPort/smtpUser`, `smtpPass` = `encryptedText` (AES-256-GCM Spaltentyp), `smtpFromEmail/smtpFromName/smtpSecure`.
+- **Alle Aufrufer** (invoice-delivery, lead-auto-reply, cover-letter, document-delivery, employee-users-Willkommen, auth-Reset, …) gehen durch `sendEmail` → beim Transport-Tausch **keine Aufrufer-Änderung**.
+- **Kein IMAP/Inbound-Reader** vorhanden (Versand-only). Lesen siehe optionalen Block C.
+
+---
+
+## Schritt 0 — Entra-Einrichtung (einmalig, Admin; NICHT durch die App)
+Im **Microsoft Entra Admin Center** ([entra.microsoft.com](https://entra.microsoft.com)):
+1. **Identität → Anwendungen → App-Registrierungen → Neue Registrierung** („SeniorenEngel-Mailer", nur eigene Organisation). Notieren: **Anwendungs-(Client-)ID** + **Verzeichnis-(Mandanten-)ID**.
+2. **Zertifikate & Geheimnisse:** ein **Zertifikat** hochladen (empfohlen, läuft im Alltag nicht ab) **oder** einen **geheimen Clientschlüssel** anlegen (Wert wird nur EINMAL angezeigt → sofort sichern; Ablauf 24 Monate, Rotation als Kalender-Reminder).
+3. **API-Berechtigungen → Berechtigung hinzufügen → Microsoft Graph → Anwendungsberechtigungen** → **`Mail.Send`** (und `Mail.Read` nur falls Block C) → **„Administratorzustimmung erteilen"**.
+4. **Least Privilege — Application Access Policy** (Exchange Online PowerShell), damit die App-Berechtigung NUR auf das eine Absender-Postfach wirkt (sonst darf sie als jedes Postfach senden):
+   ```powershell
+   # Mail-enabled Security Group mit NUR dem Absenderpostfach als Mitglied anlegen, dann:
+   New-ApplicationAccessPolicy -AppId <CLIENT_ID> `
+     -PolicyScopeGroupId <gruppe@firma.de> `
+     -AccessRight RestrictAccess `
+     -Description "Mailer darf nur als Absenderpostfach senden"
+   Test-ApplicationAccessPolicy -AppId <CLIENT_ID> -Identity <absender@firma.de>   # AccessCheckResult = Granted
+   Test-ApplicationAccessPolicy -AppId <CLIENT_ID> -Identity <andere@firma.de>     # = Denied
+   ```
+
+## Schritt 1 — Read-only Inventur (Agent)
+`email-service.ts` + `CompanySettings` + alle `sendEmail`-Aufrufer auflisten und bestätigen: der Transport ist die einzige Stelle, die getauscht werden muss; die Anhang-/`cid`-Struktur ist wie oben. Ergebnis dokumentieren, **bevor** Code geändert wird.
+
+## Schritt 2 — Config erweitern (additiv, verschlüsselt)
+In `shared/schema/company.ts` neue Felder (analog zu `smtpPass` als **`encryptedText`**):
+- `emailProvider: text` — `'smtp' | 'graph'`, Default `'smtp'`.
+- `graphTenantId: text`, `graphClientId: text`, `graphSenderUpn: text` (das Absenderpostfach, z. B. `info@firma.de`).
+- `graphClientSecret: encryptedText` (bzw. Zertifikat-Referenz, falls Zertifikatsweg). Zod-Schema + Migration (`drizzle-kit`) additiv, alte SMTP-Felder **bleiben** (Fallback bis Ende 2026).
+
+## Schritt 3 — Graph-Transport hinter der bestehenden SSoT
+Neue Datei `server/services/email-graph-transport.ts`:
+- Deps: `@azure/identity` (`ClientSecretCredential` bzw. `ClientCertificateCredential`) + `@microsoft/microsoft-graph-client` (mit `TokenCredentialAuthenticationProvider`, Scope `https://graph.microsoft.com/.default`). Node ≥18 → globales `fetch`.
+- `sendViaGraph(settings, options)`:
+  - Credential + Graph-Client **modul-weit cachen** (Token-Erneuerung macht die Library selbst — unbeaufsichtigt).
+  - `POST /users/{graphSenderUpn}/sendMail` mit:
+    ```jsonc
+    { "message": {
+        "subject": options.subject,
+        "body": { "contentType": "HTML", "content": options.html },
+        "toRecipients": [{ "emailAddress": { "address": options.to } }],
+        "attachments": options.attachments?.map(a => ({
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          "name": a.filename,
+          "contentType": a.contentType || "application/pdf",
+          "contentBytes": a.content.toString("base64"),
+          "isInline": a.cid ? true : false,
+          "contentId": a.cid || undefined          // cid „company-logo" → contentId, matcht <img src="cid:company-logo">
+        }))
+      },
+      "saveToSentItems": true
+    }
+    ```
+  - Rückgabe `{ messageId }` beibehalten (Graph liefert keine Message-ID im sendMail-Response → synthetische ID erzeugen, z. B. `<graph-{uuid}@firma.de>`, damit die Signatur stabil bleibt).
+  - **Anhang-Limit beachten:** `sendMail` mit Inline-Bytes bis ~3 MB gesamt. Größere PDFs → Draft anlegen + `POST /attachments` Upload-Session + `send`. (Rechnungs-PDFs sind klein; Limit trotzdem prüfen und bei Überschreitung sauber diesen Pfad nehmen statt still zu scheitern.)
+
+In `email-service.ts` **nur** verzweigen:
+- Stub-Pfad zuerst (unverändert).
+- Danach: `if (settings.emailProvider === 'graph') { ensureGraphConfigured(settings); return sendViaGraph(settings, options); }` sonst bisheriger nodemailer-Pfad.
+- `ensureGraphConfigured(settings)` analog zu `ensureSmtpConfigured` (tenantId/clientId/secret/senderUpn vorhanden?).
+- `testGraphConnection(settings)` analog `testSmtpConnection`: Token holen + billiger Graph-Call (`GET /users/{upn}?$select=id`) → `{ success, error? }`. Den „Verbindung testen"-Button im Admin auf den aktiven Provider routen.
+
+## Schritt 4 — Admin-UI (Firmen-Einstellungen)
+Provider-Auswahl **SMTP | Microsoft Graph (OAuth2)** + Graph-Felder (Tenant-ID, Client-ID, Absender-UPN, Client-Secret). SMTP-Felder bleiben sichtbar (Fallback). Secret schreibgeschützt maskiert wie `smtpPass`.
+
+## Block C — (optional) E-Mail LESEN via Graph, falls „abfragen" gebraucht wird
+Aktuell existiert **kein** Inbound-Reader. Wenn Postfach-Lesen nötig ist (z. B. eingehende Interessenten-/Avis-Mails): dieselbe App-Identität, zusätzlich **`Mail.Read`**-Anwendungsberechtigung (+ Admin-Consent + Application Access Policy). Lesen dann per `GET /users/{upn}/mailFolders/inbox/messages?$top=…&$select=…` (App-only, unbeaufsichtigt, Delta-Queries für Inkrement). **Vorher klären: welcher Anwendungsfall genau?** — dann als eigener, kleiner Folge-Task.
+
+## Out of scope
+- Aufrufer-Logik, E-Mail-Layout/`buildEmailLayout`, Stub-Transport-Verhalten (müssen identisch bleiben).
+- Entfernen der SMTP-Felder (erst nach stabilem Graph-Betrieb, spätestens vor Dez 2026).
+
+## Relevant files
+- `server/services/email-service.ts` (Verzweigung + `ensureGraphConfigured` + `testGraphConnection`), **neu** `server/services/email-graph-transport.ts`
+- `shared/schema/company.ts` (neue Felder, `encryptedText` für Secret) + Migration
+- `server/lib/crypto.ts` / `encrypted-row.ts` (Secret-Ver-/Entschlüsselung wiederverwenden)
+- Admin-Firmen-Einstellungen (Provider-Auswahl + Graph-Felder), `server/routes/company.ts`
+- `package.json`: `@azure/identity`, `@microsoft/microsoft-graph-client`
+
+## Definition of Done
+- [ ] `sendEmail`-Signatur unverändert; alle Aufrufer laufen ohne Änderung.
+- [ ] `emailProvider='graph'` sendet über Graph app-only; Inline-Logo (`cid`→`contentId`/`isInline`) rendert; PDF-Anhang kommt an.
+- [ ] Stub-Transport + bestehende E-Mail-Tests grün (kein echter Graph-/SMTP-Call im Test).
+- [ ] `testGraphConnection` grün; Application Access Policy: Absenderpostfach = Granted, anderes Postfach = Denied.
+- [ ] Client-Secret **verschlüsselt** gespeichert (wie `smtpPass`), nie im Klartext geloggt.
+- [ ] SMTP-Pfad bleibt als Fallback funktionsfähig; Umschaltung per `emailProvider` je Umgebung.
+- [ ] Kein interaktiver Login/Token-Handling im Betrieb nötig (Client-Credentials, automatische Erneuerung) — in DEV real gegen ein Testpostfach verifiziert.
