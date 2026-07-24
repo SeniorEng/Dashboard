@@ -94,8 +94,12 @@ export function clearTestOutbox(): void {
   testOutbox.length = 0;
 }
 
+function hasSmtpCredentials(settings: CompanySettings): boolean {
+  return !!(settings.smtpHost && settings.smtpPort && settings.smtpUser && settings.smtpPass);
+}
+
 function ensureSmtpConfigured(settings: CompanySettings): void {
-  if (!settings.smtpHost || !settings.smtpPort || !settings.smtpUser || !settings.smtpPass) {
+  if (!hasSmtpCredentials(settings)) {
     throw new Error("SMTP-Konfiguration unvollständig. Bitte in den Einstellungen konfigurieren.");
   }
 }
@@ -123,6 +127,16 @@ function ensureProviderConfigured(settings: CompanySettings): void {
   } else {
     ensureSmtpConfigured(settings);
   }
+}
+
+// SSoT für die Frage "Ist E-Mail-Versand konfiguriert?" — provider-bewusst
+// (Graph vs. SMTP). Ersetzt die alte, blinde `smtpHost && smtpUser`-Prüfung in
+// den Aufrufern (z.B. Willkommens-Mail im Benutzer-Create/Resend-Pfad), damit
+// Graph-Betrieb ohne SMTP-Felder nicht mehr fälschlich übersprungen wird.
+export function isEmailConfigured(settings: CompanySettings): boolean {
+  return isGraphProvider(settings)
+    ? hasGraphCredentials(settings)
+    : hasSmtpCredentials(settings);
 }
 
 function createTransporter(settings: CompanySettings) {
