@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 import type { StorageDriver } from "./types";
 import { replitStorageDriver } from "./replit-driver";
+import { localStorageDriver } from "./local-driver";
 
 export type { StorageDriver, StoredBucket, StoredFile, StoredFileMetadata, StoredFileSaveOptions } from "./types";
 
@@ -22,11 +23,8 @@ export function getStorageDriver(): StorageDriver {
       cached = replitStorageDriver;
       break;
     case "local":
-      // Wird im Folgeschritt (lokaler FS-Treiber) aktiviert.
-      throw new Error(
-        'STORAGE_DRIVER="local" ist noch nicht implementiert (folgt in einem ' +
-          "separaten Schritt der Hetzner-Migration).",
-      );
+      cached = localStorageDriver;
+      break;
     default:
       throw new Error(
         `STORAGE_DRIVER muss "replit" oder "local" sein (ist: "${driver}").`,
