@@ -39,7 +39,6 @@ import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
 import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse, BulkDeleteResultItem, BulkDeleteResponse, BulkStatusResultItem, BulkStatusResponse, RepairPdfsResultItem, RepairPdfsResponse } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
-import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc, sql } from "drizzle-orm";
 import { z } from "zod";
