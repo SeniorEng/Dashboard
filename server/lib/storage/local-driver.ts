@@ -28,6 +28,7 @@ import type {
   StoredFileMetadata,
   StoredFileSaveOptions,
 } from "./types";
+import { signLocalUploadToken } from "./local-upload-token";
 
 const META_SUFFIX = ".meta.json";
 
@@ -192,13 +193,18 @@ export const localStorageDriver: StorageDriver = {
   bucket(name: string): StoredBucket {
     return new LocalStoredBucket(name);
   },
-  createUploadUrl(): Promise<string> {
-    // Der Browser-Direkt-PUT-Ersatz (signierter lokaler Upload-Endpoint) folgt
-    // bewusst separat (Commit 4b). Bis dahin ist der Upload-Flow im local-Treiber
-    // nicht verfügbar; Lesen/Schreiben serverseitig (PDFs, Logos) funktioniert.
-    throw new Error(
-      "Lokaler Upload-Endpoint ist noch nicht implementiert (folgt in Commit 4b). " +
-        "STORAGE_DRIVER=local unterstützt bereits serverseitiges Lesen/Schreiben.",
+  createUploadUrl(objectPath: string, ttlSec: number): Promise<string> {
+    // Kein GCS-Presign möglich → relative, HMAC-signierte App-URL für den
+    // Browser-Direkt-PUT (verifiziert in registerObjectStorageRoutes). Der
+    // Upload-Flow legt Objekte immer unter `uploads/<objectId>` ab, daher ist
+    // die objectId das letzte Pfad-Segment.
+    const objectId = objectPath.split("/").filter(Boolean).pop();
+    if (!objectId) {
+      throw new Error(`createUploadUrl: kein objectId aus "${objectPath}" ableitbar.`);
+    }
+    const token = signLocalUploadToken({ objectId }, ttlSec * 1000);
+    return Promise.resolve(
+      `/api/uploads/local/${encodeURIComponent(objectId)}?token=${encodeURIComponent(token)}`,
     );
   },
 };

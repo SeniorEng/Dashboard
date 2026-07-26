@@ -199,6 +199,14 @@ export class ObjectStorageService {
   normalizeObjectEntityPath(
     rawPath: string,
   ): string {
+    // local-Treiber: die Upload-URL `/api/uploads/local/<objectId>?token=…`
+    // mappt auf den Objekt-Pfad `/objects/uploads/<objectId>` (Uploads landen
+    // immer unter `uploads/<objectId>`).
+    const localUpload = rawPath.match(/^\/api\/uploads\/local\/([^/?]+)/);
+    if (localUpload) {
+      return `/objects/uploads/${decodeURIComponent(localUpload[1])}`;
+    }
+
     if (!rawPath.startsWith("https://storage.googleapis.com/")) {
       return rawPath;
     }
