@@ -7,6 +7,7 @@ import { log } from "../lib/log";
 import { escapeXml } from "../lib/xml";
 import { signCallbackToken } from "../lib/twilio-callback-token";
 import { appDomainBaseUrl } from "../lib/app-domain";
+import { isStubTransport } from "../lib/messaging-transport";
 import { auditService } from "./audit";
 
 interface CallBridgeParams {
@@ -70,6 +71,19 @@ export async function initiateLeadCallBridge(params: CallBridgeParams & { throwO
   }
 
   const normalizedLeadPhone = phoneResult.normalized;
+
+  // Safe-by-default Stub-Gate (Task #1840): außerhalb der Produktion kein realer
+  // Anruf, außer TWILIO_TRANSPORT=real. Schützt Dev-Umgebungen mit Prod-Kopie-DB
+  // (echte Twilio-Credentials) vor echten Telefonanrufen.
+  if (isStubTransport("twilio")) {
+    log(
+      `STUB (NODE_ENV=${process.env.NODE_ENV ?? "unset"}): kein realer Anruf für ` +
+        `prospect ${prospectId} (${leadName}, ${normalizedLeadPhone}).`,
+      "twilio-bridge",
+    );
+    return;
+  }
+
   const client = twilio(config.accountSid, config.authToken);
   const baseUrl = buildCallbackBaseUrl();
   // HMAC-Token statt Klartext-prospectId in der Callback-URL: eine geleakte
@@ -148,6 +162,16 @@ export async function initiateTestCall(): Promise<{ success: boolean; message: s
   const config = await getTwilioConfig();
   if (!config) {
     return { success: false, message: "Twilio-Konfiguration unvollständig oder Brücke deaktiviert" };
+  }
+
+  // Safe-by-default Stub-Gate (Task #1840): außerhalb der Produktion kein realer
+  // Testanruf, außer TWILIO_TRANSPORT=real.
+  if (isStubTransport("twilio")) {
+    return {
+      success: true,
+      message: `Testanruf gestubbt (NODE_ENV=${process.env.NODE_ENV ?? "unset"}, kein realer Anruf).`,
+      callSid: `stub-call-${Date.now()}`,
+    };
   }
 
   const client = twilio(config.accountSid, config.authToken);

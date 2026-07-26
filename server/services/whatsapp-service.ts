@@ -5,6 +5,7 @@ import { whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings
 import { storage } from "../storage";
 import { normalizePhone } from "@shared/utils/phone";
 import { appDomainBaseUrl } from "../lib/app-domain";
+import { isStubTransport } from "../lib/messaging-transport";
 
 interface SendTemplateOptions {
   phoneNumber: string;
@@ -93,6 +94,17 @@ class WhatsAppService {
       { ...options, phoneNumber: normalized },
       config,
     );
+
+    // Safe-by-default Stub-Gate (Task #1840): außerhalb der Produktion kein
+    // realer Versand, außer WHATSAPP_TRANSPORT=real. Schützt Dev-Umgebungen mit
+    // Prod-Kopie-DB (echte Twilio-Credentials) vor echten WhatsApp-Nachrichten.
+    if (isStubTransport("whatsapp")) {
+      console.log(
+        `[WhatsApp] STUB (NODE_ENV=${process.env.NODE_ENV ?? "unset"}): kein realer ` +
+          `Versand an ${normalized} (template=${options.templateName}).`,
+      );
+      return { success: true, messageId: `stub-wa-${Date.now()}` };
+    }
 
     try {
       const client = twilio(config.accountSid, config.authToken);
