@@ -13,6 +13,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { errorMiddleware } from "./lib/errors";
 import { pool, db, logPoolStats } from "./lib/db";
+import { getBuildInfo } from "./lib/build-info";
 import { sql as sqlBuilder } from "drizzle-orm";
 import { closeBrowser } from "./services/pdf-generator";
 import { startMemoryWatchdog } from "./lib/memory-watchdog";
@@ -105,6 +106,20 @@ app.use((req, res, next) => {
   });
 
   next();
+});
+
+// Replit-Exit (Task #1840): schlanker Top-Level-Health-Endpoint für den
+// Coolify-Container-Healthcheck. Bewusst OHNE Auth/PII: nur DB-Ping + Build-
+// Version. 200 = App erreichbar und DB antwortet, 503 = DB nicht erreichbar.
+// Das reichhaltige `/api/health` (Startup/Chromium/Migrationen) bleibt separat.
+app.get("/health", async (_req, res) => {
+  const { version, builtAt } = getBuildInfo();
+  try {
+    await pool.query("SELECT 1");
+    res.status(200).json({ status: "ok", version, builtAt, timestamp: new Date().toISOString() });
+  } catch {
+    res.status(503).json({ status: "error", version, timestamp: new Date().toISOString() });
+  }
 });
 
 process.on("unhandledRejection", (reason, promise) => {
