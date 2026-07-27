@@ -1,0 +1,35 @@
+# Task #1840 — Build-Context für das Container-Image schlank halten.
+# WICHTIG: package-lock.json wird NICHT ausgeschlossen — der Runner kopiert es
+# ins Image, migrate.sh liest die gepinnte drizzle-kit-Version daraus.
+
+# Rebuilt/kopiert im Image
+node_modules
+dist
+
+# VCS / CI / Editor
+.git
+.github
+.claude
+.agents
+
+# Tests & Reports (weder für Build noch Laufzeit nötig)
+tests
+e2e
+test-results
+coverage
+playwright-report
+.stryker-tmp
+
+# Lokale/temporäre Artefakte & Secrets
+tmp
+*.log
+*.dump
+.env
+.env.*
+
+# attached_assets ist ~260 MB / ~1400 Dateien (großteils ungenutzter Agent-Müll).
+# Der Client-Build importiert daraus NUR das Logo — nur das lassen wir in den
+# Build-Context (spart ~260 MB pro Build). ACHTUNG: Jeder NEUE `@assets/…`-Import
+# im Client muss hier zusätzlich freigegeben werden, sonst bricht der Vite-Build.
+attached_assets/*
+!attached_assets/Logo-04_250x250_1764898165379.jpg
