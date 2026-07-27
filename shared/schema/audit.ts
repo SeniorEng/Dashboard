@@ -80,6 +80,7 @@ export const AUDIT_ACTIONS = [
   "invoice_payment_mismatch",
   "invoice_payment_difference_accepted",
   "invoice_partial_payment",
+  "invoice_payment_review_required",
   "invoice_avis_received",
   "invoice_avis_reverted",
   "call_bridge_failed",

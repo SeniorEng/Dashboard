@@ -136,9 +136,13 @@ export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: ()
   });
 
   const autoMatchMutation = useMutation({
-    mutationFn: async () => unwrapResult(await api.post<{ matched: number; skipped: number }>("/admin/qonto/auto-match", {})),
+    mutationFn: async () => unwrapResult(await api.post<{ matched: number; skipped: number; review: number }>("/admin/qonto/auto-match", {})),
     onSuccess: (data) => {
-      toast({ title: `Auto-Abgleich: ${data.matched} zugeordnet, ${data.skipped} ohne Treffer` });
+      // Task #1864 — reine Betrags-Treffer werden nur gebunden (Prüf-Zustand),
+      // nicht bezahlt; separat ausweisen, damit klar ist, dass eine manuelle
+      // Bestätigung aussteht.
+      const reviewPart = data.review > 0 ? `, ${data.review} zur Prüfung` : "";
+      toast({ title: `Auto-Abgleich: ${data.matched} zugeordnet${reviewPart}, ${data.skipped} ohne Treffer` });
       invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
@@ -223,7 +227,7 @@ export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: ()
         `/admin/qonto/transactions/${txId}/confirm-paid`, {},
       )),
     onSuccess: (data) => {
-      toast({ title: `${data.paid} Rechnung(en) trotz Differenz als bezahlt bestätigt` });
+      toast({ title: `${data.paid} Rechnung(en) als bezahlt bestätigt` });
       invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {

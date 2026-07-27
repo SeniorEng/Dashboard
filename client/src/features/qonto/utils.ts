@@ -27,6 +27,10 @@ export function confidenceBadge(confidence: string | null): {
       return { label: "Auto · Sammel-Avis", className: "bg-teal-50 text-teal-700 border-teal-200", weak: false };
     case "auto_amount":
       return { label: "Auto · nur Betrag · prüfen", className: "bg-amber-50 text-amber-700 border-amber-200", weak: true };
+    case "auto_amount_review":
+      // Task #1864 — reiner Betrags-Treffer OHNE bestätigendes Merkmal: gebunden,
+      // aber NICHT bezahlt; muss vom Admin bestätigt oder abgelehnt werden.
+      return { label: "Auto · nur Betrag · Bestätigung nötig", className: "bg-amber-50 text-amber-700 border-amber-200", weak: true };
     case "manual":
       return { label: "Manuell", className: "bg-sky-50 text-sky-700 border-sky-200", weak: false };
     case "manual_bulk":
