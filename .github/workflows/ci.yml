@@ -955,3 +955,24 @@ jobs:
       - name: Container logs (immer)
         if: always()
         run: docker logs cc-app 2>&1 | tail -80 || true
+
+  # -------------------------------------------------------------------------
+  # secret-scan (Task #1840, SHOULD): gitleaks gegen den Working Tree (--no-git,
+  # also NICHT die Historie — der bereits rotierte historische Key wird bewusst
+  # nicht re-litigiert). Allowlist in .gitleaks.toml. Verhindert NEUE Secrets.
+  # -------------------------------------------------------------------------
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run gitleaks (Working Tree, gepinnte Version)
+        run: |
+          VER=8.21.2
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks detect --no-git --source . --config .gitleaks.toml \
+            --redact --no-banner --exit-code 1
