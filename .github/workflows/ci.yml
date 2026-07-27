@@ -863,3 +863,95 @@ jobs:
           MUSTANG_CLI_JAR: ${{ steps.mustang.outputs.jar }}
           VERAPDF_CLI: ${{ steps.verapdf.outputs.bin }}
         run: npm run validate:erechnung
+
+  # -------------------------------------------------------------------------
+  # docker-build (Task #1840, Replit-Exit): baut das Container-Image und bootet
+  # es im Prod-Modus (DB_DRIVER=pg, STORAGE_DRIVER=local) gegen eine frische
+  # Postgres-16-Service-DB. `/health == 200` ist das Gate. Als Required Check in
+  # der Branch-Protection ergaenzen, sobald gruen.
+  # -------------------------------------------------------------------------
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: careconnect
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/careconnect
+      DB_DRIVER: pg
+      # Nicht-produktiver Test-Key (64-hex) fuer AES-256-GCM / Token-Signing.
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      TEST_USER_EMAIL: ci-docker@example.com
+      TEST_USER_PASSWORD: "TestPasswort123!"
+      SUPER_ADMIN_EMAIL: ci-docker@example.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Deps auf dem Runner nur fuer Schema-Push + Seeds (der Container bringt
+      # seine eigenen node_modules im Image mit).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Push DB schema (drizzle-kit push)
+        run: npx drizzle-kit push --force
+
+      - name: Seed superadmin + reference data (liefert u.a. base services)
+        run: |
+          npx tsx scripts/ci-seed-superadmin.ts
+          npx tsx scripts/seed-test-reference-data.ts
+
+      - name: Seed minimal prices SSoT (Prod Critical-SSoT-Boot-Gate)
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+          PGPASSWORD=postgres psql -h localhost -U postgres -d careconnect -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO prices (scope, origin, service_id, cents, valid_from) SELECT 'default', 'ci-health-smoke', id, 1000, '2026-01-01' FROM services LIMIT 1"
+
+      - name: Build image
+        run: docker build -t careconnect:ci .
+
+      - name: Boot container and gate on /health == 200
+        run: |
+          docker run -d --name cc-app --network host \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e DB_DRIVER=pg \
+            -e ENCRYPTION_KEY="$ENCRYPTION_KEY" \
+            -e APP_DOMAIN=ci.example.com \
+            -e STORAGE_DRIVER=local \
+            -e FILE_STORAGE_ROOT=/data \
+            -e PORT=5000 \
+            careconnect:ci
+          echo "Warte auf /health..."
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health || true)
+            if [ "$code" = "200" ]; then
+              echo "/health 200 nach $((i * 3))s"
+              curl -s http://localhost:5000/health; echo
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::/health wurde nicht rechtzeitig 200 (Container-Boot fehlgeschlagen)"
+          exit 1
+
+      - name: Container logs (immer)
+        if: always()
+        run: docker logs cc-app 2>&1 | tail -80 || true
