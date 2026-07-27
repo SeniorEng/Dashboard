@@ -18,7 +18,6 @@
  * `trigger`-Metadatum) verifiziert.
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
-import { quarantinedInCI } from "../helpers/known-failing";
 import { and, eq } from "drizzle-orm";
 import {
   getAuthCookie,
@@ -86,7 +85,7 @@ async function freshScenario(prefix: string) {
   });
 }
 
-describe.skipIf(quarantinedInCI)("Termin-Edit Auto-Rebook (Task #618)", () => {
+describe("Termin-Edit Auto-Rebook (Task #618)", () => {
   it("km-Edit: appt.travelKilometers == Σ budget_tx.travelKilometers nach PATCH", async () => {
     const auth = await getAuthCookie();
     const date = getTodayDate();

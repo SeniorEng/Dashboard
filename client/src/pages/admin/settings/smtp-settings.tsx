@@ -24,6 +24,13 @@ function pickSmtpFields(form: CompanyFormData) {
     smtpFromEmail: form.smtpFromEmail,
     smtpFromName: form.smtpFromName,
     smtpSecure: form.smtpSecure,
+    // Task #1856 — email provider selection + Microsoft Graph credentials must
+    // travel with the PATCH payload, otherwise the UI never sends them.
+    emailProvider: form.emailProvider,
+    graphTenantId: form.graphTenantId,
+    graphClientId: form.graphClientId,
+    graphSenderUpn: form.graphSenderUpn,
+    graphClientSecret: form.graphClientSecret,
   };
 }
 
@@ -31,6 +38,7 @@ export function SmtpSettingsCard({ companyForm, updateField }: SmtpSettingsCardP
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const [showGraphSecret, setShowGraphSecret] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const saveMutation = useMutation({
@@ -76,6 +84,83 @@ export function SmtpSettingsCard({ companyForm, updateField }: SmtpSettingsCardP
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="emailProvider">E-Mail-Versand-Methode</Label>
+            <select
+              id="emailProvider"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={companyForm.emailProvider}
+              onChange={(e) => updateField("emailProvider", e.target.value)}
+              data-testid="select-email-provider"
+            >
+              <option value="smtp">SMTP</option>
+              <option value="graph">Microsoft Graph (OAuth2)</option>
+            </select>
+            <p className="text-xs text-gray-500">
+              Microsoft schaltet Basic-Auth-SMTP Ende 2026 ab. „Microsoft Graph (OAuth2)" nutzt eine App-Identität ohne Postfach-Passwort.
+            </p>
+          </div>
+
+          {companyForm.emailProvider === "graph" && (
+            <div className="flex flex-col gap-3 rounded-lg border border-gray-200 p-3">
+              <p className="text-sm font-medium text-gray-700">Microsoft Graph (App-only OAuth2)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="graphTenantId">Tenant-ID</Label>
+                  <Input
+                    id="graphTenantId"
+                    value={companyForm.graphTenantId}
+                    onChange={(e) => updateField("graphTenantId", e.target.value)}
+                    placeholder="00000000-0000-0000-0000-000000000000"
+                    data-testid="input-graph-tenant-id"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="graphClientId">Client-ID (App-ID)</Label>
+                  <Input
+                    id="graphClientId"
+                    value={companyForm.graphClientId}
+                    onChange={(e) => updateField("graphClientId", e.target.value)}
+                    placeholder="00000000-0000-0000-0000-000000000000"
+                    data-testid="input-graph-client-id"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="graphSenderUpn">Absender (UPN)</Label>
+                  <Input
+                    id="graphSenderUpn"
+                    value={companyForm.graphSenderUpn}
+                    onChange={(e) => updateField("graphSenderUpn", e.target.value)}
+                    placeholder="info@firma.de"
+                    data-testid="input-graph-sender-upn"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="graphClientSecret">Client-Secret</Label>
+                  <div className="relative">
+                    <Input
+                      id="graphClientSecret"
+                      type={showGraphSecret ? "text" : "password"}
+                      value={companyForm.graphClientSecret}
+                      onChange={(e) => updateField("graphClientSecret", e.target.value)}
+                      placeholder="••••••••"
+                      data-testid="input-graph-client-secret"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-600"
+                      onClick={() => setShowGraphSecret(!showGraphSecret)}
+                    >
+                      {showGraphSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="smtpHost">SMTP-Server</Label>
@@ -160,7 +245,10 @@ export function SmtpSettingsCard({ companyForm, updateField }: SmtpSettingsCardP
               type="button"
               variant="outline"
               size="sm"
-              disabled={smtpTestMutation.isPending || !companyForm.smtpHost}
+              disabled={
+                smtpTestMutation.isPending ||
+                (companyForm.emailProvider === "graph" ? !companyForm.graphTenantId : !companyForm.smtpHost)
+              }
               onClick={() => smtpTestMutation.mutate()}
               data-testid="button-test-smtp"
             >

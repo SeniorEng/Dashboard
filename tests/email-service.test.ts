@@ -11,6 +11,7 @@ import {
   EMAIL_LOGO_SRC,
   getTestOutbox,
   clearTestOutbox,
+  isEmailConfigured,
 } from "../server/services/email-service";
 import { loadLogoBytes } from "../server/services/logo-resolver";
 
@@ -283,6 +284,120 @@ describe("email-service real SMTP path (Task #232)", () => {
 
       expect(result).toEqual({ success: true });
       expect(createTransport).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("email-service provider-aware validation (Task #1856)", () => {
+  beforeEach(() => {
+    createTransport.mockReset();
+    clearTestOutbox();
+  });
+
+  afterEach(() => {
+    delete process.env.EMAIL_TRANSPORT;
+    clearTestOutbox();
+  });
+
+  it("Graph mode does NOT require SMTP config and sends via stub outbox", async () => {
+    process.env.EMAIL_TRANSPORT = "stub";
+    const settings = makeSettings({
+      emailProvider: "graph",
+      smtpHost: null,
+      smtpPort: null,
+      smtpUser: null,
+      smtpPass: null,
+      graphTenantId: "tenant",
+      graphClientId: "client",
+      graphClientSecret: "secret",
+      graphSenderUpn: "info@firma.de",
+    } as Partial<CompanySettings>);
+
+    const result = await sendEmail(settings, { to: "to@test.local", subject: "x", html: "y" });
+
+    expect(result.messageId).toMatch(/^<stub-/);
+    expect(createTransport).not.toHaveBeenCalled();
+    const outbox = getTestOutbox();
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0].from).toBe('"Test Sender" <from@test.local>');
+  });
+
+  it("Graph mode throws the Graph error (not the SMTP one) when creds are missing", async () => {
+    process.env.EMAIL_TRANSPORT = "stub";
+    const settings = makeSettings({
+      emailProvider: "graph",
+      graphTenantId: null,
+      graphClientId: null,
+      graphClientSecret: null,
+      graphSenderUpn: null,
+    } as Partial<CompanySettings>);
+
+    await expect(
+      sendEmail(settings, { to: "to@test.local", subject: "x", html: "y" }),
+    ).rejects.toThrow(/Microsoft-Graph-Konfiguration unvollständig/);
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("SMTP mode still requires SMTP config", async () => {
+    process.env.EMAIL_TRANSPORT = "stub";
+    await expect(
+      sendEmail(makeSettings({ smtpHost: null }), { to: "to@test.local", subject: "x", html: "y" }),
+    ).rejects.toThrow(/SMTP-Konfiguration unvollständig/);
+  });
+
+  it("testEmailConnection returns success in Graph stub mode", async () => {
+    process.env.EMAIL_TRANSPORT = "stub";
+    const { testEmailConnection } = await import("../server/services/email-service");
+    const settings = makeSettings({
+      emailProvider: "graph",
+      graphTenantId: "tenant",
+      graphClientId: "client",
+      graphClientSecret: "secret",
+      graphSenderUpn: "info@firma.de",
+    } as Partial<CompanySettings>);
+
+    const result = await testEmailConnection(settings);
+    expect(result).toEqual({ success: true });
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("testEmailConnection reports the Graph config error when creds missing", async () => {
+    process.env.EMAIL_TRANSPORT = "stub";
+    const { testEmailConnection } = await import("../server/services/email-service");
+    const settings = makeSettings({ emailProvider: "graph", graphTenantId: null } as Partial<CompanySettings>);
+
+    const result = await testEmailConnection(settings);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Microsoft-Graph-Konfiguration unvollständig");
+  });
+
+  describe("isEmailConfigured() — provider-aware gate (Task #1861)", () => {
+    it("SMTP mode: true when SMTP creds complete", () => {
+      expect(isEmailConfigured(makeSettings({ emailProvider: "smtp" } as Partial<CompanySettings>))).toBe(true);
+    });
+
+    it("SMTP mode: false when any SMTP field missing", () => {
+      expect(isEmailConfigured(makeSettings({ emailProvider: "smtp", smtpUser: null } as Partial<CompanySettings>))).toBe(false);
+    });
+
+    it("Graph mode: true with full Graph config even without SMTP fields", () => {
+      const settings = makeSettings({
+        emailProvider: "graph",
+        smtpHost: null,
+        smtpPort: null,
+        smtpUser: null,
+        smtpPass: null,
+        graphTenantId: "tenant",
+        graphClientId: "client",
+        graphClientSecret: "secret",
+        graphSenderUpn: "info@firma.de",
+      } as Partial<CompanySettings>);
+      expect(isEmailConfigured(settings)).toBe(true);
+    });
+
+    it("Graph mode: false when Graph creds incomplete (ignores populated SMTP fields)", () => {
+      const settings = makeSettings({ emailProvider: "graph", graphTenantId: null } as Partial<CompanySettings>);
+      expect(isEmailConfigured(settings)).toBe(false);
     });
   });
 });

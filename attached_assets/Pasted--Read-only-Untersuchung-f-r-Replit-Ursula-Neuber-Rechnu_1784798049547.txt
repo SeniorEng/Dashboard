@@ -1,0 +1,136 @@
+# Read-only Untersuchung für Replit — Ursula Neuber: „Rechnung bereit" (Juni) ⇄ „keine umbuchbaren Verbrauchsbuchungen" (Juni)
+
+**Charakter:** NUR lesen. Keine Rechnung erstellen/stornieren, keine Umbuchung, keine Budget-Mutation während der Prüfung. Ziel: die Widersprüchlichkeit erklären, damit wir sauber weiterarbeiten können.
+
+---
+
+## Beobachtung (Prod)
+- **Rechnungs-Dialog** „Rechnung für Juni 2026" (Kunde **Ursula Neuber**): Vorschau **1 Leistungsnachweis · 4 Termine · 304,91 € brutto** → es liegt eine erstellbare Juni-Rechnung an.
+- **Umbuchungs-Dialog** „Ganzen Monat umbuchen" für **Juni 2026**: **„Keine umbuchbaren Verbrauchsbuchungen in diesem Monat."**
+- §45b-Karte: **Gesamt zugewiesen 393,00 € / davon 393,00 € verbraucht / 0,00 € verfügbar**, Geplant 152,00 € (offene, noch nicht dokumentierte Termine). Sichtbare Buchung: 22.07.2026, HW 120 min, −76,00 €.
+- Fachlicher Kontext: Pflegekasse meldet, der §45b-Entlastungsbetrag sei **bereits ausgeschöpft**. Kunde hat **2 Töpfe** aktiviert.
+
+## Verifizierte Code-Fakten (Grundlage der Hypothesen)
+1. Verbrauchsbuchung entsteht **bei der Dokumentation** und trägt **`transaction_date = appointment.date`** (Termindatum, NICHT Dokumentationsdatum) — `server/routes/appointment-documentation.ts:155`.
+2. Die Umbuchungs-Vorschau (`getRebookMonthPreview`) zählt **nur LIVE (nicht-stornierte) `consumption`-Buchungen** im Monat, über **alle Töpfe** (`hasMovable = source.appointmentCount > 0`). Ausschluss stornierter/umgebuchter Zeilen via `reversed_transaction_id` **ODER** Notiz `… Transaktion #<id> …`.
+3. „Keine umbuchbaren Verbrauchsbuchungen" ⇒ es gibt **keine LIVE consumption-Zeile mit `transaction_date` im Juni**.
+4. Rechnungs-Vorschau zählt **dokumentierte + signierte, noch nicht abgerechnete Termine nach Service-Monat** (Juni) — unabhängig davon, ob deren Budget-Konsumption live oder storniert ist.
+
+⇒ Beide Aussagen können gleichzeitig wahr sein. Der Widerspruch löst sich, sobald wir wissen, **warum keine LIVE Juni-Konsumption existiert**.
+
+---
+
+## Hypothesen (nach Wahrscheinlichkeit)
+
+**H1 — Netto-Null durch stornierte Juni-Rechnung (führend).** Für Juni wurde bereits eine Rechnung erstellt und dann **storniert**. Rechnungs-Storno löst pro Termin ein Budget-**Reversal** aus (Task #1014, netto null); die Termine erscheinen wieder als „abrechnbar" (= die 4 im Dialog), aber ihre §45b-Konsumption ist vollständig storniert → für die Umbuchung ist **nichts Live** da.
+
+**H2 — Konsumption in einem anderen Monat.** Trotz Fakt 1 könnten rück-/fehldatierte oder importierte Zeilen ein abweichendes `transaction_date` tragen; die 393 € §45b-Verbrauch liegen dann in anderen Monaten (z. B. Mai/Juli), Juni ist leer.
+
+**H3 — Konsumption nie gebucht.** Die 4 Juni-Termine sind dokumentiert/signiert, aber es wurde **keine** `consumption`-Zeile gebucht (z. B. Import-Pfad ohne Budget-Buchung, oder ein Skip). Das wäre ein echter Bug.
+
+**H4 — §45b-Reset / zweiter Pflegedienst (betrifft den FIX, nicht die leere Umbuchung).** §45b zeigt „0 verfügbar" evtl. nur, weil dieselben (jetzt stornierten) Juni-Termine dagegen gezählt wurden. Nach dem Reversal hätte §45b wieder Luft → ein Regenerieren würde erneut auf §45b buchen, obwohl die Kasse §45b für ausgeschöpft hält (Fremdverbrauch unsichtbar).
+
+---
+
+## Beweis-Checks (read-only SQL) — je Hypothese, mit erwartetem Ergebnis
+
+> `:cid` = Ursulas Kunden-ID. Zeitfenster Juni 2026 = `>= '2026-06-01' AND < '2026-07-01'`.
+
+**Schritt 0 — Kunden-ID auflösen**
+```sql
+SELECT id, name, billing_type, pflegegrad
+FROM customers
+WHERE vorname ILIKE 'Ursula' AND nachname ILIKE 'Neuber';
+```
+
+**Check A — Juni-Termine + Status (erwartet: 4× `completed`)**
+```sql
+SELECT id, date, status, deleted_at
+FROM appointments
+WHERE customer_id = :cid AND date >= '2026-06-01' AND date < '2026-07-01'
+ORDER BY date;
+```
+
+**Check B — ALLE Budget-Zeilen mit `transaction_date` im Juni (Kern-Beleg)**
+```sql
+SELECT id, budget_type, transaction_type, amount_cents, transaction_date,
+       appointment_id, reversed_transaction_id, notes
+FROM budget_transactions
+WHERE customer_id = :cid AND transaction_date >= '2026-06-01' AND transaction_date < '2026-07-01'
+ORDER BY transaction_date, id;
+```
+- **H1 bestätigt**, wenn jede `consumption` einen zugehörigen `reversal` hat (`reversed_transaction_id` = consumption.id, oder Notiz „… Transaktion #<id>").
+- **H3 bestätigt**, wenn Check A 4 `completed`-Termine zeigt, Check B aber **keine** `consumption`-Zeilen im Juni.
+
+**Check C — LIVE Juni-Konsumption je Topf (spiegelt EXAKT die Umbuchungs-Vorschau; erwartet: 0 Zeilen)**
+```sql
+SELECT bt.budget_type, COUNT(*) AS live_count, SUM(bt.amount_cents) AS live_cents
+FROM budget_transactions bt
+WHERE bt.customer_id = :cid
+  AND bt.transaction_type = 'consumption'
+  AND bt.transaction_date >= '2026-06-01' AND bt.transaction_date < '2026-07-01'
+  AND NOT EXISTS (
+    SELECT 1 FROM budget_transactions r
+    WHERE r.customer_id = bt.customer_id
+      AND r.transaction_type = 'reversal'
+      AND (r.reversed_transaction_id = bt.id OR r.notes LIKE '%Transaktion #' || bt.id || '%')
+  )
+GROUP BY bt.budget_type;
+```
+- Ergebnis **leer** ⇒ deckt sich mit „keine umbuchbaren". Zusammen mit Check B (Konsumption + Reversals vorhanden) ⇒ **H1**.
+- **Achtung Fragilität:** die `notes LIKE '%Transaktion #<id>%'`-Erkennung kann bei ungünstigen Notiz-Texten **zu viel** ausschließen (Teilstring-Kollision, z. B. #12 matcht #123). Wenn Check B LIVE-aussehende Konsumption zeigt, Check C sie aber ausschließt → **prüfen, ob ein Notiz-Match fälschlich greift** (dann ist die leere Vorschau ein Anzeige-Bug, nicht H1).
+
+**Check D — Juni-Rechnungen des Kunden, v. a. stornierte (H1-Beleg)**
+```sql
+SELECT id, invoice_number, invoice_type, billing_year, billing_month, status, created_at
+FROM invoices
+WHERE customer_id = :cid AND billing_year = 2026 AND billing_month = 6
+ORDER BY created_at;
+```
+- **H1 bestätigt**, wenn eine Juni-Rechnung `status = 'storniert'` ist (oder eine `invoice_type = 'stornorechnung'` existiert).
+
+**Check E — welche Termine hingen an der (stornierten) Juni-Rechnung**
+```sql
+SELECT ili.appointment_id, i.invoice_number, i.status, i.invoice_type
+FROM invoice_line_items ili
+JOIN invoices i ON i.id = ili.invoice_id
+WHERE i.customer_id = :cid AND i.billing_year = 2026 AND i.billing_month = 6;
+```
+- Gegencheck: dieselben 4 Termine wie in Check A.
+
+**Check F — wo liegt der §45b-Verbrauch (393 €) wirklich? (H2 + Handlungsziel)**
+```sql
+SELECT transaction_date, transaction_type, amount_cents, appointment_id, reversed_transaction_id
+FROM budget_transactions
+WHERE customer_id = :cid AND budget_type = 'entlastungsbetrag_45b'
+ORDER BY transaction_date, id;
+```
+- Zeigt, in welchen Monaten die LIVE §45b-Konsumption sitzt → **dort** ist die Umbuchung möglich.
+
+**Check G — §45b-Allokationen (Carryover vs. laufendes Jahr) für die FIX-Entscheidung (H4)**
+```sql
+SELECT id, budget_type, year, month, source, amount_cents, valid_from, expires_at
+FROM budget_allocations
+WHERE customer_id = :cid AND budget_type = 'entlastungsbetrag_45b'
+ORDER BY valid_from;
+```
+- Klärt, ob „0 verfügbar" real ist oder durch die (evtl. stornierten) Juni-Zeilen entsteht.
+
+---
+
+## Interpretation / Entscheidungsbaum
+
+- **B zeigt Konsumption je mit Reversal + D zeigt stornierte Juni-Rechnung ⇒ H1 (erwarteter Normalfall).** Die Umbuchung KANN nicht greifen (nichts Live). Weiter siehe „Nächste Schritte".
+- **B zeigt Live-Konsumption, C schließt sie via Notiz-Match aus ⇒ Anzeige-Bug** in der Reversed-Erkennung (fragiler `notes LIKE`). Fix: Erkennung strikt auf `reversed_transaction_id` stützen bzw. den Notiz-Match exakt (`#<id>` wortgrenzen-sicher) machen.
+- **B zeigt keine Juni-Konsumption, A aber 4 `completed` ⇒ H3 (echter Bug):** Dokumentation hat kein `createConsumptionTransaction` gebucht — Ursache im Doku-/Import-Pfad suchen.
+- **F zeigt den §45b-Verbrauch in anderen Monaten ⇒ H2:** dort umbuchen, Juni war nie der richtige Monat.
+
+## Nächste Schritte (NUR nach Freigabe, dann separat — hier noch nicht ausführen)
+1. Bei **H1**: nicht „umbuchen", sondern die Juni-Rechnung **neu generieren** — ABER vorher via Check F/G das **reale §45b-Restguthaben** klären. Ist §45b laut Kasse ausgeschöpft (Fremdverbrauch durch zweiten Pflegedienst), zuerst den **§45b-Startwert/Reset** auf den echten Rest setzen, DANN generieren, damit die Kaskade Juni auf den **zweiten Topf** überlaufen lässt (siehe `Arbeitsanweisung_45b-Startwert-Reset.md`).
+2. Bei **H3/Anzeige-Bug**: Bug fixen (Doku-Buchung bzw. Reversed-Erkennung), erst dann Ursulas Fall abschließen.
+
+## Definition of Done (dieser Read-only-Schritt)
+- [ ] Kunden-ID + Checks A–G ausgeführt, Ergebnisse dokumentiert.
+- [ ] Eindeutige Zuordnung zu H1 / H2 / H3 / Anzeige-Bug, mit Beleg (welche Zeilen/Rechnung).
+- [ ] Klarer Befund, ob „0 verfügbar" real ist (H4-Relevanz) — Empfehlung für den Fix-Weg.
+- [ ] KEINE Daten verändert.

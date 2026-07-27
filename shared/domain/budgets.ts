@@ -292,19 +292,6 @@ function isWithinPotWindow(
   return true;
 }
 
-/**
- * Task #1837 — SSoT für „ist dieser Topf zum Stichtag ein gültiges Buchungs-/
- * Umbuchungsziel?" (aktiviert UND im Gültigkeitsfenster). Die Kapazität
- * (verfügbare Cents) ist eine SEPARATE Frage und wird vom Unified-Reader
- * beantwortet — hier NICHT geprüft.
- */
-export function isPotEligibleAt(
-  cfg: Pick<ResolvedPotConfig, "enabled" | "validFrom" | "validTo">,
-  asOfDate: string,
-): boolean {
-  return cfg.enabled && isWithinPotWindow(cfg.validFrom, cfg.validTo, asOfDate);
-}
-
 /** Grund, warum ein Topf zum Stichtag NICHT nutzbar ist. */
 export type PotIneligibleReason =
   | "out_of_window_configured"

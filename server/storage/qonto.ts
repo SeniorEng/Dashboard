@@ -367,8 +367,18 @@ class QontoStorage {
         inArray(invoices.status, ["versendet", "avis_erhalten"]),
       ));
 
+    // Task #1859 — Doppelzuordnungs-Schutz: eine Rechnung, die bereits über eine
+    // andere echte Bank-Zahlung beansprucht ist (1:1-Match ODER Mitglied eines an
+    // eine Transaktion gebundenen Avis), darf für den Avis→Zahlung-Abgleich NICHT
+    // mehr als „offen" gelten — sonst würde eine im Picker manuell zugeordnete
+    // Rechnung, die zufällig auch in einem noch unabgeglichenen Import-Avis liegt,
+    // später ein zweites Mal auf „bezahlt" gesetzt werden. Reuse der SSoT.
+    const candidateInvoiceIds = Array.from(new Set(rows.map(r => r.invoiceId)));
+    const claimed = await this.getClaimedInvoiceIds(db, candidateInvoiceIds);
+
     const byAdvice = new Map<number, { ids: number[]; sum: number }>();
     for (const r of rows) {
+      if (claimed.has(r.invoiceId)) continue;
       const agg = byAdvice.get(r.adviceId) ?? { ids: [], sum: 0 };
       if (!agg.ids.includes(r.invoiceId)) {
         agg.ids.push(r.invoiceId);
@@ -517,21 +527,28 @@ class QontoStorage {
   }
 
   /**
-   * Task #1710 — Doppelzählungs-Guard für die manuelle Mehrfach-Zuordnung:
+   * Task #1710/#1859 — Doppelzählungs-Guard für die manuelle (Mehrfach-)Zuordnung:
    * liefert aus den übergebenen Kandidaten-Rechnungs-IDs die Teilmenge, die
-   * bereits durch eine Zahlung „beansprucht" ist — d.h. entweder 1:1 an eine
-   * Qonto-Transaktion gebunden (`matched_invoice_id`) ODER Mitglied eines noch
-   * nicht gelöschten (importierten oder manuellen) Zahlungsavis. Wird sowohl im
-   * Picker-Lesepfad als auch im Schreib-Guard des Bulk-Match innerhalb der
-   * Transaktion verwendet, damit dieselbe Rechnung nie zwei Zahlungen zufällt.
+   * bereits durch eine ECHTE Bank-Zahlung „beansprucht" ist — d.h. entweder 1:1
+   * an eine Qonto-Transaktion gebunden (`matched_invoice_id`) ODER Mitglied eines
+   * Zahlungsavis, das SELBST an eine Qonto-Transaktion gebunden ist
+   * (`qonto_transactions.matched_payment_advice_id`). Ein bloß importiertes, aber
+   * noch NICHT mit einer Bank-Zahlung abgeglichenes Avis (Status `avis_erhalten`)
+   * beansprucht seine Rechnungen NICHT — sie bleiben manuell zuordenbar. Wird
+   * sowohl im Picker-Lesepfad als auch im Schreib-Guard des Bulk-Match innerhalb
+   * der Transaktion verwendet, damit dieselbe Rechnung nie zwei Zahlungen zufällt.
    */
   async getClaimedInvoiceIds(exec: DbOrTx, candidateIds: number[]): Promise<Set<number>> {
     const claimed = new Set<number>();
     if (candidateIds.length === 0) return claimed;
 
+    // Nur Avise zählen, die selbst an eine Qonto-Transaktion gebunden sind
+    // (INNER JOIN über matched_payment_advice_id). Ein rein importiertes,
+    // unabgeglichenes Avis beansprucht seine Rechnungen nicht.
     const adviceRows = await exec.select({ invoiceId: paymentAdviceItems.matchedInvoiceId })
       .from(paymentAdviceItems)
       .innerJoin(paymentAdvices, eq(paymentAdviceItems.paymentAdviceId, paymentAdvices.id))
+      .innerJoin(qontoTransactions, eq(qontoTransactions.matchedPaymentAdviceId, paymentAdvices.id))
       .where(and(
         inArray(paymentAdviceItems.matchedInvoiceId, candidateIds),
         isNull(paymentAdvices.deletedAt),

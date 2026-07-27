@@ -26,7 +26,7 @@ import { db } from "../../lib/db";
 import { appointmentsRepo } from "../../repos";
 import { eq, and, ne, or, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { sendEmail, buildWelcomeEmailHtml, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "../../services/email-service";
+import { sendEmail, buildWelcomeEmailHtml, buildLogoInlineAttachment, EMAIL_LOGO_SRC, isEmailConfigured } from "../../services/email-service";
 
 const router = Router();
 
@@ -201,9 +201,10 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
     }
   }
 
+  const warnings: string[] = [];
   try {
     const companySettings = await getCachedCompanySettings();
-    if (companySettings.smtpHost && companySettings.smtpUser) {
+    if (isEmailConfigured(companySettings)) {
       log(`Sende Willkommens-E-Mail an ${result.data.email}...`, "email");
       const welcomeToken = await authService.createWelcomeToken(user.id);
       const baseUrl = `${req.protocol}://${req.get("host")}`;
@@ -228,16 +229,34 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       });
       log(`Willkommens-E-Mail erfolgreich gesendet: ${emailResult.messageId}`, "email");
     } else {
-      log("SMTP nicht konfiguriert, keine Willkommens-E-Mail gesendet", "email");
+      log("E-Mail nicht konfiguriert, keine Willkommens-E-Mail gesendet", "email");
+      warnings.push(
+        "Benutzer angelegt, aber es ist kein E-Mail-Versand konfiguriert – die Willkommens-E-Mail wurde nicht gesendet.",
+      );
     }
   } catch (emailError: unknown) {
+    // Fehler NICHT mehr still verschlucken: Benutzer bleibt angelegt, aber der
+    // fehlgeschlagene Versand wird persistent auditiert und dem Admin als
+    // nicht-blockierende Warnung zurückgemeldet.
     const emailErrMsg = emailError instanceof Error ? emailError.message : String(emailError);
-    const emailErrStack = emailError instanceof Error ? emailError.stack : undefined;
     console.error("[email] Willkommens-E-Mail fehlgeschlagen:", emailErrMsg);
-    console.error("[email] Stack:", emailErrStack);
+    await auditService.log(
+      req.user!.id,
+      "welcome_email_failed",
+      "user",
+      user.id,
+      { email: result.data.email, reason: emailErrMsg, context: "create" },
+      req.ip,
+    );
+    warnings.push(
+      "Benutzer angelegt, aber die Willkommens-E-Mail konnte nicht gesendet werden. Bitte erneut senden.",
+    );
   }
 
-  res.status(201).json(sanitizeUser(user));
+  res.status(201).json({
+    ...sanitizeUser(user),
+    warnings: warnings.length > 0 ? warnings : undefined,
+  });
 }));
 
 const updateUserSchema = z.object({
@@ -516,8 +535,8 @@ router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte
   }
 
   const companySettings = await getCachedCompanySettings();
-  if (!companySettings.smtpHost || !companySettings.smtpUser) {
-    res.status(400).json({ error: "SMTP_NOT_CONFIGURED", message: "E-Mail-Versand ist nicht konfiguriert" });
+  if (!isEmailConfigured(companySettings)) {
+    res.status(400).json({ error: "EMAIL_NOT_CONFIGURED", message: "E-Mail-Versand ist nicht konfiguriert" });
     return;
   }
 

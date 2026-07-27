@@ -61,6 +61,18 @@ it only hard-fails after all retries. Same root cause can surface as a river
 `code: CANCEL` (orchestration cancelled the whole run) instead of a script error — also
 transient, also retry. Don't "fix" the script for these beyond the retry; it's the env.
 
+**The harness restarts the heavy workflows on a ~4-min cycle → the full `test`
+workflow NEVER completes in-session.** Observed restarts of `test`/`e2e-smoke`/
+`Start application` every ~4 min; a full `test` run takes longer than that, so it is
+killed and re-launched before it ever prints per-file results or a final tally.
+Don't wait for a full `test`-workflow result — you won't get one. The fast gates
+(`lint`, `typecheck`) DO complete green each cycle, so trust those for whole-codebase
+signal; verify individual arch/unit files in isolation via
+`npx vitest run --project unit <file>` (no DB, ~0.5s); and let CI be the signal for
+heavy integration suites. A foreground scoped orchestrator run during the storm can
+also just exit `-1` with zero captured output (killed mid-run) — that's the env, not
+your code.
+
 **Running the ephemeral orchestrator manually (Chromium/PDF integration files that
 NEED a throwaway DB, so the raw-vitest-vs-dev-server trick above doesn't apply):**
 - `setsid`/`nohup &` detached runs STALL forever at the esbuild "Baue

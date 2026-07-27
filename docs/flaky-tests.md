@@ -40,42 +40,45 @@ Retries, siehe Task #774).
 > Beim Eintragen das Datum absolut (YYYY-MM-DD) angeben und einen konkreten
 > Owner benennen — nicht „Team". Status: `offen` / `quarantäne` / `gefixt`.
 
-## Known-Failing (vorbestehend, CI-only quarantänisiert)
+## Known-Failing (vorbestehend) — QUARANTÄNE AUFGEHOBEN (SSoT-AP0)
 
-Abgrenzung zu „flaky": Die folgenden Tests sind **nicht** mal-grün-mal-rot,
-sondern in der GitHub-Actions-CI **deterministisch rot** — wegen eines
-vorbestehenden Produktiv-Bugs, der außerhalb dieses Tasks gefixt wird. Sie
-werden **nur in CI** via `it.skipIf(quarantinedInCI)` /
-`describe.skipIf(quarantinedInCI)` übersprungen
-(`tests/helpers/known-failing.ts`, `quarantinedInCI = !!process.env.CI`); lokal
-und in den Wegwerf-DBs laufen sie weiter, die Dev-Coverage bleibt also erhalten.
+> **Status: Quarantäne ENTFERNT.** Die früher hier gelisteten km-Rebook-/
+> km-Drift-Suiten wurden ausschließlich in CI per
+> `it.skipIf(quarantinedInCI)` / `describe.skipIf(quarantinedInCI)`
+> (`tests/helpers/known-failing.ts`, `quarantinedInCI = !!process.env.CI`)
+> übersprungen. In SSoT-AP0 wurde der Skip **ersatzlos zurückgebaut** (Helper
+> gelöscht, alle 9 Wrapper entfernt) — die Suiten laufen jetzt **überall
+> unquarantänisiert**, auch in der GitHub-Actions-CI.
 
-**Root-Cause (eine gemeinsame Ursache):** Der Budget-Auto-Rebook beim
-Termin-Edit/Import-Update schreibt frische `consumption`/`reversal`-Zeilen und
-entwertet die alten kurz per `appointment_id = NULL`. In Dev/Prod und den
-lokalen Wegwerf-DBs ist das folgenlos, weil die GoBD-CHECK-Constraint
-`budget_transactions_appointment_required_check`
-(`server/startup/ensure-budget-tx-appointment-constraint.ts`) dort wegen noch
-nicht aufgelöster Legacy-Waisen **nicht** installiert wird. Die CI fährt eine
-frische DB, in der die Constraint angelegt wird → der Null-Out verletzt sie, die
-Route liefert **500 statt 200**.
+**Warum die Quarantäne stale war:** Ursprüngliche Root-Cause war die
+GoBD-CHECK-Constraint `budget_transactions_appointment_required_check`. Der
+Budget-Auto-Rebook (Termin-Edit/Import-Update) schreibt frische
+`consumption`/`reversal`-Zeilen und entwertet die alten kurz per
+`appointment_id = NULL`; in der frischen CI-DB verletzte das die Constraint →
+Route **500 statt 200**. Diese Constraint wird jedoch seit dem
+INTERIM-Publish-Fenster **nirgends mehr beim Startup angelegt**: Der Hook
+`ensureBudgetTxAppointmentConstraint`
+(`server/startup/ensure-budget-tx-appointment-constraint.ts`) ist **nicht mehr
+verdrahtet** (Begründung `server/index.ts` ~Z. 616–630; dev droppt die
+Constraint sogar). Damit fehlt sie in der CI-DB **und** in den lokalen
+Wegwerf-DBs gleichermaßen → der Null-Out ist folgenlos → die Suiten sind grün.
+Der Skip schützte also vor einem Zustand, den es nicht mehr gibt.
 
-| Test-Datei (Suite/Test) | Erkannt am | Owner | Status | Notiz |
-|---|---|---|---|---|
-| `tests/budget/km-rebook-on-edit.test.ts` (`Reopen + PATCH … travelKilometers …`) | 2026-06-15 | SeniorEng | quarantäne (CI) | Constraint-Verletzung beim Rebook-Null-Out. |
-| `tests/budget/re-document-after-edit.test.ts` (`Re-Document nach Reopen+km-PATCH …`) | 2026-06-15 | SeniorEng | quarantäne (CI) | dito. |
-| `tests/equality/appointment-edit-rebook.test.ts` (ganze Suite „Termin-Edit Auto-Rebook") | 2026-06-15 | SeniorEng | quarantäne (CI) | dito. |
-| `tests/equality/appointment-series-bulk-rebook.test.ts` (`single-Mode mit Datumsänderung …`) | 2026-06-15 | SeniorEng | quarantäne (CI) | dito. |
-| `tests/equality/appointment-series-exception-rebook.test.ts` (`Edit eines Serientermins …`) | 2026-06-15 | SeniorEng | quarantäne (CI) | dito. |
-| `tests/equality/import-update-budget-drift.test.ts` (ganze Suite Task #643) | 2026-06-15 | SeniorEng | quarantäne (CI) | Import-Update koppelt Budget-Ledger via Rebook. |
-| `tests/reconcile-import-from-excel.test.ts` (`erkennt Drift … idempotent`) | 2026-06-15 | SeniorEng | quarantäne (CI) | Reconcile rebookt aus Original-Excel. |
-| `tests/integration/audit-appointment-budget-km-drift-detects-drift.test.ts` (einziger `it`) | 2026-06-15 | SeniorEng | quarantäne (CI) | Drift-Korrektur via `reconcileKmDrift` löst Rebook aus. |
-| `tests/integration/reconcile-km-drift-leaves-audit-empty.test.ts` (einziger `it`) | 2026-06-15 | SeniorEng | quarantäne (CI) | dito. |
+> ⚠️ **OFFENER Folge-Task (bewusst LAUT, NICHT stumm):** Der Rebook-Null-Out
+> (`appointment_id = NULL` auf entwerteten Budget-Zeilen) bleibt **fachlich
+> ungeschützt**, solange die GoBD-Constraint dekommissioniert ist. Der
+> dedizierte Follow-up muss (a) die Alt-Import-Waisen in Prod backfillen,
+> (b) alle Consumption-/Availability-Reader auf `reversed`-Rows prüfen
+> (Shadow-Mode-Cent-Diff, Entscheidung vor Umbau an Alrik) und DANN (c) die
+> Constraint + den Startup-Hook wieder scharfschalten. Bis dahin ist die
+> GoBD-Integrität an dieser Stelle nur durch Konvention, nicht durch die DB
+> abgesichert — dieser Marker ersetzt den stummen CI-Skip.
 
-**Aufhebung:** Sobald der dedizierte Follow-up-Task den Rebook-Null-Out fixt
-(Plan: alle Consumption-/Availability-Reader auf `reversed`-Rows prüfen +
-Shadow-Mode-Cent-Diff, Entscheidung vor Umbau an Alrik), werden die
-`skipIf(quarantinedInCI)`-Wrapper **ersatzlos** entfernt.
+Betroffene Suiten (laufen jetzt unquarantänisiert): `km-rebook-on-edit`,
+`re-document-after-edit`, `appointment-edit-rebook`, `appointment-series-bulk-rebook`,
+`appointment-series-exception-rebook`, `import-update-budget-drift`,
+`reconcile-import-from-excel`, `audit-appointment-budget-km-drift-detects-drift`,
+`reconcile-km-drift-leaves-audit-empty`.
 
 ### Object-Storage-abhängige Tests (CI ohne Sidecar)
 

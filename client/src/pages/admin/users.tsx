@@ -103,13 +103,22 @@ export default function AdminUsers() {
 
   const createMutation = useMutation({
     mutationFn: async (data: UserFormData & { password?: string }) => {
-      const result = await api.post("/admin/users", data);
+      const result = await api.post<UserData & { warnings?: string[] }>("/admin/users", data);
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidateRelated(queryClient, "admin-users");
       setIsCreateOpen(false);
-      toast({ title: "Benutzer erstellt" });
+      const warnings = (data as { warnings?: string[] })?.warnings;
+      if (warnings && warnings.length > 0) {
+        toast({
+          title: "Benutzer erstellt – mit Hinweis",
+          description: warnings.join(" "),
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Benutzer erstellt" });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });

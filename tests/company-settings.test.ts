@@ -2,7 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
   apiPatch,
+  apiGetAs,
   getAuthCookie,
+  loginAs,
+  createTestEmployee,
 } from "./test-utils";
 
 let originalCompanySettings: Record<string, any> | null = null;
@@ -63,5 +66,53 @@ describe("CS-5: Systemeinstellungen bearbeiten (Admin)", () => {
       vacationDaysPerYear: currentSettings.data.vacationDaysPerYear || 30,
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("CS-6: Email-Secret Redaktion & Erhalt (Task #1856)", () => {
+  it("CS-6.1 – graphClientSecret wird für Nicht-Admins maskiert (GET)", async () => {
+    // Erst als Admin ein Secret setzen, dann als normaler Mitarbeiter lesen.
+    const patchRes = await apiPatch<any>("/api/company-settings", {
+      graphClientSecret: "super-geheim-graph-secret",
+    });
+    expect(patchRes.status).toBe(200);
+
+    const employee = await createTestEmployee({ isAdmin: false });
+    const empAuth = await loginAs(employee.email, employee.password);
+    const empView = await apiGetAs<any>(empAuth, "/api/company-settings");
+    expect(empView.status).toBe(200);
+    // Sensible Felder dürfen an Nicht-Admins nur maskiert (leer) rausgehen.
+    expect(empView.data.graphClientSecret).toBe("");
+    expect(empView.data.smtpPass).toBe("");
+  });
+
+  it("CS-6.2 – leeres graphClientSecret im PATCH überschreibt gespeichertes Secret NICHT", async () => {
+    // Secret setzen.
+    await apiPatch("/api/company-settings", { graphClientSecret: "behalte-mich-graph" });
+    const afterSet = await apiGet<any>("/api/company-settings");
+    expect(afterSet.data.graphClientSecret).toBe("behalte-mich-graph");
+
+    // PATCH mit leerem Secret (typischer Fall: Formular ohne erneute Eingabe).
+    const patchEmpty = await apiPatch("/api/company-settings", {
+      graphClientSecret: "",
+      companyName: afterSet.data.companyName,
+    });
+    expect(patchEmpty.status).toBe(200);
+
+    const afterEmpty = await apiGet<any>("/api/company-settings");
+    expect(afterEmpty.data.graphClientSecret).toBe("behalte-mich-graph");
+  });
+
+  it("CS-6.3 – leeres smtpPass im PATCH überschreibt gespeichertes Secret NICHT", async () => {
+    await apiPatch("/api/company-settings", { smtpPass: "behalte-mich-smtp" });
+    const afterSet = await apiGet<any>("/api/company-settings");
+    expect(afterSet.data.smtpPass).toBe("behalte-mich-smtp");
+
+    await apiPatch("/api/company-settings", {
+      smtpPass: "",
+      companyName: afterSet.data.companyName,
+    });
+    const afterEmpty = await apiGet<any>("/api/company-settings");
+    expect(afterEmpty.data.smtpPass).toBe("behalte-mich-smtp");
   });
 });

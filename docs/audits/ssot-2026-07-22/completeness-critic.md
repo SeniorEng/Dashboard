@@ -1,0 +1,19 @@
+# Completeness-Critic — Lücken des Audits selbst (2026-07-22)
+
+Prioritized gaps (verified against the repo, not just the reports):
+
+1. **No SQL-layer detection modality.** The two worst confirmed findings (13x price-resolution subquery, ~50 phantom-status SQL writes) are embedded-SQL clones that jscpd/similarity-ts/ast-grep-on-TS all miss structurally, and `server/startup/` contains DB triggers/functions (`trigger-spec.ts`, `ensure-*-immutability.ts`) that re-encode domain rules in PL/pgSQL with zero parity checks against the TS SSoT. Close: add a SQL-normalizing fingerprint pass (extract `sql\`\`` templates + migration/trigger bodies, normalize, diff) and generalize the existing budget/wage table-access ast-grep bans to every SSoT-owned table.
+
+2. **Stored-derived-data redundancy is unaddressed.** ~15 `sync-*/reconcile-*/backfill-*` scripts in `server/startup/` are standing proof that denormalized columns (invoice snapshots, budget allocations, vacation carryover) drift from computed truth — a DB-level duplicate-answer class no proposed tool sees. Close: inventory derived columns in `shared/schema.ts`, convert the one-off reconcile scripts into scheduled invariant assertions that fail loudly.
+
+3. **The enforcement substrate is leaky, so every new gate inherits evasion paths.** Fork/secret skip disables all architecture guards, knip is warning-only, `CI=true` quarantines equality suites, and the lint script never touches `shared/` — yet the research recommends adding ESLint mirrors and more test-gates on top. Close: first PR = fix lint scope, remove continue-on-error, and add a meta-check that required guard suites actually executed (non-zero test count) on main-repo runs.
+
+4. **Ratchet fragmentation — the plan itself violates SSoT.** Five independent baseline/ratchet stores are proposed (jscpd baseline, similarity-ts baseline, Betterer results, eslint-suppressions.json, dep-cruiser known-violations) with no decision on one canonical ledger; they will diverge exactly like the code did. Close: pick one shrink-only ledger (Betterer wrapping all counters is the research's own strongest candidate) and make the others feed it or be dropped.
+
+5. **26 confirmed findings are not bound to remediation.** There is no per-finding row of canonical-target → guard-to-install → baseline entry → owner, so the audit risks becoming another `docs/budget-ssot-audit.md` one-off. Close: seed the proposed machine-readable ssot-registry directly from the findings list and make "guard installed" the definition-of-done per fix.
+
+6. **Frontend duplication surface unswept.** 243 inline `queryKey` array literals across 95 files in `client/src` (no key-factory SSoT — the invalidateQueries guard checks call shape, not key ownership), plus route-path strings hand-mirrored between client fetches and server routes. Close: query-key factory module + ast-grep ban on inline keys; endpoint paths via the already-planned openapi-typescript generated client.
+
+7. **Env/config handling has no SSoT and no sweep.** 118 raw `process.env.*` reads across 48 server files with per-site fallback defaults that can silently diverge; `shared/config/` holds only `services.ts`. Close: one zod-validated env module + ast-grep ban on `process.env` outside it.
+
+8. **Scheduled-job overlap and test-helper duplication were excluded by design.** 5+ independent schedulers/setIntervals (`whatsapp-reminder-scheduler`, `month-close-scheduler`, `call-scheduler`, `cache.ts`, `memory-watchdog.ts`) were never inventoried for overlapping responsibilities, and the jscpd config deliberately ignores `tests/` even though the equality/drift suites the whole plan leans on are built from hand-copied scenario builders (`tests/helpers/budget-scenarios.ts` et al.). Close: one-time report-only jscpd+similarity-ts profile over schedulers, `tests/`, and `e2e/helpers`, plus a scheduler registry with a single-registration guard.

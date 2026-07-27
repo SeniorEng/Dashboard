@@ -38,7 +38,15 @@ export function encryptRow<T extends Record<string, unknown>>(table: Table, data
   for (const p of props) {
     if (p in result) {
       const v = result[p];
-      if (typeof v === "string" && v) result[p] = encryptSecret(v);
+      // Task #1856 — an empty/masked secret field (e.g. the redacted `smtpPass`
+      // or `graphClientSecret` that non-admins receive in the GET response, or a
+      // form the admin never touched) must NOT overwrite the stored secret with
+      // an empty string. Strip it entirely so `.set()` leaves the column intact.
+      if (typeof v === "string" && !v) {
+        delete result[p];
+        continue;
+      }
+      if (typeof v === "string") result[p] = encryptSecret(v);
     }
   }
   return result as T;

@@ -131,6 +131,7 @@ export const AUDIT_ACTIONS = [
   "advice_payment_mismatch",
   "budget_backdate_override",
   "company_secrets_reencrypted",
+  "welcome_email_failed",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

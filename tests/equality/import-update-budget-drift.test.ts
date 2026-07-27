@@ -16,7 +16,6 @@
  * bleibt bei 70).
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
-import { quarantinedInCI } from "../helpers/known-failing";
 import { eq, and } from "drizzle-orm";
 import {
   getAuthCookie,
@@ -82,7 +81,7 @@ function nextWeekday(): string {
   return d.toISOString().split("T")[0];
 }
 
-describe.skipIf(quarantinedInCI)("Equality: Import-Update koppelt Budget-Ledger an Termin (Task #643)", () => {
+describe("Equality: Import-Update koppelt Budget-Ledger an Termin (Task #643)", () => {
   it("nach Import-Update steht Σ tx.travelKm auf quantize(neue km), nicht mehr auf alten km", async () => {
     const { executeImport } = await import("../../server/services/appointment-import");
     const date = nextWeekday();

@@ -10,6 +10,13 @@ dokumentiert den Ist-Zustand und verankert die Guards.
 > [`docs/budget-legal-spec.md`](budget-legal-spec.md). Architektur-Detail:
 > [`docs/architecture/budget.md`](architecture/budget.md). Symbol-Inventur:
 > [`docs/budget-ssot-inventory.md`](budget-ssot-inventory.md).
+>
+> **Maschinenlesbarer Katalog (Task #1842):** Welche fachliche Frage welche
+> kanonische Funktion + welchen Guard hat, ist ab sofort zusätzlich in
+> [`shared/ssot-registry.ts`](../shared/ssot-registry.ts) als eine
+> maschinenlesbare Registry hinterlegt (von den Guard-Tests konsumiert, z. B.
+> `budget-single-reader.test.ts` und `budget-pot-eligibility-ssot.test.ts`).
+> Dieses Dokument bleibt die menschenlesbare Begründung/Klassifikation.
 
 ---
 

@@ -34,6 +34,16 @@ export const BUDGET_TX_APPOINTMENT_CHECK_SQL = `
  *      aufgelöste Waisen) → SKIP + Log, damit der Startup NICHT crasht. Der
  *      Backfill `backfillOrphanReversalAppointmentId` MUSS davor laufen.
  *   3. Andernfalls Constraint anlegen.
+ *
+ * @public — SSoT-AP0 (Task #1841): Diese Funktion ist AKTUELL bewusst NICHT im
+ * Startup verdrahtet (siehe `server/index.ts` — die Constraint wird
+ * „vorübergehend NICHT mehr beim Startup angelegt", weil Legacy-Waisen noch
+ * nicht aufgelöst sind und ein `km-rebook` das `appointment_id` kurzzeitig auf
+ * NULL setzt). Sie bleibt als SSoT-DDL + Constraint-Drift-Wächter erhalten und
+ * wird vom deferred Follow-up (Rebook-Null-Out-Fix + Umstellung aller
+ * Consumption-/Availability-Reader auf reversed-Rows) wieder scharf geschaltet.
+ * Der `@public`-Tag hält das knip-Dead-Code-Gate ruhig, OHNE diese Rationale zu
+ * verstecken — bitte NICHT löschen.
  */
 export async function ensureBudgetTxAppointmentConstraint(): Promise<void> {
   const existing = await db.execute(sql`
