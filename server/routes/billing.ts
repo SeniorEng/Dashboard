@@ -14,7 +14,7 @@ import {
   type BudgetSplitForAppointment,
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
-import { classifyBillingEligibility } from "@shared/domain/billing-eligibility";
+import { classifyBillingEligibility, isMonthFullyBilledAndSigned } from "@shared/domain/billing-eligibility";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
 import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
@@ -502,11 +502,32 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     // Signatur-blockierte Kunden (kein strikt signierter Termin ⇒ signiert=0)
     // bleiben in der Liste, damit sie weiterhin als „blocked" sichtbar sind
     // (Bestandsverhalten, Task #1776).
+    //
+    // Task #1873/#1878 — der frühere „signiert>0 & unbilled=0"-Ausschluss
+    // betrachtete NUR Termine unter abrechenbar-signierten LNs und wertete einen
+    // `employee_signed`-LN kassenunabhängig als „abgedeckt" (`isPartiallyDocumented`).
+    // Ein Pflegekassen-Kunde mit einem bereits abgerechneten kundensignierten
+    // Termin, der aber weitere dokumentierte-aber-nur-`employee_signed` Termine
+    // hat, sah dadurch „vollständig abgerechnet" aus und verschwand still aus der
+    // Liste (Fall „Bernd Funke"), obwohl die Kundenunterschrift noch fehlt.
+    //
+    // Der Ausschluss folgt jetzt DER EINEN SSoT `isMonthFullyBilledAndSigned`:
+    // ein Kunde wird nur entfernt, wenn JEDER dokumentierte (`completed`) Termin
+    // abrechenbar-signiert UND bereits abgerechnet ist. Das Signatur-Gate ist
+    // kassen-/zahlerabhängig (`getUnbilledSignedAppointmentFactsByCustomer` nutzt
+    // `isServiceRecordSignedForBilling`), sodass ein Pflegekassen-Termin mit nur
+    // Mitarbeiter-Unterschrift als „noch offen" zählt und den Kunden sichtbar
+    // hält. Bleibt er sichtbar, sortiert ihn `classifyBillingMaturity` in eine
+    // Aufmerksamkeits-Gruppe („Unvollständig dokumentiert" / „Wartet auf
+    // Kundenunterschrift").
     filteredCustomerRows = filteredCustomerRows.filter(c => {
       const facts = unbilledFacts.get(c.id);
-      const signed = facts?.signedAppointmentCount ?? 0;
-      const unbilled = facts?.unbilledAppointmentCount ?? 0;
-      return !(signed > 0 && unbilled === 0);
+      const coverage = coverageByCustomer.get(c.id);
+      return !isMonthFullyBilledAndSigned({
+        completedAppointments: coverage?.completedAppointments ?? 0,
+        signedAppointmentCount: facts?.signedAppointmentCount ?? 0,
+        unbilledAppointmentCount: facts?.unbilledAppointmentCount ?? 0,
+      });
     });
   }
 
@@ -578,7 +599,11 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
   const previewIsoDateRe = /^\d{4}-\d{2}-\d{2}$/;
   const previewDateFrom = typeof req.query.dateFrom === "string" && previewIsoDateRe.test(req.query.dateFrom) ? req.query.dateFrom : undefined;
   const previewDateTo = typeof req.query.dateTo === "string" && previewIsoDateRe.test(req.query.dateTo) ? req.query.dateTo : undefined;
-  const draft = await buildInvoiceDraft({ customerId, billingMonth: month, billingYear: year, dateFrom: previewDateFrom, dateTo: previewDateTo });
+  // Task #1881 — Vorschau-Modus: liefert auch bei „aktuell nichts abrechenbar"
+  // eine strukturierte Antwort (excludedAppointments je Termin + Grund, Summe
+  // 0 €) statt einer generischen badRequest-Meldung, damit der Dialog konkret
+  // erklärt, warum (noch) nicht abgerechnet werden kann. Generate lehnt weiter ab.
+  const draft = await buildInvoiceDraft({ customerId, billingMonth: month, billingYear: year, dateFrom: previewDateFrom, dateTo: previewDateTo, mode: "preview" });
   const response: BillingInvoicePreview = {
     serviceRecordCount: draft.signedRecordCount,
     coveredAppointments: draft.apptIds.length,
@@ -597,6 +622,9 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
           (a, b) => POT_ORDER.indexOf(a) - POT_ORDER.indexOf(b),
         )
       : [],
+    // Task #1869: Dokumentierte, aber nicht abgerechnete Termine samt Grund +
+    // Datum — erlaubt dem Dialog, eine Null-/Teil-Summe konkret zu erklären.
+    excludedAppointments: draft.excludedAppointments,
   };
   res.json(response);
 }));

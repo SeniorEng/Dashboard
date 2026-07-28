@@ -157,6 +157,30 @@
           "coveredAppointments": {
             "type": "integer"
           },
+          "excludedAppointments": {
+            "items": {
+              "properties": {
+                "date": {
+                  "type": "string"
+                },
+                "reason": {
+                  "enum": [
+                    "customer_signature_required",
+                    "not_signed",
+                    "no_appointments",
+                    "already_billed"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "date",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "serviceRecordCount": {
             "type": "integer"
           },
@@ -186,7 +210,8 @@
           "alreadyBilledAppointments",
           "totalCents",
           "splitInvoices",
-          "splitPots"
+          "splitPots",
+          "excludedAppointments"
         ],
         "type": "object"
       },

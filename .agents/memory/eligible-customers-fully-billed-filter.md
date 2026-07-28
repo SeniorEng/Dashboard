@@ -8,9 +8,19 @@ intentionally lists BOTH billable customers AND signature-blocked ones (so admin
 see *why* a Pflegekasse customer with only `employee_signed` LN can't be billed —
 guarded by tests/billing/eligible-signature-grouping.test.ts SIG-1).
 
-**Rule:** exclude a customer only when they are FULLY billed, expressed purely via
-the shared `getUnbilledSignedAppointmentFactsByCustomer` facts:
-`signedAppointmentCount > 0 && unbilledAppointmentCount === 0`.
+**Rule:** exclude a customer only when they are FULLY billed AND fully covered —
+combine the shared `getUnbilledSignedAppointmentFactsByCustomer` facts with the
+coverage SSoT (`isPartiallyDocumented` over `getDocumentationCoverageByCustomer`):
+`signed > 0 && unbilled === 0 && !isPartiallyDocumented(coverage)`.
+
+**Coverage-awareness (why the bare fully-billed predicate isn't enough):** the
+fully-billed check only looks at appts under STRICT-signed LNs. A customer whose one
+signed appt is already invoiced but who still has documented (`completed`) appts NOT
+covered by a signed LN (`completedAppointments > coveredAppointments`) would look
+fully-billed and vanish silently (the "Bernd Funke" case). Keep such a customer;
+`classifyBillingMaturity` then routes them to an attention group (partially_documented
+or signature_blocked), never "ready". Guarded by
+tests/billing/partially-signed-stays-visible.test.ts.
 
 **Why:** `unbilled = strict-signed − already-invoiced`. So `unbilled === 0` alone is
 ambiguous — it's ALSO true for a signature-blocked customer whose strict-signed

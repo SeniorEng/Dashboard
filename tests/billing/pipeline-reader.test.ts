@@ -134,7 +134,8 @@ describe("GET /api/billing/pipeline — Pipeline-Reader (Task #1405)", () => {
 
     // --- Struktur-Invarianten ---
     expect(body.stages).toHaveLength(7);
-    expect(body.sides).toHaveLength(3);
+    // Task #1874: Side-Zustand „Wartet auf Kundenunterschrift" hinzugekommen (3→4).
+    expect(body.sides).toHaveLength(4);
     expect(body.stages.map((s) => s.stage)).toEqual([
       "offen", "dokumentiert", "unterschrieben", "rechnung_erstellt", "versendet", "avis_erhalten", "bezahlt",
     ]);
@@ -144,6 +145,13 @@ describe("GET /api/billing/pipeline — Pipeline-Reader (Task #1405)", () => {
     expect(stageSum).toBe(body.totals.stageTotalCents);
     expect(sideSum).toBe(body.totals.sideTotalCents);
     expect(body.totals.grandTotalCents).toBe(body.totals.stageTotalCents + body.totals.sideTotalCents);
+
+    // Task #1879 — Erwarteter Umsatz = Stufen-Summe + „Wartet auf
+    // Kundenunterschrift" (übrige Side-Badges ausgeschlossen).
+    const awaitingSide = body.sides.find((s) => s.state === "wartet_auf_kundenunterschrift");
+    expect(body.totals.expectedRevenueTotalCents).toBe(
+      body.totals.stageTotalCents + (awaitingSide?.totalCents ?? 0),
+    );
 
     // Σ Karten-Cents je Stufe === Stufen-Cents (keine verlorenen €).
     for (const stage of body.stages) {

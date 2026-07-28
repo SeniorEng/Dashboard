@@ -60,38 +60,68 @@ function assertWellFormed(a: PipelineAssignment): void {
 describe("billing-pipeline stage identity (total + disjunkt)", () => {
   it("assignAppointmentStage bildet jede Status-Kombination auf genau einen Ausgang ab", () => {
     for (const status of ALL_APPOINTMENT_STATUSES) {
-      for (const documentedAndSigned of [false, true]) {
-        for (const isInvoiced of [false, true]) {
-          const input: AppointmentPipelineInput = { status, documentedAndSigned, isInvoiced };
-          const result = assignAppointmentStage(input);
-          assertWellFormed(result);
+      for (const billingType of [null, ...ALL_BILLING_TYPES]) {
+        for (const hasDirectSignature of [false, true]) {
+          for (const hasCompletedServiceRecord of [false, true]) {
+            for (const hasEmployeeSignedServiceRecord of [false, true]) {
+              for (const isInvoiced of [false, true]) {
+                const input: AppointmentPipelineInput = {
+                  status,
+                  billingType,
+                  hasDirectSignature,
+                  hasCompletedServiceRecord,
+                  hasEmployeeSignedServiceRecord,
+                  isInvoiced,
+                };
+                assertWellFormed(assignAppointmentStage(input));
+              }
+            }
+          }
         }
       }
     }
   });
 
   it("Termin-Mapping respektiert die fachliche Tabelle", () => {
+    const base = {
+      billingType: "selbstzahler" as string | null,
+      hasDirectSignature: false,
+      hasCompletedServiceRecord: false,
+      hasEmployeeSignedServiceRecord: false,
+      isInvoiced: false,
+    };
     // scheduled/documenting → offen (unabhängig von Signatur, solange nicht abgerechnet)
-    expect(assignAppointmentStage({ status: "scheduled", documentedAndSigned: false, isInvoiced: false }))
+    expect(assignAppointmentStage({ ...base, status: "scheduled" }))
       .toEqual({ kind: "stage", stage: "offen" });
-    expect(assignAppointmentStage({ status: "documenting", documentedAndSigned: false, isInvoiced: false }))
+    expect(assignAppointmentStage({ ...base, status: "documenting" }))
       .toEqual({ kind: "stage", stage: "offen" });
     // completed ohne Unterschrift → dokumentiert
-    expect(assignAppointmentStage({ status: "completed", documentedAndSigned: false, isInvoiced: false }))
+    expect(assignAppointmentStage({ ...base, status: "completed" }))
       .toEqual({ kind: "stage", stage: "dokumentiert" });
-    // completed mit Unterschrift → unterschrieben
-    expect(assignAppointmentStage({ status: "completed", documentedAndSigned: true, isInvoiced: false }))
+    // completed mit direkter Unterschrift → unterschrieben (beide Zahler-Typen)
+    expect(assignAppointmentStage({ ...base, status: "completed", hasDirectSignature: true }))
+      .toEqual({ kind: "stage", stage: "unterschrieben" });
+    // Task #1874 — Selbstzahler: employee_signed LN genügt → unterschrieben
+    expect(assignAppointmentStage({ ...base, status: "completed", billingType: "selbstzahler", hasEmployeeSignedServiceRecord: true }))
+      .toEqual({ kind: "stage", stage: "unterschrieben" });
+    // Task #1874 — Pflegekasse: employee_signed LN allein → Side „Wartet auf Kundenunterschrift"
+    expect(assignAppointmentStage({ ...base, status: "completed", billingType: "pflegekasse_gesetzlich", hasEmployeeSignedServiceRecord: true }))
+      .toEqual({ kind: "side", state: "wartet_auf_kundenunterschrift" });
+    expect(assignAppointmentStage({ ...base, status: "completed", billingType: "pflegekasse_privat", hasEmployeeSignedServiceRecord: true }))
+      .toEqual({ kind: "side", state: "wartet_auf_kundenunterschrift" });
+    // Task #1874 — Pflegekasse: completed LN (Kundenunterschrift) → unterschrieben
+    expect(assignAppointmentStage({ ...base, status: "completed", billingType: "pflegekasse_gesetzlich", hasCompletedServiceRecord: true }))
       .toEqual({ kind: "stage", stage: "unterschrieben" });
     // abgerechnet → excluded invoiced (€ lebt auf der Rechnung)
-    expect(assignAppointmentStage({ status: "completed", documentedAndSigned: true, isInvoiced: true }))
+    expect(assignAppointmentStage({ ...base, status: "completed", hasDirectSignature: true, isInvoiced: true }))
       .toEqual({ kind: "excluded", reason: "invoiced" });
     // cancelled → excluded cancelled (auch wenn fälschlich „abgerechnet")
-    expect(assignAppointmentStage({ status: "cancelled", documentedAndSigned: false, isInvoiced: true }))
+    expect(assignAppointmentStage({ ...base, status: "cancelled", isInvoiced: true }))
       .toEqual({ kind: "excluded", reason: "cancelled" });
     // no-show / expired → Side-Badges (Vorrang vor isInvoiced)
-    expect(assignAppointmentStage({ status: "customer_no_show", documentedAndSigned: false, isInvoiced: true }))
+    expect(assignAppointmentStage({ ...base, status: "customer_no_show", isInvoiced: true }))
       .toEqual({ kind: "side", state: "kunde_nicht_angetroffen" });
-    expect(assignAppointmentStage({ status: "expired_unsigned", documentedAndSigned: false, isInvoiced: false }))
+    expect(assignAppointmentStage({ ...base, status: "expired_unsigned" }))
       .toEqual({ kind: "side", state: "nicht_abgerechnet" });
   });
 
@@ -137,6 +167,33 @@ describe("billing-pipeline stage identity (total + disjunkt)", () => {
     expect(summary.grandTotalCents).toBe(3500 + 9999);
     // excluded-€ (invoiced/cancelled) tauchen in keiner Summe auf
     expect(summary.grandTotalCents).not.toBe(3500 + 9999 + 123456 + 777);
+  });
+
+  // Task #1879 — Erwarteter Umsatz = Σ Stufen + „Wartet auf Kundenunterschrift".
+  // Storniert / Kunde nicht angetroffen / Nicht abgerechnet bleiben ausgeschlossen.
+  it("expectedRevenueTotalCents zählt wartet_auf_kundenunterschrift, nicht storniert/no-show/nicht-abgerechnet", () => {
+    const summary = summarizePipelineCents([
+      { assignment: { kind: "stage", stage: "offen" }, cents: 1000 },
+      { assignment: { kind: "stage", stage: "bezahlt" }, cents: 2000 },
+      { assignment: { kind: "side", state: "wartet_auf_kundenunterschrift" }, cents: 570 },
+      { assignment: { kind: "side", state: "storniert" }, cents: 9999 },
+      { assignment: { kind: "side", state: "kunde_nicht_angetroffen" }, cents: 4444 },
+      { assignment: { kind: "side", state: "nicht_abgerechnet" }, cents: 3333 },
+    ]);
+    // Stufen-Summe (unverändert) schließt alle Side-Zustände aus.
+    expect(summary.stageTotalCents).toBe(3000);
+    // Erwarteter Umsatz = Stufen + „Wartet auf Kundenunterschrift".
+    expect(summary.expectedRevenueTotalCents).toBe(3000 + 570);
+    // Storniert/No-Show/Nicht-abgerechnet zählen NICHT mit.
+    expect(summary.expectedRevenueTotalCents).not.toBe(summary.grandTotalCents);
+    // Ohne „Wartet auf Kundenunterschrift"-Einheiten reproduziert sich die alte
+    // Gesamt-Umsatz-Zahl (= reine Stufen-Summe).
+    const withoutAwaiting = summarizePipelineCents([
+      { assignment: { kind: "stage", stage: "offen" }, cents: 1000 },
+      { assignment: { kind: "stage", stage: "bezahlt" }, cents: 2000 },
+      { assignment: { kind: "side", state: "storniert" }, cents: 9999 },
+    ]);
+    expect(withoutAwaiting.expectedRevenueTotalCents).toBe(withoutAwaiting.stageTotalCents);
   });
 });
 

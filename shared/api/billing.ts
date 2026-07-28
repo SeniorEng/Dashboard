@@ -162,6 +162,25 @@ export interface BillingInvoicePreview {
   // kein Split entsteht. Erlaubt dem UI, den Hinweis exakt zu beschriften
   // (z.B. „§45b + §45a") und „Privat" nur bei echtem Selbstzahler-Anteil.
   splitPots: InvoicePotKey[];
+  // Task #1869: Dokumentierte Termine des Zeitraums, die NICHT in dieser
+  // Rechnung landen — mit maschinenlesbarem Grund und Datum. So kann der Dialog
+  // bei einer Null-/Teil-Summe konkret benennen, WARUM Termine nicht abgerechnet
+  // werden (insb. fehlende Kundenunterschrift bei Pflegekasse vs. bereits
+  // abgerechnet) und welche Leistungsnachweise noch unterschrieben werden müssen.
+  // Nur `customer_signature_required`/`not_signed` (fehlende Unterschrift) und
+  // `already_billed` treten hier auf; abgeleitet aus DERSELBEN Eligibilitäts-SSoT
+  // wie der Erstellungs-Pfad — keine zweite Reiferegel.
+  excludedAppointments: BillingExcludedAppointment[];
+}
+
+// Task #1869: Ein nicht abgerechneter dokumentierter Termin samt Grund. `date`
+// = ISO yyyy-mm-dd des Termins; `reason` reicht der Vorschau die maschinen-
+// lesbare Block-Ursache durch (siehe `BILLING_BLOCK_SHORT_LABELS` für die
+// knappen Anzeige-Labels), damit Dialog und Kundenzeile denselben Wortlaut
+// verwenden.
+export interface BillingExcludedAppointment {
+  date: string;
+  reason: BillingBlockReason;
 }
 
 export interface GenerateInvoiceResponse {

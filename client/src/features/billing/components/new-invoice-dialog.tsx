@@ -20,9 +20,13 @@ import type {
   GenerateInvoiceResponse,
 } from "@shared/api";
 import { POT_DISPLAY_LABELS, type InvoicePotKey } from "@shared/domain/budget-invoice-split";
-import { isLateSignedFollowUp } from "@shared/domain/billing-eligibility";
+import {
+  isLateSignedFollowUp,
+  BILLING_BLOCK_SHORT_LABELS,
+  type BillingBlockReason,
+} from "@shared/domain/billing-eligibility";
 import { MONTH_NAMES } from "../constants";
-import { getCustomerName } from "../utils";
+import { getCustomerName, formatSentAt } from "../utils";
 
 const SPLIT_COUNT_WORDS = ["null", "eine", "zwei", "drei", "vier"];
 
@@ -37,6 +41,16 @@ function buildSplitHint(splitPots: InvoicePotKey[]): string {
   const labels = splitPots.map((pot) => POT_DISPLAY_LABELS[pot]).join(" + ");
   return `Wird in ${countWord} ${kind} aufgeteilt (${labels}).`;
 }
+
+// Task #1869 — Reihenfolge der Erklär-Gruppen im „Nicht abgerechnet"-Block:
+// fehlende Unterschrift zuerst (die eigentliche, behebbare Ursache einer
+// Null-Summe), danach die neutral-informativen „bereits abgerechnet"-Termine.
+const EXCLUDED_REASON_ORDER: BillingBlockReason[] = [
+  "customer_signature_required",
+  "not_signed",
+  "already_billed",
+  "no_appointments",
+];
 
 interface NewInvoiceDialogProps {
   open: boolean;
@@ -248,6 +262,48 @@ export function NewInvoiceDialog({
                   {buildSplitHint(invoicePreview.splitPots)}
                 </div>
               )}
+              {/* Task #1869 — Erklärt eine Null-/Teil-Summe konkret: welche
+                  dokumentierten Termine NICHT abgerechnet werden und warum
+                  (fehlende Kundenunterschrift vs. bereits abgerechnet) — mit den
+                  betroffenen Terminen, damit der Admin weiß, welcher
+                  Leistungsnachweis noch unterschrieben werden muss. Wortlaut aus
+                  derselben SSoT (`BILLING_BLOCK_SHORT_LABELS`) wie die
+                  Kundenzeile der Karte „Noch zu erstellen". */}
+              {invoicePreview
+                && invoicePreview.excludedAppointments.length > 0
+                && (invoicePreview.totalCents === 0
+                  || invoicePreview.coveredAppointments < invoicePreview.completedAppointments)
+                && (() => {
+                  const byReason = new Map<BillingBlockReason, string[]>();
+                  for (const ex of invoicePreview.excludedAppointments) {
+                    const list = byReason.get(ex.reason) ?? [];
+                    list.push(ex.date);
+                    byReason.set(ex.reason, list);
+                  }
+                  const groups = EXCLUDED_REASON_ORDER
+                    .filter((reason) => byReason.has(reason))
+                    .map((reason) => ({
+                      reason,
+                      dates: (byReason.get(reason) ?? []).slice().sort(),
+                    }));
+                  return (
+                    <div
+                      className="rounded-md border border-amber-200 bg-amber-50 p-2 space-y-2"
+                      data-testid="block-excluded-appointments"
+                    >
+                      <div className="text-xs font-medium text-amber-800">
+                        Nicht abgerechnet — Grund je Termin:
+                      </div>
+                      {groups.map(({ reason, dates }) => (
+                        <div key={reason} className="text-xs text-amber-800" data-testid={`block-excluded-${reason}`}>
+                          <span className="font-medium">{BILLING_BLOCK_SHORT_LABELS[reason]}</span>
+                          {" — "}
+                          <span>{dates.map((d) => formatSentAt(d)).join(", ")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
             </div>
           )}
 
@@ -273,7 +329,15 @@ export function NewInvoiceDialog({
           </Button>
           <Button
             onClick={onGenerate}
-            disabled={generateMutation.isPending || !selectedCustomerId}
+            disabled={
+              generateMutation.isPending
+              || !selectedCustomerId
+              // Task #1881 — Kein leerer Lauf: Wenn die Vorschau nichts
+              // Abrechenbares enthält (0 abgedeckte Termine ⇒ Summe 0 €), bleibt
+              // der Grund im Erklär-Block sichtbar, aber „Rechnung erstellen"
+              // ist deaktiviert (der Generate-Pfad würde ohnehin ablehnen).
+              || (!!invoicePreview && invoicePreview.coveredAppointments === 0)
+            }
             className="bg-teal-600 hover:bg-teal-700 text-white"
             data-testid="button-generate-invoice"
           >
