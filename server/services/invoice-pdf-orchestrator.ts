@@ -13,7 +13,7 @@ import { FAHRTKOSTEN_LABEL, LEGACY_FAHRTKOSTEN_LABEL } from "@shared/domain/invo
   import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
   import { DEFAULT_ZUGFERD_PROFILE, type ZugferdProfileId } from "../lib/zugferd";
   import { computeDataHash } from "./signature-integrity";
-  import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
+  import { getStorageDriver } from "../lib/storage";
   import { parseObjectPath, getPrivateDir, buildInvoicePdfObjectKey, assertInvoicePdfWriteKeyAllowed, isObjectStorageConfigured } from "../lib/object-storage-helpers";
   import { eq, and, or, inArray, sql } from "drizzle-orm";
   import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
@@ -901,7 +901,7 @@ async function renderAndUploadInvoiceArtifacts(
     assertInvoicePdfWriteKeyAllowed(fileName);
     const fullPath = `${getPrivateDir()}/${fileName}`;
     const { bucketName, objectName } = parseObjectPath(fullPath);
-    await objectStorageClient.bucket(bucketName).file(objectName).save(pdfBytes, {
+    await getStorageDriver().bucket(bucketName).file(objectName).save(pdfBytes, {
       contentType: "application/pdf",
       metadata: { invoiceNumber: invoice.invoiceNumber, pdfHash },
     });
@@ -924,7 +924,7 @@ async function renderAndUploadInvoiceArtifacts(
       assertInvoicePdfWriteKeyAllowed(lnFileName);
       const lnFullPath = `${getPrivateDir()}/${lnFileName}`;
       const { bucketName: lnBucket, objectName: lnObj } = parseObjectPath(lnFullPath);
-      await objectStorageClient.bucket(lnBucket).file(lnObj).save(leistungsnachweisPdf, {
+      await getStorageDriver().bucket(lnBucket).file(lnObj).save(leistungsnachweisPdf, {
         contentType: "application/pdf",
         metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
       });
@@ -939,7 +939,7 @@ async function renderAndUploadInvoiceArtifacts(
       assertInvoicePdfWriteKeyAllowed(lnFileName);
       const lnFullPath = `${getPrivateDir()}/${lnFileName}`;
       const { bucketName: lnBucket, objectName: lnObj } = parseObjectPath(lnFullPath);
-      await objectStorageClient.bucket(lnBucket).file(lnObj).save(ln.pdf, {
+      await getStorageDriver().bucket(lnBucket).file(lnObj).save(ln.pdf, {
         contentType: "application/pdf",
         metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
       });
@@ -1218,7 +1218,7 @@ function resolveStorageFileFromPath(pdfPath: string) {
   if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
   const fullPath = `${entityDir}${entityId}`;
   const { bucketName, objectName } = parseObjectPath(fullPath);
-  return objectStorageClient.bucket(bucketName).file(objectName);
+  return getStorageDriver().bucket(bucketName).file(objectName);
 }
 
 async function loadStoredPdfByPath(pdfPath: string | null): Promise<Buffer | null> {

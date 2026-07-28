@@ -1,6 +1,8 @@
 import nodemailer from "nodemailer";
 import type { CompanySettings } from "@shared/schema";
 import { loadLogoBytes } from "./logo-resolver";
+import { appDomainBaseUrl } from "../lib/app-domain";
+import { isStubTransport } from "../lib/messaging-transport";
 import { sendViaGraph, testGraphConnection, hasGraphCredentials } from "./email-graph-transport";
 
 interface EmailAttachment {
@@ -76,14 +78,12 @@ export interface TestOutboxEntry {
 const testOutbox: TestOutboxEntry[] = [];
 
 export function isStubEmailTransport(): boolean {
-  // Explicit opt-out lets unit tests exercise the real nodemailer path
-  // (e.g. tests/email-service.test.ts) without sending mail anywhere — the
-  // real transport is mocked in that test file. Office 365 must NEVER be
-  // contacted from tests, so this opt-out is only meaningful when paired
-  // with a mocked nodemailer or a local mail catcher.
-  if (process.env.EMAIL_TRANSPORT === "real") return false;
-  if (process.env.EMAIL_TRANSPORT === "stub") return true;
-  return process.env.NODE_ENV === "test";
+  // Safe-by-default (Task #1840): außerhalb der Produktion wird NIE real
+  // gesendet, es sei denn EMAIL_TRANSPORT=real. Der explizite "real"-Opt-out
+  // lässt Unit-Tests den echten nodemailer-Pfad mit gemocktem Transport prüfen
+  // (tests/email-service.test.ts); Office 365 wird aus Tests nie kontaktiert.
+  // Zentrale SSoT: server/lib/messaging-transport.ts.
+  return isStubTransport("email");
 }
 
 export function getTestOutbox(): TestOutboxEntry[] {
@@ -275,9 +275,10 @@ function toAbsoluteUrl(relativeUrl: string | null | undefined): string | null {
   if (relativeUrl.startsWith("cid:")) return relativeUrl;
   if (relativeUrl.startsWith("data:")) return relativeUrl;
   if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) return relativeUrl;
+  // APP_DOMAIN (Hetzner/Coolify) vorrangig; sonst unveränderte Replit-Reihenfolge.
   const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN;
-  if (!domain) return null;
-  const base = `https://${domain}`;
+  const base = appDomainBaseUrl() ?? (domain ? `https://${domain}` : null);
+  if (!base) return null;
   return `${base}${relativeUrl.startsWith("/") ? "" : "/"}${relativeUrl}`;
 }
 

@@ -4,6 +4,8 @@ import { db } from "../lib/db";
 import { whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings } from "@shared/schema";
 import { storage } from "../storage";
 import { normalizePhone } from "@shared/utils/phone";
+import { appDomainBaseUrl } from "../lib/app-domain";
+import { isStubTransport } from "../lib/messaging-transport";
 
 interface SendTemplateOptions {
   phoneNumber: string;
@@ -93,6 +95,17 @@ class WhatsAppService {
       config,
     );
 
+    // Safe-by-default Stub-Gate (Task #1840): außerhalb der Produktion kein
+    // realer Versand, außer WHATSAPP_TRANSPORT=real. Schützt Dev-Umgebungen mit
+    // Prod-Kopie-DB (echte Twilio-Credentials) vor echten WhatsApp-Nachrichten.
+    if (isStubTransport("whatsapp")) {
+      console.log(
+        `[WhatsApp] STUB (NODE_ENV=${process.env.NODE_ENV ?? "unset"}): kein realer ` +
+          `Versand an ${normalized} (template=${options.templateName}).`,
+      );
+      return { success: true, messageId: `stub-wa-${Date.now()}` };
+    }
+
     try {
       const client = twilio(config.accountSid, config.authToken);
       const message = await client.messages.create(payload);
@@ -181,9 +194,20 @@ class WhatsAppService {
   }
 
   buildAppUrl(path: string): string {
-    const baseUrl = process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : process.env.APP_URL || "";
+    // Präzedenz: APP_DOMAIN (Hetzner/Coolify) → REPLIT_DOMAINS[0] →
+    // REPLIT_DEV_DOMAIN → APP_URL.
+    //
+    // Fix (Task #1840): Zuvor wurde in Replit-PROD (wo REPLIT_DOMAINS gesetzt,
+    // REPLIT_DEV_DOMAIN aber i.d.R. ebenfalls vorhanden ist) die DEV-Domain für
+    // WhatsApp-Deep-Links verwendet — die Links zeigten auf die Dev-Umgebung.
+    // WhatsApp folgt jetzt derselben Reihenfolge wie der E-Mail-Link-Bau
+    // (REPLIT_DOMAINS[0] vor REPLIT_DEV_DOMAIN), sodass Prod-Links auf die
+    // Prod-Domain zeigen. APP_URL bleibt als letzte Stufe erhalten.
+    const replitDomain =
+      process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN;
+    const baseUrl =
+      appDomainBaseUrl() ??
+      (replitDomain ? `https://${replitDomain}` : process.env.APP_URL || "");
     return `${baseUrl}${path}`;
   }
 

@@ -1,31 +1,45 @@
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-serverless";
+import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import ws from "ws";
 
-neonConfig.webSocketConstructor = ws;
+// Replit-Exit — schaltbarer DB-Treiber (additiv, Strangler-Prinzip):
+//   DB_DRIVER=neon (Default) → @neondatabase/serverless via WebSocket
+//                              (Replit/Neon; heutiger Pfad, unverändert)
+//   DB_DRIVER=pg             → node-postgres via plain TCP
+//                              (Hetzner/Coolify: Standard-Postgres 16)
+const DB_DRIVER = (process.env.DB_DRIVER ?? "neon").trim().toLowerCase();
+if (DB_DRIVER !== "neon" && DB_DRIVER !== "pg") {
+  throw new Error(`DB_DRIVER muss "neon" oder "pg" sein (ist: "${DB_DRIVER}").`);
+}
 
-// CI/Local-only: gegen eine plain Postgres-Instanz hinter einem
-// Neon-WebSocket-Proxy (z.B. ghcr.io/timowilhelm/local-neon-http-proxy) testen.
-// Der Neon-Serverless-Treiber spricht sonst ausschließlich Secure-WebSocket/TLS
-// und kann sich nicht mit einem nackten `postgres:16`-Service-Container
-// verbinden (ECONNREFUSED). Ist `NEON_LOCAL_WS_PROXY` gesetzt (z.B.
-// `localhost:4444`), schalten wir Secure-WS/TLS-Pipelining AB und routen den
-// WebSocket über den Proxy. Der Produktivpfad (echter Neon-Host) bleibt
-// unverändert, solange die Variable NICHT gesetzt ist.
-const localWsProxy = process.env.NEON_LOCAL_WS_PROXY?.trim();
-if (localWsProxy) {
-  neonConfig.wsProxy = () => `${localWsProxy}/v2`;
-  neonConfig.useSecureWebSocket = false;
-  neonConfig.pipelineConnect = false;
-  neonConfig.pipelineTLS = false;
-  console.log(`[db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy ${localWsProxy} (kein TLS).`);
-} else {
-  // Pipeline TLS+auth in fewer round-trips — measurably reduces Neon cold-start
-  // latency on the initial WebSocket handshake (without this, the first query
-  // after a cold start regularly hits >5s).
-  neonConfig.useSecureWebSocket = true;
-  neonConfig.pipelineConnect = "password";
-  neonConfig.pipelineTLS = true;
+if (DB_DRIVER === "neon") {
+  neonConfig.webSocketConstructor = ws;
+
+  // CI/Local-only: gegen eine plain Postgres-Instanz hinter einem
+  // Neon-WebSocket-Proxy (z.B. ghcr.io/timowilhelm/local-neon-http-proxy) testen.
+  // Der Neon-Serverless-Treiber spricht sonst ausschließlich Secure-WebSocket/TLS
+  // und kann sich nicht mit einem nackten `postgres:16`-Service-Container
+  // verbinden (ECONNREFUSED). Ist `NEON_LOCAL_WS_PROXY` gesetzt (z.B.
+  // `localhost:4444`), schalten wir Secure-WS/TLS-Pipelining AB und routen den
+  // WebSocket über den Proxy. Der Produktivpfad (echter Neon-Host) bleibt
+  // unverändert, solange die Variable NICHT gesetzt ist.
+  const localWsProxy = process.env.NEON_LOCAL_WS_PROXY?.trim();
+  if (localWsProxy) {
+    neonConfig.wsProxy = () => `${localWsProxy}/v2`;
+    neonConfig.useSecureWebSocket = false;
+    neonConfig.pipelineConnect = false;
+    neonConfig.pipelineTLS = false;
+    console.log(`[db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy ${localWsProxy} (kein TLS).`);
+  } else {
+    // Pipeline TLS+auth in fewer round-trips — measurably reduces Neon cold-start
+    // latency on the initial WebSocket handshake (without this, the first query
+    // after a cold start regularly hits >5s).
+    neonConfig.useSecureWebSocket = true;
+    neonConfig.pipelineConnect = "password";
+    neonConfig.pipelineTLS = true;
+  }
 }
 
 if (!process.env.DATABASE_URL) {
@@ -51,13 +65,21 @@ if (!process.env.DATABASE_URL) {
 // Override per `NEON_POOL_IDLE_TIMEOUT_MS` (z.B. für Last-/E2E-Läufe, die viele
 // warme Verbindungen halten wollen). Rationale/Runbook: docs/dev-database-runbook.md.
 const idleTimeoutMillis = Number(process.env.NEON_POOL_IDLE_TIMEOUT_MS) || 60_000;
-export const pool = new Pool({
+const poolOptions = {
   connectionString: process.env.DATABASE_URL,
   max: 20,
   idleTimeoutMillis,
   connectionTimeoutMillis: 15_000,
   keepAlive: true,
-});
+};
+// pg.Pool und Neon-Pool teilen die node-postgres-Pool-API. Der Export bleibt auf
+// dem Neon-Typ, damit alle bestehenden Aufrufer (inkl. PoolClient-Typ-Annotationen,
+// z.B. server/index.ts Advisory-Lock) unverändert kompilieren — zur Laufzeit steckt
+// je nach DB_DRIVER die passende Implementierung dahinter.
+export const pool: NeonPool =
+  DB_DRIVER === "pg"
+    ? (new pg.Pool(poolOptions) as unknown as NeonPool)
+    : new NeonPool(poolOptions);
 
 pool.on("error", (err) => {
   // Idle-Pool-Fehler dürfen den Prozess NICHT killen — der nächste Acquire
@@ -73,10 +95,18 @@ export function logPoolStats(tag = "db") {
 }
 
 console.log(
-  `[db] pool configured — max=20 idleTimeout=${Math.round(idleTimeoutMillis / 1000)}s connectTimeout=15s keepAlive=on`,
+  `[db] driver=${DB_DRIVER} pool configured — max=20 idleTimeout=${Math.round(idleTimeoutMillis / 1000)}s connectTimeout=15s keepAlive=on`,
 );
 
-export const db = drizzle(pool);
+// Drizzle-Instanz passend zum Treiber. Beide Varianten sind PgDatabase-basiert und
+// API-gleich; typisiert wird einheitlich auf den Neon-Typ, damit `Tx`/`DbOrTx`
+// (SSoT unten) und alle Konsumenten eine einzige statische Sicht behalten.
+const neonDb = () => drizzleNeon(pool);
+type AppDb = ReturnType<typeof neonDb>;
+export const db: AppDb =
+  DB_DRIVER === "pg"
+    ? (drizzlePg(pool as unknown as pg.Pool) as unknown as AppDb)
+    : neonDb();
 
 export type DbOrTx = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
 
@@ -101,6 +131,7 @@ const TRANSIENT_PATTERNS = [
   /terminating connection due to/i,
   /Client has encountered a connection error/i,
   /ECONNRESET/i,
+  /ECONNREFUSED/i,
   /WebSocket .* (closed|terminated)/i,
 ];
 

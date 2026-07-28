@@ -6,7 +6,7 @@ import { log } from "../lib/log";
 import { computeDataHash } from "./signature-integrity";
 import { getCachedCompanySettings } from "./cache";
 import { auditService } from "./audit";
-import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
+import { getStorageDriver } from "../lib/storage";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 import { storage } from "../storage";
 
@@ -65,7 +65,7 @@ export async function verifyInvoiceIntegrity(invoiceId: number): Promise<VerifyR
       if (entityId.startsWith("/objects/")) entityId = entityId.slice("/objects/".length);
       const fullPath = `${getPrivateDir()}/${entityId}`;
       const { bucketName, objectName } = parseObjectPath(fullPath);
-      const file = objectStorageClient.bucket(bucketName).file(objectName);
+      const file = getStorageDriver().bucket(bucketName).file(objectName);
       const [exists] = await file.exists();
       if (exists) {
         const [contents] = await file.download();

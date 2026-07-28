@@ -92,7 +92,7 @@ import {
 import { storage } from "../storage";
 import { computeDataHash } from "../services/signature-integrity";
 import { auditService } from "../services/audit";
-import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
+import { getStorageDriver } from "../lib/storage";
 import {
   assertInvoicePdfWriteKeyAllowed,
   getPrivateDir,
@@ -155,7 +155,7 @@ function resolveStoredObject(storedPath: string): {
 /** Lädt die aktuell gespeicherten Bytes (oder null, falls das Objekt fehlt). */
 async function downloadStoredBytes(storedPath: string): Promise<Buffer | null> {
   const { bucketName, objectName } = resolveStoredObject(storedPath);
-  const file = objectStorageClient.bucket(bucketName).file(objectName);
+  const file = getStorageDriver().bucket(bucketName).file(objectName);
   const [exists] = await file.exists();
   if (!exists) return null;
   const [contents] = await file.download();
@@ -172,7 +172,7 @@ async function restoreStoredBytes(
   // Defense-in-Depth (Task #1042): verhindert, dass eine Nicht-Produktions-
   // Umgebung versehentlich den nackten Produktions-Key-Space überschreibt.
   assertInvoicePdfWriteKeyAllowed(objectKey);
-  await objectStorageClient.bucket(bucketName).file(objectName).save(bytes, {
+  await getStorageDriver().bucket(bucketName).file(objectName).save(bytes, {
     contentType: "application/pdf",
     metadata,
   });

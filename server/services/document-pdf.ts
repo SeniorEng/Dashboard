@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import path from "path";
-import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
+import { getStorageDriver } from "../lib/storage";
 import { generatePdfFromHtml } from "./pdf-generator";
 import { renderTemplate, buildPlaceholders, wrapInPrintableHtml, escapeHtml } from "./template-engine";
 import { documentStorage } from "../storage/documents";
@@ -76,7 +76,7 @@ async function storePdfToObjectStorage(pdfBuffer: Buffer, fileName: string, meta
   const objectFullPath = `${privateDir}/documents/${fileName}`;
   const { bucketName, objectName } = parseObjectPath(objectFullPath);
 
-  const bucket = objectStorageClient.bucket(bucketName);
+  const bucket = getStorageDriver().bucket(bucketName);
   const file = bucket.file(objectName);
   await file.save(pdfBuffer, {
     contentType: "application/pdf",
@@ -337,7 +337,7 @@ export async function getDocumentPdfBuffer(objectPath: string): Promise<Buffer> 
   }
 
   const { bucketName, objectName } = parseObjectPath(fullPath);
-  const bucket = objectStorageClient.bucket(bucketName);
+  const bucket = getStorageDriver().bucket(bucketName);
   const file = bucket.file(objectName);
 
   const [exists] = await file.exists();

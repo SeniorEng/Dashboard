@@ -14,6 +14,8 @@ vite.config.ts.*
 
 # Pre-publish DB-Backups (siehe docs/pre-publish-backup-runbook.md)
 tmp/db-backups/
+# DB-Dumps (auch Root-Level) — nie ins Repo (Task #1840)
+*.dump
 # Playwright artifacts
 test-results/
 playwright-report/

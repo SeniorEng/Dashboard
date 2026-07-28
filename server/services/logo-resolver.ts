@@ -1,4 +1,4 @@
-import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
+import { getStorageDriver } from "../lib/storage";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 
 export interface LogoBytes {
@@ -38,7 +38,7 @@ export async function loadLogoBytes(logoPath: string | null | undefined): Promis
     }
 
     const { bucketName, objectName } = parseObjectPath(fullPath);
-    const bucket = objectStorageClient.bucket(bucketName);
+    const bucket = getStorageDriver().bucket(bucketName);
     const file = bucket.file(objectName);
 
     const [exists] = await file.exists();

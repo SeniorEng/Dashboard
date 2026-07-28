@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
+import { verifyLocalUploadToken } from "../lib/storage/local-upload-token";
 
 const CSRF_COOKIE_NAME = "careconnect_csrf";
 const CSRF_HEADER_NAME = "x-csrf-token";
@@ -38,6 +39,23 @@ export function csrfProtection(
   }
 
   if (req.path.startsWith("/webhook/")) {
+    next();
+    return;
+  }
+
+  // Lokaler Storage-Upload (Task #1840): Capability-URL als Ersatz für die
+  // GCS-Presigned-PUT-URL, die unsere CSRF ebenfalls nicht durchläuft. CSRF wird
+  // hier NUR übersprungen, wenn ein gültiger, kurzlebiger HMAC-Upload-Token
+  // anliegt — der Token (kein ambient credential) IST die Auth. Ohne gültigen
+  // Token greift die normale CSRF-Prüfung unten. Eng gescoped: nur PUT, nur der
+  // /uploads/local/-Pfad, nur bei Token-Verify == ok.
+  if (
+    req.method === "PUT" &&
+    req.path.startsWith("/uploads/local/") &&
+    verifyLocalUploadToken(
+      typeof req.query.token === "string" ? req.query.token : undefined,
+    ).ok
+  ) {
     next();
     return;
   }

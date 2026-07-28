@@ -1,4 +1,4 @@
-import { Storage, File } from "@google-cloud/storage";
+import { Storage } from "@google-cloud/storage";
 import { Response } from "express";
 import { randomUUID } from "crypto";
 import {
@@ -9,6 +9,8 @@ import {
   setObjectAclPolicy,
 } from "./objectAcl";
 import { buildContentDisposition } from "@shared/domain/invoice-export-filename";
+import { getStorageDriver } from "../../lib/storage";
+import type { StoredFile } from "../../lib/storage/types";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
@@ -76,13 +78,13 @@ export class ObjectStorageService {
   }
 
   // Search for a public object from the search paths.
-  async searchPublicObject(filePath: string): Promise<File | null> {
+  async searchPublicObject(filePath: string): Promise<StoredFile | null> {
     for (const searchPath of this.getPublicObjectSearchPaths()) {
       const fullPath = `${searchPath}/${filePath}`;
 
       // Full path format: /<bucket_name>/<object_name>
       const { bucketName, objectName } = parseObjectPath(fullPath);
-      const bucket = objectStorageClient.bucket(bucketName);
+      const bucket = getStorageDriver().bucket(bucketName);
       const file = bucket.file(objectName);
 
       // Check if file exists
@@ -105,7 +107,7 @@ export class ObjectStorageService {
   // bisherige Verhalten (kein Content-Disposition, Browser wählt den Namen aus
   // dem Pfad) unverändert.
   async downloadObject(
-    file: File,
+    file: StoredFile,
     res: Response,
     cacheTtlSec: number = 3600,
     options?: { filename?: string; disposition?: "inline" | "attachment" },
@@ -163,19 +165,12 @@ export class ObjectStorageService {
     const objectId = randomUUID();
     const fullPath = `${privateObjectDir}/uploads/${objectId}`;
 
-    const { bucketName, objectName } = parseObjectPath(fullPath);
-
-    // Sign URL for PUT method with TTL
-    return signObjectURL({
-      bucketName,
-      objectName,
-      method: "PUT",
-      ttlSec: 900,
-    });
+    // Upload-URL für Direkt-PUT durch den Browser (treiberabhängig).
+    return getStorageDriver().createUploadUrl(fullPath, 900);
   }
 
   // Gets the object entity file from the object path.
-  async getObjectEntityFile(objectPath: string): Promise<File> {
+  async getObjectEntityFile(objectPath: string): Promise<StoredFile> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();
     }
@@ -192,7 +187,7 @@ export class ObjectStorageService {
     }
     const objectEntityPath = `${entityDir}${entityId}`;
     const { bucketName, objectName } = parseObjectPath(objectEntityPath);
-    const bucket = objectStorageClient.bucket(bucketName);
+    const bucket = getStorageDriver().bucket(bucketName);
     const objectFile = bucket.file(objectName);
     const [exists] = await objectFile.exists();
     if (!exists) {
@@ -204,6 +199,14 @@ export class ObjectStorageService {
   normalizeObjectEntityPath(
     rawPath: string,
   ): string {
+    // local-Treiber: die Upload-URL `/api/uploads/local/<objectId>?token=…`
+    // mappt auf den Objekt-Pfad `/objects/uploads/<objectId>` (Uploads landen
+    // immer unter `uploads/<objectId>`).
+    const localUpload = rawPath.match(/^\/api\/uploads\/local\/([^/?]+)/);
+    if (localUpload) {
+      return `/objects/uploads/${decodeURIComponent(localUpload[1])}`;
+    }
+
     if (!rawPath.startsWith("https://storage.googleapis.com/")) {
       return rawPath;
     }
@@ -248,7 +251,7 @@ export class ObjectStorageService {
     requestedPermission,
   }: {
     userId?: string;
-    objectFile: File;
+    objectFile: StoredFile;
     requestedPermission?: ObjectPermission;
   }): Promise<boolean> {
     return canAccessObject({
@@ -278,43 +281,5 @@ function parseObjectPath(path: string): {
     bucketName,
     objectName,
   };
-}
-
-async function signObjectURL({
-  bucketName,
-  objectName,
-  method,
-  ttlSec,
-}: {
-  bucketName: string;
-  objectName: string;
-  method: "GET" | "PUT" | "DELETE" | "HEAD";
-  ttlSec: number;
-}): Promise<string> {
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(request),
-    }
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
-    );
-  }
-
-  const { signed_url: signedURL } = await response.json();
-  return signedURL;
 }
 

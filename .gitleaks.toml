@@ -1,0 +1,32 @@
+# Task #1840 — gitleaks-Konfiguration für den Secret-Scan-CI-Guard.
+#
+# Ziel: NEUE eingebettete Secrets im Working Tree verhindern (der CI-Job scannt
+# `--no-git`, also den aktuellen Dateistand — NICHT die Historie; der bereits
+# rotierte, historische ENCRYPTION_KEY-Leak wird bewusst nicht re-litigiert,
+# kein History-Rewrite).
+#
+# Die Allowlist deckt die vom Secret-Scan bestätigten Nicht-Secrets ab:
+# Test-Fixtures, Backup-SHA256-Checksummen, Agent-Asset-IDs und den All-Zero-
+# CI-Dummy-Key. Sie ist bewusst eng: keine Prod-/Server-Pfade.
+
+title = "CareConnect gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Bekannte Nicht-Secrets: CI-Dummy-Keys, Backup-Checksummen, Test-Fixtures, Agent-Asset-IDs."
+
+# All-Zero-CI-Dummy-Key (ENCRYPTION_KEY in ci.yml / crash-recovery-smoke.yml).
+regexes = [
+  '''0{64}''',
+]
+
+# Verzeichnisse mit Fixtures/Checksummen/IDs — keine echten Secrets.
+paths = [
+  '''tests/.*''',
+  '''e2e/.*''',
+  '''docs/archive/.*''',
+  '''docs/backups/.*''',
+  '''\.agents/.*''',
+]
