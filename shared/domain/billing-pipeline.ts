@@ -65,6 +65,24 @@ export const PIPELINE_SIDE_STATES = [
 ] as const;
 export type PipelineSideState = (typeof PIPELINE_SIDE_STATES)[number];
 
+/**
+ * Task #1879 — Side-Zustände, deren € als ERWARTETER Umsatz gelten und daher
+ * in die Gesamt-Umsatz-Sicht der Pipeline-Karte einfließen. „Wartet auf
+ * Kundenunterschrift" ist dokumentierte Arbeit, die abgerechnet wird, sobald
+ * der Kunde unterschreibt — also erwarteter Umsatz, kein Sackgassen-Zustand.
+ *
+ * Bewusst NICHT enthalten (kein erwarteter Umsatz):
+ *   • „Storniert"               — storniert, wird nie abgerechnet.
+ *   • „Kunde nicht angetroffen" — entgangener Termin.
+ *   • „Nicht abgerechnet"       — Frist abgelaufen, nicht mehr abrechenbar.
+ *
+ * Dies ist die EINE Quelle dafür, welche Side-Zustände zum erwarteten Umsatz
+ * zählen — Server und Karte lesen dieselbe Definition.
+ */
+export const EXPECTED_REVENUE_SIDE_STATES = [
+  "wartet_auf_kundenunterschrift",
+] as const satisfies readonly PipelineSideState[];
+
 export const PIPELINE_SIDE_STATE_LABELS: Record<PipelineSideState, string> = {
   storniert: "Storniert",
   kunde_nicht_angetroffen: "Kunde nicht angetroffen",
@@ -426,6 +444,14 @@ export interface PipelineCentsSummary {
   sideTotalCents: number;
   /** Σ Stufen + Side-Badges = Gesamtumsatz-Sicht (Q1). */
   grandTotalCents: number;
+  /**
+   * Task #1879 — Erwarteter Umsatz: Σ Stufen + die als erwarteten Umsatz
+   * geltenden Side-Zustände (`EXPECTED_REVENUE_SIDE_STATES`, aktuell nur
+   * „Wartet auf Kundenunterschrift"). Storniert / Kunde nicht angetroffen /
+   * Nicht abgerechnet bleiben ausgeschlossen. Dies ist die Gesamt-Umsatz-Zahl
+   * der Status-Pipeline-Karte.
+   */
+  expectedRevenueTotalCents: number;
 }
 
 function emptyStageRecord(): Record<PipelineStage, number> {
@@ -467,11 +493,16 @@ export function summarizePipelineCents(units: PipelineAtomicUnit[]): PipelineCen
   }
   const stageTotalCents = PIPELINE_STAGES.reduce((sum, s) => sum + stageCents[s], 0);
   const sideTotalCents = PIPELINE_SIDE_STATES.reduce((sum, s) => sum + sideCents[s], 0);
+  const expectedRevenueSideCents = EXPECTED_REVENUE_SIDE_STATES.reduce(
+    (sum, s) => sum + sideCents[s],
+    0,
+  );
   return {
     stageCents,
     sideCents,
     stageTotalCents,
     sideTotalCents,
     grandTotalCents: stageTotalCents + sideTotalCents,
+    expectedRevenueTotalCents: stageTotalCents + expectedRevenueSideCents,
   };
 }

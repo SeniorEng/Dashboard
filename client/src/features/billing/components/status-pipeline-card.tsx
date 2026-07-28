@@ -109,7 +109,9 @@ export function StatusPipelineCard({
             className="text-lg font-semibold tabular-nums text-gray-900"
             data-testid="text-pipeline-grand-total"
           >
-            {isLoading || !pipeline ? "—" : formatAmount(pipeline.totals.stageTotalCents)}
+            {isLoading || !pipeline
+              ? "—"
+              : formatAmount(pipeline.totals.expectedRevenueTotalCents)}
           </div>
         </div>
       }
@@ -149,11 +151,16 @@ export function StatusPipelineCard({
                         <span className="text-gray-400">({side.itemCount})</span>
                       </>
                     );
-                    // Side-Badges tragen NICHT in den Gesamt-Umsatz ein (nur die
-                    // Pipeline-Stufen). „Kunde nicht angetroffen" ist anklickbar
-                    // und filtert die Termine-Liste, damit entgangene Termine
-                    // analysiert werden können; die übrigen Badges sind rein
-                    // informativ.
+                    // Task #1879: „Wartet auf Kundenunterschrift" ist erwarteter
+                    // Umsatz (dokumentierte Arbeit, die abgerechnet wird sobald der
+                    // Kunde unterschreibt) und fließt daher in den Gesamt-Umsatz
+                    // (expectedRevenueTotalCents) ein — wird hier aber weiterhin als
+                    // eigenes Badge ausgewiesen. Die übrigen Side-Badges („Storniert",
+                    // „Kunde nicht angetroffen", „Nicht abgerechnet") sind KEIN
+                    // erwarteter Umsatz und bleiben aus dem Gesamt-Umsatz ausgeschlossen.
+                    // „Kunde nicht angetroffen" ist anklickbar und filtert die
+                    // Termine-Liste, damit entgangene Termine analysiert werden können;
+                    // die übrigen Badges sind rein informativ.
                     if (side.state === "kunde_nicht_angetroffen") {
                       const isActive = activeStatus === "kunde_nicht_angetroffen";
                       return (

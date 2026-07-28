@@ -272,6 +272,7 @@ export async function readBillingPipeline(
       stageTotalCents: summary.stageTotalCents,
       sideTotalCents: summary.sideTotalCents,
       grandTotalCents: summary.grandTotalCents,
+      expectedRevenueTotalCents: summary.expectedRevenueTotalCents,
     },
   };
 }

@@ -168,6 +168,33 @@ describe("billing-pipeline stage identity (total + disjunkt)", () => {
     // excluded-€ (invoiced/cancelled) tauchen in keiner Summe auf
     expect(summary.grandTotalCents).not.toBe(3500 + 9999 + 123456 + 777);
   });
+
+  // Task #1879 — Erwarteter Umsatz = Σ Stufen + „Wartet auf Kundenunterschrift".
+  // Storniert / Kunde nicht angetroffen / Nicht abgerechnet bleiben ausgeschlossen.
+  it("expectedRevenueTotalCents zählt wartet_auf_kundenunterschrift, nicht storniert/no-show/nicht-abgerechnet", () => {
+    const summary = summarizePipelineCents([
+      { assignment: { kind: "stage", stage: "offen" }, cents: 1000 },
+      { assignment: { kind: "stage", stage: "bezahlt" }, cents: 2000 },
+      { assignment: { kind: "side", state: "wartet_auf_kundenunterschrift" }, cents: 570 },
+      { assignment: { kind: "side", state: "storniert" }, cents: 9999 },
+      { assignment: { kind: "side", state: "kunde_nicht_angetroffen" }, cents: 4444 },
+      { assignment: { kind: "side", state: "nicht_abgerechnet" }, cents: 3333 },
+    ]);
+    // Stufen-Summe (unverändert) schließt alle Side-Zustände aus.
+    expect(summary.stageTotalCents).toBe(3000);
+    // Erwarteter Umsatz = Stufen + „Wartet auf Kundenunterschrift".
+    expect(summary.expectedRevenueTotalCents).toBe(3000 + 570);
+    // Storniert/No-Show/Nicht-abgerechnet zählen NICHT mit.
+    expect(summary.expectedRevenueTotalCents).not.toBe(summary.grandTotalCents);
+    // Ohne „Wartet auf Kundenunterschrift"-Einheiten reproduziert sich die alte
+    // Gesamt-Umsatz-Zahl (= reine Stufen-Summe).
+    const withoutAwaiting = summarizePipelineCents([
+      { assignment: { kind: "stage", stage: "offen" }, cents: 1000 },
+      { assignment: { kind: "stage", stage: "bezahlt" }, cents: 2000 },
+      { assignment: { kind: "side", state: "storniert" }, cents: 9999 },
+    ]);
+    expect(withoutAwaiting.expectedRevenueTotalCents).toBe(withoutAwaiting.stageTotalCents);
+  });
 });
 
 // Task #1412 — Handlungs-Cluster der Rechnungsliste sind eine reine SICHT auf

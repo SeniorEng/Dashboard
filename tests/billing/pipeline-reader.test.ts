@@ -146,6 +146,13 @@ describe("GET /api/billing/pipeline — Pipeline-Reader (Task #1405)", () => {
     expect(sideSum).toBe(body.totals.sideTotalCents);
     expect(body.totals.grandTotalCents).toBe(body.totals.stageTotalCents + body.totals.sideTotalCents);
 
+    // Task #1879 — Erwarteter Umsatz = Stufen-Summe + „Wartet auf
+    // Kundenunterschrift" (übrige Side-Badges ausgeschlossen).
+    const awaitingSide = body.sides.find((s) => s.state === "wartet_auf_kundenunterschrift");
+    expect(body.totals.expectedRevenueTotalCents).toBe(
+      body.totals.stageTotalCents + (awaitingSide?.totalCents ?? 0),
+    );
+
     // Σ Karten-Cents je Stufe === Stufen-Cents (keine verlorenen €).
     for (const stage of body.stages) {
       const cardSum = stage.cards.reduce((acc, c) => acc + c.totalCents, 0);
