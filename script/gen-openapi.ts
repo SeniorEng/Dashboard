@@ -64,9 +64,22 @@ function main(): void {
     }
     const current = readFileSync(OUTPUT_PATH, "utf8");
     if (current !== next) {
+      const curLines = current.split("\n");
+      const nextLines = next.split("\n");
+      const diffs: string[] = [];
+      const max = Math.max(curLines.length, nextLines.length);
+      for (let i = 0; i < max && diffs.length < 60; i++) {
+        if (curLines[i] !== nextLines[i]) {
+          if (curLines[i] !== undefined) diffs.push(`  - [committed ${i + 1}] ${curLines[i]}`);
+          if (nextLines[i] !== undefined) diffs.push(`  + [generated ${i + 1}] ${nextLines[i]}`);
+        }
+      }
       console.error(
         "[gen:openapi] API-Schema geändert, committete OpenAPI-Spec ist veraltet.\n" +
-          "             Bitte `npm run gen:openapi` ausführen und docs/api/openapi.json committen.",
+          "             Bitte `npm run gen:openapi` ausführen und docs/api/openapi.json committen.\n" +
+          `             committed: ${curLines.length} Zeilen, generiert: ${nextLines.length} Zeilen.\n` +
+          "             Erste Abweichungen (- committed / + generiert):\n" +
+          diffs.join("\n"),
       );
       process.exit(1);
     }
