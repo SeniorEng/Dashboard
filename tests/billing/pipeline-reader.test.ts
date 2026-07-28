@@ -134,7 +134,8 @@ describe("GET /api/billing/pipeline — Pipeline-Reader (Task #1405)", () => {
 
     // --- Struktur-Invarianten ---
     expect(body.stages).toHaveLength(7);
-    expect(body.sides).toHaveLength(3);
+    // Task #1874: Side-Zustand „Wartet auf Kundenunterschrift" hinzugekommen (3→4).
+    expect(body.sides).toHaveLength(4);
     expect(body.stages.map((s) => s.stage)).toEqual([
       "offen", "dokumentiert", "unterschrieben", "rechnung_erstellt", "versendet", "avis_erhalten", "bezahlt",
     ]);

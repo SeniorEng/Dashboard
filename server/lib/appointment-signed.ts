@@ -119,6 +119,32 @@ export function completedButUnsignedSqlRaw(alias: string): SQL {
 }
 
 /**
+ * Task #1874 — Roh-SQL-Fragment „hat einen aktiven Leistungsnachweis mit dem
+ * gegebenen Status" für `db.execute`-Queries mit Tabellen-Alias (z. B.
+ * `FROM appointments a`). Der Pipeline-Reader liest damit getrennt, ob ein
+ * Termin durch eine Kunden-Unterschrift (`completed`) oder nur durch eine
+ * Mitarbeiter-Unterschrift (`employee_signed`) auf einem LN abgedeckt ist, und
+ * entscheidet die Abrechenbarkeit über das geteilte Gate
+ * `isServiceRecordSignedForBilling` (zahler-typ-abhängig). MUSS mit den
+ * LN-Status-Werten in `shared/domain/billing-eligibility.ts` in lockstep bleiben.
+ */
+export function serviceRecordWithStatusExistsSqlRaw(
+  alias: string,
+  srStatus: "employee_signed" | "completed",
+): SQL {
+  const a = sql.raw(alias);
+  const status = sql.raw(`'${srStatus}'`);
+  return sql`EXISTS (
+    SELECT 1
+    FROM service_record_appointments sra
+    JOIN monthly_service_records msr ON msr.id = sra.service_record_id
+    WHERE sra.appointment_id = ${a}.id
+      AND msr.deleted_at IS NULL
+      AND msr.status = ${status}
+  )`;
+}
+
+/**
  * Service-Codes, die als bezahlte „Dienst-Minuten" der unsignierten Termine
  * gezählt werden (Stunden-basierte Leistungen). SSoT für die LATERAL-Subquery in
  * `unsignedServiceMinutesLateralRaw`.
