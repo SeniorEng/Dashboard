@@ -146,13 +146,24 @@ export async function getUnbilledSignedAppointmentFactsByCustomer(
   if (strictSrIds.length === 0) return result;
 
   // Termine unter strikt-signierten LNs (spiegelt `getAppointmentIdsFromServiceRecords`).
+  // Task #1868 — soft-gelöschte Termine ausschließen (identisch zum echten
+  // Generate-Pfad, der die Termine über `buildLineItemsFromAppointments` /
+  // `getBudgetSplitForAppointments` mit `appointmentsRepo.activeOnly()` liest
+  // und gelöschte Termine gar nicht abrechnet). Ohne diesen Filter zählte ein
+  // noch mit dem LN verknüpfter, aber gelöschter und nie abgerechneter Termin
+  // als „signiert & offen" → Kunde erschien fälschlich abrechenbar, während die
+  // Erstellung 0,00 € erzeugt (Review↔Generate-Drift).
   const signedApptByCustomer = new Map<number, Set<number>>();
   const srApptRows = await db.select({
     serviceRecordId: serviceRecordAppointments.serviceRecordId,
     appointmentId: serviceRecordAppointments.appointmentId,
   })
     .from(serviceRecordAppointments)
-    .where(inArray(serviceRecordAppointments.serviceRecordId, strictSrIds));
+    .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
+    .where(and(
+      inArray(serviceRecordAppointments.serviceRecordId, strictSrIds),
+      appointmentsRepo.activeOnly(),
+    ));
   for (const row of srApptRows) {
     const cid = strictSrToCustomer.get(row.serviceRecordId);
     if (cid == null) continue;
@@ -274,6 +285,10 @@ export async function getDocumentationCoverageByCustomer(
         .where(and(
           inArray(serviceRecordAppointments.serviceRecordId, allActiveSrIds),
           inArray(appointments.customerId, customerIds),
+          // Task #1868 — soft-gelöschte Termine dürfen die „abgedeckt"-Zahl nicht
+          // aufblähen; sonst kann `coveredAppointments` die dokumentierten
+          // (`completed`, bereits active-gefiltert) übersteigen.
+          appointmentsRepo.activeOnly(),
         ))
         .groupBy(appointments.customerId)
     : [];

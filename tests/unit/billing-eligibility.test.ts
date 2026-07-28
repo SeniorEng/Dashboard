@@ -16,6 +16,8 @@ import {
   isServiceRecordSignedForBilling,
   isLateSignedFollowUp,
   lateSignedFollowUpCount,
+  isMonthFullyBilledAndSigned,
+  isAwaitingCustomerSignature,
 } from "@shared/domain/billing-eligibility";
 
 describe("isPflegekasseBillingType", () => {
@@ -169,6 +171,22 @@ describe("classifyBillingMaturity — genau eine Reifegruppe pro Kunde", () => {
     ).toBe("partially_documented");
   });
 
+  it("teildokumentiert UND signaturblockiert ⇒ partially_documented (Sektion == Inline-Label, Task #1881)", () => {
+    // Silke/Pia-Fall: weniger Termine abgedeckt als dokumentiert (teildokumentiert)
+    // UND zusätzlich signaturblockiert. Der Kunde zeigt inline „nur X/Y
+    // dokumentiert" und muss daher unter „Unvollständig dokumentiert" stehen —
+    // NICHT unter „Wartet auf Kundenunterschrift" (sonst zwei widersprüchliche
+    // Begründungen). `partially_documented` schlägt `signature_blocked`.
+    expect(
+      classifyBillingMaturity({
+        openAppointments: 0,
+        completedAppointments: 2,
+        coveredAppointments: 1,
+        eligibility: { status: "blocked", reason: "customer_signature_required" },
+      }),
+    ).toBe("partially_documented");
+  });
+
   it("abrechenbar + vollständig abgedeckt + keine offenen Termine ⇒ ready", () => {
     expect(
       classifyBillingMaturity({
@@ -187,6 +205,93 @@ describe("BILLING_BLOCK_SHORT_LABELS", () => {
     expect(BILLING_BLOCK_SHORT_LABELS.not_signed).toBeTruthy();
     expect(BILLING_BLOCK_SHORT_LABELS.no_appointments).toBeTruthy();
     expect(BILLING_BLOCK_SHORT_LABELS.already_billed).toBeTruthy();
+  });
+});
+
+describe("isMonthFullyBilledAndSigned (Task #1878)", () => {
+  it("alle dokumentierten Termine abrechenbar-signiert UND abgerechnet ⇒ true (Kunde fällt raus)", () => {
+    expect(
+      isMonthFullyBilledAndSigned({
+        completedAppointments: 4,
+        signedAppointmentCount: 4,
+        unbilledAppointmentCount: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("Funke: 4 dokumentiert, nur 1 abrechenbar-signiert+abgerechnet ⇒ false (bleibt sichtbar)", () => {
+    // 1 Termin unter kundensigniertem LN (abgerechnet), 3 unter employee_signed LN
+    // (bei Pflegekasse NICHT abrechenbar-signiert ⇒ nicht in signedAppointmentCount).
+    expect(
+      isMonthFullyBilledAndSigned({
+        completedAppointments: 4,
+        signedAppointmentCount: 1,
+        unbilledAppointmentCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("noch nicht abgerechnete signierte Termine (unbilled>0) ⇒ false (bleibt sichtbar)", () => {
+    expect(
+      isMonthFullyBilledAndSigned({
+        completedAppointments: 3,
+        signedAppointmentCount: 3,
+        unbilledAppointmentCount: 1,
+      }),
+    ).toBe(false);
+  });
+
+  it("pure signaturblockierte Pflegekasse (0 signiert) ⇒ false (bleibt sichtbar)", () => {
+    expect(
+      isMonthFullyBilledAndSigned({
+        completedAppointments: 3,
+        signedAppointmentCount: 0,
+        unbilledAppointmentCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("keine dokumentierten Termine ⇒ false (kein Grund zu entfernen)", () => {
+    expect(
+      isMonthFullyBilledAndSigned({
+        completedAppointments: 0,
+        signedAppointmentCount: 0,
+        unbilledAppointmentCount: 0,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("isAwaitingCustomerSignature (Task #1878)", () => {
+  it("Pflegekasse mit mehr abgedeckten als abrechenbar-signierten Terminen ⇒ true", () => {
+    // Funke: 4 abgedeckt (1 completed-LN + 3 employee_signed-LN), 1 abrechenbar-signiert.
+    expect(
+      isAwaitingCustomerSignature({
+        billingType: "pflegekasse_gesetzlich",
+        coveredAppointments: 4,
+        signedAppointmentCount: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("Pflegekasse vollständig abrechenbar-signiert (covered === signed) ⇒ false", () => {
+    expect(
+      isAwaitingCustomerSignature({
+        billingType: "pflegekasse_gesetzlich",
+        coveredAppointments: 4,
+        signedAppointmentCount: 4,
+      }),
+    ).toBe(false);
+  });
+
+  it("Selbstzahler mit employee_signed LN ⇒ false (keine Kundenunterschrift nötig)", () => {
+    expect(
+      isAwaitingCustomerSignature({
+        billingType: "selbstzahler",
+        coveredAppointments: 3,
+        signedAppointmentCount: 0,
+      }),
+    ).toBe(false);
   });
 });
 

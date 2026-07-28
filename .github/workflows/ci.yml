@@ -211,7 +211,16 @@ jobs:
       # man OHNE Artefakt-Download sieht, WAS tot ist. Bewusst gewollte, aber
       # (noch) nicht verdrahtete Exports tragen einen `@public`-JSDoc-Tag.
       # Version exakt gepinnt auf die 5.x-Linie, die knip.json adressiert.
+      #
+      # DATABASE_URL: knip lädt zur Analyse `drizzle.config.ts`, das ohne
+      # gesetzte DATABASE_URL bewusst wirft (Prod-Guard). Dieser static-analysis-
+      # Job provisioniert KEINE DB, deshalb genügt ein Dummy-URL — drizzle-kit
+      # verbindet beim reinen Config-Load nicht, der Guard ist nur erfüllt.
+      # Ohne diese Env bricht knip mit „Configuration file load error" (exit 2)
+      # ab, obwohl es keinerlei Dead-Code gibt.
       - name: Dead-code gate (knip — blocking, symbols to console)
+        env:
+          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/knip"
         run: npx --yes knip@5.88.1 --reporter symbols
 
       # Bei rotem Lauf zusätzlich den maschinenlesbaren JSON-Report erzeugen
@@ -220,6 +229,8 @@ jobs:
       # relevant, deshalb `if: failure()` + kurze Retention.
       - name: Generate knip JSON report (on failure)
         if: failure()
+        env:
+          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/knip"
         run: npx --yes knip@5.88.1 --reporter json > knip-report.json || true
 
       - name: Upload knip report

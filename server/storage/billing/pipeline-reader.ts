@@ -25,7 +25,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
-import { documentedAndSignedSqlRaw } from "../../lib/appointment-signed";
+import { serviceRecordWithStatusExistsSqlRaw } from "../../lib/appointment-signed";
 import { getInvoices } from "../billing-storage";
 import {
   agingModelForBillingType,
@@ -128,7 +128,10 @@ export async function readBillingPipeline(
     SELECT ar.id, ar.customer_id AS customer_id, ar.revenue_cents,
       a.status AS status,
       c.name AS customer_name,
-      ${documentedAndSignedSqlRaw("a")} AS documented_and_signed,
+      c.billing_type AS billing_type,
+      (a.signature_data IS NOT NULL) AS has_direct_signature,
+      ${serviceRecordWithStatusExistsSqlRaw("a", "completed")} AS has_completed_ln,
+      ${serviceRecordWithStatusExistsSqlRaw("a", "employee_signed")} AS has_employee_signed_ln,
       EXISTS (
         SELECT 1 FROM invoice_line_items li
         JOIN invoices i ON i.id = li.invoice_id
@@ -147,7 +150,10 @@ export async function readBillingPipeline(
     const customerName = String(raw.customer_name ?? "");
     const assignment = assignAppointmentStage({
       status,
-      documentedAndSigned: raw.documented_and_signed === true,
+      billingType: raw.billing_type == null ? null : String(raw.billing_type),
+      hasDirectSignature: raw.has_direct_signature === true,
+      hasCompletedServiceRecord: raw.has_completed_ln === true,
+      hasEmployeeSignedServiceRecord: raw.has_employee_signed_ln === true,
       isInvoiced: raw.is_invoiced === true,
     });
     units.push({ assignment, cents });
@@ -266,6 +272,7 @@ export async function readBillingPipeline(
       stageTotalCents: summary.stageTotalCents,
       sideTotalCents: summary.sideTotalCents,
       grandTotalCents: summary.grandTotalCents,
+      expectedRevenueTotalCents: summary.expectedRevenueTotalCents,
     },
   };
 }

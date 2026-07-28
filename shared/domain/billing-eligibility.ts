@@ -96,6 +96,82 @@ export function isPartiallyDocumented(coverage: DocumentationCoverage): boolean 
 }
 
 /**
+ * Task #1878 — Fakten der „im Monat vollständig abgerechnet?"-Regel.
+ *  • `completedAppointments`      — dokumentierte (`completed`) Termine im Monat.
+ *  • `signedAppointmentCount`     — Termine unter ABRECHENBAR-signierten LNs
+ *    (kassen-/zahlerabhängig via `isServiceRecordSignedForBilling`; ein
+ *    Pflegekassen-Termin mit NUR Mitarbeiter-Unterschrift zählt hier NICHT).
+ *  • `unbilledAppointmentCount`   — davon NOCH NICHT abgerechnet.
+ */
+export interface MonthBillingCompletionFacts {
+  completedAppointments: number;
+  signedAppointmentCount: number;
+  unbilledAppointmentCount: number;
+}
+
+/**
+ * Task #1878 — PURE SSoT für den Ausschluss aus der Karte „Noch zu erstellen" /
+ * dem Erstellen-Dialog. Ein Kunde gilt im Monat NUR dann als vollständig
+ * abgerechnet (und darf verschwinden), wenn JEDER dokumentierte (`completed`)
+ * Termin abrechenbar-signiert UND bereits abgerechnet ist.
+ *
+ * `billableSignedAndInvoiced = signedAppointmentCount − unbilledAppointmentCount`
+ * (Termine unter abrechenbar-signierten LNs, die schon abgerechnet sind). Bleibt
+ * darüber hinaus ein dokumentierter Termin offen
+ * (`completedAppointments > billableSignedAndInvoiced`), ist der Monat NICHT
+ * vollständig abgerechnet und der Kunde bleibt sichtbar — insbesondere ein
+ * Pflegekassen-Termin mit nur `employee_signed` (fehlende Kundenunterschrift),
+ * der weder abrechenbar-signiert noch abgerechnet ist (Fall „Bernd Funke").
+ *
+ * Ersetzt die frühere abdeckungs-basierte Bedingung
+ * (`signed > 0 && unbilled === 0 && !isPartiallyDocumented`), die einen
+ * `employee_signed`-LN kassenunabhängig als „abgedeckt" wertete und den Kunden
+ * dadurch fälschlich als vollständig abgerechnet entfernte.
+ */
+export function isMonthFullyBilledAndSigned(f: MonthBillingCompletionFacts): boolean {
+  const billableSignedAndInvoiced =
+    f.signedAppointmentCount - f.unbilledAppointmentCount;
+  return (
+    f.completedAppointments > 0 &&
+    billableSignedAndInvoiced >= f.completedAppointments
+  );
+}
+
+/**
+ * Task #1878 — Fakten der „wartet auf Kundenunterschrift?"-Regel auf Kunden-Ebene.
+ *  • `coveredAppointments`    — dokumentierte Termine, die durch einen aktiven LN
+ *    (Status `completed` ODER `employee_signed`) abgedeckt sind.
+ *  • `signedAppointmentCount` — Termine unter ABRECHENBAR-signierten LNs.
+ */
+export interface AwaitingCustomerSignatureFacts {
+  billingType: string | null | undefined;
+  coveredAppointments: number;
+  signedAppointmentCount: number;
+}
+
+/**
+ * Task #1878 — PURE SSoT „wartet auf Kundenunterschrift" auf Kunden-Ebene. Ein
+ * Pflegekassen-Kunde wartet auf die Kundenunterschrift, wenn im Monat mehr
+ * dokumentierte Termine durch einen aktiven Leistungsnachweis abgedeckt als
+ * abrechenbar-signiert sind — d.h. es existieren Termine unter einem nur
+ * mitarbeiter-signierten (`employee_signed`) LN, denen die Kundenunterschrift
+ * fehlt. Spiegelt den Side-Zustand „Wartet auf Kundenunterschrift" der
+ * Pipeline-Übersicht (@shared/domain/billing-pipeline, Task #1874), damit die
+ * Aufmerksamkeits-Zeile in der Liste zum Euro-Betrag der Übersicht passt.
+ *
+ * Dient NUR der wahrheitsgemäßen Inline-Kennzeichnung; die Block-Reihenfolge
+ * (`classifyBillingEligibility`) bleibt spiegelbildlich zu `buildInvoiceDraft`.
+ */
+export function isAwaitingCustomerSignature(
+  f: AwaitingCustomerSignatureFacts,
+): boolean {
+  return (
+    isPflegekasseBillingType(f.billingType) &&
+    f.coveredAppointments > f.signedAppointmentCount
+  );
+}
+
+/**
  * Task #1771 — PURE SSoT der Reifegruppierung „hat noch offene Termine?". Ein
  * Kunde gilt als „noch offen", wenn im gewählten Monat mindestens ein offener
  * (geplanter) Termin verbleibt. Die Zahl der offenen Termine liefert der Server
@@ -235,12 +311,18 @@ export interface BillingMaturityFacts {
  */
 export function classifyBillingMaturity(c: BillingMaturityFacts): BillingMaturityGroup {
   if (hasOpenAppointments(c)) return "has_open_appointments";
+  // Task #1881 — Sektion muss zum Inline-Label passen: Ein nur teildokumentierter
+  // Kunde (weniger Termine abgedeckt als dokumentiert) zeigt inline „nur X/Y
+  // dokumentiert" und gehört daher unter „Unvollständig dokumentiert" — auch wenn
+  // er zusätzlich signaturblockiert ist. Deshalb wird `partially_documented` VOR
+  // `signature_blocked` geprüft, sonst landet er unter „Wartet auf Kunden-
+  // unterschrift" und zeigt zwei widersprüchliche Begründungen gleichzeitig.
+  if (isPartiallyDocumented(c)) return "partially_documented";
   // Blockierte Kunden dürfen NIE unter „ready" landen. Fehlende Kundenunterschrift
   // ist der Regelfall und bekommt eine eigene Gruppe; alle übrigen Block-Gründe
   // (not_signed/no_appointments/already_billed) werden pragmatisch ebenfalls in
   // „signature_blocked" (= „nicht bereit, Grund per Inline-Label") einsortiert,
   // damit sie sichtbar bleiben und nicht als abrechenbar erscheinen.
   if (c.eligibility.status !== "eligible") return "signature_blocked";
-  if (isPartiallyDocumented(c)) return "partially_documented";
   return "ready";
 }

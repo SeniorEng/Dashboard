@@ -191,3 +191,9 @@ id = "ZmqNp9aRuA4apwByB0k1T"
 uri = "file://exports/Aufschluesselung-Juni-2026.xlsx"
 type = "table"
 title = "Aufschlüsselung Juni 2026 – Firmenweite Gesamtsumme"
+
+[[outputs]]
+id = "tbfMzelfAqxMrlLHcWrTz"
+uri = "file://.local/exports/ssot-kaskade-1844-und-folgende.md"
+type = "text"
+title = "SSoT-Kaskade — Export (#1844 und folgende)"

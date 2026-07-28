@@ -460,6 +460,18 @@ export const BillingInvoicePreviewSchema = component(
         "private",
       ]),
     ),
+    // Task #1869: Nicht abgerechnete dokumentierte Termine mit Grund + Datum.
+    excludedAppointments: z.array(
+      z.object({
+        date: z.string(),
+        reason: z.enum([
+          "customer_signature_required",
+          "not_signed",
+          "no_appointments",
+          "already_billed",
+        ]),
+      }),
+    ),
   }),
 );
 

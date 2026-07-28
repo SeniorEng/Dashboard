@@ -244,7 +244,10 @@ export function TransactionsTab({
     .filter(tx =>
       !showOnlyDifferences ||
       tx.paymentDifferenceResult === "underpaid" ||
-      tx.paymentDifferenceResult === "overpaid")
+      tx.paymentDifferenceResult === "overpaid" ||
+      // Task #1864 — reine Betrags-Treffer im Prüf-Zustand gehören ebenfalls in die
+      // „zu prüfen"-Ansicht (gebunden, aber NICHT bezahlt).
+      tx.matchConfidence === "auto_amount_review")
     .map((tx, i) => ({ tx, i }))
     .sort((a, b) => {
       const r = new Date(b.tx.emittedAt).getTime() - new Date(a.tx.emittedAt).getTime();
@@ -339,7 +342,7 @@ export function TransactionsTab({
             variant={showOnlyDifferences ? "default" : "outline"}
             onClick={() => setShowOnlyDifferences(v => !v)}
             aria-pressed={showOnlyDifferences}
-            title="Nur zugeordnete Zahlungen mit Betragsdifferenz anzeigen"
+            title="Nur zugeordnete Zahlungen mit Betragsdifferenz oder prüfbedürftigem Betrags-Treffer anzeigen"
             data-testid="button-filter-differences"
           >
             <AlertTriangle className={`${iconSize.sm} mr-2`} />
@@ -582,14 +585,14 @@ export function TransactionsTab({
                         {/* Differenz bewusst akzeptieren: eine gebundene, aber wegen
                             Betragsabweichung noch offene Rechnung final auf „bezahlt"
                             setzen (serverseitig geprüft & auditiert). */}
-                        {(tx.paymentDifferenceResult === "underpaid" || tx.paymentDifferenceResult === "overpaid") && (
+                        {(tx.paymentDifferenceResult === "underpaid" || tx.paymentDifferenceResult === "overpaid" || tx.matchConfidence === "auto_amount_review") && (
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => confirmPaidMutation.mutate(tx.id)}
                             disabled={confirmPaidMutation.isPending}
-                            aria-label="Trotz Differenz als bezahlt bestätigen"
-                            title="Trotz Differenz als bezahlt bestätigen"
+                            aria-label={tx.matchConfidence === "auto_amount_review" ? "Betrags-Treffer als bezahlt bestätigen" : "Trotz Differenz als bezahlt bestätigen"}
+                            title={tx.matchConfidence === "auto_amount_review" ? "Nur betragsgleicher Treffer — nach Prüfung als bezahlt bestätigen" : "Trotz Differenz als bezahlt bestätigen"}
                             className="text-green-700 hover:text-green-800"
                             data-testid={`button-confirm-paid-${tx.id}`}
                           >

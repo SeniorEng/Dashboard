@@ -69,5 +69,11 @@ export interface BillingPipelineResponse {
     sideTotalCents: number;
     /** Σ Stufen + Side-Badges (Gesamt-Umsatz-Sicht, Q1). */
     grandTotalCents: number;
+    /**
+     * Task #1879 — Erwarteter Umsatz: Σ Stufen + „Wartet auf
+     * Kundenunterschrift". Dies ist die auf der Karte angezeigte
+     * „Gesamt-Umsatz"-Zahl (Storniert / Kunde nicht angetroffen ausgeschlossen).
+     */
+    expectedRevenueTotalCents: number;
   };
 }

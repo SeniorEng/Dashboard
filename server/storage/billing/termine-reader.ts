@@ -151,9 +151,22 @@ export async function readBillingTermine(
     // Stufe folgt der Pipeline-SSoT `assignAppointmentStage`: terminale
     // Side-Zustände (Kunde nicht angetroffen) haben Vorrang vor „abgerechnet?",
     // danach greift der Rechnungsstatus, sonst die Termin-Stufe.
+    //
+    // Task #1874 — Die Termine-Liste behält BEWUSST die LN-inklusive
+    // „nachgewiesen"-Definition (`documentedAndSignedSqlRaw`, Task #1119): ein
+    // `employee_signed`-LN gilt hier weiterhin als „unterschrieben/nachgewiesen".
+    // Nur die GELD-Sicht der Pipeline (`readBillingPipeline`) wendet das
+    // zahler-typ-abhängige Abrechnungs-Gate an. Um `assignAppointmentStage`
+    // dieselbe (billability-unabhängige) Zuordnung liefern zu lassen, wird das
+    // bereits berechnete `documented_and_signed` als „direkte Unterschrift"
+    // (für beide Zahler-Typen abrechenbar) übergeben — der Side-Zustand
+    // „Wartet auf Kundenunterschrift" tritt in dieser Liste damit nicht auf.
     const apptAssignment = assignAppointmentStage({
       status,
-      documentedAndSigned: raw.documented_and_signed === true,
+      billingType: null,
+      hasDirectSignature: raw.documented_and_signed === true,
+      hasCompletedServiceRecord: false,
+      hasEmployeeSignedServiceRecord: false,
       isInvoiced,
     });
     let stage: BillingTermineStage | null = null;

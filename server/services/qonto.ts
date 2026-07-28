@@ -19,6 +19,7 @@ import {
   PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
 } from "@shared/domain/qonto/payment-difference";
 import { resolveInvoicePaymentStatus } from "@shared/domain/qonto/invoice-payment-status";
+import { evaluateAmountOnlyMatch, AMOUNT_MATCH_REVIEW_CONFIDENCE } from "@shared/domain/qonto/amount-match-guard";
 
 const QONTO_BASE_URL = "https://thirdparty.qonto.com/v2";
 
@@ -335,7 +336,7 @@ class QontoService {
     return qontoStorage.markTransactionsIrrelevantAuto(toHide);
   }
 
-  async autoMatch(userId: number, ipAddress?: string): Promise<{ matched: number; skipped: number }> {
+  async autoMatch(userId: number, ipAddress?: string): Promise<{ matched: number; skipped: number; review: number }> {
     const unmatched = await qontoStorage.getUnmatchedTransactions();
 
     // Task #1284 — "avis_erhalten" zählt als offen: ein Qonto-Zahlungseingang
@@ -360,6 +361,9 @@ class QontoService {
 
     let matched = 0;
     let skipped = 0;
+    // Task #1864 — reine Betrags-Treffer ohne bestätigendes Merkmal werden nur
+    // gebunden (Prüf-Zustand), NICHT bezahlt; separat gezählt.
+    let review = 0;
 
     for (const qtx of unmatched) {
       const searchText = [qtx.reference, qtx.label, qtx.counterpartyName]
@@ -367,22 +371,22 @@ class QontoService {
         .join(" ")
         .toLowerCase();
 
-      let bestMatch: { invoiceId: number; confidence: string; invoiceGrossCents: number } | null = null;
+      let bestMatch: { invoiceId: number; confidence: string; invoiceGrossCents: number; invoice: typeof openInvoices[number] } | null = null;
 
       for (const [num, inv] of Array.from(invoiceByNumber.entries())) {
         if (searchText.includes(num)) {
           if (Math.abs(qtx.amountCents) === inv.grossAmountCents) {
-            bestMatch = { invoiceId: inv.id, confidence: "auto_exact", invoiceGrossCents: inv.grossAmountCents };
+            bestMatch = { invoiceId: inv.id, confidence: "auto_exact", invoiceGrossCents: inv.grossAmountCents, invoice: inv };
             break;
           }
-          bestMatch = { invoiceId: inv.id, confidence: "auto_number", invoiceGrossCents: inv.grossAmountCents };
+          bestMatch = { invoiceId: inv.id, confidence: "auto_number", invoiceGrossCents: inv.grossAmountCents, invoice: inv };
         }
       }
 
       if (!bestMatch) {
         const amountMatches = invoiceByAmount.get(Math.abs(qtx.amountCents));
         if (amountMatches && amountMatches.length === 1) {
-          bestMatch = { invoiceId: amountMatches[0].id, confidence: "auto_amount", invoiceGrossCents: amountMatches[0].grossAmountCents };
+          bestMatch = { invoiceId: amountMatches[0].id, confidence: "auto_amount", invoiceGrossCents: amountMatches[0].grossAmountCents, invoice: amountMatches[0] };
         }
       }
 
@@ -441,15 +445,48 @@ class QontoService {
 
       const match = bestMatch;
 
+      // Task #1864 — Absicherung des REINEN Betrags-Treffers: Ein Treffer, der nur
+      // auf Betragsgleichheit beruht (confidence „auto_amount", keine
+      // Rechnungsnummer), darf eine Rechnung NICHT mehr still auf „bezahlt" setzen.
+      //   - Zahlung datiert VOR Rechnungserstellung ⇒ unplausibel ⇒ gar nicht binden.
+      //   - Kein bestätigendes Merkmal (Versichertennummer/Versicherten-Name/
+      //     Abrechnungszeitraum) im Verwendungszweck ⇒ nur binden + Prüf-Zustand.
+      //   - Beleg vorhanden ⇒ wie bisher als Zahlung buchen.
+      // Starke Treffer (Rechnungsnummer, exakt, Sammel-Avis) laufen NICHT durch
+      // diesen Guard und verhalten sich unverändert.
+      let reviewOnly = false;
+      if (match.confidence === "auto_amount") {
+        const outcome = evaluateAmountOnlyMatch({
+          paymentEmittedAt: qtx.emittedAt,
+          invoiceCreatedAt: match.invoice.createdAt,
+          searchText,
+          invoice: {
+            customerName: match.invoice.customerName,
+            versichertennummer: match.invoice.versichertennummer,
+            billingMonth: match.invoice.billingMonth,
+            billingYear: match.invoice.billingYear,
+          },
+        });
+        if (outcome.decision === "block_implausible_date") {
+          // Zahlung liegt datumsmäßig vor der Rechnungserstellung ⇒ kann diese
+          // Rechnung unmöglich betreffen: gar nicht binden.
+          skipped++;
+          continue;
+        }
+        reviewOnly = outcome.decision === "review";
+      }
+
+      const confidence = reviewOnly ? AMOUNT_MATCH_REVIEW_CONFIDENCE : match.confidence;
+
       // Pro Match komplett transaktional: Match-Update mit Guard
       // (matched_invoice_id IS NULL), Invoice-Status-Update mit Guard
       // (status='versendet'), Audit-Log in derselben Transaktion.
       // Wenn ein parallel laufender autoMatch oder manueller Match die
       // Transaktion bereits gebunden hat, springt das geguarded Update
       // auf 0 Zeilen — kein Status-Wechsel, kein Audit (Idempotenz).
-      const didMatch = await withAudit(async (dbTx, audit) => {
+      const bindOutcome = await withAudit(async (dbTx, audit) => {
         const matchUpdate = await dbTx.update(qontoTransactions)
-          .set({ matchedInvoiceId: match.invoiceId, matchConfidence: match.confidence })
+          .set({ matchedInvoiceId: match.invoiceId, matchConfidence: confidence })
           .where(and(
             eq(qontoTransactions.id, qtx.id),
             isNull(qontoTransactions.matchedInvoiceId),
@@ -459,6 +496,31 @@ class QontoService {
 
         if (matchUpdate.length === 0) {
           return false;
+        }
+
+        // Task #1864 — reiner Betrags-Treffer ohne Beleg: Die Transaktion ist jetzt
+        // an die Rechnung GEBUNDEN, aber die Rechnung wird NICHT auf „bezahlt"
+        // gesetzt. Nur ein Prüf-Audit; die Freigabe (confirm-paid) oder Ablehnung
+        // (Zuordnung aufheben) erfolgt manuell im Admin-Bereich.
+        if (reviewOnly) {
+          audit.record({
+            userId,
+            action: "invoice_payment_review_required",
+            entityType: "invoice",
+            entityId: match.invoiceId,
+            metadata: {
+              qontoTransactionId: qtx.id,
+              qontoTransactionExternalId: qtx.qontoTransactionId,
+              matchedBy: "auto",
+              confidence,
+              amountCents: qtx.amountCents,
+              paidCents: Math.abs(qtx.amountCents),
+              invoiceGrossCents: match.invoiceGrossCents,
+              reason: "amount_only_no_corroboration",
+            },
+            ipAddress,
+          });
+          return "review" as const;
         }
 
         // Task #1822 — Status aus dem KUMULIERTEN Zahlungsstand ableiten (Σ aller
@@ -502,7 +564,7 @@ class QontoService {
               qontoTransactionId: qtx.id,
               qontoTransactionExternalId: qtx.qontoTransactionId,
               matchedBy: "auto",
-              confidence: match.confidence,
+              confidence,
               amountCents: qtx.amountCents,
               cumulativePaidCents: totals.paidCents,
               cumulativeSkontoCents: totals.skontoCents,
@@ -529,7 +591,7 @@ class QontoService {
               qontoTransactionId: qtx.id,
               qontoTransactionExternalId: qtx.qontoTransactionId,
               matchedBy: "auto",
-              confidence: match.confidence,
+              confidence,
               amountCents: qtx.amountCents,
               paidCents: Math.abs(qtx.amountCents),
               cumulativePaidCents: totals.paidCents,
@@ -542,7 +604,7 @@ class QontoService {
           });
         }
 
-        return true;
+        return "matched" as const;
       }).catch((err: unknown) => {
         if (err instanceof Error && err.message === "INVOICE_STATUS_CHANGED") {
           return false;
@@ -550,10 +612,12 @@ class QontoService {
         throw err;
       });
 
-      if (didMatch) matched++; else skipped++;
+      if (bindOutcome === "review") review++;
+      else if (bindOutcome) matched++;
+      else skipped++;
     }
 
-    return { matched, skipped };
+    return { matched, skipped, review };
   }
 
   /**

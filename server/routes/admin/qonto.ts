@@ -27,6 +27,7 @@ import {
   resolveInvoicePaymentStatus,
   type InvoicePaymentStatusResult,
 } from "@shared/domain/qonto/invoice-payment-status";
+import { AMOUNT_MATCH_REVIEW_CONFIDENCE } from "@shared/domain/qonto/amount-match-guard";
 import {
   loadFullyPaidUnlinkedAdvices,
   loadUnmatchedCredits,
@@ -970,6 +971,14 @@ router.post("/transactions/:id/confirm-paid", asyncHandler("Rechnung konnte nich
         },
         ipAddress: req.ip,
       });
+    }
+    // Task #1864 — war dies ein reiner Betrags-Treffer im Prüf-Zustand
+    // („auto_amount_review"), ist er mit dieser Freigabe bestätigt: Kennzeichen auf
+    // „auto_amount" heben, damit die Prüf-Aufforderung im UI verschwindet.
+    if (tx.matchConfidence === AMOUNT_MATCH_REVIEW_CONFIDENCE && updatedRows.length > 0) {
+      await dbTx.update(qontoTransactions)
+        .set({ matchConfidence: "auto_amount" })
+        .where(eq(qontoTransactions.id, id));
     }
     paid = updatedRows.length;
   }, { faults: readTestFaults(req) });

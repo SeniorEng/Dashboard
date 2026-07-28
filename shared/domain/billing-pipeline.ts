@@ -17,6 +17,10 @@
  */
 import type { AppointmentStatus } from "./appointments";
 import { parseLocalDate } from "../utils/datetime";
+import {
+  isPflegekasseBillingType,
+  isServiceRecordSignedForBilling,
+} from "./billing-eligibility";
 
 // ============================================
 // PIPELINE-STUFEN (SSoT) — nur bestehende Status
@@ -57,13 +61,37 @@ export const PIPELINE_SIDE_STATES = [
   "storniert",
   "kunde_nicht_angetroffen",
   "nicht_abgerechnet",
+  "wartet_auf_kundenunterschrift",
 ] as const;
 export type PipelineSideState = (typeof PIPELINE_SIDE_STATES)[number];
+
+/**
+ * Task #1879 — Side-Zustände, deren € als ERWARTETER Umsatz gelten und daher
+ * in die Gesamt-Umsatz-Sicht der Pipeline-Karte einfließen. „Wartet auf
+ * Kundenunterschrift" ist dokumentierte Arbeit, die abgerechnet wird, sobald
+ * der Kunde unterschreibt — also erwarteter Umsatz, kein Sackgassen-Zustand.
+ *
+ * Bewusst NICHT enthalten (kein erwarteter Umsatz):
+ *   • „Storniert"               — storniert, wird nie abgerechnet.
+ *   • „Kunde nicht angetroffen" — entgangener Termin.
+ *   • „Nicht abgerechnet"       — Frist abgelaufen, nicht mehr abrechenbar.
+ *
+ * Dies ist die EINE Quelle dafür, welche Side-Zustände zum erwarteten Umsatz
+ * zählen — Server und Karte lesen dieselbe Definition.
+ */
+export const EXPECTED_REVENUE_SIDE_STATES = [
+  "wartet_auf_kundenunterschrift",
+] as const satisfies readonly PipelineSideState[];
 
 export const PIPELINE_SIDE_STATE_LABELS: Record<PipelineSideState, string> = {
   storniert: "Storniert",
   kunde_nicht_angetroffen: "Kunde nicht angetroffen",
   nicht_abgerechnet: "Nicht abgerechnet",
+  // Task #1874: Pflegekasse-Termin ist nur vom Mitarbeiter unterschrieben
+  // (`employee_signed`) — die Kundenunterschrift auf dem Leistungsnachweis fehlt,
+  // daher NOCH nicht abrechenbar. Sein € ist sichtbar, zählt aber NICHT in die
+  // Stufe „Unterschrieben" (= bereit zum Abrechnen).
+  wartet_auf_kundenunterschrift: "Wartet auf Kundenunterschrift",
 };
 
 /**
@@ -90,11 +118,28 @@ export interface AppointmentPipelineInput {
   /** Persistierter Termin-Status (oder abgeleitetes `expired_unsigned`). */
   status: AppointmentStatus;
   /**
-   * Ergebnis der SSoT `isAppointmentDocumentedAndSigned` (Termin `completed`
-   * UND direkte- oder Leistungsnachweis-Unterschrift). Wird hier NICHT neu
-   * abgeleitet, sondern vom Aufrufer aus der SSoT übernommen.
+   * Task #1874 — Zahler-Typ des Kunden (`billingType`). Entscheidet, welche
+   * Unterschrift den Termin abrechenbar macht: Pflegekasse verlangt die
+   * Kundenunterschrift, Selbstzahler genügt die Mitarbeiter-Unterschrift.
    */
-  documentedAndSigned: boolean;
+  billingType: string | null | undefined;
+  /**
+   * Direkte Unterschrift am Termin (`signature_data IS NOT NULL`). Eine am
+   * Termin erfasste Kundenunterschrift gilt für BEIDE Zahler-Typen als
+   * abrechenbar.
+   */
+  hasDirectSignature: boolean;
+  /**
+   * Es existiert ein aktiver Leistungsnachweis mit `status='completed'`
+   * (Kundenunterschrift). Macht den Termin für beide Zahler-Typen abrechenbar.
+   */
+  hasCompletedServiceRecord: boolean;
+  /**
+   * Es existiert ein aktiver Leistungsnachweis mit `status='employee_signed'`
+   * (nur Mitarbeiter-Unterschrift). Reicht bei Selbstzahler zur Abrechnung,
+   * bei Pflegekasse NICHT (dort fehlt die Kundenunterschrift).
+   */
+  hasEmployeeSignedServiceRecord: boolean;
   /**
    * True, wenn der Termin bereits über eine nicht-stornierte Rechnung
    * abgerechnet ist. Dann verlässt er die Termin-Stufen und sein € lebt auf
@@ -104,17 +149,39 @@ export interface AppointmentPipelineInput {
 }
 
 /**
+ * Task #1874 — „abrechenbar unterschrieben" für die Pipeline. Nutzt DASSELBE
+ * Gate wie der Rechnungs-Pfad (`isServiceRecordSignedForBilling`,
+ * `shared/domain/billing-eligibility.ts`), damit die Stufe „Unterschrieben"
+ * (= bereit zum Abrechnen) NIE mit der tatsächlichen Abrechenbarkeit
+ * auseinanderdriftet:
+ *   • Selbstzahler: `employee_signed` ODER `completed` genügt.
+ *   • Pflegekasse:  NUR `completed` (Kundenunterschrift) zählt.
+ * Eine direkt am Termin erfasste Unterschrift ist eine echte Kundenunterschrift
+ * und zählt für beide Zahler-Typen.
+ */
+function isAppointmentBillableSigned(input: AppointmentPipelineInput): boolean {
+  return (
+    input.hasDirectSignature ||
+    (input.hasCompletedServiceRecord &&
+      isServiceRecordSignedForBilling(input.billingType, "completed")) ||
+    (input.hasEmployeeSignedServiceRecord &&
+      isServiceRecordSignedForBilling(input.billingType, "employee_signed"))
+  );
+}
+
+/**
  * Ordnet einen Termin GENAU einem Pipeline-Ausgang zu (total + disjunkt).
  *
- * | Quelle                                   | Ausgang                       |
- * | ---------------------------------------- | ----------------------------- |
- * | `scheduled` / `documenting`              | Stufe „Offen"                 |
- * | `completed`, kein signierter LN          | Stufe „Dokumentiert"          |
- * | `completed` + signierter LN              | Stufe „Unterschrieben"        |
- * | bereits abgerechnet                      | excluded „invoiced"           |
- * | `cancelled`                              | excluded „cancelled"          |
- * | `customer_no_show`                       | Side „Kunde nicht angetroffen"|
- * | `expired_unsigned` (abgeleitet)          | Side „Nicht abgerechnet"      |
+ * | Quelle                                            | Ausgang                             |
+ * | ------------------------------------------------- | ----------------------------------- |
+ * | `scheduled` / `documenting`                       | Stufe „Offen"                       |
+ * | `completed`, nicht abrechenbar signiert           | Stufe „Dokumentiert"                |
+ * | `completed`, abrechenbar signiert                 | Stufe „Unterschrieben"              |
+ * | `completed`, Pflegekasse nur `employee_signed`    | Side „Wartet auf Kundenunterschrift"|
+ * | bereits abgerechnet                               | excluded „invoiced"                 |
+ * | `cancelled`                                       | excluded „cancelled"                |
+ * | `customer_no_show`                                | Side „Kunde nicht angetroffen"      |
+ * | `expired_unsigned` (abgeleitet)                   | Side „Nicht abgerechnet"            |
  */
 export function assignAppointmentStage(input: AppointmentPipelineInput): PipelineAssignment {
   const { status } = input;
@@ -132,9 +199,21 @@ export function assignAppointmentStage(input: AppointmentPipelineInput): Pipelin
     return { kind: "stage", stage: "offen" };
   }
   // status === "completed"
-  return input.documentedAndSigned
-    ? { kind: "stage", stage: "unterschrieben" }
-    : { kind: "stage", stage: "dokumentiert" };
+  if (isAppointmentBillableSigned(input)) {
+    return { kind: "stage", stage: "unterschrieben" };
+  }
+  // Task #1874: Pflegekasse-Termin nur mit Mitarbeiter-Unterschrift (LN
+  // `employee_signed`, keine Kundenunterschrift) — sichtbar, aber NICHT
+  // abrechenbar. Eigener Side-Zustand statt „Unterschrieben", damit die Stufe
+  // „bereit zum Abrechnen" mit der Eligibility-Sicht („Bereit zum Abrechnen")
+  // rekonziliert.
+  if (
+    isPflegekasseBillingType(input.billingType) &&
+    input.hasEmployeeSignedServiceRecord
+  ) {
+    return { kind: "side", state: "wartet_auf_kundenunterschrift" };
+  }
+  return { kind: "stage", stage: "dokumentiert" };
 }
 
 // ============================================
@@ -365,6 +444,14 @@ export interface PipelineCentsSummary {
   sideTotalCents: number;
   /** Σ Stufen + Side-Badges = Gesamtumsatz-Sicht (Q1). */
   grandTotalCents: number;
+  /**
+   * Task #1879 — Erwarteter Umsatz: Σ Stufen + die als erwarteten Umsatz
+   * geltenden Side-Zustände (`EXPECTED_REVENUE_SIDE_STATES`, aktuell nur
+   * „Wartet auf Kundenunterschrift"). Storniert / Kunde nicht angetroffen /
+   * Nicht abgerechnet bleiben ausgeschlossen. Dies ist die Gesamt-Umsatz-Zahl
+   * der Status-Pipeline-Karte.
+   */
+  expectedRevenueTotalCents: number;
 }
 
 function emptyStageRecord(): Record<PipelineStage, number> {
@@ -406,11 +493,16 @@ export function summarizePipelineCents(units: PipelineAtomicUnit[]): PipelineCen
   }
   const stageTotalCents = PIPELINE_STAGES.reduce((sum, s) => sum + stageCents[s], 0);
   const sideTotalCents = PIPELINE_SIDE_STATES.reduce((sum, s) => sum + sideCents[s], 0);
+  const expectedRevenueSideCents = EXPECTED_REVENUE_SIDE_STATES.reduce(
+    (sum, s) => sum + sideCents[s],
+    0,
+  );
   return {
     stageCents,
     sideCents,
     stageTotalCents,
     sideTotalCents,
     grandTotalCents: stageTotalCents + sideTotalCents,
+    expectedRevenueTotalCents: stageTotalCents + expectedRevenueSideCents,
   };
 }
