@@ -57,11 +57,37 @@ async function freshModule() {
   return await import("../../server/services/pdf-generator");
 }
 
+// Diese Suite provoziert BEWUSST Launch-Fehlschläge (`launchMock` rejektiert mit
+// „Network service crashed" / „Timed out …") und setzt CHROMIUM_PATH auf
+// `process.execPath`, damit `isChromiumAvailable()` true liefert. Der Launch
+// selbst ist über den `puppeteer-core`-Mock abgefangen — es wird NIE wirklich
+// Node als Browser gestartet. `pdf-generator` loggt diese *simulierten* Fehler
+// aber via `console.error`/`console.log` mit `executablePath=<node-Binary>`. Im
+// CI-tests-Job liest sich das wie ein echter Chromium-Infra-Crash und hat schon
+// zu einer Fehldiagnose geführt. Wir schlucken daher NUR die `[pdf-generator]`-
+// Rauschzeilen DIESER Suite; jede andere Konsolenausgabe bleibt unverändert.
+let consoleLogSpy: ReturnType<typeof vi.spyOn> | undefined;
+let consoleErrorSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+function isPdfGeneratorNoise(args: unknown[]): boolean {
+  return typeof args[0] === "string" && args[0].startsWith("[pdf-generator]");
+}
+
 beforeEach(() => {
   launchMock.mockReset();
+  const origLog = console.log.bind(console);
+  const origError = console.error.bind(console);
+  consoleLogSpy = vi.spyOn(console, "log").mockImplementation((...args) => {
+    if (!isPdfGeneratorNoise(args)) origLog(...args);
+  });
+  consoleErrorSpy = vi.spyOn(console, "error").mockImplementation((...args) => {
+    if (!isPdfGeneratorNoise(args)) origError(...args);
+  });
 });
 
 afterEach(async () => {
+  consoleLogSpy?.mockRestore();
+  consoleErrorSpy?.mockRestore();
   vi.useRealTimers();
 });
 
