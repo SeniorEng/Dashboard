@@ -14,7 +14,7 @@ import {
   type BudgetSplitForAppointment,
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
-import { classifyBillingEligibility } from "@shared/domain/billing-eligibility";
+import { classifyBillingEligibility, isPartiallyDocumented } from "@shared/domain/billing-eligibility";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
 import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
@@ -502,11 +502,27 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     // Signatur-blockierte Kunden (kein strikt signierter Termin ⇒ signiert=0)
     // bleiben in der Liste, damit sie weiterhin als „blocked" sichtbar sind
     // (Bestandsverhalten, Task #1776).
+    //
+    // Task #1873 — der „signiert>0 & unbilled=0"-Ausschluss betrachtet NUR
+    // Termine unter strikt signierten LNs. Er ignoriert dokumentierte
+    // (`completed`) Termine, die noch NICHT durch einen (kundensignierten) LN
+    // abgedeckt sind. Ein Kunde mit einem bereits abgerechneten signierten
+    // Termin, der aber weitere dokumentierte-aber-unsignierte Termine hat, sah
+    // dadurch „vollständig abgerechnet" aus und verschwand still aus der Liste
+    // (Fall „Bernd Funke"). Der Ausschluss ist jetzt abdeckungs-bewusst: ein
+    // Kunde wird nur dann entfernt, wenn ALLE signierten Termine abgerechnet
+    // sind UND kein dokumentierter Termin unabgedeckt bleibt
+    // (`isPartiallyDocumented` = dieselbe abgedeckt-vs-dokumentiert-SSoT wie die
+    // Reifegruppierung). Bleibt er sichtbar, sortiert ihn
+    // `classifyBillingMaturity` in eine Aufmerksamkeits-Gruppe
+    // („Unvollständig dokumentiert" / „Wartet auf Kundenunterschrift").
     filteredCustomerRows = filteredCustomerRows.filter(c => {
       const facts = unbilledFacts.get(c.id);
       const signed = facts?.signedAppointmentCount ?? 0;
       const unbilled = facts?.unbilledAppointmentCount ?? 0;
-      return !(signed > 0 && unbilled === 0);
+      const coverage = coverageByCustomer.get(c.id);
+      const stillNeedsDocumentation = coverage ? isPartiallyDocumented(coverage) : false;
+      return !(signed > 0 && unbilled === 0 && !stillNeedsDocumentation);
     });
   }
 
