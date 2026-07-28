@@ -262,7 +262,17 @@ export default function Mitarbeiterabrechnung() {
       const result = await api.get<OverviewData>(
         `/admin/mitarbeiterabrechnung?year=${selectedYear}&month=${selectedMonth}`,
       );
-      return unwrapResult(result);
+      const data = unwrapResult(result);
+      // Defense-in-Depth am Daten-Boundary: der Server liefert `abwesenheiten`
+      // immer als Array (route `mitarbeiterabrechnung.ts` → `... ?? []`), aber
+      // bei Versions-Skew im Rolling-Deploy (älteres Server-Bundle vor dem
+      // Abwesenheiten-Feature) oder einem alten React-Query-Cache kann das Feld
+      // fehlen. Einmal zentral normalisieren, damit der Render-Pfad den strikten
+      // Typ (`abwesenheiten: AbsenceBlock[]`) unverändert annehmen darf.
+      return {
+        ...data,
+        rows: data.rows.map((r) => ({ ...r, abwesenheiten: r.abwesenheiten ?? [] })),
+      };
     },
   });
 
