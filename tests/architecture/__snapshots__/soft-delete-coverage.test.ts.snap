@@ -73,6 +73,10 @@ exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) 
   "server/services/geocoding.ts": [
     "customersRepo",
   ],
+  "server/services/invoice-45b-reduction.ts": [
+    "appointmentsRepo",
+    "budgetAllocationsRepo",
+  ],
   "server/services/invoice-calc.ts": [
     "appointmentsRepo",
   ],
@@ -129,6 +133,9 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
   ],
   "server/storage/budget/preferences-storage.ts": [
     "customersRepo",
+  ],
+  "server/storage/budget/rebook-guards.ts": [
+    "appointmentsRepo",
   ],
   "server/storage/budget/rebook-storage.ts": [
     "appointmentsRepo",

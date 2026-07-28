@@ -60,6 +60,7 @@ interface OverviewRow {
   employmentType: string;
   isEuRentner: boolean;
   erfasst: { hw: number; ab: number; feiertage: number; kilometer: number };
+  abwesenheiten: { typ: "urlaub" | "krankheit"; von: string; bis: string; tage: number }[];
   saldo: { hw: number; ab: number; feiertage: number; kilometer: number };
   stundenkontoSaldo: number;
   kilometerSaldo: number;
@@ -77,6 +78,7 @@ function makeRow(overrides: Partial<OverviewRow> = {}): OverviewRow {
     employmentType: "minijobber",
     isEuRentner: false,
     erfasst: { hw: 10, ab: 0, feiertage: 0, kilometer: 0 },
+    abwesenheiten: [],
     saldo: { hw: 0, ab: 0, feiertage: 0, kilometer: 0 },
     stundenkontoSaldo: 0,
     kilometerSaldo: 0,
