@@ -599,7 +599,11 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
   const previewIsoDateRe = /^\d{4}-\d{2}-\d{2}$/;
   const previewDateFrom = typeof req.query.dateFrom === "string" && previewIsoDateRe.test(req.query.dateFrom) ? req.query.dateFrom : undefined;
   const previewDateTo = typeof req.query.dateTo === "string" && previewIsoDateRe.test(req.query.dateTo) ? req.query.dateTo : undefined;
-  const draft = await buildInvoiceDraft({ customerId, billingMonth: month, billingYear: year, dateFrom: previewDateFrom, dateTo: previewDateTo });
+  // Task #1881 — Vorschau-Modus: liefert auch bei „aktuell nichts abrechenbar"
+  // eine strukturierte Antwort (excludedAppointments je Termin + Grund, Summe
+  // 0 €) statt einer generischen badRequest-Meldung, damit der Dialog konkret
+  // erklärt, warum (noch) nicht abgerechnet werden kann. Generate lehnt weiter ab.
+  const draft = await buildInvoiceDraft({ customerId, billingMonth: month, billingYear: year, dateFrom: previewDateFrom, dateTo: previewDateTo, mode: "preview" });
   const response: BillingInvoicePreview = {
     serviceRecordCount: draft.signedRecordCount,
     coveredAppointments: draft.apptIds.length,

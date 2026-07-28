@@ -178,8 +178,16 @@ export async function buildInvoiceDraft(input: {
   // Monats). Leer = ganzer Monat (Bestandsverhalten).
   dateFrom?: string;
   dateTo?: string;
+  // Task #1881 — Modus. „preview" (Dialog-Vorschau) wirft NICHT mehr eine
+  // generische badRequest-Meldung, wenn aktuell nichts abrechenbar ist, sondern
+  // liefert eine strukturierte Antwort (excludedAppointments je Termin + Grund,
+  // Summe 0 €) aus DENSELBEN Fakten. „generate" (Default) lehnt leere Läufe
+  // weiterhin ab (keine leeren Rechnungen). Der Termin-genaue Ausschluss-Block
+  // unten ist der einzige Ableitungspfad ⇒ Review ⇔ Generate bleiben spiegelbildlich.
+  mode?: "generate" | "preview";
 }): Promise<InvoiceDraft> {
-  const { customerId, billingMonth, billingYear, dateFrom, dateTo } = input;
+  const { customerId, billingMonth, billingYear, dateFrom, dateTo, mode } = input;
+  const isPreview = mode === "preview";
 
   const customer = await storage.getCustomer(customerId);
   if (!customer) throw notFound("Kunde nicht gefunden");
@@ -218,7 +226,7 @@ export async function buildInvoiceDraft(input: {
   const signedRecords = serviceRecords.filter(sr =>
     isServiceRecordSignedForBilling(customer.billingType, sr.status)
   );
-  if (signedRecords.length === 0) {
+  if (signedRecords.length === 0 && !isPreview) {
     throw badRequest(
       isPflegekasseBilling
         ? BILLING_BLOCK_MESSAGES.customer_signature_required
@@ -228,7 +236,7 @@ export async function buildInvoiceDraft(input: {
 
   const serviceRecordIds = signedRecords.map(sr => sr.id);
   const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
-  if (allApptIds.length === 0) {
+  if (allApptIds.length === 0 && !isPreview) {
     throw badRequest(BILLING_BLOCK_MESSAGES.no_appointments);
   }
 
@@ -260,7 +268,7 @@ export async function buildInvoiceDraft(input: {
   let apptIds = alreadyInvoicedIds.length > 0
     ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
     : allApptIds;
-  if (apptIds.length === 0) {
+  if (apptIds.length === 0 && !isPreview) {
     throw badRequest(BILLING_BLOCK_MESSAGES.already_billed);
   }
 
@@ -278,7 +286,7 @@ export async function buildInvoiceDraft(input: {
       .where(and(...rangeConds));
     const inRangeIds = new Set(inRangeRows.map(r => r.id));
     apptIds = apptIds.filter(id => inRangeIds.has(id));
-    if (apptIds.length === 0) {
+    if (apptIds.length === 0 && !isPreview) {
       throw badRequest("Im gewählten Datumsbereich gibt es keine abrechenbaren Termine.");
     }
   }

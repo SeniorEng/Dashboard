@@ -171,6 +171,22 @@ describe("classifyBillingMaturity — genau eine Reifegruppe pro Kunde", () => {
     ).toBe("partially_documented");
   });
 
+  it("teildokumentiert UND signaturblockiert ⇒ partially_documented (Sektion == Inline-Label, Task #1881)", () => {
+    // Silke/Pia-Fall: weniger Termine abgedeckt als dokumentiert (teildokumentiert)
+    // UND zusätzlich signaturblockiert. Der Kunde zeigt inline „nur X/Y
+    // dokumentiert" und muss daher unter „Unvollständig dokumentiert" stehen —
+    // NICHT unter „Wartet auf Kundenunterschrift" (sonst zwei widersprüchliche
+    // Begründungen). `partially_documented` schlägt `signature_blocked`.
+    expect(
+      classifyBillingMaturity({
+        openAppointments: 0,
+        completedAppointments: 2,
+        coveredAppointments: 1,
+        eligibility: { status: "blocked", reason: "customer_signature_required" },
+      }),
+    ).toBe("partially_documented");
+  });
+
   it("abrechenbar + vollständig abgedeckt + keine offenen Termine ⇒ ready", () => {
     expect(
       classifyBillingMaturity({

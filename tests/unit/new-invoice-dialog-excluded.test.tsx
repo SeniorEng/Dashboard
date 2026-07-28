@@ -101,6 +101,39 @@ describe("NewInvoiceDialog — Erklärung der Null-/Teil-Summe (Task #1869)", ()
     ).toContain("Bereits abgerechnet");
   });
 
+  it("zeigt bei „alles bereits abgerechnet + weitere ohne Unterschrift“ die Aufschlüsselung statt generischer Meldung (Task #1881)", () => {
+    render(
+      <Harness
+        preview={{
+          ...BASE_PREVIEW,
+          // Nichts abrechenbar (0 abgedeckt ⇒ Summe 0 €), aber es GIBT dokumentierte
+          // Termine: einer bereits abgerechnet, zwei warten auf Kundenunterschrift.
+          coveredAppointments: 0,
+          completedAppointments: 3,
+          alreadyBilledAppointments: 1,
+          totalCents: 0,
+          excludedAppointments: [
+            { date: "2026-05-04", reason: "already_billed" },
+            { date: "2026-05-06", reason: "customer_signature_required" },
+            { date: "2026-05-20", reason: "customer_signature_required" },
+          ],
+        }}
+      />,
+    );
+
+    // Konkrete Aufschlüsselung beider Gründe (keine generische Einzelmeldung).
+    expect(
+      screen.getByTestId("block-excluded-customer_signature_required").textContent,
+    ).toContain("Kundenunterschrift fehlt");
+    expect(
+      screen.getByTestId("block-excluded-already_billed").textContent,
+    ).toContain("Bereits abgerechnet");
+    // Kein leerer Lauf: „Rechnung erstellen" ist deaktiviert, wenn nichts abrechenbar ist.
+    expect(
+      (screen.getByTestId("button-generate-invoice") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it("zeigt keinen Erklär-Block, wenn alles dokumentierte abgerechnet wird", () => {
     render(
       <Harness

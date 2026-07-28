@@ -311,12 +311,18 @@ export interface BillingMaturityFacts {
  */
 export function classifyBillingMaturity(c: BillingMaturityFacts): BillingMaturityGroup {
   if (hasOpenAppointments(c)) return "has_open_appointments";
+  // Task #1881 — Sektion muss zum Inline-Label passen: Ein nur teildokumentierter
+  // Kunde (weniger Termine abgedeckt als dokumentiert) zeigt inline „nur X/Y
+  // dokumentiert" und gehört daher unter „Unvollständig dokumentiert" — auch wenn
+  // er zusätzlich signaturblockiert ist. Deshalb wird `partially_documented` VOR
+  // `signature_blocked` geprüft, sonst landet er unter „Wartet auf Kunden-
+  // unterschrift" und zeigt zwei widersprüchliche Begründungen gleichzeitig.
+  if (isPartiallyDocumented(c)) return "partially_documented";
   // Blockierte Kunden dürfen NIE unter „ready" landen. Fehlende Kundenunterschrift
   // ist der Regelfall und bekommt eine eigene Gruppe; alle übrigen Block-Gründe
   // (not_signed/no_appointments/already_billed) werden pragmatisch ebenfalls in
   // „signature_blocked" (= „nicht bereit, Grund per Inline-Label") einsortiert,
   // damit sie sichtbar bleiben und nicht als abrechenbar erscheinen.
   if (c.eligibility.status !== "eligible") return "signature_blocked";
-  if (isPartiallyDocumented(c)) return "partially_documented";
   return "ready";
 }

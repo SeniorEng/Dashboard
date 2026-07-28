@@ -329,7 +329,15 @@ export function NewInvoiceDialog({
           </Button>
           <Button
             onClick={onGenerate}
-            disabled={generateMutation.isPending || !selectedCustomerId}
+            disabled={
+              generateMutation.isPending
+              || !selectedCustomerId
+              // Task #1881 — Kein leerer Lauf: Wenn die Vorschau nichts
+              // Abrechenbares enthält (0 abgedeckte Termine ⇒ Summe 0 €), bleibt
+              // der Grund im Erklär-Block sichtbar, aber „Rechnung erstellen"
+              // ist deaktiviert (der Generate-Pfad würde ohnehin ablehnen).
+              || (!!invoicePreview && invoicePreview.coveredAppointments === 0)
+            }
             className="bg-teal-600 hover:bg-teal-700 text-white"
             data-testid="button-generate-invoice"
           >
