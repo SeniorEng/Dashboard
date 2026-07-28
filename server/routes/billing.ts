@@ -14,7 +14,7 @@ import {
   type BudgetSplitForAppointment,
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
-import { classifyBillingEligibility, isPartiallyDocumented } from "@shared/domain/billing-eligibility";
+import { classifyBillingEligibility, isMonthFullyBilledAndSigned } from "@shared/domain/billing-eligibility";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
 import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
@@ -503,26 +503,31 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     // bleiben in der Liste, damit sie weiterhin als „blocked" sichtbar sind
     // (Bestandsverhalten, Task #1776).
     //
-    // Task #1873 — der „signiert>0 & unbilled=0"-Ausschluss betrachtet NUR
-    // Termine unter strikt signierten LNs. Er ignoriert dokumentierte
-    // (`completed`) Termine, die noch NICHT durch einen (kundensignierten) LN
-    // abgedeckt sind. Ein Kunde mit einem bereits abgerechneten signierten
-    // Termin, der aber weitere dokumentierte-aber-unsignierte Termine hat, sah
-    // dadurch „vollständig abgerechnet" aus und verschwand still aus der Liste
-    // (Fall „Bernd Funke"). Der Ausschluss ist jetzt abdeckungs-bewusst: ein
-    // Kunde wird nur dann entfernt, wenn ALLE signierten Termine abgerechnet
-    // sind UND kein dokumentierter Termin unabgedeckt bleibt
-    // (`isPartiallyDocumented` = dieselbe abgedeckt-vs-dokumentiert-SSoT wie die
-    // Reifegruppierung). Bleibt er sichtbar, sortiert ihn
-    // `classifyBillingMaturity` in eine Aufmerksamkeits-Gruppe
-    // („Unvollständig dokumentiert" / „Wartet auf Kundenunterschrift").
+    // Task #1873/#1878 — der frühere „signiert>0 & unbilled=0"-Ausschluss
+    // betrachtete NUR Termine unter abrechenbar-signierten LNs und wertete einen
+    // `employee_signed`-LN kassenunabhängig als „abgedeckt" (`isPartiallyDocumented`).
+    // Ein Pflegekassen-Kunde mit einem bereits abgerechneten kundensignierten
+    // Termin, der aber weitere dokumentierte-aber-nur-`employee_signed` Termine
+    // hat, sah dadurch „vollständig abgerechnet" aus und verschwand still aus der
+    // Liste (Fall „Bernd Funke"), obwohl die Kundenunterschrift noch fehlt.
+    //
+    // Der Ausschluss folgt jetzt DER EINEN SSoT `isMonthFullyBilledAndSigned`:
+    // ein Kunde wird nur entfernt, wenn JEDER dokumentierte (`completed`) Termin
+    // abrechenbar-signiert UND bereits abgerechnet ist. Das Signatur-Gate ist
+    // kassen-/zahlerabhängig (`getUnbilledSignedAppointmentFactsByCustomer` nutzt
+    // `isServiceRecordSignedForBilling`), sodass ein Pflegekassen-Termin mit nur
+    // Mitarbeiter-Unterschrift als „noch offen" zählt und den Kunden sichtbar
+    // hält. Bleibt er sichtbar, sortiert ihn `classifyBillingMaturity` in eine
+    // Aufmerksamkeits-Gruppe („Unvollständig dokumentiert" / „Wartet auf
+    // Kundenunterschrift").
     filteredCustomerRows = filteredCustomerRows.filter(c => {
       const facts = unbilledFacts.get(c.id);
-      const signed = facts?.signedAppointmentCount ?? 0;
-      const unbilled = facts?.unbilledAppointmentCount ?? 0;
       const coverage = coverageByCustomer.get(c.id);
-      const stillNeedsDocumentation = coverage ? isPartiallyDocumented(coverage) : false;
-      return !(signed > 0 && unbilled === 0 && !stillNeedsDocumentation);
+      return !isMonthFullyBilledAndSigned({
+        completedAppointments: coverage?.completedAppointments ?? 0,
+        signedAppointmentCount: facts?.signedAppointmentCount ?? 0,
+        unbilledAppointmentCount: facts?.unbilledAppointmentCount ?? 0,
+      });
     });
   }
 

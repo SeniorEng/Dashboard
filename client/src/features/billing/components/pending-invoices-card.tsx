@@ -20,6 +20,7 @@ import {
   classifyBillingMaturity,
   isLateSignedFollowUp,
   lateSignedFollowUpCount,
+  isAwaitingCustomerSignature,
   BILLING_BLOCK_SHORT_LABELS,
 } from "@shared/domain/billing-eligibility";
 import { BILLING_TYPE_LABELS } from "../constants";
@@ -76,9 +77,23 @@ function PendingCustomerRow({
   // „Kundenunterschrift fehlt"). Nur relevant, wenn keine offenen Termine mehr
   // anstehen (sonst dominiert der „noch X geplante Termine"-Vermerk) und der
   // Kunde nicht ohnehin über den Partial-Hinweis erklärt wird.
+  //
+  // Task #1878: Bei einem Pflegekassen-Kunden, der einen bereits abgerechneten
+  // kundensignierten Termin UND weitere nur mitarbeiter-signierte Termine im
+  // Monat hat (Fall „Bernd Funke"), meldet die Eligibilitäts-SSoT — spiegel-
+  // bildlich zu `buildInvoiceDraft` — `already_billed`. Der wahre Grund für die
+  // sichtbar gehaltene Zeile ist aber die fehlende Kundenunterschrift der
+  // weiteren Termine. `isAwaitingCustomerSignature` (dieselbe SSoT, die den
+  // Euro-Betrag der Übersicht speist) überstimmt das Label daher wahrheitsgemäß
+  // auf „Kundenunterschrift fehlt".
+  const awaitingSignature = isAwaitingCustomerSignature(c);
   const blockLabel =
-    openCount === 0 && !partial && c.eligibility.reason
-      ? BILLING_BLOCK_SHORT_LABELS[c.eligibility.reason]
+    openCount === 0 && !partial
+      ? awaitingSignature
+        ? BILLING_BLOCK_SHORT_LABELS.customer_signature_required
+        : c.eligibility.reason
+          ? BILLING_BLOCK_SHORT_LABELS[c.eligibility.reason]
+          : null
       : null;
   return (
     <li
