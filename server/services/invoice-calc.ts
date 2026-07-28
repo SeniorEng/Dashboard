@@ -7,6 +7,7 @@ import {
   isServiceRecordSignedForBilling,
 } from "@shared/domain/billing-eligibility";
 import type { BudgetType } from "@shared/domain/budgets";
+import type { BillingExcludedAppointment } from "@shared/api/billing";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
 import { appointments, invoices as invoicesTable, type Invoice } from "@shared/schema";
@@ -109,6 +110,11 @@ export interface InvoiceDraft {
   // unterschriebene Nachzügler fälschlich als „unvollständig dokumentiert"
   // erscheinen ließ.
   alreadyBilledAppointmentCount: number;
+  // Task #1869 — Dokumentierte Termine des Zeitraums, die NICHT abgerechnet
+  // werden, samt Grund + Datum (fehlende Kundenunterschrift vs. bereits
+  // abgerechnet). Abgeleitet aus denselben Signatur-/Abgerechnet-Fakten wie die
+  // Eligibilitäts-SSoT — rein erklärend, ändert nichts am Abrechnungs-Umfang.
+  excludedAppointments: BillingExcludedAppointment[];
   insuranceInfo: Awaited<ReturnType<typeof getInsuranceData>>;
   // Task #759 — Variant C: Pot-Items sind die Wahrheits-Quelle. Wenn nur
   // ein Pot belegt ist, wird der Legacy-Single-Invoice-Pfad verwendet
@@ -300,7 +306,7 @@ export async function buildInvoiceDraft(input: {
   const nextMonth = billingMonth === 12 ? 1 : billingMonth + 1;
   const nextYear = billingMonth === 12 ? billingYear + 1 : billingYear;
   const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
-  const completedRows = await appointmentsRepo.selectColumnsFrom({ id: appointments.id })
+  const completedRows = await appointmentsRepo.selectColumnsFrom({ id: appointments.id, date: appointments.date })
     .where(and(
       eq(appointments.customerId, customerId),
       eq(appointments.status, "completed"),
@@ -309,6 +315,39 @@ export async function buildInvoiceDraft(input: {
       lt(appointments.date, periodEndStr),
     ));
   const completedAppointmentsInPeriod = completedRows.length;
+
+  // Task #1869 — Erklärung für eine Null-/Teil-Summe: WELCHE dokumentierten
+  // Termine NICHT abgerechnet werden und WARUM. Zwei Ursachen werden benannt:
+  //  • fehlende Unterschrift — Termine unter Leistungsnachweisen, die (noch)
+  //    nicht abrechenbar signiert sind (bei Pflegekasse: keine Kundenunterschrift,
+  //    nur `employee_signed` → `customer_signature_required`; sonst `not_signed`).
+  //  • bereits abgerechnet — Termine, die schon in einer früheren Rechnung des
+  //    Zeitraums enthalten sind (`already_billed`).
+  // Grundlage sind DIESELBEN Signatur-/Abgerechnet-Fakten wie oben (kein zweiter
+  // Ableitungspfad); rein erklärend — der Abrechnungs-Umfang bleibt unberührt.
+  const billableApptIdSet = new Set(apptIds);
+  const alreadyInvoicedIdSet = new Set(alreadyInvoicedIds);
+  const unsignedRecordIds = serviceRecords
+    .filter(sr => !isServiceRecordSignedForBilling(customer.billingType, sr.status))
+    .map(sr => sr.id);
+  const awaitingSignatureApptIdSet = new Set(
+    await getAppointmentIdsFromServiceRecords(unsignedRecordIds),
+  );
+  const missingSignatureReason: BillingExcludedAppointment["reason"] =
+    isPflegekasseBilling ? "customer_signature_required" : "not_signed";
+  const excludedAppointments: BillingExcludedAppointment[] = completedRows
+    .filter(row => !billableApptIdSet.has(row.id))
+    .map((row): BillingExcludedAppointment | null => {
+      if (alreadyInvoicedIdSet.has(row.id)) {
+        return { date: row.date, reason: "already_billed" };
+      }
+      if (awaitingSignatureApptIdSet.has(row.id)) {
+        return { date: row.date, reason: missingSignatureReason };
+      }
+      return null;
+    })
+    .filter((e): e is BillingExcludedAppointment => e !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   // Task #759 — Variant C: Pot-Split jetzt **immer** rechnen. Wenn nur ein
   // Pot belegt ist, fällt der Generator auf den Legacy-Single-Invoice-Pfad
@@ -360,6 +399,7 @@ export async function buildInvoiceDraft(input: {
       alreadyInvoicedIds,
       completedAppointmentsInPeriod,
       alreadyBilledAppointmentCount,
+      excludedAppointments,
       insuranceInfo,
       potItems,
       needsBudgetSplit: false,
@@ -405,6 +445,7 @@ export async function buildInvoiceDraft(input: {
     alreadyInvoicedIds,
     completedAppointmentsInPeriod,
     alreadyBilledAppointmentCount,
+    excludedAppointments,
     insuranceInfo,
     potItems,
     needsBudgetSplit: true,

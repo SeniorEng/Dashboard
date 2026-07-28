@@ -597,6 +597,9 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
           (a, b) => POT_ORDER.indexOf(a) - POT_ORDER.indexOf(b),
         )
       : [],
+    // Task #1869: Dokumentierte, aber nicht abgerechnete Termine samt Grund +
+    // Datum — erlaubt dem Dialog, eine Null-/Teil-Summe konkret zu erklären.
+    excludedAppointments: draft.excludedAppointments,
   };
   res.json(response);
 }));
