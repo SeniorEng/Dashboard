@@ -119,6 +119,25 @@ export function completedButUnsignedSqlRaw(alias: string): SQL {
 }
 
 /**
+ * Task #1886 — Fachregel „Erstberatungen werden dem KUNDEN nicht abgerechnet" als
+ * Roh-SQL-Prädikat für `db.execute`-Queries mit Tabellen-Alias (z. B.
+ * `FROM appointments a`). Erstberatungs-Termine (`appointment_type = 'Erstberatung'`,
+ * kundenlose Interessenten-Termine mit `customer_id = NULL`) sind Akquise: sie erzeugen
+ * keine Kunden-/Kassen-Rechnung und keinen Leistungsnachweis. In KUNDENSEITIGEN
+ * „abrechenbar/dokumentiert aber fehlt"-/Reconciliation-Audits dürfen sie daher NICHT als
+ * Lücke erscheinen (sonst Fehlalarm). `appointment_type` ist `NOT NULL`, daher ist
+ * `<> 'Erstberatung'` NULL-sicher.
+ *
+ * NUR für die KUNDENSEITE. Auf der MITARBEITER-Seite (Lohn/Stunden/km,
+ * `server/storage/time-tracking/payroll-hours.ts`) zählt die Erstberatung VOLL — dort
+ * NICHT verwenden. Siehe CLAUDE.md → Arbeitsregeln (zweiseitige Regel).
+ */
+export function notErstberatungSqlRaw(alias: string): SQL {
+  const a = sql.raw(alias);
+  return sql`${a}.appointment_type <> 'Erstberatung'`;
+}
+
+/**
  * Task #1874 — Roh-SQL-Fragment „hat einen aktiven Leistungsnachweis mit dem
  * gegebenen Status" für `db.execute`-Queries mit Tabellen-Alias (z. B.
  * `FROM appointments a`). Der Pipeline-Reader liest damit getrennt, ob ein

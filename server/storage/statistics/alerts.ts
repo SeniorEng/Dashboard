@@ -1,5 +1,11 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
+// Task #1886 — kundenseitiger Erstberatung-Ausschluss für den „Undokumentierte
+// Termine"-Alarm. Dessen Drill-down (`/undocumented` → `listUndocumentedAppointments`)
+// schließt kundenlose Erstberatungen über `JOIN customers` bereits aus; ohne
+// denselben Ausschluss im Zähler zeigte der Alarm eine höhere Zahl als die Liste.
+// Rein kundenseitig — kein Lohn-/Stunden-/km-Pfad.
+import { notErstberatungSqlRaw } from "../../lib/appointment-signed";
 
 const MONTH_NAMES_DE = [
   "", "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -29,6 +35,7 @@ export async function getOperationsAlerts(): Promise<AlertItem[]> {
       FROM appointments a
       WHERE a.deleted_at IS NULL
         AND a.status = 'completed'
+        AND ${notErstberatungSqlRaw('a')}
         AND a.date::date < ${threeDaysAgo}::date
     `),
     db.execute(sql`

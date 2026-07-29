@@ -54,6 +54,22 @@ Cutover parallel gültig (Replit-Betrieb).
   NICHT bauen, erst bei Alrik rückfragen. Gilt ausdrücklich auch für die KI.
 - **Eine SSoT pro fachlicher Frage (+ Integer-Cents)**: Genau eine Funktion pro
   fachlicher Frage; Anzeige- und Schreibpfade importieren dieselbe. Geld = Integer-Cents.
+- **Erstberatungen werden dem KUNDEN nicht abgerechnet — mitarbeiterseitig zählen sie
+  voll (zweiseitige Regel, #1886).** Erstberatungs-Termine (`appointment_type =
+  'Erstberatung'`, kundenlose Interessenten-/Prospect-Termine mit `customer_id = NULL`;
+  Service `erstberatung`: `isBillable:false`, `defaultPriceCents:0`, `budgetPots:[]`) sind
+  Akquise, kein abrechenbarer Kundentermin.
+  - **Kundenseite (ausschließen):** keine Kunden-/Kassen-Rechnung, kein Leistungsnachweis,
+    nie in Rechnungsliste/Abrechnung. In kundenseitigen „abrechenbar/dokumentiert aber
+    fehlt"-/Reconciliation-Audits dürfen sie NICHT als Lücke erscheinen (sonst Fehlalarm).
+    Sie werden nie als „Kundenunterschrift fehlt" geflaggt (kein Kunde, gegen den
+    unterschrieben würde). SSoT-Prädikate: `completedButUnsignedSqlRaw` / `notErstberatungSqlRaw`
+    in `server/lib/appointment-signed.ts` (`appointment_type <> 'Erstberatung'`, NULL-sicher).
+  - **Mitarbeiterseite (voll zählen, NICHT ausschließen):** Arbeitsleistung, Stunden, km und
+    Lohn zählen normal — der `erstberatung`-Service hat `employeeRateCents > 0`, die
+    Lohn-/Stunden-SSoT `server/storage/time-tracking/payroll-hours.ts` bucketet Erstberatung
+    ausdrücklich (`stundenErstberatung`). Kundenseitige Ausschlüsse eng fassen, damit sie
+    keinen Lohn-/Stunden-/km-Pfad treffen.
 - **Tests nur gegen Dev/Ephemeral-DBs — NIE gegen Prod.** Cleanup-/Reseed-Skripte
   brauchen `--apply` + Hostname-Guard. Dev-DB-Guard nicht umgehen.
 - **UI-Präferenzen**: Keine Blur-Effekte (`backdrop-blur` verboten); Overlays max.

@@ -365,6 +365,13 @@ export async function getOpenAppointmentCountByCustomer(
 }
 
 export async function buildLineItemsFromAppointments(apptIds: number[], customerId?: number, billingType?: string) {
+  // #1886: Erstberatungen erreichen die Kunden-Abrechnung nicht — die `apptIds`
+  // stammen ausschließlich aus kunden-signierten Leistungsnachweisen
+  // (`getAppointmentIdsFromServiceRecords`), und Erstberatungen sind kundenlos
+  // (customer_id = NULL) und tragen nie einen LN. Der Ausschluss ist damit an
+  // diesen Invariant gekoppelt (kein redundanter appointment_type-Filter). Auf der
+  // Mitarbeiterseite (Lohn/Stunden/km) zählt die Erstberatung dagegen voll — siehe
+  // CLAUDE.md → Arbeitsregeln.
   if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0, totalVatCents: 0 };
   const isVatExempt = billingType && billingType !== "selbstzahler";
 
