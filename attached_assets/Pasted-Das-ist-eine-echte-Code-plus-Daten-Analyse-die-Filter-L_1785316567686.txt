@@ -1,0 +1,44 @@
+Das ist eine echte Code-plus-Daten-Analyse — die Filter-Logik der zwei Ansichten und die Zahlen kann nur Claude Code am Repo/DB verlässlich liefern. Was ich aus der Domänen-Erinnerung schon als zu prüfende Lücken-Hypothesen beisteuern kann (gegen aktuellen Code zu verifizieren, Erinnerung ist Momentaufnahme):
+
+Screenshot 1 — Abrechnungsliste
+
+Nicht-Abrechenbares wird angezeigt (False Positive): No-Show-Termine, wenn sie als „dokumentiert" zählen → Kunde erscheint abrechenbar, obwohl der Termin nicht an die Kasse darf (No-Show-Behandlung war laut #1555 uneinheitlich). Dazu §45a-deaktivierte oder budget-erschöpfte Kunden — hier greift zusätzlich der eben gefundene §45b-Verfall-Bug (Verfügbar zu niedrig → könnte fälschlich gaten).
+
+Abrechenbares fehlt (False Negative): Die zwei „Nur 1/2 dokumentierte Termine"-Fälle (Silke Schönherr, Pia Dybol) sind der gefährlichste sichtbare Punkt — wird jetzt abgerechnet, landet nur der dokumentierte Termin auf der Rechnung, der zweite fällt still raus → Unterabrechnung. Und: Termine eines zweiten Mitarbeiters, die nie in einen Sammel-LN kamen, tauchen evtl. gar nicht als abrechenbar auf (offener #1542-Post-Check).
+
+Screenshot 2 — Nachweise je Mitarbeiter (Monique Geitner, Juli)
+
+Unterschrift für nicht Erbrachtes (FP): No-Show- oder stornierte Termine, die als „Termine bereit" gelistet werden.
+
+Fehlt → Unterschrift wird nicht eingeholt (FN) — mein Hauptverdacht: Die Ansicht ist auf eingeloggter Mitarbeiter + Monat gescoped. Bei einem Kunden mit Terminen mehrerer Mitarbeiter sieht Monique die Termine der Kollegen nicht — wird die Unterschrift pro Mitarbeiter eingeholt, können die Termine des anderen ungezeichnet bleiben. Das ist exakt der offene #1542-Post-Check. Dazu: Termine mit noch unvollständiger Doku erscheinen nicht als „bereit" → werden übersehen, bis die Doku steht.
+
+Zum Zahlenteil (Anzahl + € je Status, Juni/Juli): Die Hetzner-Dev-DB hat aktuell nur Platzhalterdaten — echte Juni/Juli-Zahlen liegen auf Replit-Prod. Zwei Entscheidungen, bevor Claude Code loslegt:
+
+Woher soll Claude Code die Juni/Juli-Zahlen (Anzahl + € je Status) nehmen?
+Read-only aus Replit-Prod
+Reihenfolge gegenüber der laufenden §45b-Gegenprobe?
+Erst §45b-Gegenprobe fertig (Empfohlen)
+
+Notiert: Zahlen read-only aus Replit-Prod, und erst die §45b-Gegenprobe zu Ende, dann diese Ansichten-Analyse. Ich lege die zwei Tasks an und halte die Anweisung bereit, damit du sie direkt nach der Gegenprobe an Claude Code geben kannst.
+
+Aufgaben aktualisiert
+Aufgaben aktualisiert
+
+So machen wir's:
+
+Jetzt: Claude Code die §45b-Gegenprobe zu Ende fahren (die Anweisung von eben — Wegwerf-Postgres an 127.0.0.1, 15.06 vs 15.07). Poste mir die Ist/Soll-Zahlen je Stichtag, dann ist der Bug doppelt bestätigt und wir haken #12 ab.
+
+Danach gibst du Claude Code diese Anweisung für die Ansichten-Analyse:
+
+Analyse Abrechnungs- + Nachweis-Ansichten (Juni/Juli 2026) — read-only, kein Fix, kein Commit.
+
+Sicherheit: Zahlen kommen aus Replit-Prod, ausschließlich SELECT (read-only Rolle, wenn vorhanden). Keine Schreiboperation, Connection-String nicht ins Repo/in Logs schreiben. Falls kein Zugang bereitliegt: melden, nicht improvisieren.
+
+Teil A — Zahlen (Juni und Juli 2026 getrennt): Termine nach Lebenszyklus-Status, je mit Anzahl + Summe €: dokumentiert, LN erstellt, Unterschrift offen, Rechnung erstellt, an Kasse gesendet, bezahlt — plus No-Show, storniert, deaktivierter Kunde. Zusätzlich die Abrechnungs-Gruppen aus Screenshot 1 (Noch zu erstellen / Bereit zum Abrechnen / Wartet auf Kundenunterschrift) mit Anzahl + €.
+
+Teil B — Lücken-Audit (Code lesen, dann gegen die Daten gegenprüfen):
+
+Finde die Query/den Service hinter der Abrechnungsliste (Screenshot 1). Liste die exakten Inklusionsfilter + die Gruppierungslogik. Prüfe: (a) werden No-Show / storniert / §45a-deaktiviert / budget-erschöpft ausgeschlossen? (b) kann ein Kunde als „abrechenbar" erscheinen, während nur ein Teil seiner Termine dokumentiert ist, und die übrigen still von der Rechnung fallen? (c) werden Termine mehrerer Mitarbeiter vollständig erfasst, oder können abrechenbare Termine nie auftauchen (#1542-Post-Check)?
+Finde die Query hinter Nachweise je Mitarbeiter (Screenshot 2). Liste Scope (Mitarbeiter + Monat + Status). Prüfe: (a) erscheinen No-Show/stornierte Termine als „bereit"? (b) Mehr-Mitarbeiter-Kunde: sieht der eingeloggte Mitarbeiter nur eigene Termine — bleiben Termine anderer Mitarbeiter desselben Kunden ungezeichnet? (c) werden Termine mit unvollständiger Doku korrekt zurückgehalten oder fälschlich ganz übersehen?
+Reconciliation: Baue eine Query „alle abrechenbar-fähigen Termine Juni/Juli" (dokumentiert, nicht No-Show, aktiver Kunde, im Budget) und vergleiche mit dem, was die zwei Ansichten tatsächlich anzeigen. Jedes Delta = eine Lücke — benenne Kunde/Termin/Grund.
+Melde je Ansicht: False Positive (Nicht-Abrechenbares angezeigt) und False Negative (Abrechenbares fehlt), jeweils mit der konkreten Code-Bedingung. Keine Code-Änderung. Fachliche Bewertung mache ich (Alrik) mit Cowork-Claude.

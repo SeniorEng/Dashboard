@@ -1,0 +1,45 @@
+Read-only Datenanalyse (Juni/Juli 2026). Nur Auswertung — keine Code-Änderung, keine Datenänderung, nichts schreiben. Bitte nur SELECT-Abfragen gegen die Prod-DB und die Ergebnisse berichten.
+
+Fachregel vorab (bindend): Ein gültiger, abrechenbarer Leistungsnachweis erfordert beide Unterschriften — Kunde UND Mitarbeiter. Ein LN mit nur Mitarbeiterunterschrift (Status employee_signed) ist nicht abrechenbar; abrechenbar ist nur der beidseitig signierte (completed).
+
+Teil A — Termine nach Status, Juni 2026 und Juli 2026 getrennt. Je Monat und je Status: Anzahl Termine + Summe € (Terminwert). Status: geplant, in Doku, abgeschlossen (completed), No-Show, storniert; zusätzlich abgeschlossene Termine aufgeteilt nach LN-Stand: „ohne LN", „nur mitarbeitersigniert (employee_signed)", „beidseitig signiert (completed)", „berechnet/auf Rechnung", „an Kasse gesendet", „bezahlt". Deaktivierte/inaktive Kunden separat ausweisen. Dazu die drei Abrechnungsgruppen der Abrechnungs-Karte (Bereit zum Abrechnen / Wartet auf Kundenunterschrift / Noch offene Termine) mit Anzahl + €.
+
+Teil B — Reconciliation (Lücken finden). Bilde die Menge „eigentlich abrechenbar" = abgeschlossene Termine mit beidseitig signiertem LN, aktiver Kunde, nicht No-Show/storniert, im Budget. Vergleiche mit dem, was die Abrechnungs-Karte tatsächlich als „Bereit zum Abrechnen" zeigt und was die Rechnung tatsächlich bucht. Zwei konkrete Lücken bitte gezielt quantifizieren:
+
+Kunden, die als „Bereit zum Abrechnen" erscheinen, obwohl sie im selben Monat Termine unter einem nur mitarbeitersignierten LN haben, die dann nicht mitfakturiert werden → Anzahl Kunden + Anzahl + € der still herausfallenden Termine. (Fehlende Kundenunterschrift wird hier nicht gemeldet.)
+Kunden mit abgeschlossenen Terminen, die in gar keinem LN hängen (also nirgends zur Abrechnung/Unterschrift auftauchen) → Anzahl + €. Sowie Termine, deren Legs verschiedenen Mitarbeitern gehören und für die (weil kein aktiver Primärmitarbeiter den Nachweis bündelt) keine Kundenunterschrift eingeholt wurde.
+
+Gib jeweils die Detailliste (Kunde, Termin-ID, Grund) aus.
+
+Teil C — §45b-Verfall-Exposure. Hintergrund: §45b-Übertrag aus 2025 verfällt zum 30.06.2026. Wird ein H1-2026-Verbrauch erst nach dem 30.06. gebucht/umgebucht/importiert, koppelt er an allocation_id = NULL statt an den (dann schon abgeschriebenen) Übertrag; dadurch wird er im Juli-Verfügbar fälschlich vom laufenden 2026-Topf abgezogen → Verfügbar zu niedrig. Finde die real betroffene Population und Summe mit folgender Logik (nur echte Fehlkopplung zählen, legitimer statutorischer NULL-Verbrauch NICHT):
+
+sql
+WITH carryover AS (
+  SELECT customer_id, id AS alloc_id, amount_cents
+  FROM budget_allocations
+  WHERE budget_type='entlastungsbetrag_45b' AND source='carryover'
+    AND deleted_at IS NULL AND valid_from='2026-01-01' AND expires_at='2026-06-30'),
+wo AS (
+  SELECT c.customer_id, c.alloc_id, c.amount_cents,
+         COALESCE(SUM(ABS(t.amount_cents)),0) AS written_off
+  FROM carryover c
+  LEFT JOIN budget_transactions t
+    ON t.allocation_id=c.alloc_id AND t.transaction_type='write_off'
+  GROUP BY 1,2,3),
+null_h1 AS (
+  SELECT customer_id, COUNT(*) n_tx, SUM(ABS(amount_cents)) null_cents,
+         SUM(CASE WHEN created_at::date > '2026-06-30' THEN ABS(amount_cents) ELSE 0 END) cents_after_expiry,
+         COUNT(*) FILTER (WHERE created_at::date > '2026-06-30') tx_after_expiry
+  FROM budget_transactions
+  WHERE budget_type='entlastungsbetrag_45b' AND transaction_type='consumption'
+    AND allocation_id IS NULL
+    AND transaction_date BETWEEN '2026-01-01' AND '2026-06-30'
+  GROUP BY 1)
+SELECT COUNT(DISTINCT w.customer_id) AS betroffene_kunden,
+       SUM(LEAST(n.null_cents, w.written_off)) AS zu_niedrig_ausgewiesene_cents,
+       SUM(n.cents_after_expiry) AS davon_nach_3006_entstanden_cents,
+       SUM(n.tx_after_expiry)   AS tx_nach_3006
+FROM wo w JOIN null_h1 n USING (customer_id)
+WHERE w.written_off > 0;
+
+Bitte die Spalten-/Tabellennamen gegen das aktuelle Schema prüfen und ggf. anpassen, dann ausführen. Zusätzlich die Kunden-Detailzeilen (je Kunde LEAST(null_cents, written_off)). Nur lesen, nichts ändern.
