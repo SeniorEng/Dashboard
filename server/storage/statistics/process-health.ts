@@ -2,6 +2,13 @@ import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { ProcessHealthRow, ProcessHealthSummary, SparklinePoint } from "@shared/statistics";
 import { billingPeriodFilter, buildKpi, dateFilter, getHealthThresholds, num, periodToResponse, previousPeriod, previousYearPeriod, scoreFor, type ResolvedPeriod } from "./common";
+// Task #1886 — kundenseitiger Erstberatung-Ausschluss. Die completed-Termin-Scans
+// unten sind Kunden-Doku-/Abrechnungs-Lücken-KPIs; ihre Drill-down-Listen
+// (`listUndocumentedAppointments`/`listAppointmentsWithoutRecord`) schließen
+// kundenlose Erstberatungen bereits über `JOIN customers` aus. Ohne denselben
+// Ausschluss im Zähler zählte die Kennzahl Erstberatungen als Lücke, die Liste
+// aber nicht (Count≠Liste). Kein Lohn-/Stunden-/km-Pfad — rein kundenseitig.
+import { notErstberatungSqlRaw } from "../../lib/appointment-signed";
 
 /**
  * Task #1530 — Termin-genaues „noch abzurechnen"-Prädikat für einen
@@ -79,6 +86,7 @@ async function periodCounts(p: ResolvedPeriod): Promise<PeriodCounts> {
           )) AS wo_appts,
       (SELECT COUNT(*)::int FROM appointments a
         WHERE a.deleted_at IS NULL AND a.status = 'completed'
+          AND ${notErstberatungSqlRaw('a')}
           ${dFilter}
           AND NOT EXISTS (SELECT 1 FROM service_record_appointments sra WHERE sra.appointment_id = a.id)) AS wo_record,
       (SELECT COUNT(DISTINCT msr.id)::int FROM monthly_service_records msr
@@ -100,6 +108,7 @@ async function undocumentedCount(): Promise<number> {
   const r = await db.execute(sql`
     SELECT COUNT(*)::int AS c FROM appointments a
     WHERE a.deleted_at IS NULL AND a.status = 'completed'
+      AND ${notErstberatungSqlRaw('a')}
       AND a.date::date <= ${cutoff}::date
   `);
   return num((r.rows[0] as Record<string, unknown>).c);
@@ -126,10 +135,12 @@ async function monthlySparkRows(year: number): Promise<MonthlySparkRow[]> {
           )), 0)::int AS wo_appts,
       COALESCE((SELECT COUNT(*)::int FROM appointments a
         WHERE a.deleted_at IS NULL AND a.status = 'completed'
+          AND ${notErstberatungSqlRaw('a')}
           AND EXTRACT(YEAR FROM a.date::date) = ${year}
           AND EXTRACT(MONTH FROM a.date::date) = g.m), 0)::int AS undoc,
       COALESCE((SELECT COUNT(*)::int FROM appointments a
         WHERE a.deleted_at IS NULL AND a.status = 'completed'
+          AND ${notErstberatungSqlRaw('a')}
           AND EXTRACT(YEAR FROM a.date::date) = ${year}
           AND EXTRACT(MONTH FROM a.date::date) = g.m
           AND NOT EXISTS (SELECT 1 FROM service_record_appointments sra WHERE sra.appointment_id = a.id)

@@ -140,6 +140,11 @@ export async function readBillingPipeline(
       ) AS is_invoiced
     FROM appt_rev ar
     JOIN appointments a ON a.id = ar.id
+    -- #1886: Erstberatungen (kundenlos, customer_id = NULL) fallen hier über den
+    -- INNER JOIN auf customers implizit raus und erscheinen nie in der
+    -- Kunden-Abrechnungs-Pipeline. Kein expliziter appointment_type-Filter nötig
+    -- (wäre redundant); der Ausschluss ist an den NULL-customer_id-Invariant der
+    -- Erstberatung gekoppelt (siehe CLAUDE.md → Arbeitsregeln).
     JOIN customers c ON c.id = ar.customer_id
   `);
 
