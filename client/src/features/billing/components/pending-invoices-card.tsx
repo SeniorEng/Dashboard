@@ -6,6 +6,7 @@ import { iconSize } from "@/design-system";
 import {
   Loader2,
   FileText,
+  FilePlus,
   CheckCircle2,
   ClipboardList,
   ChevronDown,
@@ -16,6 +17,7 @@ import {
 import type { BillingCustomerItem } from "@shared/api";
 import {
   isPartiallyDocumented,
+  isServiceRecordMissing,
   hasOpenAppointments,
   classifyBillingMaturity,
   isLateSignedFollowUp,
@@ -51,19 +53,28 @@ interface PendingInvoicesCardProps {
 function PendingCustomerRow({
   customer: c,
   onCreateForCustomer,
+  canCreate,
   selectedMonth,
   selectedYear,
 }: {
   customer: BillingCustomerItem;
   onCreateForCustomer: (customerId: number) => void;
+  // Task #1885: Nicht-abrechenbare Kunden (Gruppe „Leistungsnachweis fehlt noch")
+  // bekommen KEINE „Erstellen"-Aktion — eine Rechnung ist ohne LN nicht möglich.
+  canCreate: boolean;
   selectedMonth: number;
   selectedYear: number;
 }) {
+  // Task #1885: Dokumentierte Termine, aber noch gar kein Leistungsnachweis
+  // (`coveredAppointments === 0`). Gemeinsame SSoT `isServiceRecordMissing`.
+  const serviceRecordMissing = isServiceRecordMissing(c);
   // Partial-Signing-Hinweis: weniger Termine durch einen aktiven
   // Leistungsnachweis abgedeckt als dokumentiert wurden. Gemeinsame SSoT-Regel
   // `isPartiallyDocumented` (@shared/domain/billing-eligibility), dieselbe, die
   // `/billing/eligible-customers` für den „nur X/Y dokumentiert"-Hinweis nutzt.
-  const partial = isPartiallyDocumented(c);
+  // Task #1885: Bei ganz fehlendem LN (`covered === 0`) NICHT als „nur 0/N
+  // dokumentiert" anzeigen — das ist der eigene „Leistungsnachweis fehlt"-Hinweis.
+  const partial = isPartiallyDocumented(c) && !serviceRecordMissing;
   const openCount = c.openAppointments ?? 0;
   // Task #1813: Nachberechnung (spät unterschriebene Nachzügler) — der Kunde
   // hat im Monat bereits eine Rechnung UND weitere signierte Termine, die noch
@@ -100,8 +111,11 @@ function PendingCustomerRow({
   // „Unvollständig dokumentiert" und darf nicht gleichzeitig „Kundenunterschrift
   // fehlt" zeigen — das wäre eine zweite, widersprüchliche Begründung. Die
   // betroffenen Termine erklärt der Dialog beim Öffnen weiterhin im Detail.
+  // Task #1885: Bei fehlendem LN erklärt der eigene „Leistungsnachweis fehlt"-Hinweis
+  // die Zeile — das generische Block-Label (z. B. „Nicht unterschrieben") wäre eine
+  // zweite, weniger präzise Begründung und wird daher unterdrückt.
   const blockLabel =
-    openCount === 0 && !partial && c.eligibility.status !== "eligible"
+    !serviceRecordMissing && openCount === 0 && !partial && c.eligibility.status !== "eligible"
       ? awaitingSignature
         ? awaitingSignatureCount > 0
           ? `${BILLING_BLOCK_SHORT_LABELS.customer_signature_required} (${awaitingSignatureCount} ${awaitingSignatureCount === 1 ? "Termin" : "Termine"})`
@@ -143,6 +157,15 @@ function PendingCustomerRow({
             Nur {c.coveredAppointments}/{c.completedAppointments} dokumentierte Termine im Leistungsnachweis
           </div>
         )}
+        {serviceRecordMissing && (
+          <div
+            className="mt-0.5 text-xs text-amber-700"
+            data-testid={`text-pending-ln-missing-${c.id}`}
+          >
+            Noch kein Leistungsnachweis — {c.completedAppointments} dokumentierte
+            {c.completedAppointments === 1 ? "r Termin" : " Termine"}
+          </div>
+        )}
         {blockLabel && (
           <div
             className="mt-0.5 text-xs text-amber-700"
@@ -170,16 +193,18 @@ function PendingCustomerRow({
           </Link>
         )}
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="text-teal-700 border-teal-200 hover:bg-teal-50"
-        onClick={() => onCreateForCustomer(c.id)}
-        data-testid={`button-create-pending-${c.id}`}
-      >
-        <FileText className={`${iconSize.sm} mr-1`} />
-        Erstellen
-      </Button>
+      {canCreate && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-teal-700 border-teal-200 hover:bg-teal-50"
+          onClick={() => onCreateForCustomer(c.id)}
+          data-testid={`button-create-pending-${c.id}`}
+        >
+          <FileText className={`${iconSize.sm} mr-1`} />
+          Erstellen
+        </Button>
+      )}
     </li>
   );
 }
@@ -194,6 +219,7 @@ function PendingSection({
   headerClassName,
   customers,
   onCreateForCustomer,
+  canCreate = true,
   testIdKey,
   selectedMonth,
   selectedYear,
@@ -203,6 +229,10 @@ function PendingSection({
   headerClassName: string;
   customers: BillingCustomerItem[];
   onCreateForCustomer: (customerId: number) => void;
+  // Task #1885: false in der Gruppe „Leistungsnachweis fehlt noch" — dort ist keine
+  // Rechnung möglich, also keine „Erstellen"-Aktion. Default true (alle übrigen
+  // Sektionen unverändert).
+  canCreate?: boolean;
   testIdKey: string;
   selectedMonth: number;
   selectedYear: number;
@@ -253,6 +283,7 @@ function PendingSection({
                 key={c.id}
                 customer={c}
                 onCreateForCustomer={onCreateForCustomer}
+                canCreate={canCreate}
                 selectedMonth={selectedMonth}
                 selectedYear={selectedYear}
               />
@@ -314,6 +345,7 @@ export function PendingInvoicesCard({
   // dokumentierte Kunden; unvollständig dokumentierte wandern in eine eigene
   // Gruppe, unterschrifts-blockierte in „Wartet auf Kundenunterschrift".
   const openCustomers: BillingCustomerItem[] = [];
+  const serviceRecordMissingCustomers: BillingCustomerItem[] = [];
   const signatureBlockedCustomers: BillingCustomerItem[] = [];
   const partiallyDocumentedCustomers: BillingCustomerItem[] = [];
   const readyCustomers: BillingCustomerItem[] = [];
@@ -321,6 +353,10 @@ export function PendingInvoicesCard({
     switch (classifyBillingMaturity(c)) {
       case "has_open_appointments":
         openCustomers.push(c);
+        break;
+      // Task #1885: dokumentierte Termine, aber noch gar kein Leistungsnachweis.
+      case "service_record_missing":
+        serviceRecordMissingCustomers.push(c);
         break;
       case "signature_blocked":
         signatureBlockedCustomers.push(c);
@@ -406,6 +442,19 @@ export function PendingInvoicesCard({
                   customers={partiallyDocumentedCustomers}
                   onCreateForCustomer={onCreateForCustomer}
                   testIdKey="partial"
+                  selectedMonth={selectedMonth}
+                  selectedYear={selectedYear}
+                />
+                {/* Task #1885: dokumentierte Termine, aber noch gar kein LN. NICHT
+                    abrechenbar → keine „Erstellen"-Aktion (canCreate=false). */}
+                <PendingSection
+                  title="Leistungsnachweis fehlt noch"
+                  icon={<FilePlus className={`${iconSize.sm} text-amber-600`} />}
+                  headerClassName="text-amber-700"
+                  customers={serviceRecordMissingCustomers}
+                  onCreateForCustomer={onCreateForCustomer}
+                  canCreate={false}
+                  testIdKey="ln-missing"
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}
                 />
