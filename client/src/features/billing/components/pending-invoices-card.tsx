@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
 import type { MissingSignatureItem } from "../types";
+import { formatEuroDE } from "@shared/utils/money";
 import {
   isPartiallyDocumented,
   isServiceRecordMissing,
@@ -237,6 +238,18 @@ function PendingCustomerRow({
           </div>
         )}
       </div>
+      {/* Task #1887 — voraussichtlicher Betrag des aktuell abrechenbaren Teils
+          (dieselbe SSoT wie die Erstellung). 0 → „—" (noch nicht abrechenbar). */}
+      <div
+        className="shrink-0 text-right text-sm tabular-nums"
+        data-testid={`text-pending-amount-${c.id}`}
+      >
+        {(c.estimatedAmountCents ?? 0) > 0 ? (
+          <span className="font-medium text-gray-900">{formatEuroDE(c.estimatedAmountCents)}</span>
+        ) : (
+          <span className="text-gray-400" title="Aktuell nicht abrechenbar">—</span>
+        )}
+      </div>
       {canCreate && (
         <Button
           variant="outline"
@@ -289,6 +302,13 @@ function PendingSection({
   // als Toggle, der Zähler bleibt auch im eingeklappten Zustand sichtbar.
   // Standard: aufgeklappt.
   const [open, setOpen] = useState(true);
+  // Task #1887 — kumulierte Gruppensumme des aktuell abrechenbaren Betrags (Σ der
+  // Kundenbeträge dieser Gruppe, dieselbe SSoT). Nicht-abrechenbare Gruppen (LN
+  // fehlt / offen / wartet) summieren zu 0 → „—" statt irreführender Zahl.
+  const groupTotalCents = customers.reduce(
+    (sum, c) => sum + (c.estimatedAmountCents ?? 0),
+    0,
+  );
   if (customers.length === 0) return null;
   return (
     <div className="mt-5 first:mt-0" data-testid={`section-pending-${testIdKey}`}>
@@ -311,6 +331,14 @@ function PendingSection({
           data-testid={`text-pending-${testIdKey}-count`}
         >
           {customers.length}
+        </span>
+        {/* Task #1887 — kumulierte Gruppensumme (analog „Avis ausstehend … €").
+            Nicht-abrechenbare Gruppe → „—". */}
+        <span
+          className="ml-auto text-xs font-semibold tabular-nums text-gray-900"
+          data-testid={`text-pending-${testIdKey}-total`}
+        >
+          {groupTotalCents > 0 ? formatEuroDE(groupTotalCents) : "—"}
         </span>
       </button>
       {/* Task #1772: weiches Ein-/Ausklappen via grid-rows-Transition (kein
