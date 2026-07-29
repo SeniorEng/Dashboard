@@ -1405,6 +1405,10 @@
           "status": {
             "type": "string"
           },
+          "stornierteRechnungId": {
+            "nullable": true,
+            "type": "integer"
+          },
           "vatAmountCents": {
             "type": "integer"
           },
@@ -1435,7 +1439,8 @@
           "pdfPath",
           "createdAt",
           "billingRunId",
-          "budgetType"
+          "budgetType",
+          "stornierteRechnungId"
         ],
         "type": "object"
       },
