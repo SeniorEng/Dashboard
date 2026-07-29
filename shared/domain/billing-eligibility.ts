@@ -277,9 +277,26 @@ export function classifyBillingEligibility(
 }
 
 /**
+ * Task #1885 — PURE SSoT der Gruppe „Leistungsnachweis fehlt noch". Ein Kunde hat
+ * im Monat dokumentierte (`completed`) Termine, aber KEINER davon ist durch einen
+ * aktiven Leistungsnachweis abgedeckt (`coveredAppointments === 0`) — es wurde also
+ * noch gar kein LN erstellt. Abgegrenzt von `isPartiallyDocumented` (dort existiert
+ * bereits ein LN, der nur einen Teil abdeckt: `0 < covered < completed`): diese
+ * Gruppe ist der Vorschritt davor (noch gar kein LN). Dadurch bleibt das Verhalten
+ * von `isPartiallyDocumented` für Kunden mit vorhandenem LN (`covered ≥ 1`)
+ * unverändert. Rein additiv (#1885 macht LN-lose Kunden erstmals sichtbar).
+ */
+export function isServiceRecordMissing(c: DocumentationCoverage): boolean {
+  return c.completedAppointments > 0 && c.coveredAppointments === 0;
+}
+
+/**
  * Task #1786 — Reifegruppe eines Kunden in der Karte „Noch zu erstellen".
  * Genau EINE Gruppe pro Kunde:
  *  • `has_open_appointments` — im Monat sind noch offene (geplante) Termine.
+ *  • `service_record_missing` — dokumentierte Termine, aber noch gar kein
+ *                              Leistungsnachweis (Task #1885, „Leistungsnachweis
+ *                              fehlt noch"). NICHT abrechenbar — kein „Erstellen".
  *  • `signature_blocked`     — keine offenen Termine mehr, aber Pflegekasse ohne
  *                              Kundenunterschrift (nur `employee_signed`).
  *  • `partially_documented`  — abrechenbar, aber weniger Termine durch aktive
@@ -291,6 +308,7 @@ export type BillingMaturityGroup =
   | "ready"
   | "partially_documented"
   | "signature_blocked"
+  | "service_record_missing"
   | "has_open_appointments";
 
 /** Eingangsfakten der Reifegruppierung — schon vom Server gelieferte Felder. */
@@ -311,6 +329,13 @@ export interface BillingMaturityFacts {
  */
 export function classifyBillingMaturity(c: BillingMaturityFacts): BillingMaturityGroup {
   if (hasOpenAppointments(c)) return "has_open_appointments";
+  // Task #1885 — VOR `partially_documented`: dokumentierte Termine ganz ohne LN
+  // (`covered === 0`) sind „Leistungsnachweis fehlt noch", nicht „unvollständig
+  // dokumentiert". `isPartiallyDocumented` (`covered < completed`) bliebe sonst für
+  // `covered === 0` wahr und würde diese Kunden fälschlich als teildokumentiert
+  // einsortieren. Kunden mit vorhandenem LN haben `covered ≥ 1` und sind davon nicht
+  // betroffen — die bestehende „Unvollständig dokumentiert"-Gruppe bleibt unverändert.
+  if (isServiceRecordMissing(c)) return "service_record_missing";
   // Task #1881 — Sektion muss zum Inline-Label passen: Ein nur teildokumentierter
   // Kunde (weniger Termine abgedeckt als dokumentiert) zeigt inline „nur X/Y
   // dokumentiert" und gehört daher unter „Unvollständig dokumentiert" — auch wenn
