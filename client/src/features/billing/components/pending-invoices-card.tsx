@@ -15,6 +15,7 @@ import {
   PenLine,
 } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
+import type { MissingSignatureItem } from "../types";
 import {
   isPartiallyDocumented,
   isServiceRecordMissing,
@@ -37,6 +38,10 @@ interface PendingInvoicesCardProps {
   // geplante Termine" die Kundendetail-Terminliste auf denselben Monat scopt.
   selectedMonth: number;
   selectedYear: number;
+  // Task #1889 — termingenaue „fehlende Unterschrift nach Abschluss"-Einträge je
+  // Kunde (ersetzt die separate obere Box). Wird unter dem jeweiligen Kunden in der
+  // Liste gerendert, sodass die Unterschrift direkt nachgeholt werden kann.
+  missingSignaturesByCustomer?: Map<number, MissingSignatureItem[]>;
 }
 
 // Task #1743: Ein Kunde gilt als „bereit zum Abrechnen", wenn er im gewählten
@@ -54,6 +59,7 @@ function PendingCustomerRow({
   customer: c,
   onCreateForCustomer,
   canCreate,
+  missingSignatures,
   selectedMonth,
   selectedYear,
 }: {
@@ -62,6 +68,8 @@ function PendingCustomerRow({
   // Task #1885: Nicht-abrechenbare Kunden (Gruppe „Leistungsnachweis fehlt noch")
   // bekommen KEINE „Erstellen"-Aktion — eine Rechnung ist ohne LN nicht möglich.
   canCreate: boolean;
+  // Task #1889 — „fehlende Unterschrift nach Abschluss"-Termine dieses Kunden.
+  missingSignatures?: MissingSignatureItem[];
   selectedMonth: number;
   selectedYear: number;
 }) {
@@ -203,6 +211,31 @@ function PendingCustomerRow({
             <ChevronRight className={iconSize.xs} />
           </Link>
         )}
+        {/* Task #1889 — termingenaue „fehlende Unterschrift nach Abschluss"-Einträge
+            direkt unter dem Kunden (ersetzt die separate obere Box). Der
+            Monatsabschluss-Kontext bleibt als Hinweis erhalten; jeder Eintrag
+            verlinkt den Termin, damit die Unterschrift direkt nachgeholt werden kann. */}
+        {missingSignatures && missingSignatures.length > 0 && (
+          <div className="mt-1 space-y-1" data-testid={`block-missing-signatures-${c.id}`}>
+            <div className="text-xs text-amber-700">
+              Monat abgeschlossen — Unterschrift weiterhin nachholbar:
+            </div>
+            {missingSignatures.map((m) => (
+              <Link
+                key={m.id}
+                href={`/appointment/${m.id}`}
+                className="flex items-center gap-2 rounded border border-amber-200 bg-white px-2 py-1 text-xs text-amber-700 hover:underline"
+                data-testid={`link-missing-signature-${m.id}`}
+              >
+                <span className="font-medium">
+                  {m.date.split("-").reverse().join(".")}
+                  {m.scheduledStart ? ` ${m.scheduledStart.slice(0, 5)}` : ""}
+                </span>
+                <span className="ml-auto shrink-0 text-gray-400">{m.employeeName}</span>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
       {canCreate && (
         <Button
@@ -231,6 +264,7 @@ function PendingSection({
   customers,
   onCreateForCustomer,
   canCreate = true,
+  missingSignaturesByCustomer,
   testIdKey,
   selectedMonth,
   selectedYear,
@@ -244,6 +278,7 @@ function PendingSection({
   // Rechnung möglich, also keine „Erstellen"-Aktion. Default true (alle übrigen
   // Sektionen unverändert).
   canCreate?: boolean;
+  missingSignaturesByCustomer?: Map<number, MissingSignatureItem[]>;
   testIdKey: string;
   selectedMonth: number;
   selectedYear: number;
@@ -295,6 +330,7 @@ function PendingSection({
                 customer={c}
                 onCreateForCustomer={onCreateForCustomer}
                 canCreate={canCreate}
+                missingSignatures={missingSignaturesByCustomer?.get(c.id)}
                 selectedMonth={selectedMonth}
                 selectedYear={selectedYear}
               />
@@ -334,6 +370,7 @@ export function PendingInvoicesCard({
   onCreateForCustomer,
   selectedMonth,
   selectedYear,
+  missingSignaturesByCustomer,
 }: PendingInvoicesCardProps) {
   // Task #1501: Karte einklappbar — der Kopf dient als Toggle, der Zähler bleibt
   // auch im eingeklappten Zustand sichtbar.
@@ -442,6 +479,7 @@ export function PendingInvoicesCard({
                   headerClassName="text-green-700"
                   customers={readyCustomers}
                   onCreateForCustomer={onCreateForCustomer}
+                  missingSignaturesByCustomer={missingSignaturesByCustomer}
                   testIdKey="ready"
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}
@@ -452,6 +490,7 @@ export function PendingInvoicesCard({
                   headerClassName="text-amber-700"
                   customers={partiallyDocumentedCustomers}
                   onCreateForCustomer={onCreateForCustomer}
+                  missingSignaturesByCustomer={missingSignaturesByCustomer}
                   testIdKey="partial"
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}
@@ -464,6 +503,7 @@ export function PendingInvoicesCard({
                   headerClassName="text-amber-700"
                   customers={serviceRecordMissingCustomers}
                   onCreateForCustomer={onCreateForCustomer}
+                  missingSignaturesByCustomer={missingSignaturesByCustomer}
                   canCreate={false}
                   testIdKey="ln-missing"
                   selectedMonth={selectedMonth}
@@ -475,6 +515,7 @@ export function PendingInvoicesCard({
                   headerClassName="text-amber-700"
                   customers={signatureBlockedCustomers}
                   onCreateForCustomer={onCreateForCustomer}
+                  missingSignaturesByCustomer={missingSignaturesByCustomer}
                   testIdKey="signature"
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}
@@ -485,6 +526,7 @@ export function PendingInvoicesCard({
                   headerClassName="text-amber-700"
                   customers={openCustomers}
                   onCreateForCustomer={onCreateForCustomer}
+                  missingSignaturesByCustomer={missingSignaturesByCustomer}
                   testIdKey="open"
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}

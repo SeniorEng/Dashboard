@@ -1,3 +1,20 @@
+// Task #1889 — Ein termingenauer „fehlende Unterschrift nach Abschluss"-Eintrag
+// (Server-SSoT `getMissingSignaturesInClosedMonths` / `completedButUnsignedSqlRaw`,
+// #1586: completed, keine Direktunterschrift, nicht unter signiertem LN,
+// Monat abgeschlossen, Erstberatung ausgenommen). Wird jetzt pro Kunde in die
+// Abrechnungsliste integriert statt in eine separate Box (die redundante obere Box
+// entfällt).
+export interface MissingSignatureItem {
+  id: number;
+  date: string;
+  scheduledStart: string | null;
+  customerId: number;
+  customerName: string;
+  employeeName: string;
+  year: number;
+  month: number;
+}
+
 export interface GenerateAllResponse {
   summary: { total: number; created: number; skipped: number; errors: number };
   // Task #1883 — bei „übersprungen wegen Teil-Abrechnung" reisen die betroffenen

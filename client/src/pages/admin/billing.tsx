@@ -40,11 +40,11 @@ import {
   useBillingTermine,
   useActiveEmployees,
   useBillingMutations,
+  useMissingSignaturesByCustomer,
   BillingFilterBar,
   EconomicsOverviewCard,
   StatusPipelineCard,
   TermineTab,
-  MissingSignaturesCard,
   InvoiceList,
   PendingInvoicesCard,
   BulkSendDialog,
@@ -129,6 +129,10 @@ export default function AdminBilling() {
     NO_DATE,
     NO_DATE,
   );
+
+  // Task #1889 — „fehlende Unterschrift nach Abschluss" pro Kunde, direkt in die
+  // Abrechnungsliste integriert (ersetzt die separate obere Box).
+  const missingSignaturesByCustomer = useMissingSignaturesByCustomer(selectedYear, selectedMonth);
 
   const previewCustomerId = selectedCustomerId ? parseInt(selectedCustomerId, 10) : null;
   const {
@@ -475,8 +479,6 @@ export default function AdminBilling() {
         </button>
       </div>
 
-      <MissingSignaturesCard selectedYear={selectedYear} selectedMonth={selectedMonth} />
-
       {activeTab === "termine" ? (
         <TermineTab
           termine={termine}
@@ -560,6 +562,7 @@ export default function AdminBilling() {
             onCreateForCustomer={handleCreateForCustomer}
             selectedMonth={selectedMonth}
             selectedYear={selectedYear}
+            missingSignaturesByCustomer={missingSignaturesByCustomer}
           />
 
           <InvoiceList

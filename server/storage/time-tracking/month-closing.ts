@@ -289,6 +289,7 @@ export async function getMissingSignaturesInClosedMonths(): Promise<
     id: number;
     date: string;
     scheduledStart: string | null;
+    customerId: number;
     customerName: string;
     employeeName: string;
     year: number;
@@ -300,6 +301,7 @@ export async function getMissingSignaturesInClosedMonths(): Promise<
       a.id AS id,
       a.date AS date,
       a.scheduled_start AS scheduled_start,
+      a.customer_id AS customer_id,
       COALESCE(c.vorname || ' ' || c.nachname, c.name) AS customer_name,
       resp.display_name AS employee_name,
       EXTRACT(YEAR FROM a.date)::int AS year,
@@ -322,6 +324,7 @@ export async function getMissingSignaturesInClosedMonths(): Promise<
     id: Number(r.id),
     date: String(r.date),
     scheduledStart: r.scheduled_start === null || r.scheduled_start === undefined ? null : String(r.scheduled_start),
+    customerId: Number(r.customer_id),
     customerName: String(r.customer_name ?? "Unbekannt"),
     employeeName: String(r.employee_name ?? "Unbekannt"),
     year: Number(r.year),
