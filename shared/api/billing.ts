@@ -43,6 +43,14 @@ export interface BillingCustomerItem {
   // Helper `isLateSignedFollowUp`/`lateSignedFollowUpCount`.
   signedAppointmentCount: number;
   unbilledAppointmentCount: number;
+  // Task #1887 — voraussichtlicher Brutto-Betrag des AKTUELL abrechenbaren Teils
+  // dieses Kunden (Cent), berechnet über `buildInvoiceDraft` im preview-Modus —
+  // DIESELBE SSoT wie `/billing/preview` und die echte Erstellung, inkl. der
+  // #1883-Ausschlüsse (nicht-kundensignierte / LN-lose Termine tragen nicht bei).
+  // 0 bei nicht-abrechenbaren Kunden (LN fehlt / nur offene Termine / nur
+  // employee_signed). Das Frontend zeigt den Betrag je Zeile + die Gruppensumme;
+  // 0 wird als „—" (noch nicht abrechenbar) dargestellt.
+  estimatedAmountCents: number;
 }
 
 export interface InvoiceItem {

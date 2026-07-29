@@ -103,6 +103,9 @@
             ],
             "type": "object"
           },
+          "estimatedAmountCents": {
+            "type": "integer"
+          },
           "id": {
             "type": "integer"
           },
@@ -142,6 +145,7 @@
           "openAppointments",
           "signedAppointmentCount",
           "unbilledAppointmentCount",
+          "estimatedAmountCents",
           "eligibility"
         ],
         "type": "object"

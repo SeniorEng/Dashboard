@@ -357,6 +357,11 @@ export const BillingCustomerItemSchema = component(
     openAppointments: z.number().int(),
     signedAppointmentCount: z.number().int(),
     unbilledAppointmentCount: z.number().int(),
+    // Task #1887 — voraussichtlicher Brutto-Betrag des AKTUELL abrechenbaren Teils
+    // (buildInvoiceDraft preview, dieselbe SSoT wie die echte Erstellung inkl.
+    // #1883-Ausschlüsse). 0 bei nicht-abrechenbaren Kunden (LN fehlt / offen / nur
+    // employee_signed).
+    estimatedAmountCents: z.number().int(),
     eligibility: z.object({
       status: z.enum(["eligible", "blocked"]),
       reason: z
