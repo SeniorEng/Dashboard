@@ -591,6 +591,39 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     statusesByCustomer.set(r.customerId, arr);
   }
 
+  // Task #1887 — voraussichtlicher Betrag je Kunde = exakt der Vorschau-/
+  // Erstellungsbetrag: `buildInvoiceDraft` im preview-Modus (DIESELBE SSoT wie
+  // `/billing/preview` und die echte Erstellung, inkl. der #1883-Ausschlüsse —
+  // nicht-kundensignierte / LN-lose Termine tragen NICHT bei). Kein zweiter
+  // Rechenweg. Effizienz: nur Kunden mit tatsächlich abrechenbarem Anteil
+  // (`unbilledAppointmentCount > 0`) brauchen einen Draft; alle übrigen (LN fehlt /
+  // nur offene Termine / nur employee_signed) sind 0 und werden übersprungen. Der
+  // preview-Modus ist ein reiner Lesepfad (kein PDF, kein Schreibpfad). Begrenzt
+  // parallel (Chunks), damit die Liste bei vielen Kunden nicht spürbar langsamer wird
+  // und der DB-Pool nicht überlastet. Datums-/Kassenfilter sind bereits im Scope
+  // (`finalIds` gefiltert, `dateFromQ`/`dateToQ` an den Draft durchgereicht).
+  const amountByCustomer = new Map<number, number>();
+  const billableForAmount = finalIds.filter(
+    (id) => (unbilledFacts.get(id)?.unbilledAppointmentCount ?? 0) > 0,
+  );
+  const AMOUNT_CONCURRENCY = 8;
+  for (let i = 0; i < billableForAmount.length; i += AMOUNT_CONCURRENCY) {
+    const chunk = billableForAmount.slice(i, i + AMOUNT_CONCURRENCY);
+    await Promise.all(
+      chunk.map(async (id) => {
+        const draft = await buildInvoiceDraft({
+          customerId: id,
+          billingMonth: month,
+          billingYear: year,
+          dateFrom: dateFromQ,
+          dateTo: dateToQ,
+          mode: "preview",
+        });
+        amountByCustomer.set(id, draft.grossAmountCents);
+      }),
+    );
+  }
+
   // Termin-Fakten (signiert / noch nicht abgerechnet) je Kunde aus DER EINEN
   // SSoT `unbilledFacts` (oben berechnet) — keine zweite Kopie der Regel mehr.
   const eligibleCustomers: BillingCustomerItem[] = filteredCustomerRows.map(c => {
@@ -611,6 +644,9 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
       // DERSELBEN SSoT (`unbilledFacts`), die auch die Eligibilität speist.
       signedAppointmentCount: facts?.signedAppointmentCount ?? 0,
       unbilledAppointmentCount: facts?.unbilledAppointmentCount ?? 0,
+      // Task #1887 — voraussichtlicher Brutto-Betrag des abrechenbaren Teils (0 =
+      // aktuell nicht abrechenbar → Frontend zeigt „—").
+      estimatedAmountCents: amountByCustomer.get(c.id) ?? 0,
     };
   });
 
