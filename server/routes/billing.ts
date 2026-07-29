@@ -37,6 +37,7 @@ import {
 import type { Invoice, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
 import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
 import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse, BulkDeleteResultItem, BulkDeleteResponse, BulkStatusResultItem, BulkStatusResponse, RepairPdfsResultItem, RepairPdfsResponse } from "@shared/api";
+import type { BillingExcludedAppointment } from "@shared/api/billing";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
@@ -85,7 +86,7 @@ import {
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
 import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer, getUnbilledSignedAppointmentFactsByCustomer, type UnbilledSignedFacts } from "../services/invoice-data";
-import { buildInvoiceDraft, generateInvoiceCore } from "../services/invoice-calc";
+import { buildInvoiceDraft, generateInvoiceCore, PartialBillingConfirmationRequiredError } from "../services/invoice-calc";
 import { reduceInvoice45bToPaidAmount } from "../services/invoice-45b-reduction";
 import {
   MONTH_NAMES_DE,
@@ -1525,12 +1526,33 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   if (!parsed.success) {
     throw badRequest(fromError(parsed.error).toString());
   }
-  const result = await generateInvoiceCore(parsed.data, {
-    userId: req.user!.id,
-    ipAddress: req.ip,
-    testFaults: readTestFaults(req),
-  });
-  res.json(result);
+  try {
+    const result = await generateInvoiceCore(parsed.data, {
+      userId: req.user!.id,
+      ipAddress: req.ip,
+      testFaults: readTestFaults(req),
+    });
+    // Task #1883 — Opt-in-Grund fürs bewusste Teil-Abrechnen protokollieren.
+    if (parsed.data.confirmPartial) {
+      log(
+        `partial-billing confirmed customer=${parsed.data.customerId} month=${parsed.data.billingMonth}/${parsed.data.billingYear} userId=${req.user!.id} reason=${JSON.stringify(parsed.data.partialReason ?? "")}`,
+        "billing",
+      );
+    }
+    res.json(result);
+  } catch (err) {
+    // Task #1883 — Guard: dokumentierte Termine würden still fallen. Nicht als
+    // 500/400 verschlucken, sondern 409 mit Ausweis der betroffenen Termine, damit
+    // das Frontend die Teil-Abrechnung explizit bestätigen lassen kann.
+    if (err instanceof PartialBillingConfirmationRequiredError) {
+      return res.status(409).json({
+        code: err.code,
+        message: err.message,
+        excludedAppointments: err.excludedAppointments,
+      });
+    }
+    throw err;
+  }
 }));
 
 // Task #1785 P4 — §45b-Kürzung: Superadmin reduziert EINE ausgestellte
@@ -3196,9 +3218,15 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     // /eligible-customers und die Karten-Gruppierung „Bereit zum Abrechnen" —
     // keine zweite Berechnung. Weggelassen/false = alle berechtigten Kunden.
     readyOnly: z.boolean().optional(),
+    // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen (Variante B). Ohne dieses
+    // Flag werden Mischkunden, bei denen dokumentierte Termine mangels
+    // Kundenunterschrift/LN still fielen, als „übersprungen mit Ausweis" gemeldet
+    // (nie still); mit `confirmPartial=true` wird ihr signierter Teil abgerechnet.
+    confirmPartial: z.boolean().optional(),
+    partialReason: z.string().max(500).optional(),
   }).safeParse(req.body);
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
-  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo, readyOnly } = parsed.data;
+  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo, readyOnly, confirmPartial, partialReason } = parsed.data;
   const hasDateRange = !!(dateFrom || dateTo);
   // Task #586 — Strukturiertes Start-/Ende-Log + Voll-Stack im inneren
   // Catch, damit der nächste 500-Vorfall in Prod im Server-Log sofort
@@ -3207,6 +3235,13 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
   // den blanken Express-Request-Log und keinen Kontext.
   const startedAt = Date.now();
   const userId = req.user?.id;
+  // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen protokollieren (Flag + Grund).
+  if (confirmPartial) {
+    log(
+      `partial-billing (generate-all) confirmed month=${billingMonth}/${billingYear} userId=${userId ?? "?"} reason=${JSON.stringify(partialReason ?? "")}`,
+      "billing",
+    );
+  }
 
   // Berechtigte Kunden = Kunden mit signiertem Leistungsnachweis für den Monat.
   const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
@@ -3321,6 +3356,9 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     status: "created" | "skipped" | "error";
     invoiceCount?: number;
     message?: string;
+    // Task #1883 — bei „übersprungen wegen Teil-Abrechnung" die betroffenen Termine
+    // mitgeben (Datum + Grund), damit der Dialog sie nachverfolgen kann (nie still).
+    excludedAppointments?: BillingExcludedAppointment[];
   }> = [];
 
   // Task #1771: übersprungene Kunden mit noch offenen Terminen in die
@@ -3361,7 +3399,7 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
       // kein Cookie-Forwarding, kein Host-Header-SSRF-Risiko.
       try {
         const result = await generateInvoiceCore(
-          { customerId, billingMonth, billingYear, dateFrom, dateTo },
+          { customerId, billingMonth, billingYear, dateFrom, dateTo, confirmPartial },
           {
             userId: req.user!.id,
             ipAddress: req.ip,
@@ -3373,6 +3411,19 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
           : 1;
         results.push({ customerId, status: "created", invoiceCount: count });
       } catch (innerErr) {
+        // Task #1883 — Guard (Variante B): ohne `confirmPartial` würden bei diesem
+        // Mischkunden dokumentierte Termine mangels Kundenunterschrift/LN still
+        // fallen. Als „übersprungen MIT Ausweis" melden (nie still) — die betroffenen
+        // Termine reisen im Result mit, damit der Dialog sie prominent nachverfolgt.
+        if (innerErr instanceof PartialBillingConfirmationRequiredError) {
+          results.push({
+            customerId,
+            status: "skipped",
+            message: "Wartet auf Kundenunterschrift / Leistungsnachweis",
+            excludedAppointments: innerErr.excludedAppointments,
+          });
+          continue;
+        }
         const msg = innerErr instanceof Error ? innerErr.message : "Unbekannter Fehler";
         // „Alle Termine ... bereits abgerechnet" / „Kein Leistungsnachweis"
         // / „nicht unterschrieben" werden als Skip gewertet, damit die
