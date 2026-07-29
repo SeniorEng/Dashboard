@@ -375,7 +375,46 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
       monthlyServiceRecordsRepo.activeOnly()
     ));
 
-  const uniqueCustomerIds = Array.from(new Set(signedRecords.map(r => r.customerId)));
+  const signedCustomerIds = Array.from(new Set(signedRecords.map(r => r.customerId)));
+
+  // Task #1885 — Kandidatenmenge erweitern: nicht mehr NUR Kunden mit einem
+  // signierten Leistungsnachweis, sondern ALLE Kunden mit im Monat noch nicht
+  // vollständig abgerechneter Termin-Aktivität — dokumentiert (`completed`) UND/ODER
+  // offen (`scheduled`/`documenting`), auch ganz OHNE LN. Dadurch werden Kunden
+  // sichtbar, die erst noch einen LN brauchen (Gruppe „Leistungsnachweis fehlt noch")
+  // bzw. deren Termine noch offen sind („Noch offene Termine"). Erstberatungen /
+  // kundenlose Termine bleiben ausgeschlossen (#1886: `appointment_type <> 'Erstberatung'`;
+  // NULL-`customer_id` wird unten weggefiltert). Storniert/No-Show zählen nicht als
+  // abrechenbare Aktivität. Der Ausschluss vollständig abgerechneter Kunden bleibt
+  // `isMonthFullyBilledAndSigned` (unten) überlassen.
+  //
+  // WICHTIG (Sichtbarkeit ≠ Abrechenbarkeit, #1885 Punkt 4): Diese Erweiterung
+  // betrifft AUSSCHLIESSLICH die Anzeige. Die Sammel-Erstellung (`POST /generate-all`)
+  // leitet ihre Kundenmenge WEITERHIN eigenständig aus signierten LNs ab und wird
+  // dadurch NICHT erweitert; der „Alle erstellen"-Zähler filtert zusätzlich auf
+  // `eligibility.status === "eligible"`. Alle hier neu sichtbaren (LN-losen) Kunden
+  // sind `blocked` und damit weder im Bulk-Set noch im Zähler.
+  const mm = String(month).padStart(2, "0");
+  const activityMonthStart = `${year}-${mm}-01`;
+  const activityNextMonth = month === 12 ? 1 : month + 1;
+  const activityNextYear = month === 12 ? year + 1 : year;
+  const activityMonthEndExclusive = `${activityNextYear}-${String(activityNextMonth).padStart(2, "0")}-01`;
+  const activityRows = await appointmentsRepo.selectColumnsFrom({
+    customerId: appointments.customerId,
+  })
+    .where(and(
+      appointmentsRepo.activeOnly(),
+      ne(appointments.appointmentType, "Erstberatung"),
+      notInArray(appointments.status, ["cancelled", "customer_no_show"]),
+      gte(appointments.date, activityMonthStart),
+      lt(appointments.date, activityMonthEndExclusive),
+    ))
+    .groupBy(appointments.customerId);
+  const activityCustomerIds = activityRows
+    .map((r) => r.customerId)
+    .filter((id): id is number => id != null);
+
+  const uniqueCustomerIds = Array.from(new Set([...signedCustomerIds, ...activityCustomerIds]));
 
   if (uniqueCustomerIds.length === 0) {
     return res.json([]);
