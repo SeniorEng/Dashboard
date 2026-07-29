@@ -26,8 +26,11 @@ import { getProcessHealthSummary } from "../server/storage/statistics/process-he
 import { getEmployeePayrollRows } from "../server/storage/time-tracking/payroll-hours";
 import { resolvePeriod } from "../server/storage/statistics/common";
 
-const YEAR = 2017;
-const MONTH = 8;
+// resolvePeriod validiert year >= 2020; isolierter, sonst ungenutzter Monat
+// (weit weg von 2021-03 des process-health-Tests und den 2025/2026-Budget-Tests),
+// damit parallele Test-Daten die Delta-Assertions nicht verfälschen.
+const YEAR = 2020;
+const MONTH = 11;
 const PERIOD = resolvePeriod({ year: YEAR, month: MONTH });
 
 let employeeId: number;
