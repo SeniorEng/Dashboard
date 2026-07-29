@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -68,8 +69,9 @@ interface NewInvoiceDialogProps {
   blockingDrafts: BlockingDraftInvoice[] | undefined;
   onDiscardClick: () => void;
   discardDraftsMutation: UseMutationResult<DiscardDraftsResponse, Error, { customerId: number; month: number; year: number }, unknown>;
-  generateMutation: UseMutationResult<GenerateInvoiceResponse, Error, { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string }, unknown>;
-  onGenerate: () => void;
+  generateMutation: UseMutationResult<GenerateInvoiceResponse, Error, { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string; confirmPartial?: boolean; partialReason?: string }, unknown>;
+  // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen wird beim Erstellen mitgegeben.
+  onGenerate: (opts?: { confirmPartial?: boolean; partialReason?: string }) => void;
 }
 
 export function NewInvoiceDialog({
@@ -91,6 +93,25 @@ export function NewInvoiceDialog({
   generateMutation,
   onGenerate,
 }: NewInvoiceDialogProps) {
+  // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen (Variante B). Zurückgesetzt,
+  // sobald ein anderer Kunde vorschaut wird, damit die Bestätigung nie versehentlich
+  // von einem Kunden auf den nächsten übernommen wird.
+  const [confirmPartial, setConfirmPartial] = useState(false);
+  const [partialReason, setPartialReason] = useState("");
+  useEffect(() => {
+    setConfirmPartial(false);
+    setPartialReason("");
+  }, [previewCustomerId]);
+
+  // Task #1883 — Termine, die STILL aus der Rechnung fielen (mangels Kunden-
+  // unterschrift bzw. Leistungsnachweis) — `already_billed` (bekannt/gewollt) zählt
+  // NICHT. Dieselbe Ausschluss-SSoT wie der Server-Guard. Sind welche vorhanden,
+  // verlangt die Erstellung eine ausdrückliche Teil-Abrechnungs-Bestätigung.
+  const silentlyDropped = (invoicePreview?.excludedAppointments ?? []).filter(
+    (e) => e.reason !== "already_billed",
+  );
+  const needsPartialConfirmation = silentlyDropped.length > 0;
+
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setSelectedCustomerId(""); } }}>
       <DialogContent>
@@ -271,7 +292,8 @@ export function NewInvoiceDialog({
                   Kundenzeile der Karte „Noch zu erstellen". */}
               {invoicePreview
                 && invoicePreview.excludedAppointments.length > 0
-                && (invoicePreview.totalCents === 0
+                && (needsPartialConfirmation
+                  || invoicePreview.totalCents === 0
                   || invoicePreview.coveredAppointments < invoicePreview.completedAppointments)
                 && (() => {
                   const byReason = new Map<BillingBlockReason, string[]>();
@@ -304,6 +326,43 @@ export function NewInvoiceDialog({
                     </div>
                   );
                 })()}
+              {/* Task #1883 — Opt-in fürs bewusste Teil-Abrechnen (Variante B).
+                  Erscheint NUR, wenn dokumentierte Termine sonst still fielen. Ohne
+                  Häkchen bleibt „Rechnung erstellen" gesperrt (der Server-Guard würde
+                  ohnehin mit 409 ablehnen) — nichts wird still teil-abgerechnet. */}
+              {needsPartialConfirmation && (
+                <div
+                  className="rounded-md border border-amber-300 bg-amber-50 p-2 space-y-2"
+                  data-testid="block-confirm-partial"
+                >
+                  <label className="flex items-start gap-2 text-xs text-amber-900">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={confirmPartial}
+                      onChange={(e) => setConfirmPartial(e.target.checked)}
+                      data-testid="checkbox-confirm-partial"
+                    />
+                    <span>
+                      Teil-Abrechnung bestätigen: den signierten Teil jetzt abrechnen; die{" "}
+                      {silentlyDropped.length}{" "}
+                      {silentlyDropped.length === 1 ? "genannten Termin" : "genannten Termine"}{" "}
+                      später mit Kundenunterschrift / Leistungsnachweis nachreichen.
+                    </span>
+                  </label>
+                  {confirmPartial && (
+                    <input
+                      type="text"
+                      value={partialReason}
+                      maxLength={500}
+                      onChange={(e) => setPartialReason(e.target.value)}
+                      placeholder="Grund (optional)"
+                      className="w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs text-gray-800"
+                      data-testid="input-partial-reason"
+                    />
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -328,7 +387,12 @@ export function NewInvoiceDialog({
             Abbrechen
           </Button>
           <Button
-            onClick={onGenerate}
+            onClick={() =>
+              onGenerate({
+                confirmPartial: needsPartialConfirmation ? confirmPartial : undefined,
+                partialReason: needsPartialConfirmation && partialReason.trim() ? partialReason.trim() : undefined,
+              })
+            }
             disabled={
               generateMutation.isPending
               || !selectedCustomerId
@@ -337,6 +401,9 @@ export function NewInvoiceDialog({
               // der Grund im Erklär-Block sichtbar, aber „Rechnung erstellen"
               // ist deaktiviert (der Generate-Pfad würde ohnehin ablehnen).
               || (!!invoicePreview && invoicePreview.coveredAppointments === 0)
+              // Task #1883 — Mischkunde: solange die Teil-Abrechnung nicht bestätigt
+              // ist, bleibt „Erstellen" gesperrt (nichts still teil-abrechnen).
+              || (needsPartialConfirmation && !confirmPartial)
             }
             className="bg-teal-600 hover:bg-teal-700 text-white"
             data-testid="button-generate-invoice"
