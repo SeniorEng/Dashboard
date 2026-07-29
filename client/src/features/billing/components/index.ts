@@ -7,7 +7,6 @@ export { EconomicsOverviewCard } from "./economics-overview-card";
 export { StatusPipelineCard } from "./status-pipeline-card";
 export type { BillingStatusFilter, PipelineStageSelection } from "./status-pipeline-card";
 export { TermineTab } from "./termine-tab";
-export { MissingSignaturesCard } from "./missing-signatures-card";
 export { BulkSendDialog } from "./bulk-send-dialog";
 export { GenerateAllDialog } from "./generate-all-dialog";
 export { PendingInvoicesCard } from "./pending-invoices-card";
