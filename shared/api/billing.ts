@@ -83,6 +83,11 @@ export interface InvoiceItem {
   // Bestand vor #759).
   billingRunId: string | null;
   budgetType: string | null;
+  // Task #1890: Bei einer Stornorechnung (`invoiceType === "stornorechnung"`)
+  // die ID der Originalrechnung, die sie storniert. Erlaubt dem Frontend, das
+  // Paar Original ↔ Stornorechnung sichtbar zu verlinken. NULL bei normalen
+  // Rechnungen.
+  stornierteRechnungId: number | null;
   // Task #1822: Nur im Zustand `teilweise_bezahlt` gesetzt. `paidCents` = Σ der
   // bereits eingegangenen, gebundenen Zahlungen; `openAmountCents` = offener Rest
   // (Brutto − Skonto − gezahlt). Beide stammen aus derselben SSoT wie der

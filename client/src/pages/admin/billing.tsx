@@ -23,9 +23,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
-import { ArrowLeft, CalendarDays, FileText, Printer, Loader2 } from "lucide-react";
+import { ArrowLeft, CalendarDays, FileText, Printer, Loader2, Ban } from "lucide-react";
 import type { InvoiceItem } from "@shared/api";
 import { isBulkActionableDraft, isPflegekasseBatchDraft } from "@shared/domain/billing-drafts";
+import { isStorniertInvoice } from "@shared/domain/billing-pipeline";
 import {
   useBillingInvoices,
   useEligibleCustomers,
@@ -111,10 +112,15 @@ export default function AdminBilling() {
     NO_DATE,
   );
 
-  // Storno-Belege bleiben aus der Liste (GoBD-Gutschriften blähen sie nur auf).
-  const visibleInvoices = invoices?.filter(
-    (inv) => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung",
-  );
+  // Task #1890: Storno-Belege (stornierte Originale + Gutschriften) sind
+  // standardmäßig ausgeblendet (Archiv-Charakter), lassen sich aber über einen
+  // Umschalter einblenden — dann füllen sie den bestehenden „Storniert"-Cluster.
+  const [showStorno, setShowStorno] = useState(false);
+  const visibleInvoices = showStorno
+    ? invoices
+    : invoices?.filter(
+        (inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }),
+      );
 
   const { data: customers, isLoading: customersLoading } = useEligibleCustomers(
     selectedYear,
@@ -327,10 +333,31 @@ export default function AdminBilling() {
 
   const handleToggleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set((visibleInvoices ?? []).map((inv) => inv.id)));
+      // Task #1890: „Alle auswählen" nimmt bewusst KEINE Storno-Belege auf —
+      // für sie gibt es keine Sammelaktion. So bleiben Auswahl-/Versand-Zähler
+      // unverändert, auch wenn die Stornos gerade eingeblendet sind.
+      setSelectedIds(
+        new Set(
+          (visibleInvoices ?? [])
+            .filter((inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }))
+            .map((inv) => inv.id),
+        ),
+      );
     } else {
       setSelectedIds(new Set());
     }
+  };
+
+  // Task #1890: Springt zur verknüpften Rechnung (Original ↔ Stornorechnung),
+  // klappt deren Detailansicht auf und scrollt sie in den sichtbaren Bereich.
+  // Beide Enden liegen im selben (aufgeklappten) „Storniert"-Cluster.
+  const handleNavigateToInvoice = (invoiceId: number) => {
+    setExpandedInvoiceId(invoiceId);
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`invoice-row-${invoiceId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   };
 
   // Task #1630: „Nach Status auswählen" — alle Rechnungen eines Handlungs-
@@ -510,6 +537,18 @@ export default function AdminBilling() {
               )}
               PDF-Fehler beheben
             </Button>
+            {/* Task #1890: Storno-Belege ein-/ausblenden. Standard: aus
+                (Archiv). Eingeblendet erscheinen stornierte Originale und ihre
+                Gutschriften im „Storniert"-Cluster der Liste. */}
+            <Button
+              variant={showStorno ? "default" : "outline"}
+              onClick={() => setShowStorno((v) => !v)}
+              data-testid="button-toggle-storno"
+              aria-pressed={showStorno}
+            >
+              <Ban className={`${iconSize.sm} mr-1`} />
+              {showStorno ? "Stornos ausblenden" : "Stornos anzeigen"}
+            </Button>
           </div>
 
           <PendingInvoicesCard
@@ -540,6 +579,7 @@ export default function AdminBilling() {
             onToggleSelect={handleToggleSelect}
             onToggleSelectAll={handleToggleSelectAll}
             onToggleSelectCluster={handleToggleSelectCluster}
+            onNavigateToInvoice={handleNavigateToInvoice}
             onBulkDelete={() => setPendingBulkAction({ type: "delete" })}
             onBulkStatus={(status) => setPendingBulkAction({ type: "status", status })}
             onBulkPrint={handleBulkPrint}

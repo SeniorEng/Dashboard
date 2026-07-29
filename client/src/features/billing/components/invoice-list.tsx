@@ -17,6 +17,7 @@ import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } 
 import {
   INVOICE_ACTION_CLUSTERS,
   INVOICE_ACTION_CLUSTER_LABELS,
+  isStorniertInvoice,
   type InvoiceActionCluster,
 } from "@shared/domain/billing-pipeline";
 import { InvoiceRow } from "./invoice-row";
@@ -76,6 +77,8 @@ interface InvoiceListProps {
   // Task #1630: „Nach Status auswählen" — alle Rechnungen eines Clusters
   // auf einmal auswählen/abwählen.
   onToggleSelectCluster: (invoiceIds: number[], checked: boolean) => void;
+  // Task #1890: Sprung zur verknüpften Rechnung (Original ↔ Stornorechnung).
+  onNavigateToInvoice: (invoiceId: number) => void;
   onBulkDelete: () => void;
   onBulkStatus: (status: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt") => void;
   // Task #1695: EIN „Drucken"-Menü für die Auswahl (READ-ONLY — kein
@@ -115,6 +118,7 @@ export function InvoiceList({
   onToggleSelect,
   onToggleSelectAll,
   onToggleSelectCluster,
+  onNavigateToInvoice,
   onBulkDelete,
   onBulkStatus,
   onBulkPrint,
@@ -154,6 +158,40 @@ export function InvoiceList({
     return byCluster;
   }, [invoices]);
 
+  // Task #1890: Verknüpfung Original ↔ Stornorechnung für die Anzeige. Aus der
+  // Liste des Zeitraums ableitbar, da Storno und Original denselben
+  // Abrechnungsmonat tragen. `byId` löst die Rechnungsnummer der referenzierten
+  // Rechnung auf; `stornoForOriginal` findet zu einem stornierten Original die
+  // zugehörige Gutschrift.
+  const stornoLinks = useMemo(() => {
+    const byId = new Map<number, InvoiceItem>();
+    const stornoForOriginal = new Map<number, InvoiceItem>();
+    for (const inv of invoices ?? []) {
+      byId.set(inv.id, inv);
+      if (inv.invoiceType === "stornorechnung" && inv.stornierteRechnungId != null) {
+        stornoForOriginal.set(inv.stornierteRechnungId, inv);
+      }
+    }
+    return { byId, stornoForOriginal };
+  }, [invoices]);
+
+  const linkedInvoiceFor = (
+    invoice: InvoiceItem,
+  ): { id: number; invoiceNumber: string; relation: "cancels" | "cancelledBy" } | undefined => {
+    if (invoice.invoiceType === "stornorechnung" && invoice.stornierteRechnungId != null) {
+      const original = stornoLinks.byId.get(invoice.stornierteRechnungId);
+      if (original) {
+        return { id: original.id, invoiceNumber: original.invoiceNumber, relation: "cancels" };
+      }
+    } else if (invoice.status === "storniert") {
+      const storno = stornoLinks.stornoForOriginal.get(invoice.id);
+      if (storno) {
+        return { id: storno.id, invoiceNumber: storno.invoiceNumber, relation: "cancelledBy" };
+      }
+    }
+    return undefined;
+  };
+
   if (invoicesLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -164,7 +202,14 @@ export function InvoiceList({
 
   if (invoices && invoices.length > 0) {
     const selectedCount = selectedIds.size;
-    const allSelected = invoices.every((inv) => selectedIds.has(inv.id));
+    // Task #1890: Storno-Belege sind nicht sammel-auswählbar; „Alle auswählen"
+    // bezieht sich nur auf die aktionsfähigen (nicht-stornierten) Rechnungen.
+    const selectableInvoices = invoices.filter(
+      (inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }),
+    );
+    const allSelected =
+      selectableInvoices.length > 0 &&
+      selectableInvoices.every((inv) => selectedIds.has(inv.id));
     const someSelected = selectedCount > 0 && !allSelected;
 
     const toggleCluster = (cluster: InvoiceActionCluster) => {
@@ -342,12 +387,16 @@ export function InvoiceList({
                   verschachtelt sein. Checkbox + Klapp-Button sind Geschwister;
                   ein Klick auf die Checkbox löst das Ein-/Ausklappen NICHT aus. */}
               <div className="flex w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 hover:bg-gray-50">
-                <Checkbox
-                  checked={clusterChecked}
-                  onCheckedChange={(checked) => onToggleSelectCluster(clusterIds, checked === true)}
-                  aria-label={`Alle Rechnungen im Cluster ${INVOICE_ACTION_CLUSTER_LABELS[cluster]} auswählen`}
-                  data-testid={`checkbox-select-cluster-${cluster}`}
-                />
+                {/* Task #1890: Der „Storniert"-Cluster ist ein reines Archiv —
+                    keine Sammelauswahl (weder Cluster-Checkbox noch Zeilen). */}
+                {cluster !== "storniert" && (
+                  <Checkbox
+                    checked={clusterChecked}
+                    onCheckedChange={(checked) => onToggleSelectCluster(clusterIds, checked === true)}
+                    aria-label={`Alle Rechnungen im Cluster ${INVOICE_ACTION_CLUSTER_LABELS[cluster]} auswählen`}
+                    data-testid={`checkbox-select-cluster-${cluster}`}
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => toggleCluster(cluster)}
@@ -407,8 +456,11 @@ export function InvoiceList({
                     onMarkPaid={onMarkPaid}
                     isSuperAdmin={isSuperAdmin}
                     onReduce45b={onReduce45b}
+                    selectable={cluster !== "storniert"}
                     selected={selectedIds.has(invoice.id)}
                     onToggleSelect={onToggleSelect}
+                    linkedInvoice={linkedInvoiceFor(invoice)}
+                    onNavigateToInvoice={onNavigateToInvoice}
                     aging={group.aging.get(invoice.id)}
                   />
                 ))}

@@ -29,6 +29,7 @@ import {
   Banknote,
   Undo2,
   Scissors,
+  Link2,
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
@@ -68,8 +69,13 @@ interface InvoiceRowProps {
   isSuperAdmin: boolean;
   onReduce45b: (invoice: InvoiceItem) => void;
   // Task #1376: Mehrfachauswahl für Sammelaktionen.
+  // Task #1890: Storno-Belege sind nicht sammel-auswählbar → dann Checkbox aus.
+  selectable?: boolean;
   selected: boolean;
   onToggleSelect: (invoiceId: number, checked: boolean) => void;
+  // Task #1890: Verknüpfte Rechnung (Original ↔ Stornorechnung) + Sprung dorthin.
+  linkedInvoice?: { id: number; invoiceNumber: string; relation: "cancels" | "cancelledBy" };
+  onNavigateToInvoice?: (invoiceId: number) => void;
   // Task #1412: Aging-Bucket (Ampel) für die wartenden Cluster. `none`/`green`
   // → kein Badge; nur mahnende Stufen werden hervorgehoben.
   aging?: AgingBucket;
@@ -90,8 +96,11 @@ export function InvoiceRow({
   onMarkPaid,
   isSuperAdmin,
   onReduce45b,
+  selectable = true,
   selected,
   onToggleSelect,
+  linkedInvoice,
+  onNavigateToInvoice,
   aging = "none",
 }: InvoiceRowProps) {
   // Task #1785 P4: §45b-Kürzung nur für Superadmins auf einer AUSGESTELLTEN
@@ -171,20 +180,23 @@ export function InvoiceRow({
 
   return (
     <div>
-      <Card data-testid={`invoice-row-${invoice.id}`}>
+      <Card id={`invoice-row-${invoice.id}`} data-testid={`invoice-row-${invoice.id}`}>
         <CardContent className="py-2 px-3">
           {/* Task #1007: Am Handy gestapeltes Layout (Kopf / Kunde / Aktionen
               je eigene Zeile), ab sm wieder kompakt in einer Reihe. */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             {/* Kopf: Nummer + Typ/Status-Badges, am Handy zusätzlich der Betrag rechts */}
             <div className="flex items-center gap-2 sm:shrink-0">
-              {/* Task #1376: Auswahl-Checkbox für Sammelaktionen. */}
-              <Checkbox
-                checked={selected}
-                onCheckedChange={(checked) => onToggleSelect(invoice.id, checked === true)}
-                aria-label={`Rechnung ${invoice.invoiceNumber} auswählen`}
-                data-testid={`checkbox-select-${invoice.id}`}
-              />
+              {/* Task #1376: Auswahl-Checkbox für Sammelaktionen.
+                  Task #1890: Storno-Belege sind nicht auswählbar → keine Box. */}
+              {selectable && (
+                <Checkbox
+                  checked={selected}
+                  onCheckedChange={(checked) => onToggleSelect(invoice.id, checked === true)}
+                  aria-label={`Rechnung ${invoice.invoiceNumber} auswählen`}
+                  data-testid={`checkbox-select-${invoice.id}`}
+                />
+              )}
               <span className="font-medium text-gray-900 text-sm">{invoice.invoiceNumber}</span>
               <Badge
                 variant="outline"
@@ -198,6 +210,27 @@ export function InvoiceRow({
               >
                 {STATUS_LABELS[invoice.status] || invoice.status}
               </Badge>
+              {/* Task #1890: Verknüpfung Original ↔ Stornorechnung. Eine
+                  Stornorechnung zeigt die stornierte Originalrechnung, ein
+                  storniertes Original seine Gutschrift — beide anklickbar
+                  (Sprung + Aufklappen der Gegenseite). */}
+              {linkedInvoice && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToInvoice?.(linkedInvoice.id)}
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                  title={
+                    linkedInvoice.relation === "cancels"
+                      ? `Storniert Rechnung ${linkedInvoice.invoiceNumber}`
+                      : `Storniert durch ${linkedInvoice.invoiceNumber}`
+                  }
+                  data-testid={`link-storno-ref-${invoice.id}`}
+                >
+                  <Link2 className={iconSize.xs} />
+                  {linkedInvoice.relation === "cancels" ? "storniert " : "Storno "}
+                  {linkedInvoice.invoiceNumber}
+                </button>
+              )}
               {/* Task #1822: Offener Rest bei Teilzahlung — die Summe der bereits
                   eingegangenen Zahlungen deckt die Rechnung noch nicht. Der Betrag
                   stammt aus derselben SSoT wie der Statuswechsel
