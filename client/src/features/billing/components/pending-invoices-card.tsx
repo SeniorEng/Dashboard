@@ -106,23 +106,26 @@ function PendingCustomerRow({
     0,
     (c.coveredAppointments ?? 0) - (c.signedAppointmentCount ?? 0),
   );
-  // Task #1881 — Das Kurz-Label erscheint NUR bei tatsächlich blockierten Kunden.
-  // Ein abrechenbarer (eligible) Kunde steht unter „Bereit zum Abrechnen" bzw.
-  // „Unvollständig dokumentiert" und darf nicht gleichzeitig „Kundenunterschrift
-  // fehlt" zeigen — das wäre eine zweite, widersprüchliche Begründung. Die
-  // betroffenen Termine erklärt der Dialog beim Öffnen weiterhin im Detail.
-  // Task #1885: Bei fehlendem LN erklärt der eigene „Leistungsnachweis fehlt"-Hinweis
-  // die Zeile — das generische Block-Label (z. B. „Nicht unterschrieben") wäre eine
-  // zweite, weniger präzise Begründung und wird daher unterdrückt.
+  // Task #1883 (Punkt 6) — Der „Kundenunterschrift fehlt"-Hinweis MUSS auch bei
+  // Mischkunden feuern, die insgesamt `eligible` sind (der signierte Teil ist
+  // abrechenbar, aber weitere Termine warten noch auf die Kundenunterschrift, nur
+  // `employee_signed`). Vorher war er auf `eligibility ≠ eligible` gegatet — dadurch
+  // verschwand der 669-€-Fall (Funke) still unter „Bereit zum Abrechnen". Jetzt feuert
+  // er unabhängig von der Eligibilität, sobald awaiting-signature-Termine vorliegen
+  // (und weder offene Termine noch ein fehlender LN die Zeile dominieren).
+  const showAwaitingSignatureNote =
+    awaitingSignature && openCount === 0 && !serviceRecordMissing;
+  const awaitingSignatureLabel = awaitingSignatureCount > 0
+    ? `${BILLING_BLOCK_SHORT_LABELS.customer_signature_required} (${awaitingSignatureCount} ${awaitingSignatureCount === 1 ? "Termin" : "Termine"})`
+    : BILLING_BLOCK_SHORT_LABELS.customer_signature_required;
+  // Task #1881/#1885 — generisches Block-Label nur für die ÜBRIGEN Block-Gründe
+  // (not_signed/no_appointments/already_billed) eines blockierten Kunden, wenn die
+  // Zeile nicht bereits über den Awaiting-, Partial- oder „LN fehlt"-Hinweis erklärt
+  // wird (keine zweite, widersprüchliche Begründung).
   const blockLabel =
-    !serviceRecordMissing && openCount === 0 && !partial && c.eligibility.status !== "eligible"
-      ? awaitingSignature
-        ? awaitingSignatureCount > 0
-          ? `${BILLING_BLOCK_SHORT_LABELS.customer_signature_required} (${awaitingSignatureCount} ${awaitingSignatureCount === 1 ? "Termin" : "Termine"})`
-          : BILLING_BLOCK_SHORT_LABELS.customer_signature_required
-        : c.eligibility.reason
-          ? BILLING_BLOCK_SHORT_LABELS[c.eligibility.reason]
-          : null
+    !serviceRecordMissing && !showAwaitingSignatureNote && openCount === 0 && !partial
+      && c.eligibility.status !== "eligible" && c.eligibility.reason
+      ? BILLING_BLOCK_SHORT_LABELS[c.eligibility.reason]
       : null;
   return (
     <li
@@ -164,6 +167,14 @@ function PendingCustomerRow({
           >
             Noch kein Leistungsnachweis — {c.completedAppointments} dokumentierte
             {c.completedAppointments === 1 ? "r Termin" : " Termine"}
+          </div>
+        )}
+        {showAwaitingSignatureNote && (
+          <div
+            className="mt-0.5 text-xs text-amber-700"
+            data-testid={`text-pending-awaiting-signature-${c.id}`}
+          >
+            {awaitingSignatureLabel}
           </div>
         )}
         {blockLabel && (

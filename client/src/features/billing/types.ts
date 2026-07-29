@@ -1,6 +1,14 @@
 export interface GenerateAllResponse {
   summary: { total: number; created: number; skipped: number; errors: number };
-  results: Array<{ customerId: number; status: "created" | "skipped" | "error"; invoiceCount?: number; message?: string }>;
+  // Task #1883 — bei „übersprungen wegen Teil-Abrechnung" reisen die betroffenen
+  // Termine (Datum + Grund) mit, damit der Dialog sie nachverfolgen kann (nie still).
+  results: Array<{
+    customerId: number;
+    status: "created" | "skipped" | "error";
+    invoiceCount?: number;
+    message?: string;
+    excludedAppointments?: Array<{ date: string; reason: string }>;
+  }>;
 }
 
 // Task #1785 P4 — §45b-Kürzung. Ziel-Topf, in den der Überhang (X−Y) umgebucht

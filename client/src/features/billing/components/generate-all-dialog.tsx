@@ -27,7 +27,7 @@ interface GenerateAllDialogProps {
   generateAllMutation: UseMutationResult<
     GenerateAllResponse,
     Error,
-    { readyOnly: boolean },
+    { readyOnly: boolean; confirmPartial?: boolean },
     unknown
   >;
   customers: BillingCustomerItem[] | undefined;
@@ -53,6 +53,11 @@ export function GenerateAllDialog({
   // sich aus derselben reinen SSoT (`hasOpenAppointments`) ab, die auch der
   // Server-Filter nutzt — so können Dialog-Auswahl und Liste nie divergieren.
   const [readyOnly, setReadyOnly] = useState(true);
+  // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen von Mischkunden (Variante B).
+  // Default AUS: ohne dieses Häkchen werden Mischkunden (dokumentierte Termine mangels
+  // Kundenunterschrift/LN nicht abrechenbar) als „übersprungen mit Ausweis" gemeldet,
+  // nie still teil-abgerechnet. AN = ihr signierter Teil wird jetzt abgerechnet.
+  const [confirmPartial, setConfirmPartial] = useState(false);
 
   const totalCount = customers?.length ?? 0;
   // Task #1775: Der (N)-Zähler „werden erstellt" darf nur die Kunden zählen, die
@@ -116,6 +121,22 @@ export function GenerateAllDialog({
                 />
                 <span className="text-gray-700">
                   Nur Kunden ohne offene Termine abrechnen
+                </span>
+              </label>
+              {/* Task #1883 — Opt-in: Mischkunden (fehlende Kundenunterschrift/LN)
+                  jetzt teil-abrechnen. Ohne Häkchen werden sie mit Ausweis der
+                  betroffenen Termine übersprungen (nie still). */}
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={confirmPartial}
+                  onCheckedChange={(v) => setConfirmPartial(v === true)}
+                  disabled={generateAllMutation.isPending}
+                  className="mt-0.5"
+                  data-testid="checkbox-confirm-partial-bulk"
+                />
+                <span className="text-gray-700">
+                  Mischkunden teil-abrechnen (signierten Teil jetzt, fehlende
+                  Kundenunterschriften/Leistungsnachweise werden ausgewiesen)
                 </span>
               </label>
               <div className="text-gray-600" data-testid="text-generate-all-plan">
@@ -211,7 +232,7 @@ export function GenerateAllDialog({
             Schließen
           </Button>
           <Button
-            onClick={() => generateAllMutation.mutate({ readyOnly })}
+            onClick={() => generateAllMutation.mutate({ readyOnly, confirmPartial })}
             disabled={generateAllMutation.isPending || willCreate === 0 || !!generateAllProgress}
             className="bg-teal-600 hover:bg-teal-700 text-white"
             data-testid="button-confirm-generate-all"

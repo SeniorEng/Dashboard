@@ -1,4 +1,4 @@
-import { badRequest, notFound } from "../lib/errors";
+import { badRequest, notFound, AppError } from "../lib/errors";
 import { splitLineItemsAcrossPots, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
 import { isPrivatePaymentAllowed } from "@shared/domain/budget-selbstzahler-validator";
 import {
@@ -318,6 +318,12 @@ export async function buildInvoiceDraft(input: {
     .where(and(
       eq(appointments.customerId, customerId),
       eq(appointments.status, "completed"),
+      // Task #1883/#1886 — Erstberatungen sind keine abrechenbaren Kundentermine und
+      // dürfen den Unterabrechnungs-Guard NICHT auslösen (sie sind kundenlos und
+      // haben nie einen LN). Regulär tragen sie `customer_id = NULL` und fallen schon
+      // über den Customer-Filter raus; der Typ-Filter macht die #1886-Regel hier
+      // explizit und guard-fest.
+      ne(appointments.appointmentType, "Erstberatung"),
       appointmentsRepo.activeOnly(),
       gte(appointments.date, periodStartStr),
       lt(appointments.date, periodEndStr),
@@ -343,6 +349,12 @@ export async function buildInvoiceDraft(input: {
   );
   const missingSignatureReason: BillingExcludedAppointment["reason"] =
     isPflegekasseBilling ? "customer_signature_required" : "not_signed";
+  // Task #1883 — Termine unter den ABRECHENBAR-signierten LNs (vor Datumsbereich).
+  // Ein dokumentierter Termin, der hier NICHT enthalten ist, liegt unter gar keinem
+  // (bzw. nur einem unsignierten) LN. Ein signierter Termin, der bloß per
+  // Datumsbereich ausgeschlossen wird, ist hier enthalten → bewusst außerhalb, kein
+  // stiller Verlust.
+  const signedApptIdSet = new Set(allApptIds);
   const excludedAppointments: BillingExcludedAppointment[] = completedRows
     .filter(row => !billableApptIdSet.has(row.id))
     .map((row): BillingExcludedAppointment | null => {
@@ -350,6 +362,14 @@ export async function buildInvoiceDraft(input: {
         return { date: row.date, reason: "already_billed" };
       }
       if (awaitingSignatureApptIdSet.has(row.id)) {
+        return { date: row.date, reason: missingSignatureReason };
+      }
+      // Task #1883 — completed-Termin ganz OHNE Leistungsnachweis (weder unter einem
+      // signierten noch unter einem unsignierten LN). Fiel bisher STILL aus der
+      // Rechnung (Kraft/Hentschel-Typ). Mit demselben „Unterschrift/LN fehlt"-Grund
+      // erfassen, damit der Unterabrechnungs-Guard ihn sieht. Nur echte Nicht-LN-
+      // Termine — datumsbereich-ausgeschlossene signierte Termine bleiben unmarkiert.
+      if (!signedApptIdSet.has(row.id)) {
         return { date: row.date, reason: missingSignatureReason };
       }
       return null;
@@ -475,11 +495,30 @@ export async function buildInvoiceDraft(input: {
 // damit /generate-all die Logik direkt im selben Prozess aufrufen kann.
 // Kein HTTP-Self-Call, kein Forwarden von Session-Cookies, kein
 // Host-Header-SSRF-Risiko. /generate ist nur noch ein dünner Wrapper.
+/**
+ * Task #1883 — Guard gegen stille Unterabrechnung (Variante B, Confirm-to-proceed).
+ * Wird geworfen, wenn beim Erstellen dokumentierte Termine mangels Kundenunterschrift
+ * (nur `employee_signed`) ODER mangels Leistungsnachweis aus der Rechnung fielen und
+ * die Teil-Abrechnung NICHT explizit bestätigt wurde. Trägt die betroffenen Termine,
+ * damit `/generate` sie als 409 und `generate-all` sie als „übersprungen mit Ausweis"
+ * melden kann — nichts fällt still.
+ */
+export class PartialBillingConfirmationRequiredError extends AppError {
+  constructor(public excludedAppointments: BillingExcludedAppointment[]) {
+    super(
+      409,
+      "PARTIAL_BILLING_CONFIRMATION_REQUIRED",
+      `${excludedAppointments.length} dokumentierte${excludedAppointments.length === 1 ? "r Termin würde" : " Termine würden"} mangels Kundenunterschrift bzw. Leistungsnachweis nicht abgerechnet. Bitte die fehlenden Unterschriften/Leistungsnachweise einholen oder die Teil-Abrechnung des signierten Teils ausdrücklich bestätigen.`,
+    );
+    this.name = "PartialBillingConfirmationRequiredError";
+  }
+}
+
 export async function generateInvoiceCore(
-  input: { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string },
+  input: { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string; confirmPartial?: boolean },
   ctx: { userId: number; ipAddress?: string; testFaults: Set<string> },
 ): Promise<GenerateInvoiceResult> {
-  const { customerId, billingMonth, billingYear, dateFrom, dateTo } = input;
+  const { customerId, billingMonth, billingYear, dateFrom, dateTo, confirmPartial } = input;
   // Lokales Shadow-`req`-Objekt, damit der unten kopierte Body unverändert
   // bleibt (`req.user!.id`, `req.ip`, `readTestFaults(req)` lesen weiterhin).
   const req = {
@@ -517,6 +556,21 @@ export async function generateInvoiceCore(
       draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo });
     }
   }
+  // Task #1883 — Guard gegen stille Unterabrechnung. Dokumentierte Termine, die
+  // mangels Kundenunterschrift (nur `employee_signed`) ODER mangels Leistungsnachweis
+  // NICHT auf die Rechnung kommen, dürfen nicht STILL fallen. Ohne explizites
+  // `confirmPartial` bricht die Erstellung ab und meldet die betroffenen Termine
+  // (Datum + Grund). `already_billed` (bewusst/bekannt) triggert NICHT. Eine SSoT:
+  // dieselbe `excludedAppointments` wie Preview/`buildInvoiceDraft` — kein zweiter
+  // Ausschluss-Begriff, insb. NICHT `isPartiallyDocumented` (das zählt
+  // `employee_signed` als covered und verfehlte den 669-€-Fall).
+  const silentlyDroppedAppointments = draft.excludedAppointments.filter(
+    (e) => e.reason !== "already_billed",
+  );
+  if (silentlyDroppedAppointments.length > 0 && !confirmPartial) {
+    throw new PartialBillingConfirmationRequiredError(silentlyDroppedAppointments);
+  }
+
   const {
     customer,
     customerName,

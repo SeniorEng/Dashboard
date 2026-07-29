@@ -82,7 +82,7 @@ export function useBillingMutations({
   const [bulkActionProgress, setBulkActionProgress] = useState<BulkActionProgress | null>(null);
 
   const generateMutation = useMutation({
-    mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string }) => {
+    mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string; confirmPartial?: boolean; partialReason?: string }) => {
       // Task #544: harter Client-Timeout (60s) gegen endlose "Wird erstellt..."-Spinner.
       // Der Server rendert das PDF inzwischen im Hintergrund, der Request sollte
       // in < 3s zurückkommen — wenn nicht, ist etwas grundlegend kaputt.
@@ -224,8 +224,11 @@ export function useBillingMutations({
     // dieselbe „offene Termine"-SSoT wie die Karten-Gruppierung.
     mutationFn: async ({
       readyOnly,
+      confirmPartial,
     }: {
       readyOnly: boolean;
+      // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen der Mischkunden (Variante B).
+      confirmPartial?: boolean;
     }) => {
       setGenerateAllProgress(null);
       const result = await api.post<GenerateAllResponse>("/billing/generate-all", {
@@ -235,6 +238,7 @@ export function useBillingMutations({
         ...(dateFrom ? { dateFrom } : {}),
         ...(dateTo ? { dateTo } : {}),
         readyOnly,
+        ...(confirmPartial ? { confirmPartial: true } : {}),
       });
       return unwrapResult(result);
     },

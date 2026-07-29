@@ -290,7 +290,7 @@ export default function AdminBilling() {
     }
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = (opts?: { confirmPartial?: boolean; partialReason?: string }) => {
     if (!selectedCustomerId) {
       toast({ title: "Bitte Kunden auswählen", variant: "destructive" });
       return;
@@ -299,6 +299,9 @@ export default function AdminBilling() {
       customerId: parseInt(selectedCustomerId),
       billingMonth: selectedMonth,
       billingYear: selectedYear,
+      // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen (Variante B).
+      confirmPartial: opts?.confirmPartial,
+      partialReason: opts?.partialReason,
     });
   };
 
