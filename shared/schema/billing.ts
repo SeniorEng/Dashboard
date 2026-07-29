@@ -182,6 +182,13 @@ export const createInvoiceSchema = z.object({
   // abrechnet. Ohne Range = ganzer Monat (Rückwärtskompatibilität).
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datum (YYYY-MM-DD)").optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datum (YYYY-MM-DD)").optional(),
+  // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen (Variante B). Ohne diese
+  // Bestätigung bricht die Erstellung ab, wenn dokumentierte Termine mangels
+  // Kundenunterschrift/Leistungsnachweis still aus der Rechnung fielen (409 +
+  // Ausweis der betroffenen Termine). Mit `confirmPartial=true` wird der signierte
+  // Teil abgerechnet; `partialReason` hält den Grund für die Nachvollziehbarkeit fest.
+  confirmPartial: z.boolean().optional(),
+  partialReason: z.string().max(500, "Maximal 500 Zeichen").optional(),
 });
 
 export const updateInvoiceStatusSchema = z.object({
