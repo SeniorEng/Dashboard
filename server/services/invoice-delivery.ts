@@ -1,12 +1,12 @@
-import { eq, and, isNull, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import {
-  customerInsuranceHistory,
   insuranceProviders,
   budgetTransactions,
   type Customer,
 } from "@shared/schema";
 import { db } from "../lib/db";
 import { storage } from "../storage";
+import { resolveCustomerInsuranceAt } from "../storage/customer-mgmt/insurance";
 import type { InvoicePdfData } from "../lib/pdf-generator";
 import { applyLeistungsnachweisCustomerAddress } from "../lib/customer-address-format";
 
@@ -16,34 +16,32 @@ export const MONTH_NAMES_DE = [
 ];
 
 /**
- * Lädt die aktive Pflegekassenzuordnung (`customer_insurance_history`) und —
- * falls vorhanden — den zugehörigen `insurance_providers`-Datensatz für den
- * Rechnungsversand. Gibt die rohen Query-Arrays zurück (wie zuvor inline in
- * `/send` und `/send-batch`), damit die Aufrufer ihre jeweilige
- * Fehlerbehandlung (throw vs. results-collect) und Audit-Metadaten
- * unverändert behalten. Der Provider wird — exakt wie zuvor — nur abgefragt,
- * wenn eine aktive Kassenzuordnung existiert (keine Zusatz-Query).
+ * Lädt die im ABRECHNUNGSZEITRAUM gültige Pflegekassenzuordnung
+ * (`customer_insurance_history`) und — falls vorhanden — den zugehörigen
+ * `insurance_providers`-Datensatz für den Rechnungsversand. Gibt die rohen
+ * Query-Arrays zurück (wie zuvor inline in `/send` und `/send-batch`), damit die
+ * Aufrufer ihre jeweilige Fehlerbehandlung (throw vs. results-collect) und
+ * Audit-Metadaten unverändert behalten.
+ *
+ * Task #1893 — Stichtag statt `valid_to IS NULL`: eine Mai-Rechnung, die im Juli
+ * versendet wird, muss an die im MAI gültige Kasse gehen. Der Stichtag kommt aus
+ * dem Abrechnungsmonat der Rechnung (`billingPeriodAsOfISO`).
  */
-export async function loadInsuranceForSend(customerId: number): Promise<{
+export async function loadInsuranceForSend(customerId: number, asOfISO: string): Promise<{
   insHist: { providerId: number; versichertennummer: string | null }[];
   provider: (typeof insuranceProviders.$inferSelect)[];
 }> {
-  const insHist = await db.select({
-    providerId: customerInsuranceHistory.insuranceProviderId,
-    versichertennummer: customerInsuranceHistory.versichertennummer,
-  })
-    .from(customerInsuranceHistory)
-    .where(and(
-      eq(customerInsuranceHistory.customerId, customerId),
-      isNull(customerInsuranceHistory.validTo),
-    ))
-    .limit(1);
+  const ins = await resolveCustomerInsuranceAt(customerId, asOfISO);
+  if (!ins) return { insHist: [], provider: [] };
 
-  if (!insHist.length) return { insHist, provider: [] };
+  const insHist = [{
+    providerId: ins.insuranceProviderId,
+    versichertennummer: ins.versichertennummer,
+  }];
 
   const provider = await db.select()
     .from(insuranceProviders)
-    .where(eq(insuranceProviders.id, insHist[0].providerId))
+    .where(eq(insuranceProviders.id, ins.insuranceProviderId))
     .limit(1);
 
   return { insHist, provider };

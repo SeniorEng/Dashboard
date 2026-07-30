@@ -21,10 +21,14 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import {
+  isMonthStartISO,
+  INSURANCE_WINDOW_MUST_START_ON_FIRST,
+} from "@shared/domain/insurance-period";
+import {
   VERSICHERTENNUMMER_GKV_REGEX,
   VERSICHERTENNUMMER_FLEX_REGEX,
 } from "@shared/schema/common";
-import { Heart, Loader2, Clock, Plus, ArrowRightLeft, X } from "lucide-react";
+import { Heart, Loader2, Clock, Plus, ArrowRightLeft, X, Pencil } from "lucide-react";
 import type { InsuranceProviderItem } from "@/lib/api/types";
 
 interface InsuranceHistoryEntry {
@@ -55,15 +59,32 @@ interface CustomerInsuranceTabProps {
 // Frontend- und Backend-Validierung nicht auseinanderlaufen.
 const VERSICHERTENNUMMER_REGEX = VERSICHERTENNUMMER_GKV_REGEX;
 
+
+// Task #1893 — Kassenwechsel sind nur zum Monatsersten zulässig. Vorbelegung ist
+// deshalb der 1. des FOLGENDEN Monats (der laufende Monat ist i.d.R. schon
+// abgerechnet bzw. läuft noch auf die bisherige Kasse).
+function firstOfNextMonthISO(): string {
+  const now = new Date();
+  const y = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
+  const m = now.getMonth() === 11 ? 1 : now.getMonth() + 2;
+  return `${y}-${String(m).padStart(2, "0")}-01`;
+}
+
 export function CustomerInsuranceTab({ customerId, customerBillingType, currentInsurance }: CustomerInsuranceTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Task #1893 — Korrektur einer bestehenden Zuordnung (Gültig-ab/-bis/VNr).
+  const [editEntry, setEditEntry] = useState<InsuranceHistoryEntry | null>(null);
+  const [editValidFrom, setEditValidFrom] = useState("");
+  const [editValidTo, setEditValidTo] = useState("");
+  const [editVersichertennummer, setEditVersichertennummer] = useState("");
+
   const [insuranceProviderId, setInsuranceProviderId] = useState("");
   const [versichertennummer, setVersichertennummer] = useState("");
-  const [validFrom, setValidFrom] = useState(todayISO());
+  const [validFrom, setValidFrom] = useState(firstOfNextMonthISO());
   const [vnError, setVnError] = useState<string | null>(null);
 
   // Inline-Anlage einer neuen Pflegekasse direkt im Wechsel-Dialog, damit das
@@ -108,10 +129,55 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
     },
   });
 
+  const updateInsuranceMutation = useMutation({
+    mutationFn: async (data: { insuranceId: number; validFrom: string; validTo: string | null; versichertennummer: string }) => {
+      const { insuranceId, ...patch } = data;
+      const result = await api.patch<InsuranceHistoryEntry>(
+        `/admin/customers/${customerId}/insurance/${insuranceId}`,
+        patch
+      );
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      // `customer-insurance` invalidiert bereits ["customer-insurance-history"].
+      invalidateRelated(queryClient, "customer-insurance", "customers");
+      toast({ title: "Zuordnung korrigiert" });
+      setEditEntry(null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Korrektur nicht möglich", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const openEditDialog = (entry: InsuranceHistoryEntry) => {
+    setEditEntry(entry);
+    setEditValidFrom(entry.validFrom);
+    setEditValidTo(entry.validTo ?? "");
+    setEditVersichertennummer(entry.versichertennummer);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editEntry) return;
+    if (!isMonthStartISO(editValidFrom)) {
+      toast({ title: "Nur Wechsel zum Monatsersten", description: INSURANCE_WINDOW_MUST_START_ON_FIRST, variant: "destructive" });
+      return;
+    }
+    if (editValidTo && editValidTo < editValidFrom) {
+      toast({ title: "Zeitraum ungültig", description: "„Gültig bis“ liegt vor „Gültig ab“.", variant: "destructive" });
+      return;
+    }
+    updateInsuranceMutation.mutate({
+      insuranceId: editEntry.id,
+      validFrom: editValidFrom,
+      validTo: editValidTo || null,
+      versichertennummer: editVersichertennummer,
+    });
+  };
+
   const resetForm = () => {
     setInsuranceProviderId("");
     setVersichertennummer("");
-    setValidFrom(todayISO());
+    setValidFrom(firstOfNextMonthISO());
     setVnError(null);
     setShowNewProvider(false);
     setNewName("");
@@ -196,6 +262,11 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
     }
     if (!validFrom) {
       toast({ title: "Bitte Gültig-ab-Datum angeben", variant: "destructive" });
+      return;
+    }
+    // Spiegelt die serverseitige Erzwingung (Task #1893) — dieselbe SSoT-Prüfung.
+    if (!isMonthStartISO(validFrom)) {
+      toast({ title: "Nur Wechsel zum Monatsersten", description: INSURANCE_WINDOW_MUST_START_ON_FIRST, variant: "destructive" });
       return;
     }
 
@@ -289,9 +360,21 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-sm">{entry.provider.name}</span>
-                  {!entry.validTo && (
-                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Aktuell</span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {!entry.validTo && (
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Aktuell</span>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      onClick={() => openEditDialog(entry)}
+                      data-testid={`button-edit-insurance-${entry.id}`}
+                    >
+                      <Pencil className={iconSize.sm} />
+                    </Button>
+                  </div>
                 </div>
                 <p className="text-xs text-gray-600 mt-1">
                   VNr: {entry.versichertennummer}
@@ -305,6 +388,75 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
           </div>
         )}
       </SectionCard>
+
+      <Dialog open={editEntry !== null} onOpenChange={(open) => !open && setEditEntry(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Zuordnung korrigieren</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-2">
+            <p className="text-sm text-gray-600">
+              {editEntry?.provider.name}
+            </p>
+
+            <div className="space-y-2">
+              <Label>Versichertennummer</Label>
+              <Input
+                value={editVersichertennummer}
+                onChange={(e) => setEditVersichertennummer(e.target.value)}
+                data-testid="input-edit-versichertennummer"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Gültig ab *</Label>
+              <DatePicker
+                value={editValidFrom}
+                onChange={(date) => setEditValidFrom(date || editValidFrom)}
+                placeholder="Datum wählen"
+                data-testid="datepicker-edit-valid-from"
+              />
+              <p className="text-xs text-gray-500">Muss der 1. eines Monats sein.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Gültig bis</Label>
+              <DatePicker
+                value={editValidTo}
+                onChange={(date) => setEditValidTo(date || "")}
+                placeholder="leer = aktuell gültig"
+                data-testid="datepicker-edit-valid-to"
+              />
+              <p className="text-xs text-gray-500">
+                Leer lassen für die aktuell gültige Zuordnung. Zeiträume müssen
+                lückenlos aneinander anschließen und dürfen sich nicht überschneiden.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button variant="outline" onClick={() => setEditEntry(null)} data-testid="button-cancel-edit">
+                Abbrechen
+              </Button>
+              <Button
+                className={componentStyles.btnPrimary}
+                onClick={handleSaveEdit}
+                disabled={updateInsuranceMutation.isPending}
+                data-testid="button-save-edit-insurance"
+              >
+                {updateInsuranceMutation.isPending ? (
+                  <>
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                    Speichern...
+                  </>
+                ) : (
+                  "Korrektur speichern"
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-md">
@@ -445,15 +597,14 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
               <Label>Gültig ab *</Label>
               <DatePicker
                 value={validFrom}
-                onChange={(date) => setValidFrom(date || todayISO())}
+                onChange={(date) => setValidFrom(date || firstOfNextMonthISO())}
                 placeholder="Datum wählen"
                 data-testid="datepicker-valid-from"
               />
-              {currentInsurance && (
-                <p className="text-xs text-gray-500">
-                  Die bisherige Kasse wird automatisch zum Vortag beendet.
-                </p>
-              )}
+              <p className="text-xs text-gray-500">
+                Ein Kassenwechsel ist nur zum 1. eines Monats möglich.
+                {currentInsurance ? " Die bisherige Kasse endet automatisch am letzten Tag des Vormonats." : ""}
+              </p>
             </div>
 
             <div className="flex justify-end gap-2 pt-4 border-t">

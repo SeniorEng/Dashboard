@@ -6,6 +6,7 @@ import {
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import type { InvoiceWithCustomer } from "../storage";
 import { formatInvoiceNumber } from "@shared/domain/invoice-number";
+import { insuranceValidAtBillingMonthSqlRaw } from "../lib/insurance-period";
 
 export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string; statuses?: string[]; insuranceProviderId?: number; dateFrom?: string; dateTo?: string }): Promise<InvoiceWithCustomer[]> {
   const { invoices, customers } = await import("@shared/schema");
@@ -34,14 +35,16 @@ export async function getInvoices(filters: { year?: number; month?: number; cust
       WHERE ${sql.join(parts, sql` AND `)}
     )`);
   }
-  // Krankenkassen-Filter: matched gegen den aktuell aktiven Insurance-History-
-  // Eintrag des Kunden (validTo IS NULL). Selbstzahler-Rechnungen haben keinen
-  // Eintrag und fallen damit automatisch raus, was dem Filter-Intent entspricht.
+  // Krankenkassen-Filter: matched gegen die im ABRECHNUNGSMONAT der jeweiligen
+  // Rechnung gültige Zuordnung (Task #1893) — der Stichtag ist hier korreliert,
+  // weil die Liste Rechnungen mehrerer Monate zugleich filtert. Selbstzahler-
+  // Rechnungen haben keinen Eintrag und fallen automatisch raus, was dem
+  // Filter-Intent entspricht.
   if (filters.insuranceProviderId) {
     conditions.push(sql`EXISTS (
       SELECT 1 FROM customer_insurance_history cih
       WHERE cih.customer_id = ${invoices.customerId}
-        AND cih.valid_to IS NULL
+        AND ${insuranceValidAtBillingMonthSqlRaw("cih", sql`${invoices.billingYear}`, sql`${invoices.billingMonth}`)}
         AND cih.insurance_provider_id = ${filters.insuranceProviderId}
     )`);
   }

@@ -14,6 +14,7 @@ import { appointments, invoices as invoicesTable, type Invoice } from "@shared/s
 import { eq, and, gte, lt, lte, ne, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { todayISO, addDays } from "@shared/utils/datetime";
+import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
 import { STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
 import { storage } from "../storage";
 import { db } from "../lib/db";
@@ -199,7 +200,12 @@ export async function buildInvoiceDraft(input: {
   const invoiceDueDateIso = addDays(invoiceIssueIso, dueDays);
 
   // Task #562 — Käuferreferenz (BT-10) für Pflegekassen.
-  const insuranceInfo = await getInsuranceData(customerId);
+  // Task #1893 — am Stichtag des Abrechnungszeitraums aufgelöst: Versicherten-
+  // nummer, IK und Empfänger müssen zum abgerechneten Monat passen.
+  const insuranceInfo = await getInsuranceData(
+    customerId,
+    billingPeriodAsOfISO(billingYear, billingMonth, dateTo),
+  );
   const defaultBuyerReference =
     (customer.billingType === "pflegekasse_gesetzlich" ||
       customer.billingType === "pflegekasse_privat") &&
@@ -593,7 +599,10 @@ export async function generateInvoiceCore(
     // Pro Pot eine eigene Rechnung mit pot-spezifischem Empfänger
     // (resolveBudgetRecipient), §-Notiz und Käuferreferenz.
     const billingRunId = randomUUID();
-    const asOfIso = todayISO();
+    // Task #1893 — Stichtag ist das ENDE des Abrechnungszeitraums, nicht „heute".
+    // Vorher `todayISO()`: eine im Juli erstellte Juni-Rechnung löste damit sowohl
+    // den Empfänger-Override als auch die Kasse gegen den Juli-Stand auf.
+    const asOfIso = billingPeriodAsOfISO(billingYear, billingMonth, dateTo);
 
     const splitResult = await withAudit(async (tx, audit) => {
       const createdInvoices: Invoice[] = [];

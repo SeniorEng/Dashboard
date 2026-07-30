@@ -14,6 +14,7 @@ import { db } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
 import { loadCustomerPriceContext } from "../storage/pricing/price-for";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
+import { resolveCustomerInsuranceAt } from "../storage/customer-mgmt/insurance";
 import { isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
 
 export interface BuildLineItem extends Record<string, unknown> {
@@ -842,27 +843,28 @@ async function rederiveSplitFromCurrentAllocation(
   }
 }
 
-export async function getInsuranceData(customerId: number) {
-  const insuranceData = await db.select({
-    providerName: insuranceProviders.name,
-    ikNummer: insuranceProviders.ikNummer,
-    versichertennummer: customerInsuranceHistory.versichertennummer,
-    empfaenger: insuranceProviders.empfaenger,
-    empfaengerZeile2: insuranceProviders.empfaengerZeile2,
-    anschrift: insuranceProviders.anschrift,
-    plzOrt: insuranceProviders.plzOrt,
-    strasse: insuranceProviders.strasse,
-    hausnummer: insuranceProviders.hausnummer,
-    plz: insuranceProviders.plz,
-    stadt: insuranceProviders.stadt,
-  })
-  .from(customerInsuranceHistory)
-  .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
-  .where(and(
-    eq(customerInsuranceHistory.customerId, customerId),
-    isNull(customerInsuranceHistory.validTo)
-  ))
-  .limit(1);
+/**
+ * Kostenträger-Stammdaten für die Rechnungserstellung — am STICHTAG des
+ * Abrechnungszeitraums, nicht „heute" (Task #1893).
+ *
+ * Dünne Projektion über `resolveCustomerInsuranceAt`; das frühere eigene
+ * `valid_to IS NULL`-Select ist damit ersetzt (eine Fenster-Logik, nicht zwei).
+ */
+export async function getInsuranceData(customerId: number, asOfISO: string) {
+  const ins = await resolveCustomerInsuranceAt(customerId, asOfISO);
+  if (!ins) return null;
 
-  return insuranceData.length > 0 ? insuranceData[0] : null;
+  return {
+    providerName: ins.provider.name,
+    ikNummer: ins.provider.ikNummer,
+    versichertennummer: ins.versichertennummer,
+    empfaenger: ins.provider.empfaenger,
+    empfaengerZeile2: ins.provider.empfaengerZeile2,
+    anschrift: ins.provider.anschrift,
+    plzOrt: ins.provider.plzOrt,
+    strasse: ins.provider.strasse,
+    hausnummer: ins.provider.hausnummer,
+    plz: ins.provider.plz,
+    stadt: ins.provider.stadt,
+  };
 }

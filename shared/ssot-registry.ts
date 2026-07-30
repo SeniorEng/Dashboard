@@ -344,6 +344,43 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     ],
     eslintRules: [],
   },
+  {
+    id: "insurance-at-date",
+    question:
+      "Welcher Kostenträger gilt für einen Kunden an einem Stichtag? (Abrechnung/Versand: Stichtag = Ende des Abrechnungszeitraums, NICHT heute)",
+    canonical: [
+      // Der eine Row-Resolver (DB).
+      {
+        symbol: "resolveCustomerInsuranceAt",
+        module: "server/storage/customer-mgmt/insurance.ts",
+      },
+      // Dessen SQL-Zwilling für Filter-/Gruppierungs-Joins.
+      { symbol: "insuranceValidAt", module: "server/lib/insurance-period.ts" },
+      // Die pure Zeitraum-/Stichtags-Semantik.
+      { symbol: "billingPeriodAsOfISO", module: "shared/domain/insurance-period.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Lese-Rand (Task #1893): kein direktes „aktuelle Zuordnung"-Lesen
+        // (`valid_to IS NULL` / `isNull(customerInsuranceHistory.validTo)`)
+        // außerhalb dieser Dateien. Erlaubt bleiben: die beiden SSoT-Module
+        // selbst, das Schließen der Vorgängerzeile beim Wechsel, das Lösch-Gate
+        // („wie viele Kunden haben diese Kasse AKTUELL?") sowie die
+        // Stammdaten-/Dubletten-Pfade, für die „aktuell" fachlich richtig ist.
+        test: "tests/architecture/insurance-at-date-ssot.test.ts",
+        allowlistName: "CURRENT_INSURANCE_READ_ALLOWLIST",
+        allowlist: [
+          "server/storage/customer-mgmt/insurance.ts",
+          "server/lib/insurance-period.ts",
+          "server/storage/customers-storage.ts",
+          "server/storage/customer-management.ts",
+          "server/lib/duplicate-check.ts",
+        ],
+      },
+    ],
+    eslintRules: [],
+  },
 ];
 
 /** Liefert den Registry-Eintrag mit `id` oder wirft (unbekannte id = Fehler). */

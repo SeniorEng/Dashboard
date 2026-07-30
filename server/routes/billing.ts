@@ -17,7 +17,8 @@ import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
 import { classifyBillingEligibility, isMonthFullyBilledAndSigned } from "@shared/domain/billing-eligibility";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
 import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
-import { resolveBudgetRecipient } from "../storage/budget-recipients";
+import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
+import { insuranceValidAt } from "../lib/insurance-period";
 import { randomUUID } from "crypto";
 import {
   createInvoiceSchema,
@@ -344,7 +345,8 @@ router.get("/payers", asyncHandler("Krankenkassen-Liste konnte nicht geladen wer
       customerInsuranceHistory,
       and(
         eq(customerInsuranceHistory.customerId, invoicesTable.customerId),
-        isNull(customerInsuranceHistory.validTo),
+        // Task #1893 — die im ABGEFRAGTEN Monat gültige Kasse, nicht die heutige.
+        insuranceValidAt(billingPeriodAsOfISO(year, month)),
       ),
     )
     .innerJoin(insuranceProviders, eq(insuranceProviders.id, customerInsuranceHistory.insuranceProviderId))
@@ -471,7 +473,9 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
       .from(customerInsuranceHistory)
       .where(and(
         inArray(customerInsuranceHistory.customerId, uniqueCustomerIds),
-        isNull(customerInsuranceHistory.validTo),
+        // Task #1893 — identischer Stichtag wie die Erstellung, sonst divergieren
+        // Counter und tatsächlich erstellte Menge (#1888-Invariante).
+        insuranceValidAt(billingPeriodAsOfISO(year, month, dateToQ)),
         eq(customerInsuranceHistory.insuranceProviderId, insuranceProviderIdQ),
       ));
     const allowed = new Set(matching.map(r => r.customerId));
@@ -1059,7 +1063,11 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       const isKostenerstattung = invoice.billingType === "pflegekasse_gesetzlich" && cust[0].rechnungAnKunde;
       const sendToCustomer = isPrivatBilling || isKostenerstattung;
 
-      const { insHist, provider: prov } = await loadInsuranceForSend(invoice.customerId);
+      // Task #1893 — Kasse am Stichtag des abgerechneten Monats, nicht heute.
+      const { insHist, provider: prov } = await loadInsuranceForSend(
+        invoice.customerId,
+        billingPeriodAsOfISO(invoice.billingYear, invoice.billingMonth),
+      );
 
       if (!insHist.length) {
         results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "Keine Pflegekassenzuordnung" });
@@ -1893,9 +1901,17 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   const isKostenerstattung = invoice.billingType === "pflegekasse_gesetzlich" && cust.rechnungAnKunde;
   const sendToCustomer = isPrivatBilling || isKostenerstattung;
 
-  const { insHist: insHistory, provider } = await loadInsuranceForSend(invoice.customerId);
+  // Task #1893 — Kasse am Stichtag des abgerechneten Monats, nicht heute.
+  const { insHist: insHistory, provider } = await loadInsuranceForSend(
+    invoice.customerId,
+    billingPeriodAsOfISO(invoice.billingYear, invoice.billingMonth),
+  );
 
-  if (!insHistory.length) throw badRequest("Keine aktive Pflegekassenzuordnung für diesen Kunden.");
+  if (!insHistory.length) {
+    throw badRequest(
+      `Keine Pflegekassenzuordnung für den Abrechnungszeitraum ${String(invoice.billingMonth).padStart(2, "0")}/${invoice.billingYear}.`,
+    );
+  }
 
   let recipientEmail: string | null = null;
   let recipientDisplayName = "";
@@ -2504,7 +2520,9 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
     .innerJoin(insuranceProviders, eq(insuranceProviders.id, customerInsuranceHistory.insuranceProviderId))
     .where(and(
       inArray(customerInsuranceHistory.customerId, customerIds),
-      isNull(customerInsuranceHistory.validTo),
+      // Task #1893 — Gruppierung/Dateiname nach der im Abrechnungsmonat
+      // gültigen Kasse; sonst landet die Rechnung im Bündel der falschen Kasse.
+      insuranceValidAt(billingPeriodAsOfISO(billingYear, billingMonth)),
     ));
   const payerByCustomer = new Map(payerRows.map(r => [r.customerId, { id: r.providerId, name: r.providerName }]));
 
@@ -2797,7 +2815,9 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
     .innerJoin(insuranceProviders, eq(insuranceProviders.id, customerInsuranceHistory.insuranceProviderId))
     .where(and(
       inArray(customerInsuranceHistory.customerId, customerIds),
-      isNull(customerInsuranceHistory.validTo),
+      // Task #1893 — Gruppierung/Dateiname nach der im Abrechnungsmonat
+      // gültigen Kasse; sonst landet die Rechnung im Bündel der falschen Kasse.
+      insuranceValidAt(billingPeriodAsOfISO(billingYear, billingMonth)),
     ));
   const payerByCustomer = new Map(payerRows.map(r => [r.customerId, { id: r.providerId, name: r.providerName }]));
 
@@ -3320,7 +3340,8 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
       .from(customerInsuranceHistory)
       .where(and(
         inArray(customerInsuranceHistory.customerId, customerIds),
-        isNull(customerInsuranceHistory.validTo),
+        // Task #1893 — derselbe Stichtag wie /eligible-customers und die Erstellung.
+        insuranceValidAt(billingPeriodAsOfISO(billingYear, billingMonth, dateTo)),
         eq(customerInsuranceHistory.insuranceProviderId, insuranceProviderId),
       ));
     const allowed = new Set(matching.map(r => r.customerId));

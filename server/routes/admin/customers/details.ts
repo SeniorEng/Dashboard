@@ -1,11 +1,12 @@
 import { Router, Request, Response } from "express";
 import { customerManagementStorage } from "../../../storage/customer-management";
 import { storage } from "../../../storage";
-import { asyncHandler } from "../../../lib/errors";
+import { asyncHandler, notFound } from "../../../lib/errors";
 import { requireIntParam } from "../../../lib/params";
 import { withAudit } from "../../../lib/with-audit";
 import {
   insertCustomerInsuranceSchema,
+  updateCustomerInsuranceSchema,
   insertCustomerContactSchema,
   insertCareLevelHistorySchema,
 } from "@shared/schema";
@@ -63,6 +64,52 @@ router.post("/customers/:id/insurance", asyncHandler("Versicherung konnte nicht 
   });
 
   res.status(201).json(insurance);
+}));
+
+// Task #1893 — Korrektur einer bestehenden Kostenträger-Zuordnung.
+// Gültig-ab/-bis und Versichertennummer sind korrigierbar; Kasse und Kunde nicht
+// (ein Wechsel ist eine neue Zeile, keine Korrektur). Die Fenster-Regeln
+// (Monatserster, überlappungs-/lückenfrei) erzwingt `updateCustomerInsurance`.
+router.patch("/customers/:id/insurance/:insuranceId", asyncHandler("Versicherung konnte nicht geändert werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
+  const insuranceId = requireIntParam(req.params.insuranceId, res);
+  if (insuranceId === null) return;
+
+  const patch = updateCustomerInsuranceSchema.parse(req.body);
+
+  const existing = await customerManagementStorage.getCustomerInsuranceHistory(customerId);
+  const target = existing.find((e) => e.id === insuranceId);
+  if (!target) throw notFound("Versicherungs-Zuordnung nicht gefunden");
+
+  const updated = await withAudit(async (tx, audit) => {
+    const row = await customerManagementStorage.updateCustomerInsurance(insuranceId, patch, tx);
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_updated",
+      entityType: "customer",
+      entityId: customerId,
+      metadata: {
+        changedFields: ["versicherung_korrigiert"],
+        oldValues: {
+          insuranceId: target.id,
+          validFrom: target.validFrom,
+          validTo: target.validTo,
+          versichertennummer: target.versichertennummer,
+        },
+        newValues: {
+          insuranceId: row.id,
+          validFrom: row.validFrom,
+          validTo: row.validTo,
+          versichertennummer: row.versichertennummer,
+        },
+      },
+      ipAddress: req.ip,
+    });
+    return row;
+  });
+
+  res.json(updated);
 }));
 
 router.get("/customers/:id/contacts", asyncHandler("Kontakte konnten nicht geladen werden", async (req: Request, res: Response) => {

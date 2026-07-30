@@ -9,7 +9,8 @@
  *    `validFrom/validTo`-Fenster (append-only historisiert).
  * 2. Pot-Default:
  *    - Kasse-Pots (`entlastungsbetrag_45b`/`umwandlung_45a`/
- *      `ersatzpflege_39_42a`): aktuelle `customer_insurance_history`-Zeile
+ *      `ersatzpflege_39_42a`): die am Stichtag `asOfISO` gültige
+ *      `customer_insurance_history`-Zeile über `resolveCustomerInsuranceAt`
  *      (Empfänger = `insurance_providers.empfaenger` oder Provider-Name).
  *    - `"private"` (Selbstzahler-Pot): Kunden-Stammadresse.
  *
@@ -24,7 +25,7 @@ import {
   customerBudgetRecipients,
   customers as customersTable,
 } from "@shared/schema";
-import { customerInsuranceHistory, insuranceProviders } from "@shared/schema";
+import { resolveCustomerInsuranceAt } from "./customer-mgmt/insurance";
 import type { InvoicePotKey } from "@shared/domain/budget-invoice-split";
 
 export interface BudgetRecipient {
@@ -138,35 +139,13 @@ export async function resolveBudgetRecipient(
     };
   }
 
-  // 2) Kasse-Default: aktuelle Versicherung des Kunden.
-  const insRows = await db
-    .select({
-      providerName: insuranceProviders.name,
-      ikNummer: insuranceProviders.ikNummer,
-      versichertennummer: customerInsuranceHistory.versichertennummer,
-      empfaenger: insuranceProviders.empfaenger,
-      empfaengerZeile2: insuranceProviders.empfaengerZeile2,
-      anschrift: insuranceProviders.anschrift,
-      plzOrt: insuranceProviders.plzOrt,
-      strasse: insuranceProviders.strasse,
-      hausnummer: insuranceProviders.hausnummer,
-      plz: insuranceProviders.plz,
-      stadt: insuranceProviders.stadt,
-    })
-    .from(customerInsuranceHistory)
-    .innerJoin(
-      insuranceProviders,
-      eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id),
-    )
-    .where(
-      and(
-        eq(customerInsuranceHistory.customerId, customerId),
-        isNull(customerInsuranceHistory.validTo),
-      ),
-    )
-    .limit(1);
+  // 2) Kasse-Default: die am Stichtag gültige Zuordnung (Task #1893).
+  // Vorher `valid_to IS NULL` — der Resolver bekam `asOfISO` zwar übergeben,
+  // wandte ihn aber NUR auf den Override (1) an. Damit adressierte eine im Juli
+  // erstellte Juni-Rechnung den Juli-Kostenträger.
+  const ins = await resolveCustomerInsuranceAt(customerId, asOfISO);
 
-  if (insRows.length === 0) {
+  if (!ins) {
     return {
       recipientName: customerName,
       recipientAddress: customerAddress,
@@ -176,12 +155,11 @@ export async function resolveBudgetRecipient(
     };
   }
 
-  const ins = insRows[0];
   return {
-    recipientName: ins.empfaenger || ins.providerName,
-    recipientAddress: buildInsuranceAddress(ins),
-    insuranceProviderName: ins.providerName,
-    ikNummer: ins.ikNummer ?? null,
+    recipientName: ins.provider.empfaenger || ins.provider.name,
+    recipientAddress: buildInsuranceAddress(ins.provider),
+    insuranceProviderName: ins.provider.name,
+    ikNummer: ins.provider.ikNummer ?? null,
     versichertennummer: ins.versichertennummer ?? null,
   };
 }
