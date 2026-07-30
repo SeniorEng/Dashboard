@@ -78,6 +78,53 @@ Cutover parallel gültig (Replit-Betrieb).
   `SignaturePad`-Komponente für ALLE Unterschriften. Keine Avatare/Profilbilder.
 - **Kommunikationsstil**: einfache, klare Sprache.
 
+## Wiederkehrende fachliche Regeln & Fallen (bindend)
+
+Stehender Urteils-Kontext. Diese Regeln sind aus realen Prod-Vorfällen entstanden —
+sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
+
+- **GoBD**: Gestellte/versendete Rechnungen NIE still editieren → **Storno +
+  Neuausstellung** (neue Nummer, Original referenziert). Nie einen bereits
+  gestellten Betrag rückwirkend *erhöhen*.
+- **Signierter Leistungsnachweis**: Termin entfernen nur, wenn keine **aktive**
+  (nicht-stornierte) Rechnung dranhängt — sonst zuerst stornieren.
+  In-place-Korrektur ist **reduktions-only**.
+- **Erstberatung**: zweiseitig — kundenseitig nie abgerechnet, mitarbeiterseitig
+  (Lohn/Stunden/km) voll. Ausschlüsse nur auf Kundenpfaden (Details oben).
+- **§45b**: Anker = Pflegegrad (nicht Vertrag); Verfall strikt 30.06.(Y+1).
+- **Kostenträger**: immer zeitraumgenau auflösen (Stichtag = Periodenende),
+  Kassenwechsel nur zum 1. eines Monats.
+- **`todayISO()`-vs-`asOf`-Falle**: Bei JEDER Datums-/Stichtags-Frage prüfen, ob
+  fälschlich „heute" statt „as-of Zeitraum" gelesen wird. Dieser Bug ist dreimal
+  aufgetreten: §45b-Verfall, Kostenträger-Empfänger, `asOfIso` in `invoice-calc`.
+- **Eine SSoT pro fachlicher Frage**: Anzeige-, Schreib- UND Filter-Pfade
+  importieren dieselbe Funktion; kein Zweitbegriff derselben Frage.
+- **Nebenbefunde**: Jeden Nebenbefund (Bug/Auffälligkeit/Tech-Debt), der beim
+  Arbeiten auffällt, im **PR-Body als `FINDING: … [P1/P2/P3]`** vermerken —
+  Alrik/Cowork übernimmt ihn in die Long-List. Den laufenden Task NICHT
+  entgleisen lassen.
+- **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
+  kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
+  Der `tests`-CI-Job ist **bekannt rot** (~28 Dateien Altbestand); PRs gegen
+  diese Baseline diffen, nicht gegen „grün".
+
+## Arbeitsmodus: autonom bis zur PR, Mensch an 4 Gates
+
+Der volle Loop (read → plan → implement → tsc/lint/test → commit → push → PR →
+CI) läuft **autonom**. Ein Mensch klinkt sich nur an diesen vier Punkten ein:
+
+1. **Fachliche Weiche** — offene Domänen-Entscheidung, *bevor* gebaut wird
+   (Variante A/B, GoBD-Frage). Greift nur, wenn wirklich offen. → Alrik entscheidet.
+2. **PR-Diff-Review** — Urteilsblick auf die Billing-/GoBD-Logik *vor* dem Merge.
+   → Cowork-Claude ODER der `reviewer`-Subagent (`.claude/agents/reviewer.md`),
+   der den Code nicht geschrieben hat.
+3. **Merge + Deploy** — Admin-Merge nach `main` + Prod-Publish. → Alrik bestätigt.
+4. **Prod-Schreiboperation** — Dry-Run zuerst, dann ausdrückliche Freigabe je
+   Schritt. → Alrik bestätigt.
+
+Alles dazwischen läuft ohne Rückfrage. Grundsatz: **Gate dort, wo Urteil oder
+Unumkehrbarkeit sitzt — nicht überall.**
+
 ## Stack & Wo was liegt
 
 - **Frontend** React 19 + Vite + Tailwind v4 (`client/src/`); **Backend** Express +
