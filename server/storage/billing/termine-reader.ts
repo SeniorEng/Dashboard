@@ -21,6 +21,8 @@
  *
  * Diese Liste trägt KEINE Geldbeträge (die Geld-Sicht lebt in der Pipeline).
  */
+import { insuranceValidAtSqlRaw } from "../../lib/insurance-period";
+import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
@@ -77,10 +79,12 @@ export async function readBillingTermine(
 ): Promise<BillingTermineResponse> {
   const { employeeId, insuranceProviderId } = opts;
 
+  // Task #1893 — Kassenfilter auf die im Abrechnungsmonat gültige Zuordnung.
+  const insAsOf = billingPeriodAsOfISO(billingYear, billingMonth);
   const insFilter = insuranceProviderId !== undefined
     ? sql`AND a.customer_id IN (
         SELECT cih.customer_id FROM customer_insurance_history cih
-        WHERE cih.valid_to IS NULL AND cih.insurance_provider_id = ${insuranceProviderId}
+        WHERE ${insuranceValidAtSqlRaw("cih", insAsOf)} AND cih.insurance_provider_id = ${insuranceProviderId}
       )`
     : sql``;
 

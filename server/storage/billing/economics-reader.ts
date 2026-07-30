@@ -24,6 +24,8 @@
  *
  * Geldbeträge sind ausnahmslos Integer-Cents.
  */
+import { insuranceValidAtSqlRaw } from "../../lib/insurance-period";
+import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
@@ -176,10 +178,12 @@ export async function readBillingEconomics(
   const empApptFilter = employeeId !== undefined
     ? sql`AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) = ${employeeId}`
     : sql``;
+  // Task #1893 — Kassenfilter auf die im Abrechnungsmonat gültige Zuordnung.
   const insApptFilter = insuranceProviderId !== undefined
     ? sql`AND a.customer_id IN (
         SELECT cih.customer_id FROM customer_insurance_history cih
-        WHERE cih.valid_to IS NULL AND cih.insurance_provider_id = ${insuranceProviderId}
+        WHERE ${insuranceValidAtSqlRaw("cih", billingPeriodAsOfISO(billingYear, billingMonth))}
+          AND cih.insurance_provider_id = ${insuranceProviderId}
       )`
     : sql``;
   const dTeFilter = sql`AND EXTRACT(YEAR FROM t.entry_date::date) = ${billingYear} AND EXTRACT(MONTH FROM t.entry_date::date) = ${billingMonth}`;
