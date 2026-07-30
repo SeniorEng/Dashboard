@@ -19,6 +19,9 @@ import {
   createTestCustomer,
   cleanupCustomer,
   createAndDocumentAppointment,
+  createTestEmployee,
+  assignEmployeeToCustomer,
+  deactivateTestEmployee,
   getFutureDate,
 } from "../test-utils";
 
@@ -50,6 +53,7 @@ async function getStatus(appointmentId: number): Promise<string> {
 
 describe("Task #1119: migrateExpiredUnsignedAppointments", () => {
   let customerId: number;
+  let employeeId: number;
   let serviceId: number;
   const ids: Record<string, number> = {};
 
@@ -58,10 +62,19 @@ describe("Task #1119: migrateExpiredUnsignedAppointments", () => {
     customerId = customer.id as number;
     serviceId = await getSeededServiceId();
 
+    // Eigener Mitarbeiter statt des geteilten Admin-Users: die Termin-Slots
+    // (getFutureDate(7..10), 09:00) sind sonst dieselben, die andere parallel
+    // laufende Suiten über `createAndDocumentAppointment` per Default belegen —
+    // das erzeugte sporadisch ein 409 „Terminüberschneidung" im Seeding.
+    const employee = await createTestEmployee({ nachnamePrefix: "TestMigExp" });
+    employeeId = employee.id;
+    await assignEmployeeToCustomer(customerId, employeeId);
+
     const keys = ["signed", "ended", "startedOnly", "untouched"];
     for (let i = 0; i < keys.length; i++) {
       const { appointmentId } = await createAndDocumentAppointment(customerId, serviceId, {
         date: getFutureDate(7 + i),
+        assignedEmployeeId: employeeId,
       });
       ids[keys[i]] = appointmentId;
     }
@@ -74,6 +87,7 @@ describe("Task #1119: migrateExpiredUnsignedAppointments", () => {
 
   afterAll(async () => {
     await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
   });
 
   it("restauriert jeden expired_unsigned-Termin auf seinen wahren Lebenszyklus-Status", async () => {
