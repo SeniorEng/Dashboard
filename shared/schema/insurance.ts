@@ -70,7 +70,10 @@ export const customerInsuranceHistory = pgTable("customer_insurance_history", {
 }, (table) => [
   index("customer_insurance_history_customer_id_idx").on(table.customerId),
   index("customer_insurance_history_provider_id_idx").on(table.insuranceProviderId),
-  index("customer_insurance_history_valid_idx").on(table.customerId, table.validTo),
+  // Task #1893 — Stichtags-Lesepfad (`validFrom <= asOf AND (validTo IS NULL OR
+  // validTo >= asOf)`, jüngstes `validFrom` gewinnt). ERSETZT den früheren
+  // Zuschnitt (customerId, validTo), der auf `valid_to IS NULL` optimiert war.
+  index("customer_insurance_history_valid_idx").on(table.customerId, table.validFrom, table.validTo),
 ]);
 
 // Insurance Provider schemas

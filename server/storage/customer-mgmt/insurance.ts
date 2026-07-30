@@ -7,9 +7,16 @@ import {
   customerInsuranceHistory,
   customerBudgetRecipients,
 } from "@shared/schema";
-import { eq, and, isNull, desc, count, notExists, sql } from "drizzle-orm";
+import { eq, and, isNull, or, lte, gte, desc, count, notExists, sql } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
+import {
+  dayBeforeISO,
+  validateInsuranceWindow,
+  validateInsuranceWindows,
+  type InsuranceWindow,
+} from "@shared/domain/insurance-period";
 import { db, type DbOrTx } from "../../lib/db";
+import { badRequest, notFound } from "../../lib/errors";
 
 const insuranceHistoryWithProviderSelect = {
   id: customerInsuranceHistory.id,
@@ -201,19 +208,53 @@ export async function deleteInsuranceProviderIfUnused(id: number): Promise<Delet
   });
 }
 
-export async function getCustomerCurrentInsurance(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined> {
-  const result = await db
+/**
+ * Task #1893 — DER Stichtags-Resolver für die Kostenträger-Zuordnung.
+ *
+ * Liefert zu (Kunde × Stichtag) genau die Zuordnung, deren Gültigkeitsfenster
+ * den Stichtag umschließt. ERSETZT das direkte `valid_to IS NULL`-Lesen in
+ * allen Abrechnungs-/Versandpfaden (`getInsuranceData`, Kassen-Default in
+ * `resolveBudgetRecipient`, `loadInsuranceForSend`) — dort ist „aktuell" das
+ * falsche Kriterium, weil eine im Juli erstellte Juni-Rechnung den im Juni
+ * gültigen Kostenträger adressieren muss.
+ *
+ * Prädikat: `validFrom <= asOf AND (validTo IS NULL OR validTo >= asOf)`
+ * (beide Grenzen inklusiv). `orderBy(desc(validFrom))` ist die Sicherung gegen
+ * historische Altdaten mit überlappenden Fenstern — bei sauberen Daten kann das
+ * Prädikat ohnehin nur eine Zeile treffen (siehe `validateInsuranceWindows`).
+ */
+export async function resolveCustomerInsuranceAt(
+  customerId: number,
+  asOfISO: string,
+  executor: DbOrTx = db,
+): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined> {
+  const result = await executor
     .select(insuranceHistoryWithProviderSelect)
     .from(customerInsuranceHistory)
     .innerJoin(insuranceProviders, eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id))
     .where(and(
       eq(customerInsuranceHistory.customerId, customerId),
-      isNull(customerInsuranceHistory.validTo)
+      lte(customerInsuranceHistory.validFrom, asOfISO),
+      or(
+        isNull(customerInsuranceHistory.validTo),
+        gte(customerInsuranceHistory.validTo, asOfISO),
+      ),
     ))
+    .orderBy(desc(customerInsuranceHistory.validFrom))
     .limit(1);
-  
+
   if (result.length === 0) return undefined;
   return { ...result[0], provider: result[0].provider };
+}
+
+/**
+ * „Aktuelle Kasse" für STAMMDATEN-Ansichten (Kundenakte, Dokument-Platzhalter).
+ * Bewusst `heute` als Stichtag — für Abrechnung/Versand ist das FALSCH, dort
+ * gehört {@link resolveCustomerInsuranceAt} mit dem Periodenende hin.
+ * Auf den Resolver zurückgeführt, damit es nur EIN Fenster-Prädikat gibt.
+ */
+export async function getCustomerCurrentInsurance(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined> {
+  return resolveCustomerInsuranceAt(customerId, todayISO());
 }
 
 export async function getCustomerInsuranceHistory(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider })[]> {
@@ -227,17 +268,59 @@ export async function getCustomerInsuranceHistory(customerId: number): Promise<(
   return result.map(r => ({ ...r, provider: r.provider }));
 }
 
+/** Alle Gültigkeitsfenster eines Kunden — Basis der Überlappungs-/Lückenprüfung. */
+async function loadInsuranceWindows(
+  customerId: number,
+  executor: DbOrTx,
+): Promise<(InsuranceWindow & { id: number })[]> {
+  const rows = await executor
+    .select({
+      id: customerInsuranceHistory.id,
+      validFrom: customerInsuranceHistory.validFrom,
+      validTo: customerInsuranceHistory.validTo,
+    })
+    .from(customerInsuranceHistory)
+    .where(eq(customerInsuranceHistory.customerId, customerId));
+  return rows;
+}
+
+/**
+ * Task #1893 — Kassenwechsel NUR zum Monatsersten.
+ *
+ * `validFrom` MUSS der 1. eines Monats sein; die Vorgängerzeile wird lückenlos
+ * und überlappungsfrei am Tag DAVOR geschlossen (= letzter Tag des Vormonats).
+ * ERSETZT das frühere `validTo = todayISO()`, das am Wechseltag zwei gleichzeitig
+ * gültige Zeilen erzeugte (beide erfüllten das Stichtags-Prädikat, `.limit(1)`
+ * entschied zufällig).
+ *
+ * @throws {AppError} 400 mit deutscher Meldung bei unzulässigem Fenster.
+ */
 export async function addCustomerInsurance(data: InsertCustomerInsurance, userId?: number, tx?: DbOrTx): Promise<CustomerInsuranceHistory> {
   const executor = tx ?? db;
-  const today = todayISO();
 
+  const windowError = validateInsuranceWindow({ validFrom: data.validFrom, validTo: data.validTo ?? null });
+  if (windowError) throw badRequest(windowError);
+
+  const closesAt = dayBeforeISO(data.validFrom);
+
+  // Vorgänger lückenlos am Tag vor dem neuen `validFrom` schließen. Nur offene
+  // Fenster, die VOR dem neuen Start begonnen haben — ein bereits geschlossenes
+  // oder später beginnendes Fenster wird nie stillschweigend umgeschrieben.
   await executor
     .update(customerInsuranceHistory)
-    .set({ validTo: today })
+    .set({ validTo: closesAt })
     .where(and(
       eq(customerInsuranceHistory.customerId, data.customerId),
-      isNull(customerInsuranceHistory.validTo)
+      isNull(customerInsuranceHistory.validTo),
+      lte(customerInsuranceHistory.validFrom, closesAt),
     ));
+
+  const existing = await loadInsuranceWindows(data.customerId, executor);
+  const setError = validateInsuranceWindows([
+    ...existing,
+    { validFrom: data.validFrom, validTo: data.validTo ?? null },
+  ]);
+  if (setError) throw badRequest(setError);
 
   const result = await executor.insert(customerInsuranceHistory).values({
     ...data,
@@ -245,4 +328,56 @@ export async function addCustomerInsurance(data: InsertCustomerInsurance, userId
   }).returning();
 
   return result[0];
+}
+
+export interface UpdateCustomerInsurancePatch {
+  validFrom?: string;
+  validTo?: string | null;
+  versichertennummer?: string;
+}
+
+/**
+ * Task #1893 — Korrektur einer BESTEHENDEN Zuordnung (Gültig-ab/-bis/
+ * Versichertennummer). Validiert die resultierende Fenster-Menge des Kunden
+ * als Ganzes: 01.-Erzwingung, keine Überlappung, keine Lücke, kein Rückwärts.
+ *
+ * @throws {AppError} 404 wenn die Zeile nicht existiert, 400 bei unzulässigem Fenster.
+ */
+export async function updateCustomerInsurance(
+  insuranceId: number,
+  patch: UpdateCustomerInsurancePatch,
+  tx?: DbOrTx,
+): Promise<CustomerInsuranceHistory> {
+  const executor = tx ?? db;
+
+  const currentRows = await executor
+    .select()
+    .from(customerInsuranceHistory)
+    .where(eq(customerInsuranceHistory.id, insuranceId))
+    .limit(1);
+  const current = currentRows[0];
+  if (!current) throw notFound("Versicherungs-Zuordnung nicht gefunden");
+
+  const nextValidFrom = patch.validFrom ?? current.validFrom;
+  const nextValidTo = patch.validTo !== undefined ? patch.validTo : current.validTo;
+
+  const others = (await loadInsuranceWindows(current.customerId, executor))
+    .filter((w) => w.id !== insuranceId);
+  const setError = validateInsuranceWindows([
+    ...others,
+    { id: insuranceId, validFrom: nextValidFrom, validTo: nextValidTo },
+  ]);
+  if (setError) throw badRequest(setError);
+
+  const updated = await executor
+    .update(customerInsuranceHistory)
+    .set({
+      validFrom: nextValidFrom,
+      validTo: nextValidTo,
+      ...(patch.versichertennummer !== undefined ? { versichertennummer: patch.versichertennummer } : {}),
+    })
+    .where(eq(customerInsuranceHistory.id, insuranceId))
+    .returning();
+
+  return updated[0];
 }
