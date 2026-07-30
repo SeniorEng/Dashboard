@@ -124,5 +124,18 @@ export const insertCustomerInsuranceSchema = z.object({
   notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });
 
+/**
+ * Task #1893 — Korrektur einer bestehenden Zuordnung. Bewusst NUR die drei
+ * korrigierbaren Felder; Kasse und Kunde bleiben unveränderlich (ein Wechsel ist
+ * eine neue Zeile, keine Korrektur). Die Fenster-Regeln (Monatserster,
+ * überlappungs- und lückenfrei) prüft `updateCustomerInsurance` serverseitig.
+ */
+export const updateCustomerInsuranceSchema = z.object({
+  validFrom: z.string().optional(),
+  validTo: z.string().nullable().optional(),
+  versichertennummer: versichertennummerSchema.optional(),
+});
+
 export type CustomerInsuranceHistory = typeof customerInsuranceHistory.$inferSelect;
 export type InsertCustomerInsurance = z.infer<typeof insertCustomerInsuranceSchema>;
+export type UpdateCustomerInsurance = z.infer<typeof updateCustomerInsuranceSchema>;

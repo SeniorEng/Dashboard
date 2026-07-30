@@ -139,6 +139,7 @@ class CustomerManagementStorage {
   getCustomerCurrentInsurance = insuranceModule.getCustomerCurrentInsurance;
   getCustomerInsuranceHistory = insuranceModule.getCustomerInsuranceHistory;
   addCustomerInsurance = insuranceModule.addCustomerInsurance;
+  updateCustomerInsurance = insuranceModule.updateCustomerInsurance;
 
   getCustomerContact = contactsModule.getCustomerContact;
   getCustomerContacts = contactsModule.getCustomerContacts;
