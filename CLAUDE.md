@@ -72,6 +72,14 @@ Cutover parallel gültig (Replit-Betrieb).
     keinen Lohn-/Stunden-/km-Pfad treffen.
 - **Tests nur gegen Dev/Ephemeral-DBs — NIE gegen Prod.** Cleanup-/Reseed-Skripte
   brauchen `--apply` + Hostname-Guard. Dev-DB-Guard nicht umgehen.
+- **Einmal-Korrekturskripte sind temporäre Werkzeuge (`server/scripts/fix-*`).**
+  Nach „angewendet + verifiziert" das `.ts` LÖSCHEN und stattdessen ein kurzes
+  Protokoll unter `docs/corrections/<datum>_<fall>.md` ablegen (Problem, Maßnahme,
+  Vorher/Nachher, Audit-Referenz). Das Protokoll ERSETZT das liegengebliebene
+  Skript als Nachweis; der vollständige Nachweis ist git-Historie + DB-Audit-Log
+  + `.md`. Liegengebliebene Skripte brechen `tsc`/CI, sobald sich Signaturen
+  ändern, und suggerieren einen wiederholbaren Vorgang, den es nicht gibt.
+  Wiederverwendbare Fähigkeiten als echtes Feature bauen, nicht als Skript.
 - **UI-Präferenzen**: Keine Blur-Effekte (`backdrop-blur` verboten); Overlays max.
   `bg-black/50` ohne Blur. Keine CSS-Transforms in Dialog/AlertDialog/Sheet/Drawer
   (Sub-Pixel-Unschärfe) — Flexbox-Zentrierung + reine Fade-Animationen. Zentrale
