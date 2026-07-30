@@ -225,10 +225,16 @@ export function useBillingMutations({
     mutationFn: async ({
       readyOnly,
       confirmPartial,
+      customerIds,
     }: {
       readyOnly: boolean;
       // Task #1883 — Opt-in fürs bewusste Teil-Abrechnen der Mischkunden (Variante B).
       confirmPartial?: boolean;
+      // Task #1888 — explizite Auswahl-Allowlist (Multi-Select „Erstellen (N)").
+      // Ist sie gesetzt, verengt der Server die Massenerstellung auf DIESE Kunden
+      // (reine Schnittmenge mit den signierten LNs — nie Erweiterung). Skip-/Fehler-/
+      // Idempotenz-Logik + der #1883-Guard laufen unverändert.
+      customerIds?: number[];
     }) => {
       setGenerateAllProgress(null);
       const result = await api.post<GenerateAllResponse>("/billing/generate-all", {
@@ -239,6 +245,7 @@ export function useBillingMutations({
         ...(dateTo ? { dateTo } : {}),
         readyOnly,
         ...(confirmPartial ? { confirmPartial: true } : {}),
+        ...(customerIds ? { customerIds } : {}),
       });
       return unwrapResult(result);
     },

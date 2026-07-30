@@ -3260,9 +3260,17 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     // (nie still); mit `confirmPartial=true` wird ihr signierter Teil abgerechnet.
     confirmPartial: z.boolean().optional(),
     partialReason: z.string().max(500).optional(),
+    // Task #1888 — optionale Auswahl-Allowlist (Multi-Select „Erstellen (N)").
+    // Ist sie gesetzt, wird die Massenerstellung auf DIESE Kunden verengt. Der
+    // Guard bleibt: die Menge entsteht weiterhin aus signierten LNs und wird nur
+    // GESCHNITTEN, nie erweitert — ein nicht-abrechenbarer (LN-loser) Kunde ist
+    // gar nicht in `signedRecords` und wird daher nie angefasst, selbst wenn er
+    // (fälschlich) in der Auswahl steht. Skip-/Fehler-/Idempotenz-Logik und der
+    // #1883-Unterabrechnungs-Guard laufen unverändert weiter.
+    customerIds: z.array(z.number().int().positive()).optional(),
   }).safeParse(req.body);
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
-  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo, readyOnly, confirmPartial, partialReason } = parsed.data;
+  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo, readyOnly, confirmPartial, partialReason, customerIds: selectedCustomerIds } = parsed.data;
   const hasDateRange = !!(dateFrom || dateTo);
   // Task #586 — Strukturiertes Start-/Ende-Log + Voll-Stack im inneren
   // Catch, damit der nächste 500-Vorfall in Prod im Server-Log sofort
@@ -3294,6 +3302,15 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
       monthlyServiceRecordsRepo.activeOnly(),
     ));
   let customerIds = Array.from(new Set(signedRecords.map(r => r.customerId)));
+
+  // Task #1888 — Auswahl-Allowlist: verengt die aus signierten LNs abgeleitete Menge
+  // auf die vom Frontend gewählten Kunden (Multi-Select). Reine SCHNITTMENGE — nie
+  // Erweiterung: nicht-abrechenbare (LN-lose) Kunden sind nicht in `customerIds` und
+  // bleiben es auch bei Auswahl. Leere Auswahl = nichts zu tun.
+  if (selectedCustomerIds !== undefined) {
+    const allowSet = new Set(selectedCustomerIds);
+    customerIds = customerIds.filter((id) => allowSet.has(id));
+  }
 
   // Krankenkassen-Filter: schränkt die Massenerstellung auf Kunden mit der
   // gewählten aktiven Pflegekasse ein. Selbstzahler-Kunden haben keinen
