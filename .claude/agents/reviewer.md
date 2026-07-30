@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Prüft einen PR-Diff auf die wiederkehrenden CareConnect-Fallen (GoBD, SSoT, Stichtag-vs-heute, Test-Baseline), ohne ihn geschrieben zu haben. Gate 2 des Betriebsmodells. Nutzen, wenn ein Review eines Diffs oder einer PR angefordert wird ("review PR #N", "prüfe den Diff", "Gate 2").
+description: "Prüft einen PR-Diff auf die wiederkehrenden CareConnect-Fallen (GoBD, SSoT, Stichtag-vs-heute, Test-Baseline), ohne ihn geschrieben zu haben. Gate 2 des Betriebsmodells. Nutzen, wenn ein Review eines Diffs oder einer PR angefordert wird ('review PR #14', 'prüfe den Diff', 'Gate 2')."
 model: opus
 tools: [Read, Grep, Glob, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(gh pr diff:*), Bash(gh pr view:*), Bash(gh run view:*), Bash(gh run list:*)]
 disallowedTools: [Edit, Write, NotebookEdit]
