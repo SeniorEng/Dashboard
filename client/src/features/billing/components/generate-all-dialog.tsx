@@ -27,10 +27,14 @@ interface GenerateAllDialogProps {
   generateAllMutation: UseMutationResult<
     GenerateAllResponse,
     Error,
-    { readyOnly: boolean; confirmPartial?: boolean },
+    { readyOnly: boolean; confirmPartial?: boolean; customerIds?: number[] },
     unknown
   >;
   customers: BillingCustomerItem[] | undefined;
+  // Task #1888 — wenn gesetzt, ist der Lauf auf DIESE Auswahl (Multi-Select
+  // „Erstellen (N)") verengt: Zähler zählen nur die Auswahl, und die Allowlist wird
+  // an `generate-all` durchgereicht.
+  selectedCustomerIds?: number[];
   selectedMonth: number;
   selectedYear: number;
   closeButtonRef: RefObject<HTMLButtonElement | null>;
@@ -43,6 +47,7 @@ export function GenerateAllDialog({
   setGenerateAllProgress,
   generateAllMutation,
   customers,
+  selectedCustomerIds,
   selectedMonth,
   selectedYear,
   closeButtonRef,
@@ -59,7 +64,16 @@ export function GenerateAllDialog({
   // nie still teil-abgerechnet. AN = ihr signierter Teil wird jetzt abgerechnet.
   const [confirmPartial, setConfirmPartial] = useState(false);
 
-  const totalCount = customers?.length ?? 0;
+  // Task #1888 — bei einer Multi-Select-Auswahl zählen die Vorab-Zähler NUR die
+  // ausgewählten Kunden (sonst die ganze berechtigte Menge).
+  const scopedCustomers = useMemo(() => {
+    if (!selectedCustomerIds) return customers ?? [];
+    const allow = new Set(selectedCustomerIds);
+    return (customers ?? []).filter((c) => allow.has(c.id));
+  }, [customers, selectedCustomerIds]);
+  const isSelectionRun = selectedCustomerIds !== undefined;
+
+  const totalCount = scopedCustomers.length;
   // Task #1775: Der (N)-Zähler „werden erstellt" darf nur die Kunden zählen, die
   // tatsächlich abgerechnet werden — also solche ohne offene Termine UND mit
   // erfülltem Unterschrifts-Gate (`eligibility.status === "eligible"`). Das
@@ -69,10 +83,10 @@ export function GenerateAllDialog({
   // vorher fälschlich mit und ließen den Zähler mehr versprechen, als entsteht.
   const readyCount = useMemo(
     () =>
-      (customers ?? []).filter(
+      scopedCustomers.filter(
         (c) => !hasOpenAppointments(c) && c.eligibility.status === "eligible",
       ).length,
-    [customers],
+    [scopedCustomers],
   );
   // Task #1783: Auch ohne readyOnly werden signatur-blockierte Kunden
   // (`eligibility.status !== "eligible"`) server-seitig übersprungen. Der
@@ -80,9 +94,9 @@ export function GenerateAllDialog({
   // und tatsächliches Lauf-Ergebnis übereinstimmen.
   const signatureBlockedCount = useMemo(
     () =>
-      (customers ?? []).filter((c) => c.eligibility.status !== "eligible")
+      scopedCustomers.filter((c) => c.eligibility.status !== "eligible")
         .length,
-    [customers],
+    [scopedCustomers],
   );
   const willCreate = readyOnly ? readyCount : totalCount - signatureBlockedCount;
   const willSkip = readyOnly ? totalCount - readyCount : signatureBlockedCount;
@@ -98,7 +112,9 @@ export function GenerateAllDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Alle offenen Leistungsnachweise abrechnen</DialogTitle>
+          <DialogTitle>
+            {isSelectionRun ? "Ausgewählte Kunden abrechnen" : "Alle offenen Leistungsnachweise abrechnen"}
+          </DialogTitle>
           <DialogDescription>
             Für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} werden alle Kunden mit unterschriebenem Leistungsnachweis sequenziell in Rechnung gestellt. Kunden mit bereits vorhandener Rechnung werden übersprungen.
           </DialogDescription>
@@ -232,7 +248,7 @@ export function GenerateAllDialog({
             Schließen
           </Button>
           <Button
-            onClick={() => generateAllMutation.mutate({ readyOnly, confirmPartial })}
+            onClick={() => generateAllMutation.mutate({ readyOnly, confirmPartial, ...(selectedCustomerIds ? { customerIds: selectedCustomerIds } : {}) })}
             disabled={generateAllMutation.isPending || willCreate === 0 || !!generateAllProgress}
             className="bg-teal-600 hover:bg-teal-700 text-white"
             data-testid="button-confirm-generate-all"

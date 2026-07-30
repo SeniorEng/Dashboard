@@ -41,6 +41,7 @@ import {
   useActiveEmployees,
   useBillingMutations,
   useMissingSignaturesByCustomer,
+  useSelection,
   BillingFilterBar,
   EconomicsOverviewCard,
   StatusPipelineCard,
@@ -89,11 +90,19 @@ export default function AdminBilling() {
   const [reduce45bTarget, setReduce45bTarget] = useState<InvoiceItem | null>(null);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [generateAllOpen, setGenerateAllOpen] = useState(false);
+  // Task #1888 — wenn gesetzt, ist der „Alle erstellen"-Dialog auf die Multi-Select-
+  // Auswahl der Erstellungs-Liste verengt (Sammelaktion „Erstellen (N)"); null = der
+  // reguläre „Alle erstellen"-Lauf über die ganze berechtigte Menge.
+  const [generateAllSelection, setGenerateAllSelection] = useState<number[] | null>(null);
   const generateAllCloseBtnRef = useRef<HTMLButtonElement>(null);
   const [bulkSendOpen, setBulkSendOpen] = useState(false);
   // Task #1473: Print-only Sammeldruck-Dialog (kein Statuswechsel).
   const [sammeldruckOpen, setSammeldruckOpen] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // Task #1888 — gemeinsame Auswahl-Hülle (#1376) über den geteilten `useSelection`-
+  // Hook. Eine Instanz für die Rechnungs-Liste, eine für die Erstellungs-Liste.
+  const invoiceSelection = useSelection();
+  const selectedIds = invoiceSelection.selectedIds;
+  const pendingSelection = useSelection();
   const [pendingBulkAction, setPendingBulkAction] = useState<
     | { type: "delete" }
     | { type: "status"; status: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt" }
@@ -212,7 +221,7 @@ export default function AdminBilling() {
     },
     onDiscardSettled: () => setDiscardConfirmOpen(false),
     onStatusSuccess: () => setStornoTarget(null),
-    onBulkActionSuccess: () => setSelectedIds(new Set()),
+    onBulkActionSuccess: () => invoiceSelection.clear(),
     onReduce45bSuccess: () => setReduce45bTarget(null),
   });
 
@@ -318,10 +327,17 @@ export default function AdminBilling() {
     setExpandedInvoiceId(expandedInvoiceId === invoiceId ? null : invoiceId);
   };
 
-  // Auswahl zurücksetzen, sobald sich der sichtbare Listenumfang ändert.
+  // Auswahl zurücksetzen, sobald sich der sichtbare Listenumfang ändert. Task #1888:
+  // gilt für BEIDE Auswahl-Hüllen (Rechnungs- und Erstellungs-Liste), damit Zähler/
+  // Summen unter Kassen-/Datumsfilter konsistent bleiben. Deps auf die STABILEN
+  // `clear`-Callbacks (useCallback []), nicht auf die je Render neu gebildeten
+  // Selection-Objekte — sonst liefe der Effekt bei jedem Render.
+  const clearInvoiceSelection = invoiceSelection.clear;
+  const clearPendingSelection = pendingSelection.clear;
   useEffect(() => {
-    setSelectedIds(new Set());
-  }, [selectedMonth, selectedYear, payerFilter]);
+    clearInvoiceSelection();
+    clearPendingSelection();
+  }, [selectedMonth, selectedYear, payerFilter, clearInvoiceSelection, clearPendingSelection]);
 
   // Task #1473: Pipeline-Chip → passender Tab + geteilter Status-Filter.
   const handleStageSelect = (selection: PipelineStageSelection) => {
@@ -330,12 +346,7 @@ export default function AdminBilling() {
   };
 
   const handleToggleSelect = (invoiceId: number, checked: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(invoiceId);
-      else next.delete(invoiceId);
-      return next;
-    });
+    invoiceSelection.toggle(invoiceId, checked);
   };
 
   const handleToggleSelectAll = (checked: boolean) => {
@@ -343,15 +354,13 @@ export default function AdminBilling() {
       // Task #1890: „Alle auswählen" nimmt bewusst KEINE Storno-Belege auf —
       // für sie gibt es keine Sammelaktion. So bleiben Auswahl-/Versand-Zähler
       // unverändert, auch wenn die Stornos gerade eingeblendet sind.
-      setSelectedIds(
-        new Set(
-          (visibleInvoices ?? [])
-            .filter((inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }))
-            .map((inv) => inv.id),
-        ),
+      invoiceSelection.setAll(
+        (visibleInvoices ?? [])
+          .filter((inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }))
+          .map((inv) => inv.id),
       );
     } else {
-      setSelectedIds(new Set());
+      invoiceSelection.clear();
     }
   };
 
@@ -370,14 +379,20 @@ export default function AdminBilling() {
   // Task #1630: „Nach Status auswählen" — alle Rechnungen eines Handlungs-
   // Clusters auf einmal auswählen/abwählen.
   const handleToggleSelectCluster = (ids: number[], checked: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) {
-        if (checked) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
+    invoiceSelection.toggleMany(ids, checked);
+  };
+
+  // Task #1888 — Sammelaktion „Erstellen (N)" der Erstellungs-Liste: öffnet den
+  // bestehenden „Alle erstellen"-Dialog auf die Auswahl VERENGT. So teilen Auswahl-
+  // und Voll-Lauf denselben #1883-geschützten generate-all-Pfad, dieselbe Skip-/
+  // Fehler-/Idempotenz-Logik und dasselbe Fortschritt/Ergebnis-Feedback. Der Server
+  // schneidet die Auswahl zusätzlich auf die signierten LNs (nie Erweiterung).
+  const handleCreateSelectedPending = () => {
+    const ids = Array.from(pendingSelection.selectedIds);
+    if (ids.length === 0) return;
+    setGenerateAllSelection(ids);
+    setGenerateAllProgress(null);
+    setGenerateAllOpen(true);
   };
 
   const bulkActionPending = bulkDeleteMutation.isPending || bulkStatusMutation.isPending;
@@ -490,7 +505,7 @@ export default function AdminBilling() {
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              onClick={() => { setGenerateAllProgress(null); setGenerateAllOpen(true); }}
+              onClick={() => { setGenerateAllSelection(null); setGenerateAllProgress(null); setGenerateAllOpen(true); }}
               className={componentStyles.btnPrimary}
               data-testid="button-generate-all"
             >
@@ -563,6 +578,9 @@ export default function AdminBilling() {
             selectedMonth={selectedMonth}
             selectedYear={selectedYear}
             missingSignaturesByCustomer={missingSignaturesByCustomer}
+            selection={pendingSelection}
+            onCreateSelected={handleCreateSelectedPending}
+            createSelectedPending={generateAllMutation.isPending && generateAllSelection !== null}
           />
 
           <InvoiceList
@@ -684,11 +702,21 @@ export default function AdminBilling() {
 
       <GenerateAllDialog
         open={generateAllOpen}
-        setOpen={setGenerateAllOpen}
+        setOpen={(o) => {
+          setGenerateAllOpen(o);
+          // Task #1888 — beim Schließen eines Auswahl-Laufs die Auswahl leeren
+          // (frisch erstellte Kunden sind ohnehin aus der Liste), damit Zähler/Summe
+          // nicht mit veralteten IDs zurückbleiben.
+          if (!o && generateAllSelection !== null) {
+            pendingSelection.clear();
+            setGenerateAllSelection(null);
+          }
+        }}
         generateAllProgress={generateAllProgress}
         setGenerateAllProgress={setGenerateAllProgress}
         generateAllMutation={generateAllMutation}
         customers={customers}
+        selectedCustomerIds={generateAllSelection ?? undefined}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
         closeButtonRef={generateAllCloseBtnRef}

@@ -14,4 +14,5 @@ export {
 export type { ActiveEmployee } from "./use-billing-queries";
 export { useBillingMutations } from "./use-billing-mutations";
 export { useMissingSignaturesByCustomer } from "./use-missing-signatures";
+export { useSelection, type Selection } from "./use-selection";
 export { useRowCap, DEFAULT_ROW_CAP } from "./use-row-cap";

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { iconSize } from "@/design-system";
 import {
   Loader2,
@@ -30,6 +31,7 @@ import {
 import { BILLING_TYPE_LABELS } from "../constants";
 import { getCustomerName } from "../utils";
 import { useRowCap } from "../hooks/use-row-cap";
+import type { Selection } from "../hooks/use-selection";
 
 interface PendingInvoicesCardProps {
   customers: BillingCustomerItem[] | undefined;
@@ -43,6 +45,12 @@ interface PendingInvoicesCardProps {
   // Kunde (ersetzt die separate obere Box). Wird unter dem jeweiligen Kunden in der
   // Liste gerendert, sodass die Unterschrift direkt nachgeholt werden kann.
   missingSignaturesByCustomer?: Map<number, MissingSignatureItem[]>;
+  // Task #1888 — geteilte Auswahl-Hülle (#1376) für die Sammelaktion „Erstellen (N)".
+  // NUR erstellbare Kunden („Bereit zum Abrechnen") sind auswählbar; die übrigen
+  // Gruppen bleiben sichtbar, aber read-only.
+  selection?: Selection;
+  onCreateSelected?: () => void;
+  createSelectedPending?: boolean;
 }
 
 // Task #1743: Ein Kunde gilt als „bereit zum Abrechnen", wenn er im gewählten
@@ -61,6 +69,9 @@ function PendingCustomerRow({
   onCreateForCustomer,
   canCreate,
   missingSignatures,
+  selectable,
+  selected,
+  onToggleSelect,
   selectedMonth,
   selectedYear,
 }: {
@@ -71,6 +82,10 @@ function PendingCustomerRow({
   canCreate: boolean;
   // Task #1889 — „fehlende Unterschrift nach Abschluss"-Termine dieses Kunden.
   missingSignatures?: MissingSignatureItem[];
+  // Task #1888 — Auswahl-Checkbox nur in erstellbaren („Bereit")-Zeilen.
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: number, checked: boolean) => void;
   selectedMonth: number;
   selectedYear: number;
 }) {
@@ -141,6 +156,16 @@ function PendingCustomerRow({
       className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
       data-testid={`row-pending-customer-${c.id}`}
     >
+      {/* Task #1888 — Auswahl-Checkbox (nur in erstellbaren Zeilen). */}
+      {selectable && (
+        <Checkbox
+          checked={!!selected}
+          onCheckedChange={(v) => onToggleSelect?.(c.id, v === true)}
+          className="shrink-0"
+          data-testid={`checkbox-pending-${c.id}`}
+          aria-label={`${getCustomerName(c)} auswählen`}
+        />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -278,6 +303,8 @@ function PendingSection({
   onCreateForCustomer,
   canCreate = true,
   missingSignaturesByCustomer,
+  selectable = false,
+  selection,
   testIdKey,
   selectedMonth,
   selectedYear,
@@ -292,6 +319,9 @@ function PendingSection({
   // Sektionen unverändert).
   canCreate?: boolean;
   missingSignaturesByCustomer?: Map<number, MissingSignatureItem[]>;
+  // Task #1888 — nur erstellbare Sektionen („Bereit zum Abrechnen") sind auswählbar.
+  selectable?: boolean;
+  selection?: Selection;
   testIdKey: string;
   selectedMonth: number;
   selectedYear: number;
@@ -309,14 +339,32 @@ function PendingSection({
     (sum, c) => sum + (c.estimatedAmountCents ?? 0),
     0,
   );
+  // Task #1888 — Gruppen-Auswahlzustand (alle/teils/keine) für die Header-Checkbox
+  // „ganze Gruppe auswählen" (analog Cluster-Auswahl der Rechnungs-Liste).
+  const groupIds = customers.map((c) => c.id);
+  const selectedInGroup =
+    selectable && selection ? groupIds.filter((id) => selection.has(id)).length : 0;
+  const allSelected = selectedInGroup === groupIds.length && groupIds.length > 0;
+  const someSelected = selectedInGroup > 0 && !allSelected;
   if (customers.length === 0) return null;
   return (
     <div className="mt-5 first:mt-0" data-testid={`section-pending-${testIdKey}`}>
+      <div className="mb-1 flex items-center gap-2">
+      {/* Task #1888 — Gruppen-Auswahl-Checkbox (nur in erstellbaren Sektionen). */}
+      {selectable && selection && (
+        <Checkbox
+          checked={allSelected ? true : someSelected ? "indeterminate" : false}
+          onCheckedChange={(v) => selection.toggleMany(groupIds, v === true)}
+          className="shrink-0"
+          data-testid={`checkbox-pending-group-${testIdKey}`}
+          aria-label={`${title} — ganze Gruppe auswählen`}
+        />
+      )}
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        className={`mb-1 flex w-full items-center gap-2 text-left text-sm font-medium ${headerClassName}`}
+        className={`flex w-full items-center gap-2 text-left text-sm font-medium ${headerClassName}`}
         data-testid={`button-pending-section-toggle-${testIdKey}`}
       >
         <ChevronDown
@@ -341,6 +389,7 @@ function PendingSection({
           {groupTotalCents > 0 ? formatEuroDE(groupTotalCents) : "—"}
         </span>
       </button>
+      </div>
       {/* Task #1772: weiches Ein-/Ausklappen via grid-rows-Transition (kein
           CSS-Transform), analog zur Karte. */}
       <div
@@ -359,6 +408,9 @@ function PendingSection({
                 onCreateForCustomer={onCreateForCustomer}
                 canCreate={canCreate}
                 missingSignatures={missingSignaturesByCustomer?.get(c.id)}
+                selectable={selectable}
+                selected={selection?.has(c.id)}
+                onToggleSelect={selection?.toggle}
                 selectedMonth={selectedMonth}
                 selectedYear={selectedYear}
               />
@@ -399,6 +451,9 @@ export function PendingInvoicesCard({
   selectedMonth,
   selectedYear,
   missingSignaturesByCustomer,
+  selection,
+  onCreateSelected,
+  createSelectedPending,
 }: PendingInvoicesCardProps) {
   // Task #1501: Karte einklappbar — der Kopf dient als Toggle, der Zähler bleibt
   // auch im eingeklappten Zustand sichtbar.
@@ -445,6 +500,17 @@ export function PendingInvoicesCard({
         break;
     }
   }
+
+  // Task #1888 — nur „Bereit zum Abrechnen" ist auswählbar (die einzige tatsächlich
+  // erstellbare Gruppe). Der `generate-all`-Guard schneidet ohnehin auf signierte
+  // LNs — die Auswahl-Allowlist ist eine zusätzliche, engere Absicherung.
+  const selectionEnabled = !!selection && readyCustomers.length > 0;
+  const readyIds = readyCustomers.map((c) => c.id);
+  const selectedReadyCount = selection ? readyIds.filter((id) => selection.has(id)).length : 0;
+  const allReadySelected = selectedReadyCount === readyIds.length && readyIds.length > 0;
+  const selectedTotalCents = selection
+    ? readyCustomers.filter((c) => selection.has(c.id)).reduce((s, c) => s + (c.estimatedAmountCents ?? 0), 0)
+    : 0;
 
   return (
     <Card className="mb-6" data-testid="card-pending-invoices">
@@ -501,6 +567,47 @@ export function PendingInvoicesCard({
               </div>
             ) : (
               <>
+                {/* Task #1888 — Auswahl-Kopfzeile: „Alle auswählen" (nur erstellbare
+                    „Bereit"-Kunden) + Sammelaktion „Erstellen (N)" über den
+                    #1883-geschützten generate-all-Pfad. Nur sichtbar, wenn es
+                    erstellbare Kunden gibt. */}
+                {selectionEnabled && selection && (
+                  <div
+                    className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
+                    data-testid="bar-pending-selection"
+                  >
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <Checkbox
+                        checked={allReadySelected}
+                        onCheckedChange={(v) =>
+                          v === true ? selection.setAll(readyIds) : selection.clear()
+                        }
+                        data-testid="checkbox-pending-select-all"
+                        aria-label="Alle erstellbaren Kunden auswählen"
+                      />
+                      <span>Alle auswählen</span>
+                    </label>
+                    {selectedReadyCount > 0 && (
+                      <span className="text-sm text-gray-600" data-testid="text-pending-selected-count">
+                        {selectedReadyCount} ausgewählt · {formatEuroDE(selectedTotalCents)}
+                      </span>
+                    )}
+                    <Button
+                      size="sm"
+                      className="ml-auto bg-teal-600 hover:bg-teal-700 text-white"
+                      disabled={selectedReadyCount === 0 || !!createSelectedPending}
+                      onClick={() => onCreateSelected?.()}
+                      data-testid="button-pending-create-selected"
+                    >
+                      {createSelectedPending ? (
+                        <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                      ) : (
+                        <FileText className={`${iconSize.sm} mr-1`} />
+                      )}
+                      Erstellen ({selectedReadyCount})
+                    </Button>
+                  </div>
+                )}
                 <PendingSection
                   title="Bereit zum Abrechnen"
                   icon={<CheckCircle2 className={`${iconSize.sm} text-green-600`} />}
@@ -508,6 +615,8 @@ export function PendingInvoicesCard({
                   customers={readyCustomers}
                   onCreateForCustomer={onCreateForCustomer}
                   missingSignaturesByCustomer={missingSignaturesByCustomer}
+                  selectable={selectionEnabled}
+                  selection={selection}
                   testIdKey="ready"
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}

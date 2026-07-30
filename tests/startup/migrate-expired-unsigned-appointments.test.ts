@@ -19,6 +19,9 @@ import {
   createTestCustomer,
   cleanupCustomer,
   createAndDocumentAppointment,
+  createTestEmployee,
+  assignEmployeeToCustomer,
+  deactivateTestEmployee,
   getFutureDate,
 } from "../test-utils";
 
@@ -50,6 +53,7 @@ async function getStatus(appointmentId: number): Promise<string> {
 
 describe("Task #1119: migrateExpiredUnsignedAppointments", () => {
   let customerId: number;
+  let employeeId: number;
   let serviceId: number;
   const ids: Record<string, number> = {};
 
@@ -58,12 +62,30 @@ describe("Task #1119: migrateExpiredUnsignedAppointments", () => {
     customerId = customer.id as number;
     serviceId = await getSeededServiceId();
 
-    const keys = ["signed", "ended", "startedOnly", "untouched"];
-    for (let i = 0; i < keys.length; i++) {
+    // Eigener Mitarbeiter statt des geteilten Admin-Users: dessen Kalender
+    // belegen andere parallel laufende Suiten über die Defaults von
+    // `createAndDocumentAppointment` (getFutureDate(7), 09:00) ebenfalls.
+    const employee = await createTestEmployee({ nachnamePrefix: "TestMigExp" });
+    employeeId = employee.id;
+    await assignEmployeeToCustomer(customerId, employeeId);
+
+    // Je Termin eine EIGENE Uhrzeit. Die Tage allein reichen nicht: `getFutureDate`
+    // rollt Sa auf Mo (+2) und So auf Mo (+1), deshalb fallen z.B. an einem
+    // Donnerstags-Lauf getFutureDate(9) und (10) beide auf denselben Montag —
+    // zwei 09:00-Termine desselben Kunden ⇒ 409 „Terminüberschneidung".
+    const slots = [
+      { key: "signed", startTime: "09:00" },
+      { key: "ended", startTime: "11:00" },
+      { key: "startedOnly", startTime: "13:00" },
+      { key: "untouched", startTime: "15:00" },
+    ];
+    for (let i = 0; i < slots.length; i++) {
       const { appointmentId } = await createAndDocumentAppointment(customerId, serviceId, {
         date: getFutureDate(7 + i),
+        startTime: slots[i].startTime,
+        assignedEmployeeId: employeeId,
       });
-      ids[keys[i]] = appointmentId;
+      ids[slots[i].key] = appointmentId;
     }
 
     await forceExpiredUnsigned(ids.signed, { actualStart: "09:00", actualEnd: "10:00", signatureData: "data:image/png;base64,AAAA" });
@@ -74,6 +96,7 @@ describe("Task #1119: migrateExpiredUnsignedAppointments", () => {
 
   afterAll(async () => {
     await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
   });
 
   it("restauriert jeden expired_unsigned-Termin auf seinen wahren Lebenszyklus-Status", async () => {
