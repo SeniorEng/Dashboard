@@ -277,10 +277,12 @@ describe("Task #1893 — Fenster-Regeln beim Anlegen und Korrigieren", () => {
   it("eine Korrektur, die eine Lücke ließe, wird abgelehnt", async () => {
     const list = await apiGet<any[]>(`/api/admin/customers/${customerId}/insurance`);
     const alt = list.data.find((e: any) => e.insuranceProviderId === providerAId);
-    // Alte Zeile einen Monat zu früh beenden ⇒ Lücke bis zum Wechsel.
-    const tooEarly = ymdLocal(new Date(PREV2_YEAR, PREV2_MONTH - 1, 0));
+    // Alte Zeile MITTEN im eigenen Fenster beenden ⇒ echte Lücke bis zum
+    // Wechsel. (Ein Ende VOR dem eigenen `validFrom` wäre ein Rückwärts-Fenster
+    // und würde von der anderen Regel abgefangen.)
+    const midMonth = iso(PREV2_YEAR, PREV2_MONTH, 15);
     const res = await apiPatch<any>(`/api/admin/customers/${customerId}/insurance/${alt.id}`, {
-      validTo: tooEarly,
+      validTo: midMonth,
     });
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.data)).toContain("Lücke");
