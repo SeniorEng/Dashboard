@@ -959,6 +959,20 @@ jobs:
       - name: Build image
         run: docker build -t careconnect:ci .
 
+      # Der Coolify-Pre-Deploy-Command IM IMAGE, nicht auf dem Runner. Die
+      # Schritte oben pushen das Schema mit dem Repo-Checkout — dabei liegt
+      # alles da, was `drizzle.config.ts` importiert. Im Image gilt nur die
+      # COPY-Liste des Dockerfiles: fehlt dort etwas, bricht der echte
+      # Pre-Deploy mit „Cannot find module", ohne dass irgendein Gate es sieht
+      # (genau so passiert — Review zu PR #21). Das Schema ist hier bereits
+      # gepusht, der Lauf ist also ein No-Op-Diff und prüft nur den Pfad.
+      - name: Pre-deploy command inside the image (bash scripts/migrate.sh)
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_URL="$DATABASE_URL" \
+            --entrypoint bash \
+            careconnect:ci scripts/migrate.sh --force
+
       - name: Boot container and gate on /health == 200
         run: |
           docker run -d --name cc-app --network host \

@@ -103,17 +103,31 @@ describe("assertEphemeralDbForWrite", () => {
     expect(run).toThrow(/npm run db:reseed-dev/);
   });
 
-  it("lässt die drei erlaubten Wegwerf-Pfade durch", () => {
+  it("lässt CI und eine direkte cc_test_-DATABASE_URL durch", () => {
     expect(() =>
       assertEphemeralDbForWrite("x", { DATABASE_URL: EPHEMERAL_URL }),
     ).not.toThrow();
     expect(() => assertEphemeralDbForWrite("x", { CI: "true" })).not.toThrow();
+  });
+
+  // BEWUSST enger als `evaluateTestDbTarget`: dessen Pfad 2 beantwortet „läuft
+  // dieser TESTLAUF gegen Wegwerf-DBs?". Für einen Schreibvorgang zählt aber,
+  // wo ER landet — und das steht in DATABASE_URL. Ein Rest `TEST_DATABASE_URLS`
+  // aus einem früheren Orchestrator-Lauf darf keinen Push auf die Dev-Prod-Kopie
+  // freischalten.
+  it("lässt sich NICHT von einem Rest-TEST_DATABASE_URLS freischalten", () => {
+    expect(
+      evaluateTestDbTarget({
+        TEST_DATABASE_URLS: EPHEMERAL_URL,
+        DATABASE_URL: DEV_URL,
+      }).ok,
+    ).toBe(true); // Testlauf-Frage: erlaubt
     expect(() =>
-      assertEphemeralDbForWrite("x", {
+      assertEphemeralDbForWrite("drizzle-kit push", {
         TEST_DATABASE_URLS: EPHEMERAL_URL,
         DATABASE_URL: DEV_URL,
       }),
-    ).not.toThrow();
+    ).toThrow(/NICHT-Wegwerf-Datenbank/); // Schreib-Frage: blockiert
   });
 
   it("lässt den erklärten Nicht-Test-Schreibzugriff durch (migrate.sh, db:push, reseed)", () => {

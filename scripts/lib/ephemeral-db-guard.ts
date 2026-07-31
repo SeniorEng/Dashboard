@@ -132,27 +132,39 @@ export const NON_EPHEMERAL_WRITE_ENV = "ALLOW_NON_EPHEMERAL_DB_WRITE";
 // `DATABASE_URL` geerbt hat — bei `drizzle-kit push --force` ist das
 // nicht-interaktives DDL inkl. Spalten-Drops, bei den Seeds ein Superadmin mit
 // dokumentiertem Passwort plus überschriebene `company_settings`-Identität.
+//
+// BEWUSST ENGER als `evaluateTestDbTarget`: Pfad 2 (`TEST_DATABASE_URLS`)
+// beantwortet „läuft dieser TESTLAUF gegen Wegwerf-DBs?" — hier zählt aber, wo
+// DIESER Schreibvorgang landet, und der geht nach `DATABASE_URL`. Ein Rest
+// `TEST_DATABASE_URLS` aus einem früheren Orchestrator-Lauf darf einen Push auf
+// die Dev-Prod-Kopie nicht freischalten. Der Orchestrator selbst ist davon nicht
+// betroffen: er setzt für Push und Seeds `DATABASE_URL` auf die `cc_test_*`-URL
+// (`scripts/with-ephemeral-db.ts`).
 export function assertEphemeralDbForWrite(
   entrypoint: string,
   env: NodeJS.ProcessEnv = process.env,
 ): void {
-  if (evaluateTestDbTarget(env).ok) return;
+  if (env.CI === "true") return;
+  const dbName = dbNameOf(env.DATABASE_URL);
+  if (dbName && dbName.startsWith(DB_PREFIX)) return;
   if ((env[NON_EPHEMERAL_WRITE_ENV] || "").trim() === "1") return;
 
-  const dbName = dbNameOf(env.DATABASE_URL);
   const target = dbName ? `„${dbName}"` : "(DATABASE_URL nicht gesetzt)";
   throw new Error(
     blockMessage(`${entrypoint} zielt auf eine NICHT-Wegwerf-Datenbank.`, [
       `Ziel-DB ${target} hat nicht den Präfix '${DB_PREFIX}'.`,
       "",
-      "Häufigste Ursache: die Env-Datei wurde nicht gesourct und der Prozess hat",
-      "die DATABASE_URL der Shell geerbt.",
+      "In den allermeisten Fällen ist das ein Versehen: die Env-Datei wurde nicht",
+      "gesourct und der Prozess hat die DATABASE_URL der Shell geerbt.",
       "",
-      "Absicht ist erklärbar, aber nur ausdrücklich — diese Wege setzen den",
-      `Marker ${NON_EPHEMERAL_WRITE_ENV}=1 selbst:`,
+      "  → RICHTIG:  die passende DATABASE_URL setzen und den Aufruf wiederholen.",
+      "",
+      "Nur wenn eine echte DB WIRKLICH das Ziel ist, gibt es drei Wege, die ihre",
+      `Absicht selbst erklären (${NON_EPHEMERAL_WRITE_ENV}=1) — den Marker`,
+      "NIEMALS von Hand in einer Shell setzen:",
       "  Prod-Migration :  bash scripts/migrate.sh [--force]",
       "  Dev-Schema     :  npm run db:push",
-      "  Dev-Reseed     :  npm run db:reseed-dev",
+      "  Dev-Reseed     :  npm run db:reseed-dev  (mit --apply + Hostname-Guard)",
     ]),
   );
 }

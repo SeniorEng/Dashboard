@@ -10,7 +10,9 @@ if (!process.env.DATABASE_URL) {
 // die legitimen Nicht-Test-Ziele (`scripts/migrate.sh`, `npm run db:push`,
 // `scripts/reseed-dev-db.sh`) erklären ihre Absicht über
 // `ALLOW_NON_EPHEMERAL_DB_WRITE=1`.
-assertEphemeralDbForWrite("drizzle-kit push");
+// Der Guard läuft beim Config-Load, also VOR jedem Unterbefehl — er trifft
+// damit auch `generate`/`check`/`up`/`studio`/`--dry-run`, nicht nur `push`.
+assertEphemeralDbForWrite("drizzle-kit (Config-Load)");
 
 export default defineConfig({
   out: "./migrations",

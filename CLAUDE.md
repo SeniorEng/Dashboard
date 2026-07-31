@@ -34,6 +34,11 @@ Cutover parallel gültig (Replit-Betrieb).
   zusätzlich seinen `--apply`- + Hostname-Guard). Ein nackter
   `npx drizzle-kit push` in einer Shell mit geerbter `DATABASE_URL` ist blockiert —
   er war der Weg, auf dem `--force` versehentlich eine echte DB treffen konnte.
+  Der Guard läuft beim Config-Load, trifft also auch `generate`/`check`/`studio`
+  und `--dry-run`. **Den Marker nie von Hand in einer Shell setzen** — er gehört
+  in genau diese drei Skripte. `scripts/post-merge.sh` fährt `npm run db:push`
+  unbeaufsichtigt gegen die Dev-DB; das ist der einzige Weg, bei dem „Absicht
+  erklärt" nicht heißt, dass gerade jemand hinsieht.
 - **Idempotente Startup-DDL**: Ergänzend laufen die Fixes in `server/startup/**`
   beim Boot (z.B. km-/geo-numeric, invoice-per-pot). Die gehören NICHT in
   `drizzle-kit push` (siehe `replit.md` → Gotchas).

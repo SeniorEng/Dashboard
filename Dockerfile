@@ -60,10 +60,16 @@ COPY --from=builder /app/dist ./dist
 # Für den Migrations-Pre-Deploy (`bash scripts/migrate.sh`):
 #   - package-lock.json: migrate.sh liest die gepinnte drizzle-kit-Version daraus
 #   - drizzle.config.ts + shared/ + migrations/: Schema-Quelle für drizzle-kit
+#   - scripts/lib/: drizzle.config.ts importiert von dort den Wegwerf-DB-Guard.
+#     Die Config wird NICHT gebündelt, sondern von drizzle-kit zur Laufzeit
+#     gelesen — fehlt der Ordner, bricht schon der Config-Load ("Cannot find
+#     module") und der Pre-Deploy scheitert. Beide Dateien importieren nur
+#     Node-Builtins, kosten also nichts an Laufzeit-Deps.
 COPY package.json package-lock.json drizzle.config.ts ./
 COPY shared ./shared
 COPY migrations ./migrations
 COPY scripts/migrate.sh ./scripts/migrate.sh
+COPY scripts/lib ./scripts/lib
 
 # non-root Laufzeit; /data als Mountpoint für den lokalen Storage-Treiber.
 RUN groupadd --system app \

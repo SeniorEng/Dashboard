@@ -19,7 +19,9 @@
 // seeden daher idempotent eine kanonische Test-Firmenidentität (KEINE echten
 // Secrets — reine Geschäftsstammdaten + Test-IBAN). Läuft im Orchestrator NACH
 // dem Superadmin-Seed und VOR dem Server-Start.
-import { assertEphemeralDbForWrite } from "./lib/ephemeral-db-guard";
+// MUSS der erste Import bleiben: prüft die Ziel-DB, bevor server/storage
+// ausgewertet wird (scripts/lib/assert-write-target.ts).
+import "./lib/assert-write-target";
 import { storage } from "../server/storage";
 
 async function seedCompanySettings(): Promise<void> {
@@ -60,10 +62,6 @@ async function seedCompanySettings(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // Fail-closed: überschreibt die `company_settings`-Firmenidentität — nur auf
-  // Wegwerf-DBs. Allow-List-SSoT: scripts/lib/ephemeral-db-guard.ts.
-  assertEphemeralDbForWrite("seed-test-reference-data");
-
   await seedCompanySettings();
 }
 

@@ -17,8 +17,10 @@
  *
  * Aufruf:  npx tsx scripts/ci-seed-superadmin.ts
  */
+// MUSS der erste Import bleiben: prüft die Ziel-DB, bevor server/lib/db
+// ausgewertet wird (scripts/lib/assert-write-target.ts).
+import "./lib/assert-write-target";
 import { eq } from "drizzle-orm";
-import { assertEphemeralDbForWrite } from "./lib/ephemeral-db-guard";
 import { db } from "../server/lib/db";
 import { users, userRoles } from "@shared/schema";
 import { authService } from "../server/services/auth";
@@ -36,10 +38,6 @@ const TEST_USER_SERVICE_ROLES = [
 ] as const;
 
 async function main(): Promise<void> {
-  // Fail-closed: dieser Seed legt einen Superadmin mit dokumentiertem Passwort
-  // an — nur auf Wegwerf-DBs. Allow-List-SSoT: scripts/lib/ephemeral-db-guard.ts.
-  assertEphemeralDbForWrite("ci-seed-superadmin");
-
   const email = process.env.TEST_USER_EMAIL;
   const password =
     process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWORD_INTERNAL;
