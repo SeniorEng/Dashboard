@@ -60,10 +60,13 @@ import {
   canDeleteAppointment as policyCanDelete,
   canDocumentAppointment as policyCanDocument,
   canReopenAppointment as policyCanReopen,
+  isAdminLike,
   type PolicyUser,
   type PolicyAppointment,
 } from "@shared/policies/appointments";
 import type { AppointmentStatus } from "@shared/domain/appointments";
+import { findActiveInvoicesForAppointments } from "../lib/appointment-invoiced";
+import type { ServiceRecordAppointmentRemoval } from "../storage/service-records-storage";
 
 const router = Router();
 
@@ -1829,12 +1832,23 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
 
   const user = req.user!;
-  const isAdmin = user.isAdmin;
 
   const flags = await loadPolicyFlags(id, appointment);
   const policyAppt = toPolicyAppointment(appointment, flags);
-  const decision = policyCanDelete(toPolicyUser(user), policyAppt);
+  const policyUser = toPolicyUser(user);
+  const decision = policyCanDelete(policyUser, policyAppt);
   if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
+
+  // Task #1892 — EINE Prädikat-Quelle für „zählt als Admin?": dieselbe, die
+  // die Policy oben benutzt (`isAdmin || isSuperAdmin`). Vorher stand hier
+  // `user.isAdmin`; beide Spalten sind unabhängig (shared/schema/users.ts),
+  // also wurde ein Super-Admin ohne `is_admin` von `canDeleteAppointment`
+  // unten mit 403 „Abgeschlossene Termine können nicht gelöscht werden"
+  // abgewiesen, obwohl die Policy ihm ALLOW gegeben hatte. Diese Variable
+  // speist alle drei Admin-Entscheidungen dieser Route: die Folgekosten-
+  // Validierung, den Korrektur-Zweig am signierten LN und das Audit-Feld
+  // `adminForceDelete` — sie müssen dieselbe Antwort geben.
+  const isAdmin = isAdminLike(policyUser);
 
   if (!isAdmin) {
     // Zusätzliche Service-seitige Validierung (z. B. Folgekosten-Sperren).
@@ -1861,6 +1875,16 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   // werden für Audit + Antwort gesammelt.
   const cascadedDeletedLegIds: number[] = [];
 
+  // Task #1892 — je betroffenem Leistungsnachweis ein eigener Audit-Eintrag.
+  let serviceRecordRemovals: ServiceRecordAppointmentRemoval[] = [];
+
+  // Task #1892 — abgelehnte Co-Visit-Korrektur: Grund im äußeren Scope
+  // aufheben. Der Guard wirft, damit rollt die Transaktion zurück; ein Audit-
+  // Insert mit dem Tx-Client würde MITGEROLLT und die Ablehnung hinterließe
+  // keine Spur. Der Eintrag wird deshalb nach dem Rollback ohne `exec`
+  // geschrieben (globaler Pool).
+  let coVisitBlock: { legs: { id: number; reason: "own_outcome" | "signed" }[]; groupId: string } | null = null;
+
   // Task #1544 — Das Löschen läuft IMMER in einer Transaktion, damit die
   // Race-sichere Lock-Prüfung greift. Die junction `service_record_appointments`
   // ist ON DELETE CASCADE; ohne die In-Tx-Prüfung könnte eine gleichzeitig
@@ -1870,7 +1894,84 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   // Unterschrift und bricht ab, wenn der LN inzwischen versiegelt wurde.
   await db.transaction(async (txClient) => {
     if (await storage.lockAndCheckAppointmentLocked(id, txClient)) {
-      throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
+      // Task #1892 — Admin-Korrektur statt pauschalem Abbruch. Die
+      // Policy-Schicht (`canDeleteAppointment`) erlaubt Admins das Löschen
+      // gesperrter Termine bereits; hier wird der Termin dafür zuerst aus den
+      // verknüpften Leistungsnachweisen herausgelöst (reduktions-only, LN
+      // bleibt mit beiden Unterschriften gültig). Nicht-Admins bleiben
+      // gesperrt — die Policy hat sie oben schon abgelehnt, dieser Zweig ist
+      // die zweite, transaktionale Verteidigungslinie. `isAdmin` ist hier das
+      // Policy-Prädikat (`isAdminLike`, siehe oben), nicht `user.isAdmin`.
+      if (!isAdmin) {
+        throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
+      }
+
+      // Task #1892 — Zwei-Kräfte-Einsatz: KEIN halber Einsatz. Die Kaskade
+      // unten überspringt Partner-Legs, die versiegelt sind oder einen eigenen
+      // echten Ausgang haben (`continue`). Liefe die Korrektur trotzdem durch,
+      // bliebe ein halbes Paar stehen — davon eine Hälfte auf einem signierten
+      // Nachweis — und die Antwort meldete Erfolg. Deshalb: ablehnen.
+      //
+      // Geprüft wird NICHT „ist das ein Co-Visit?", sondern „gibt es einen
+      // Partner, den die Kaskade stehenlassen würde?". `co_visit_group_id`
+      // wird nirgends wieder genullt; ein Leg, dessen Partner längst gelöscht
+      // ist, trägt die Gruppe weiter. Ein pauschales Ablehnen machte solche
+      // Termine DAUERHAFT unkorrigierbar — eine Sackgasse, wo dieser Task
+      // gerade eine beseitigt.
+      if (appointment.coVisitGroupId != null) {
+        const partners = await storage.getCoVisitPartnerAppointments(appointment.coVisitGroupId, id, txClient);
+        // Reihenfolge der Prüfung identisch zur Kaskade unten: erst eigener
+        // Ausgang, dann Versiegelung. Der Grund wird mitgeführt, weil die
+        // beiden Fälle dem Admin GRUNDVERSCHIEDENE Dinge sagen müssen — ein
+        // `completed`-Partner hängt an keinem Nachweis.
+        const blockingLegs: { id: number; reason: "own_outcome" | "signed" }[] = [];
+        for (const partner of partners) {
+          if (!canModifyAppointment(partner.status as AppointmentStatus)) {
+            blockingLegs.push({ id: partner.id, reason: "own_outcome" });
+          } else if (await storage.lockAndCheckAppointmentLocked(partner.id, txClient)) {
+            blockingLegs.push({ id: partner.id, reason: "signed" });
+          }
+        }
+        if (blockingLegs.length > 0) {
+          // Eine Co-Visit-Gruppe entsteht über `secondAssignedEmployeeId` und
+          // hat damit genau ZWEI Legs — es kann also höchstens ein Partner
+          // blockieren. Ein Grund reicht; keine Mehrfach-Verknüpfung nötig.
+          const legList = blockingLegs.map((l) => `#${l.id}`).join(", ");
+          const reasonText = blockingLegs[0].reason === "signed"
+            ? "liegt auf einem unterschriebenen Leistungsnachweis"
+            : "ist bereits abgeschlossen oder als „nicht angetroffen“ vermerkt";
+          // Für den Audit-Eintrag NACH dem Rollback aufheben (siehe unten).
+          coVisitBlock = { legs: blockingLegs, groupId: appointment.coVisitGroupId };
+          throw new AppError(
+            409,
+            "APPOINTMENT_CO_VISIT_LOCKED",
+            `Zwei-Kräfte-Einsatz — der Termin der zweiten Kraft (${legList}) ${reasonText} und bliebe stehen. `
+              + "Es entstünde ein halber Einsatz. Bitte beide Termine separat behandeln.",
+          );
+        }
+      }
+
+      // GoBD — Storno first: Termine auf einer AKTIVEN Rechnung dürfen nicht
+      // entfernt werden. Der Guard läuft INNERHALB der Transaktion unter dem
+      // FOR-UPDATE-Lock, nicht als check-then-write daneben.
+      const activeInvoices = await findActiveInvoicesForAppointments([id], txClient);
+      if (activeInvoices.length > 0) {
+        const numbers = [...new Set(activeInvoices.map((i) => i.invoiceNumber))].join(", ");
+        // Entwurfs-Rechnungen zählen als „aktiv" (sie binden den Termin), aber
+        // ein Entwurf wird VERWORFEN, nicht storniert — GoBD verlangt für den
+        // noch nicht gestellten Beleg kein Storno. Der Admin bekommt sonst
+        // einen Weg genannt, den es für ihn nicht gibt.
+        const allDraft = activeInvoices.every((i) => i.status === "entwurf");
+        throw new AppError(
+          409,
+          "APPOINTMENT_INVOICED",
+          allDraft
+            ? `Für diesen Termin existiert der Rechnungsentwurf ${numbers}. Bitte zuerst den Entwurf verwerfen, danach kann der Termin entfernt werden.`
+            : `Dieser Termin ist auf der Rechnung ${numbers} abgerechnet. Bitte zuerst die Rechnung stornieren, danach kann der Termin entfernt werden.`,
+        );
+      }
+
+      serviceRecordRemovals = await storage.removeAppointmentFromServiceRecords(id, txClient);
     }
     for (const tx of transactions) {
       await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
@@ -1908,6 +2009,36 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
         }
       }
     }
+  }).catch(async (err) => {
+    // Task #1892 — die abgelehnte Co-Visit-Korrektur bekommt eine Spur. Der
+    // Eintrag läuft bewusst NACH dem Rollback und OHNE `exec`, sonst würde er
+    // mit der Transaktion verworfen, die ihn ausgelöst hat.
+    if (coVisitBlock) {
+      // Der Audit-Eintrag darf die 409 NIE verschlucken. `auditService.log`
+      // fängt Fehler ohne `exec` zwar bereits selbst ab — das ist aber ein
+      // Detail zwei Dateien weiter. Hier festgenagelt, damit es beim Umbau
+      // dort nicht still zur Fehlerquelle wird.
+      try {
+        await auditService.log(
+          req.user!.id,
+          "appointment_co_visit_removal_blocked",
+          "appointment",
+          id,
+          {
+            customerId: appointment.customerId,
+            date: appointment.date,
+            coVisitGroupId: coVisitBlock.groupId,
+            blockingLegIds: coVisitBlock.legs.map((l) => l.id),
+            blockingReasons: coVisitBlock.legs.map((l) => ({ appointmentId: l.id, reason: l.reason })),
+            actor: { role: actorRole(user) },
+          },
+          ip
+        );
+      } catch (auditErr) {
+        console.error("[appointments] Audit der abgelehnten Co-Visit-Korrektur fehlgeschlagen:", auditErr);
+      }
+    }
+    throw err;
   });
   reversedTransactions = transactions.length;
 
@@ -1923,12 +2054,38 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
       adminForceDelete: isAdmin && isCompleted,
       reversedTransactions,
       wasLocked: isLocked,
+      removedFromServiceRecordIds: serviceRecordRemovals.length > 0
+        ? serviceRecordRemovals.map((r) => r.recordId)
+        : undefined,
       coVisitGroupId: appointment.coVisitGroupId ?? undefined,
       coVisitCascadedLegIds: cascadedDeletedLegIds.length > 0 ? cascadedDeletedLegIds : undefined,
       actor: { role: actorRole(user) },
     },
     ip
   );
+
+  // Task #1892 — je betroffenem Leistungsnachweis ein eigener Audit-Eintrag,
+  // damit die Reduktion im Verlauf des LN (nicht nur des Termins) sichtbar ist.
+  for (const removal of serviceRecordRemovals) {
+    await auditService.log(
+      req.user!.id,
+      "service_record_appointment_removed",
+      "service_record",
+      removal.recordId,
+      {
+        appointmentId: id,
+        customerId: removal.customerId,
+        employeeId: removal.employeeId,
+        year: removal.year,
+        month: removal.month,
+        recordStatus: removal.status,
+        remainingAppointments: removal.remainingAppointments,
+        recordSoftDeleted: removal.becameEmpty,
+        actor: { role: actorRole(user) },
+      },
+      ip
+    );
+  }
 
   // Task #1615 — je kaskadiertem Partner-Leg ein eigener Audit-Eintrag, damit
   // der Löschgrund (Co-Visit-Kaskade) im Verlauf jedes Legs sichtbar ist.
