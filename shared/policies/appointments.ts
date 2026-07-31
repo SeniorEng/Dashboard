@@ -79,7 +79,15 @@ const deny = (reason: string): PolicyDecision => ({ allowed: false, reason });
 // HELPER
 // ============================================
 
-function isAdminLike(user: PolicyUser): boolean {
+/**
+ * SSoT „zählt dieser Benutzer als Admin?" — `isAdmin` ODER `isSuperAdmin`.
+ * Beide Spalten sind unabhängig (`shared/schema/users.ts`), nichts erzwingt
+ * die Kopplung. Exportiert, damit Routen, die eine Policy-Entscheidung
+ * transaktional nachprüfen, DIESES Prädikat importieren statt ein zweites zu
+ * formulieren (Task #1892: die Lösch-Route prüfte `user.isAdmin` und wies
+ * damit Super-Admins ab, denen die Policy längst ALLOW gegeben hatte).
+ */
+export function isAdminLike(user: PolicyUser): boolean {
   return user.isAdmin || user.isSuperAdmin;
 }
 

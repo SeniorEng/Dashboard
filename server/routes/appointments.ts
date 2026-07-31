@@ -60,6 +60,7 @@ import {
   canDeleteAppointment as policyCanDelete,
   canDocumentAppointment as policyCanDocument,
   canReopenAppointment as policyCanReopen,
+  isAdminLike,
   type PolicyUser,
   type PolicyAppointment,
 } from "@shared/policies/appointments";
@@ -1835,7 +1836,8 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
 
   const flags = await loadPolicyFlags(id, appointment);
   const policyAppt = toPolicyAppointment(appointment, flags);
-  const decision = policyCanDelete(toPolicyUser(user), policyAppt);
+  const policyUser = toPolicyUser(user);
+  const decision = policyCanDelete(policyUser, policyAppt);
   if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
 
   if (!isAdmin) {
@@ -1866,6 +1868,13 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   // Task #1892 — je betroffenem Leistungsnachweis ein eigener Audit-Eintrag.
   let serviceRecordRemovals: ServiceRecordAppointmentRemoval[] = [];
 
+  // Task #1892 — abgelehnte Co-Visit-Korrektur: Grund im äußeren Scope
+  // aufheben. Der Guard wirft, damit rollt die Transaktion zurück; ein Audit-
+  // Insert mit dem Tx-Client würde MITGEROLLT und die Ablehnung hinterließe
+  // keine Spur. Der Eintrag wird deshalb nach dem Rollback ohne `exec`
+  // geschrieben (globaler Pool).
+  let coVisitBlock: { legs: { id: number; reason: "own_outcome" | "signed" }[]; groupId: string } | null = null;
+
   // Task #1544 — Das Löschen läuft IMMER in einer Transaktion, damit die
   // Race-sichere Lock-Prüfung greift. Die junction `service_record_appointments`
   // ist ON DELETE CASCADE; ohne die In-Tx-Prüfung könnte eine gleichzeitig
@@ -1882,7 +1891,12 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
       // bleibt mit beiden Unterschriften gültig). Nicht-Admins bleiben
       // gesperrt — die Policy hat sie oben schon abgelehnt, dieser Zweig ist
       // die zweite, transaktionale Verteidigungslinie.
-      if (!isAdmin) {
+      //
+      // WICHTIG: dasselbe Prädikat wie die Policy (`isAdminLike` =
+      // `isAdmin || isSuperAdmin`), nicht `user.isAdmin`. Beide Spalten sind
+      // unabhängig; ein Super-Admin ohne `is_admin` bekam sonst hier 409,
+      // obwohl `canDeleteAppointment` oben ALLOW gesagt hatte.
+      if (!isAdminLike(policyUser)) {
         throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
       }
 
@@ -1900,18 +1914,37 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
       // gerade eine beseitigt.
       if (appointment.coVisitGroupId != null) {
         const partners = await storage.getCoVisitPartnerAppointments(appointment.coVisitGroupId, id, txClient);
-        const blockingLegIds: number[] = [];
+        // Reihenfolge der Prüfung identisch zur Kaskade unten: erst eigener
+        // Ausgang, dann Versiegelung. Der Grund wird mitgeführt, weil die
+        // beiden Fälle dem Admin GRUNDVERSCHIEDENE Dinge sagen müssen — ein
+        // `completed`-Partner hängt an keinem Nachweis.
+        const blockingLegs: { id: number; reason: "own_outcome" | "signed" }[] = [];
         for (const partner of partners) {
-          const partnerBlocks =
-            !canModifyAppointment(partner.status as AppointmentStatus) ||
-            await storage.lockAndCheckAppointmentLocked(partner.id, txClient);
-          if (partnerBlocks) blockingLegIds.push(partner.id);
+          if (!canModifyAppointment(partner.status as AppointmentStatus)) {
+            blockingLegs.push({ id: partner.id, reason: "own_outcome" });
+          } else if (await storage.lockAndCheckAppointmentLocked(partner.id, txClient)) {
+            blockingLegs.push({ id: partner.id, reason: "signed" });
+          }
         }
-        if (blockingLegIds.length > 0) {
+        if (blockingLegs.length > 0) {
+          const legList = (rs: typeof blockingLegs) =>
+            rs.map((r) => `#${r.id}`).join(", ");
+          const signed = blockingLegs.filter((r) => r.reason === "signed");
+          const ownOutcome = blockingLegs.filter((r) => r.reason === "own_outcome");
+          const reasons: string[] = [];
+          if (signed.length > 0) {
+            reasons.push(`liegt auf einem unterschriebenen Leistungsnachweis (Termin ${legList(signed)})`);
+          }
+          if (ownOutcome.length > 0) {
+            reasons.push(`ist bereits abgeschlossen oder als „nicht angetroffen“ vermerkt (Termin ${legList(ownOutcome)})`);
+          }
+          // Für den Audit-Eintrag NACH dem Rollback aufheben (siehe unten).
+          coVisitBlock = { legs: blockingLegs, groupId: appointment.coVisitGroupId };
           throw new AppError(
             409,
             "APPOINTMENT_CO_VISIT_LOCKED",
-            "Zwei-Kräfte-Einsatz — Partner-Leg liegt auf einem signierten Nachweis, bitte separat behandeln.",
+            `Zwei-Kräfte-Einsatz — der Termin der zweiten Kraft ${reasons.join(" bzw. ")} und bliebe stehen. `
+              + "Es entstünde ein halber Einsatz. Bitte beide Termine separat behandeln.",
           );
         }
       }
@@ -1974,6 +2007,28 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
         }
       }
     }
+  }).catch(async (err) => {
+    // Task #1892 — die abgelehnte Co-Visit-Korrektur bekommt eine Spur. Der
+    // Eintrag läuft bewusst NACH dem Rollback und OHNE `exec`, sonst würde er
+    // mit der Transaktion verworfen, die ihn ausgelöst hat.
+    if (coVisitBlock) {
+      await auditService.log(
+        req.user!.id,
+        "appointment_co_visit_removal_blocked",
+        "appointment",
+        id,
+        {
+          customerId: appointment.customerId,
+          date: appointment.date,
+          coVisitGroupId: coVisitBlock.groupId,
+          blockingLegIds: coVisitBlock.legs.map((l) => l.id),
+          blockingReasons: coVisitBlock.legs.map((l) => ({ appointmentId: l.id, reason: l.reason })),
+          actor: { role: actorRole(user) },
+        },
+        ip
+      );
+    }
+    throw err;
   });
   reversedTransactions = transactions.length;
 

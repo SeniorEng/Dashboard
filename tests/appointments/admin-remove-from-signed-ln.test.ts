@@ -587,4 +587,74 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
     const after = await apiGet<any>(`/api/service-records/${recordA}`);
     expect(after.status, "LN enthielt nur diesen Termin und ist damit leer ⇒ soft-gelöscht").toBe(404);
   });
+
+  it("1892.10 – (j) Partner-Leg mit eigenem Ausgang (ohne LN) blockiert ebenfalls — mit korrekter Begründung", async () => {
+    // Nagelt den Guard-Zweig `!canModifyAppointment(partner.status)` fest.
+    // Leg B ist `completed` und hängt an KEINEM Nachweis — die Kaskade würde es
+    // trotzdem überspringen, es bliebe also ein halber Einsatz stehen. Die
+    // Meldung darf hier NICHT von einem signierten Nachweis reden: den gibt es
+    // für Leg B nicht.
+    const empB = await createTestEmployee({ nachnamePrefix: "LN1892CoVisitDone" });
+    cleanupEmployeeIds.push(empB.id);
+
+    const customerId = await newCustomer("j");
+    await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: empB.id,
+      backupEmployeeId2: null,
+    });
+
+    const date = workdays[13];
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId,
+      date,
+      scheduledStart: "09:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+      secondAssignedEmployeeId: empB.id,
+    });
+    expect(createRes.status, `Co-Visit-Anlage: ${JSON.stringify(createRes.data)}`).toBe(201);
+    const groupId = createRes.data.coVisitGroupId;
+
+    const list = await apiGet<any[]>(`/api/appointments?date=${date}&customerId=${customerId}`);
+    const legs = (list.data as any[]).filter((a) => a.coVisitGroupId === groupId);
+    expect(legs.length, "Zwei-Kräfte-Einsatz hat genau zwei Legs").toBe(2);
+    for (const leg of legs) cleanupApptIds.push(leg.id);
+
+    const legA = legs.find((l) => l.assignedEmployeeId === auth.user.id)!;
+    const legB = legs.find((l) => l.assignedEmployeeId === empB.id)!;
+
+    await documentAppointment(legA.id, "09:00");
+    await documentAppointment(legB.id, "09:00");
+
+    // NUR Leg A kommt auf einen Nachweis. Leg B bleibt `completed` ohne LN —
+    // genau der Zweig, den dieser Test prüft.
+    const recordA = await createSignedRecord(customerId, [legA.id], auth.user.id);
+
+    const legBState = await apiGet<any>(`/api/appointments/${legB.id}`);
+    expect(legBState.data.status, "Leg B hat einen eigenen Ausgang").toBe("completed");
+    expect(legBState.data.isLocked, "Leg B hängt an KEINEM unterschriebenen Nachweis").toBeFalsy();
+
+    const delRes = await apiDelete(`/api/appointments/${legA.id}`);
+    expect(
+      delRes.status,
+      `Korrektur muss abgelehnt werden, got ${delRes.status} ${JSON.stringify(delRes.data)}`,
+    ).toBe(409);
+    expect((delRes.data as any)?.error ?? (delRes.data as any)?.code).toBe("APPOINTMENT_CO_VISIT_LOCKED");
+
+    const message = String((delRes.data as any)?.message);
+    expect(message, "Meldung nennt den echten Grund (eigener Ausgang)").toMatch(/abgeschlossen|nicht angetroffen/i);
+    expect(
+      message,
+      "Meldung darf für Leg B KEINEN unterschriebenen Nachweis behaupten — den gibt es nicht",
+    ).not.toMatch(/unterschriebenen Leistungsnachweis/i);
+    expect(message, "Meldung weist das blockierende Leg aus").toContain(`#${legB.id}`);
+
+    // Kein Halbzustand: beide Legs leben, der Nachweis von A ist unverändert.
+    for (const legId of [legA.id, legB.id]) {
+      const still = await apiGet<any>(`/api/appointments/${legId}`);
+      expect(still.status, `Leg ${legId} lebt weiter`).toBe(200);
+    }
+    expect(await coveredAppointmentIds(recordA), "LN A unverändert").toContain(legA.id);
+  });
 });

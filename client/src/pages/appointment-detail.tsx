@@ -545,9 +545,10 @@ export default function AppointmentDetail() {
                 </p>
                 {appointment.coVisitGroupId != null && (
                   <p>
-                    Dieser Termin ist ein <strong>Zwei-Kräfte-Einsatz</strong>. Liegt der Termin der
-                    zweiten Kraft ebenfalls auf einem unterschriebenen Nachweis, wird die Korrektur
-                    abgelehnt — es bliebe sonst ein halber Einsatz stehen.
+                    Dieser Termin ist ein <strong>Zwei-Kräfte-Einsatz</strong>. Kann der Termin der
+                    zweiten Kraft nicht mitgelöscht werden — weil er auf einem unterschriebenen
+                    Nachweis liegt, abgeschlossen ist oder als „nicht angetroffen“ vermerkt wurde —,
+                    wird die Korrektur abgelehnt. Es bliebe sonst ein halber Einsatz stehen.
                   </p>
                 )}
               </div>
