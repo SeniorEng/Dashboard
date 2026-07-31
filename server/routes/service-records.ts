@@ -1,12 +1,13 @@
 import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAuth, canAccessCustomer } from "../middleware/auth";
-import { insertServiceRecordSchema, insertSingleServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords, appointments, invoiceLineItems, invoices as invoicesTable, NO_SHOW_REASON_LABELS, type NoShowReason } from "@shared/schema";
+import { insertServiceRecordSchema, insertSingleServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords, appointments, NO_SHOW_REASON_LABELS, type NoShowReason } from "@shared/schema";
 import { asyncHandler, sendForbidden, sendNotFound, sendConflict, sendBadRequest } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { db } from "../lib/db";
+import { hasActiveInvoiceForAppointments } from "../lib/appointment-invoiced";
 import { appointmentsRepo } from "../repos";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
 import { getPrimaryCustomerIds } from "../storage/customers-storage";
@@ -671,18 +672,7 @@ router.get("/:id/check-invoiced", requireAuth, asyncHandler("Abrechnungsstatus k
     .where(eq(serviceRecordAppointments.serviceRecordId, id));
   const linkedAppointmentIds = linkedAppointments.map(r => r.appointmentId);
 
-  let isInvoiced = false;
-  if (linkedAppointmentIds.length > 0) {
-    const invoicedRows = await db.select({ appointmentId: invoiceLineItems.appointmentId })
-      .from(invoiceLineItems)
-      .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
-      .where(and(
-        inArray(invoiceLineItems.appointmentId, linkedAppointmentIds),
-        ne(invoicesTable.status, "storniert"),
-        ne(invoicesTable.invoiceType, "stornorechnung")
-      ));
-    isInvoiced = invoicedRows.length > 0;
-  }
+  const isInvoiced = await hasActiveInvoiceForAppointments(linkedAppointmentIds);
 
   res.json({ isInvoiced });
 }));
@@ -717,18 +707,8 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
       .where(eq(serviceRecordAppointments.serviceRecordId, id));
     const aptIds = linkedAppointments.map(r => r.appointmentId);
 
-    if (aptIds.length > 0) {
-      const invoicedRows = await tx.select({ appointmentId: invoiceLineItems.appointmentId })
-        .from(invoiceLineItems)
-        .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
-        .where(and(
-          inArray(invoiceLineItems.appointmentId, aptIds),
-          ne(invoicesTable.status, "storniert"),
-          ne(invoicesTable.invoiceType, "stornorechnung")
-        ));
-      if (invoicedRows.length > 0) {
-        throw new Error("INVOICED");
-      }
+    if (await hasActiveInvoiceForAppointments(aptIds, tx)) {
+      throw new Error("INVOICED");
     }
 
     await tx.delete(serviceRecordAppointments)

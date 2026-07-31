@@ -46,6 +46,9 @@ export const AUDIT_ACTIONS = [
   "initial_balance_deleted",
   "carryover_set",
   "service_record_deleted",
+  // Task #1892 — Admin entfernt einen Termin aus einem unterschriebenen
+  // Leistungsnachweis (reduktions-only; LN bleibt gültig).
+  "service_record_appointment_removed",
   "prospect_converted",
   "employee_handover",
   "budget_rebook",

@@ -64,6 +64,8 @@ import {
   type PolicyAppointment,
 } from "@shared/policies/appointments";
 import type { AppointmentStatus } from "@shared/domain/appointments";
+import { findActiveInvoicesForAppointments } from "../lib/appointment-invoiced";
+import type { ServiceRecordAppointmentRemoval } from "../storage/service-records-storage";
 
 const router = Router();
 
@@ -1861,6 +1863,9 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   // werden für Audit + Antwort gesammelt.
   const cascadedDeletedLegIds: number[] = [];
 
+  // Task #1892 — je betroffenem Leistungsnachweis ein eigener Audit-Eintrag.
+  let serviceRecordRemovals: ServiceRecordAppointmentRemoval[] = [];
+
   // Task #1544 — Das Löschen läuft IMMER in einer Transaktion, damit die
   // Race-sichere Lock-Prüfung greift. Die junction `service_record_appointments`
   // ist ON DELETE CASCADE; ohne die In-Tx-Prüfung könnte eine gleichzeitig
@@ -1870,7 +1875,31 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   // Unterschrift und bricht ab, wenn der LN inzwischen versiegelt wurde.
   await db.transaction(async (txClient) => {
     if (await storage.lockAndCheckAppointmentLocked(id, txClient)) {
-      throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
+      // Task #1892 — Admin-Korrektur statt pauschalem Abbruch. Die
+      // Policy-Schicht (`canDeleteAppointment`) erlaubt Admins das Löschen
+      // gesperrter Termine bereits; hier wird der Termin dafür zuerst aus den
+      // verknüpften Leistungsnachweisen herausgelöst (reduktions-only, LN
+      // bleibt mit beiden Unterschriften gültig). Nicht-Admins bleiben
+      // gesperrt — die Policy hat sie oben schon abgelehnt, dieser Zweig ist
+      // die zweite, transaktionale Verteidigungslinie.
+      if (!isAdmin) {
+        throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
+      }
+
+      // GoBD — Storno first: Termine auf einer AKTIVEN Rechnung dürfen nicht
+      // entfernt werden. Der Guard läuft INNERHALB der Transaktion unter dem
+      // FOR-UPDATE-Lock, nicht als check-then-write daneben.
+      const activeInvoices = await findActiveInvoicesForAppointments([id], txClient);
+      if (activeInvoices.length > 0) {
+        const numbers = [...new Set(activeInvoices.map((i) => i.invoiceNumber))].join(", ");
+        throw new AppError(
+          409,
+          "APPOINTMENT_INVOICED",
+          `Dieser Termin ist auf der Rechnung ${numbers} abgerechnet. Bitte zuerst die Rechnung stornieren, danach kann der Termin entfernt werden.`,
+        );
+      }
+
+      serviceRecordRemovals = await storage.removeAppointmentFromServiceRecords(id, txClient);
     }
     for (const tx of transactions) {
       await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
@@ -1923,12 +1952,38 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
       adminForceDelete: isAdmin && isCompleted,
       reversedTransactions,
       wasLocked: isLocked,
+      removedFromServiceRecordIds: serviceRecordRemovals.length > 0
+        ? serviceRecordRemovals.map((r) => r.recordId)
+        : undefined,
       coVisitGroupId: appointment.coVisitGroupId ?? undefined,
       coVisitCascadedLegIds: cascadedDeletedLegIds.length > 0 ? cascadedDeletedLegIds : undefined,
       actor: { role: actorRole(user) },
     },
     ip
   );
+
+  // Task #1892 — je betroffenem Leistungsnachweis ein eigener Audit-Eintrag,
+  // damit die Reduktion im Verlauf des LN (nicht nur des Termins) sichtbar ist.
+  for (const removal of serviceRecordRemovals) {
+    await auditService.log(
+      req.user!.id,
+      "service_record_appointment_removed",
+      "service_record",
+      removal.recordId,
+      {
+        appointmentId: id,
+        customerId: removal.customerId,
+        employeeId: removal.employeeId,
+        year: removal.year,
+        month: removal.month,
+        recordStatus: removal.status,
+        remainingAppointments: removal.remainingAppointments,
+        recordSoftDeleted: removal.becameEmpty,
+        actor: { role: actorRole(user) },
+      },
+      ip
+    );
+  }
 
   // Task #1615 — je kaskadiertem Partner-Leg ein eigener Audit-Eintrag, damit
   // der Löschgrund (Co-Visit-Kaskade) im Verlauf jedes Legs sichtbar ist.

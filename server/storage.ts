@@ -15,7 +15,8 @@ import {
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { eq } from "drizzle-orm";
-import { db, type DbOrTx } from "./lib/db";
+import { db, type DbOrTx, type Tx } from "./lib/db";
+import type { ServiceRecordAppointmentRemoval } from "./storage/service-records-storage";
 import { decryptRow, encryptRow } from "./lib/encrypted-row";
 
 import * as customersStorage from "./storage/customers-storage";
@@ -121,6 +122,7 @@ export interface IStorage {
   getAppointmentIdsInServiceRecords(appointmentIds: number[], txClient?: DbOrTx): Promise<number[]>;
   lockAppointmentsForUpdate(appointmentIds: number[], txClient: DbOrTx): Promise<void>;
   lockAndCheckAppointmentLocked(appointmentId: number, txClient: DbOrTx): Promise<boolean>;
+  removeAppointmentFromServiceRecords(appointmentId: number, txClient: Tx): Promise<ServiceRecordAppointmentRemoval[]>;
   getServiceRecordForAppointment(appointmentId: number): Promise<MonthlyServiceRecord | undefined>;
   
   // Optimized overview query
@@ -230,6 +232,7 @@ class DatabaseStorage implements IStorage {
   getAppointmentIdsInServiceRecords = serviceRecordsStorage.getAppointmentIdsInServiceRecords;
   lockAppointmentsForUpdate = serviceRecordsStorage.lockAppointmentsForUpdate;
   lockAndCheckAppointmentLocked = serviceRecordsStorage.lockAndCheckAppointmentLocked;
+  removeAppointmentFromServiceRecords = serviceRecordsStorage.removeAppointmentFromServiceRecords;
   getServiceRecordForAppointment = serviceRecordsStorage.getServiceRecordForAppointment;
   isAppointmentLocked = serviceRecordsStorage.isAppointmentLocked;
   getServiceRecordsOverview = serviceRecordsStorage.getServiceRecordsOverview;

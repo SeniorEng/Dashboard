@@ -26,7 +26,7 @@ import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppointmentSeriesDetail, formatSeriesInfo } from "@/features/appointments/hooks/use-appointment-series";
 import { useToast } from "@/hooks/use-toast";
-import { api, unwrapResult } from "@/lib/api/client";
+import { api, unwrapResult, ApiError } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { useAppointmentPolicy } from "@/features/appointments/use-appointment-policy";
 import {
@@ -179,9 +179,13 @@ export default function AppointmentDetail() {
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Der Termin konnte nicht gelöscht werden.";
+      // Task #1892 — Storno-first: der Termin hängt an einer aktiven Rechnung.
+      // Das ist kein technischer Fehler, sondern eine fachliche Reihenfolge:
+      // erst stornieren, dann entfernen. Deshalb eigener, erklärender Titel.
+      const isInvoiced = error instanceof ApiError && error.code === "APPOINTMENT_INVOICED";
       toast({
         variant: "destructive",
-        title: "Fehler",
+        title: isInvoiced ? "Zuerst Rechnung stornieren" : "Fehler",
         description: message,
       });
     }
@@ -388,9 +392,19 @@ export default function AppointmentDetail() {
 
       {isCompleted && appointment.isLocked && (
         <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <p className="text-xs text-amber-700" data-testid="text-locked-info">
-            Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.
-          </p>
+          {/* Task #1892 — Für Admins ist der unterschriebene LN keine Sackgasse
+              mehr: der Termin kann als Korrektur herausgelöst werden. */}
+          {user?.isAdmin ? (
+            <p className="text-xs text-amber-700" data-testid="text-locked-info-admin">
+              Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Bearbeiten ist nicht
+              mehr möglich. Als Korrektur können Sie ihn löschen — er wird dann aus dem
+              Leistungsnachweis entfernt, der Nachweis bleibt mit beiden Unterschriften gültig.
+            </p>
+          ) : (
+            <p className="text-xs text-amber-700" data-testid="text-locked-info">
+              Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.
+            </p>
+          )}
         </div>
       )}
 
@@ -490,7 +504,6 @@ export default function AppointmentDetail() {
                 <>
                   Möchten Sie den dokumentierten Termin bei <strong>{appointment.customer?.name}</strong> wirklich löschen?
                   Das verbrauchte Budget wird automatisch zurückgebucht.
-                  {appointment.isLocked && " Der Termin ist Teil eines unterschriebenen Leistungsnachweises."}
                   {" "}Diese Aktion kann nicht rückgängig gemacht werden.
                 </>
               ) : (
@@ -501,6 +514,30 @@ export default function AppointmentDetail() {
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {/* Task #1892 — Admin-Korrektur an einem unterschriebenen LN: erklärt
+              in einfacher Sprache, was genau passiert (reduktions-only). */}
+          {appointment.isLocked && user?.isAdmin && (
+            <div
+              className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3"
+              data-testid="warning-signed-service-record-delete"
+            >
+              <FileText className={`${iconSize.sm} text-amber-600 shrink-0 mt-0.5`} />
+              <div className="text-sm text-amber-800 space-y-1">
+                <p>
+                  Dieser Termin steht auf einem <strong>unterschriebenen Leistungsnachweis</strong>.
+                  Er wird daraus entfernt.
+                </p>
+                <p>
+                  Der Leistungsnachweis bleibt gültig — mit beiden Unterschriften, nur mit einem
+                  Termin und entsprechend weniger Wert. Das verbrauchte Budget wird zurückgebucht.
+                  Enthält der Nachweis danach keinen Termin mehr, wird er entfernt.
+                </p>
+                <p>
+                  Ist der Termin bereits abgerechnet, muss die Rechnung zuerst storniert werden.
+                </p>
+              </div>
+            </div>
+          )}
           {isCoVisit && (
             <div
               className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3"

@@ -14,7 +14,7 @@ import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import { computeDataHash } from "../services/signature-integrity";
 import { analyzeSignatureImage } from "../lib/signature-validation";
 import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQL, type SQLWrapper } from "drizzle-orm";
-import { db, type DbOrTx } from "../lib/db";
+import { db, type DbOrTx, type Tx } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
 
 function employeeFilter(employeeId: number): SQL {
@@ -127,6 +127,45 @@ export class EmptySignatureError extends Error {
   }
 }
 
+/**
+ * Task #749 — Cache-Invalidierung für Kunde/Jahr/Monat.
+ *
+ * Ändert sich der Inhalt eines Leistungsnachweises (Unterschriftslage ODER —
+ * seit #1892 — die Menge der enthaltenen Termine), können sowohl das
+ * Leistungsnachweis-PDF als auch das Rechnungs-PDF/ZUGFeRD-XML dieser Periode
+ * veraltet sein (der LN ist Anlage zur Rechnung). Wir nullen die Cache-Felder
+ * der betroffenen Rechnungen, damit der nächste Abruf frisch rendert.
+ *
+ * GoBD: NUR Rechnungen im Entwurfs-Status werden angefasst. Versendete
+ * (`versendet`), bezahlte (`bezahlt`) und stornierte (`storniert`) Rechnungen
+ * bleiben UNANGETASTET — Korrektur dort ausschließlich über Storno +
+ * Neuanlage (siehe docs/deployment-log.md, RE-2026-0010-Runbook).
+ *
+ * Die eine Stelle, an der diese Invalidierung formuliert ist: Unterschrift
+ * (`signServiceRecord`) und Termin-Entfernung
+ * (`removeAppointmentFromServiceRecords`) rufen dieselbe Funktion.
+ */
+export async function invalidateDraftInvoicePdfCache(
+  client: DbOrTx,
+  scope: { customerId: number; year: number; month: number },
+): Promise<void> {
+  await client.update(invoicesTable)
+    .set({
+      leistungsnachweisPath: null,
+      leistungsnachweisHash: null,
+      leistungsnachweisDataFingerprint: null,
+      pdfPath: null,
+      pdfHash: null,
+      pdfDataFingerprint: null,
+    })
+    .where(and(
+      eq(invoicesTable.customerId, scope.customerId),
+      eq(invoicesTable.billingYear, scope.year),
+      eq(invoicesTable.billingMonth, scope.month),
+      eq(invoicesTable.status, "entwurf"),
+    ));
+}
+
 export async function signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number, signingIp?: string | null, signingLocation?: string | null): Promise<MonthlyServiceRecord | undefined> {
   const existing = await getServiceRecord(id);
   if (!existing) return undefined;
@@ -204,33 +243,11 @@ export async function signServiceRecord(id: number, signatureData: string, signe
       throw new Error(outOfOrderMessage);
     }
 
-    // Task #749 — Cache-Invalidierung: Sobald sich die Unterschriftslage
-    // ändert (neu unterschrieben oder re-signed), können sowohl das
-    // Leistungsnachweis-PDF als auch das Rechnungs-PDF/ZUGFeRD-XML für
-    // diesen Kunden/Monat/Jahr veraltet sein (LN ist Anlage zur Rechnung,
-    // beide enthalten Signaturen). Wir nullen die Cache-Felder für
-    // betroffene Rechnungen im Entwurfs-Status, damit der nächste Abruf
-    // frisch rendert.
-    //
-    // GoBD: Versendete (`versendet`), bezahlte (`bezahlt`) und stornierte
-    // (`storniert`) Rechnungen bleiben UNANGETASTET — Korrektur dort
-    // ausschließlich über Storno + Neuanlage (siehe
-    // docs/deployment-log.md, RE-2026-0010-Runbook).
-    await tx.update(invoicesTable)
-      .set({
-        leistungsnachweisPath: null,
-        leistungsnachweisHash: null,
-        leistungsnachweisDataFingerprint: null,
-        pdfPath: null,
-        pdfHash: null,
-        pdfDataFingerprint: null,
-      })
-      .where(and(
-        eq(invoicesTable.customerId, existing.customerId),
-        eq(invoicesTable.billingYear, existing.year),
-        eq(invoicesTable.billingMonth, existing.month),
-        eq(invoicesTable.status, "entwurf"),
-      ));
+    await invalidateDraftInvoicePdfCache(tx, {
+      customerId: existing.customerId,
+      year: existing.year,
+      month: existing.month,
+    });
 
     return result[0];
   });
@@ -462,6 +479,121 @@ export async function lockAndCheckAppointmentLocked(
   return rows.some(
     (r) => r.status === "employee_signed" || r.status === "completed",
   );
+}
+
+/** Ergebnis einer Termin-Entfernung je betroffenem Leistungsnachweis. */
+export interface ServiceRecordAppointmentRemoval {
+  recordId: number;
+  customerId: number;
+  employeeId: number;
+  year: number;
+  month: number;
+  /** Status VOR der Entfernung — bleibt durch die Entfernung unverändert. */
+  status: ServiceRecordStatus;
+  /** Der LN enthielt danach keinen Termin mehr und wurde soft-gelöscht. */
+  becameEmpty: boolean;
+  /** Verbliebene Termine nach der Entfernung. */
+  remainingAppointments: number;
+}
+
+/**
+ * Task #1892 — Admin-Korrektur: einen Termin aus ALLEN verknüpften, nicht
+ * gelöschten Leistungsnachweisen herauslösen.
+ *
+ * REDUKTIONS-ONLY: die Operation entfernt ausschließlich; sie fügt nie etwas
+ * hinzu und erhöht nie einen Wert. Status und BEIDE Unterschriften des LN
+ * bleiben unangetastet — der Nachweis bleibt gültig, nur mit einem Termin (und
+ * entsprechend weniger Wert) weniger. Das ist zulässig, weil der LN on-demand
+ * rendert und die Signatur-Hashes das Unterschrifts-BILD hashen, nicht den
+ * Inhalt.
+ *
+ * MUSS innerhalb der Lösch-Transaktion und NACH
+ * `lockAndCheckAppointmentLocked` laufen — dessen FOR-UPDATE-Lock auf Termin-
+ * und LN-Zeilen serialisiert diese Mutation gegen eine gleichzeitig
+ * committende Unterschrift. Wir sperren die LN-Zeilen hier erneut mit
+ * FOR UPDATE, damit die Funktion auch für sich genommen lock-sauber ist
+ * (derselbe Lock, kein zusätzliches Fenster).
+ *
+ * Wird ein LN durch die Entfernung leer, ergibt er keinen Nachweis mehr und
+ * wird soft-gelöscht (`deleted_at`) — hart gelöscht wird nie.
+ *
+ * Der Aufrufer MUSS vorher sicherstellen, dass der Termin auf keiner AKTIVEN
+ * Rechnung liegt (`hasActiveInvoiceForAppointments`) — GoBD: Storno first.
+ */
+export async function removeAppointmentFromServiceRecords(
+  appointmentId: number,
+  txClient: Tx,
+): Promise<ServiceRecordAppointmentRemoval[]> {
+  const linked = await txClient.select({
+    recordId: monthlyServiceRecords.id,
+    customerId: monthlyServiceRecords.customerId,
+    employeeId: monthlyServiceRecords.employeeId,
+    year: monthlyServiceRecords.year,
+    month: monthlyServiceRecords.month,
+    status: monthlyServiceRecords.status,
+  })
+    .from(serviceRecordAppointments)
+    .innerJoin(
+      monthlyServiceRecords,
+      eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id),
+    )
+    .where(and(
+      eq(serviceRecordAppointments.appointmentId, appointmentId),
+      isNull(monthlyServiceRecords.deletedAt),
+    ))
+    .for("update");
+
+  if (linked.length === 0) return [];
+
+  // Die Verknüpfung lösen — NUR für diesen Termin.
+  await txClient.delete(serviceRecordAppointments)
+    .where(and(
+      eq(serviceRecordAppointments.appointmentId, appointmentId),
+      inArray(serviceRecordAppointments.serviceRecordId, linked.map((l) => l.recordId)),
+    ));
+
+  const removals: ServiceRecordAppointmentRemoval[] = [];
+  const now = new Date();
+
+  for (const record of linked) {
+    const remaining = await txClient.select({ appointmentId: serviceRecordAppointments.appointmentId })
+      .from(serviceRecordAppointments)
+      .where(eq(serviceRecordAppointments.serviceRecordId, record.recordId));
+
+    const becameEmpty = remaining.length === 0;
+    if (becameEmpty) {
+      await txClient.update(monthlyServiceRecords)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(eq(monthlyServiceRecords.id, record.recordId));
+    } else {
+      // Inhalt geändert ⇒ `updated_at` mitziehen. Status und Unterschriften
+      // bleiben bewusst unberührt (reduktions-only, kein neuer LN-Status).
+      await txClient.update(monthlyServiceRecords)
+        .set({ updatedAt: now })
+        .where(eq(monthlyServiceRecords.id, record.recordId));
+    }
+
+    // Dieselbe Invalidierung wie beim Signieren — der LN ist Anlage zur
+    // Rechnung, sein Inhalt hat sich geändert.
+    await invalidateDraftInvoicePdfCache(txClient, {
+      customerId: record.customerId,
+      year: record.year,
+      month: record.month,
+    });
+
+    removals.push({
+      recordId: record.recordId,
+      customerId: record.customerId,
+      employeeId: record.employeeId,
+      year: record.year,
+      month: record.month,
+      status: record.status as ServiceRecordStatus,
+      becameEmpty,
+      remainingAppointments: remaining.length,
+    });
+  }
+
+  return removals;
 }
 
 export async function getServiceRecordForAppointment(appointmentId: number): Promise<MonthlyServiceRecord | undefined> {
