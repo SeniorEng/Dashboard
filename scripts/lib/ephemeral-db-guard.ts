@@ -10,14 +10,20 @@
 //
 // Diese Datei enthält die reine, testbare Entscheidungslogik (kein DB-Zugriff).
 // Sie ist die EINE Quelle der Allow-List ("ist das eine erlaubte Wegwerf-DB?")
-// und wird an zwei Stellen wiederverwendet:
+// und wird an vier Stellen wiederverwendet:
 //   - `tests/globalSetup.ts` (`assertEphemeralTestDb`) bricht den Vitest-Lauf VOR
 //     den Integrationstests ab.
 //   - der App-Server-Boot (Task #1429, `server/startup/assert-ephemeral-test-db.ts`)
 //     verweigert den Start, wenn er in `NODE_ENV=test` gegen eine Nicht-Wegwerf-DB
 //     hochfahren würde (z.B. die Dev-`Start application`-Konfiguration).
+//   - die schreibenden Entrypoints (`assertEphemeralDbForWrite`): `drizzle.config.ts`
+//     sowie die beiden Test-Seeds. Sie lasen `DATABASE_URL` vorher ungeprüft.
 // Sie liegt daher hier in `scripts/lib/` (neben dem Prefix-SSoT
 // `ephemeral-db-sweep.ts`) — neutral importierbar von Tests UND vom Server.
+//
+// ERSETZT den `guard()`-Shell-Zaun, den CLAUDE.md für den lokalen Test-Ablauf
+// vorgab: der hing daran, dass ihn jemand vor jeden schreibenden Schritt tippt.
+// Die Prüfung sitzt jetzt in den Entrypoints selbst.
 // ---------------------------------------------------------------------------
 import { DB_PREFIX } from "./ephemeral-db-sweep.ts";
 
@@ -93,5 +99,60 @@ export function assertEphemeralTestDb(
       "==============================================================================",
       "",
     ].join("\n"),
+  );
+}
+
+// Rahmen für die Abbruch-Meldungen der schreibenden Entrypoints.
+function blockMessage(headline: string, lines: string[]): string {
+  return [
+    "",
+    "==============================================================================",
+    `  ABBRUCH: ${headline}`,
+    "==============================================================================",
+    ...lines.map((l) => (l.length > 0 ? `  ${l}` : "")),
+    "==============================================================================",
+    "",
+  ].join("\n");
+}
+
+// Absichtserklärung für die schreibenden Entrypoints. EIN Marker für alle drei
+// (Schema-Push + beide Seeds), weil es dieselbe fachliche Frage ist: „darf dieser
+// schreibende Aufruf auf eine Nicht-Wegwerf-DB?". Er wird ausschliesslich von den
+// Skripten gesetzt, die genau das beabsichtigen — nie global in einer Shell:
+//   - `scripts/migrate.sh`      Prod-Migration (Coolify-Pre-Deploy)
+//   - `npm run db:push`         ausdrücklicher Dev-Schema-Push
+//   - `scripts/reseed-dev-db.sh` Dev-Reseed (Push + beide Seeds); hat zusätzlich
+//                                seinen eigenen `--apply`- + Hostname-Guard
+export const NON_EPHEMERAL_WRITE_ENV = "ALLOW_NON_EPHEMERAL_DB_WRITE";
+
+// Bricht ab, wenn ein SCHREIBENDER Entrypoint auf einer Nicht-Wegwerf-DB landen
+// würde, ohne dass der Aufrufer das erklärt hat.
+//
+// Fail-closed bleibt damit der nackte Aufruf in einer Shell, die eine fremde
+// `DATABASE_URL` geerbt hat — bei `drizzle-kit push --force` ist das
+// nicht-interaktives DDL inkl. Spalten-Drops, bei den Seeds ein Superadmin mit
+// dokumentiertem Passwort plus überschriebene `company_settings`-Identität.
+export function assertEphemeralDbForWrite(
+  entrypoint: string,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (evaluateTestDbTarget(env).ok) return;
+  if ((env[NON_EPHEMERAL_WRITE_ENV] || "").trim() === "1") return;
+
+  const dbName = dbNameOf(env.DATABASE_URL);
+  const target = dbName ? `„${dbName}"` : "(DATABASE_URL nicht gesetzt)";
+  throw new Error(
+    blockMessage(`${entrypoint} zielt auf eine NICHT-Wegwerf-Datenbank.`, [
+      `Ziel-DB ${target} hat nicht den Präfix '${DB_PREFIX}'.`,
+      "",
+      "Häufigste Ursache: die Env-Datei wurde nicht gesourct und der Prozess hat",
+      "die DATABASE_URL der Shell geerbt.",
+      "",
+      "Absicht ist erklärbar, aber nur ausdrücklich — diese Wege setzen den",
+      `Marker ${NON_EPHEMERAL_WRITE_ENV}=1 selbst:`,
+      "  Prod-Migration :  bash scripts/migrate.sh [--force]",
+      "  Dev-Schema     :  npm run db:push",
+      "  Dev-Reseed     :  npm run db:reseed-dev",
+    ]),
   );
 }

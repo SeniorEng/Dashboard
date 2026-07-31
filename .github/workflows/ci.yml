@@ -218,9 +218,13 @@ jobs:
       # verbindet beim reinen Config-Load nicht, der Guard ist nur erfüllt.
       # Ohne diese Env bricht knip mit „Configuration file load error" (exit 2)
       # ab, obwohl es keinerlei Dead-Code gibt.
+      # Der Dummy trägt den `cc_test_`-Präfix, damit er den Wegwerf-DB-Guard in
+      # `drizzle.config.ts` aus eigener Kraft erfüllt (Pfad 3) statt nur über das
+      # von GitHub gesetzte `CI=true` (Pfad 1) — sonst wäre `npx knip` lokal
+      # blockiert und der Grund erst nach längerem Suchen erkennbar.
       - name: Dead-code gate (knip — blocking, symbols to console)
         env:
-          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/knip"
+          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/cc_test_knip"
         run: npx --yes knip@5.88.1 --reporter symbols
 
       # Bei rotem Lauf zusätzlich den maschinenlesbaren JSON-Report erzeugen
@@ -230,7 +234,7 @@ jobs:
       - name: Generate knip JSON report (on failure)
         if: failure()
         env:
-          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/knip"
+          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/cc_test_knip"
         run: npx --yes knip@5.88.1 --reporter json > knip-report.json || true
 
       - name: Upload knip report

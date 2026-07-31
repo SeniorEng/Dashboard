@@ -8,8 +8,10 @@
 import { describe, it, expect } from "vitest";
 import { DB_PREFIX } from "../../scripts/lib/ephemeral-db-sweep.ts";
 import {
+  assertEphemeralDbForWrite,
   assertEphemeralTestDb,
   evaluateTestDbTarget,
+  NON_EPHEMERAL_WRITE_ENV,
 } from "../../scripts/lib/ephemeral-db-guard";
 
 const DEV_URL = "postgres://user:pw@helium/heliumdb";
@@ -73,5 +75,79 @@ describe("assertEphemeralTestDb", () => {
 
   it("wirft NICHT in CI", () => {
     expect(() => assertEphemeralTestDb({ CI: "true" })).not.toThrow();
+  });
+});
+
+// Follow-up aus dem Gate-2-Review zu PR #20: die schreibenden Entrypoints
+// (drizzle-kit push, beide Test-Seeds) lasen `DATABASE_URL` vorher ungeprüft.
+// Sie teilen sich jetzt die Allow-List des Testlauf-Guards plus EINE
+// Absichtserklärung für die legitimen Nicht-Test-Wege.
+describe("assertEphemeralDbForWrite", () => {
+  it("blockiert eine geerbte Dev-DB-URL und nennt den Entrypoint", () => {
+    expect(() =>
+      assertEphemeralDbForWrite("ci-seed-superadmin", { DATABASE_URL: DEV_URL }),
+    ).toThrow(/ci-seed-superadmin/);
+  });
+
+  it("blockiert auch, wenn DATABASE_URL ganz fehlt", () => {
+    expect(() => assertEphemeralDbForWrite("drizzle-kit push", {})).toThrow(
+      /NICHT-Wegwerf-Datenbank/,
+    );
+  });
+
+  it("nennt die drei legitimen Wege in der Meldung", () => {
+    const run = () =>
+      assertEphemeralDbForWrite("drizzle-kit push", { DATABASE_URL: DEV_URL });
+    expect(run).toThrow(/scripts\/migrate\.sh/);
+    expect(run).toThrow(/npm run db:push/);
+    expect(run).toThrow(/npm run db:reseed-dev/);
+  });
+
+  it("lässt die drei erlaubten Wegwerf-Pfade durch", () => {
+    expect(() =>
+      assertEphemeralDbForWrite("x", { DATABASE_URL: EPHEMERAL_URL }),
+    ).not.toThrow();
+    expect(() => assertEphemeralDbForWrite("x", { CI: "true" })).not.toThrow();
+    expect(() =>
+      assertEphemeralDbForWrite("x", {
+        TEST_DATABASE_URLS: EPHEMERAL_URL,
+        DATABASE_URL: DEV_URL,
+      }),
+    ).not.toThrow();
+  });
+
+  it("lässt den erklärten Nicht-Test-Schreibzugriff durch (migrate.sh, db:push, reseed)", () => {
+    expect(() =>
+      assertEphemeralDbForWrite("drizzle-kit push", {
+        DATABASE_URL: "postgres://user:pw@prod-host:5432/careconnect",
+        [NON_EPHEMERAL_WRITE_ENV]: "1",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertEphemeralDbForWrite("ci-seed-superadmin", {
+        DATABASE_URL: DEV_URL,
+        [NON_EPHEMERAL_WRITE_ENV]: "1",
+      }),
+    ).not.toThrow();
+  });
+
+  it("akzeptiert nur exakt '1' als Absichtserklärung", () => {
+    for (const value of ["", "0", "true", "yes"]) {
+      expect(() =>
+        assertEphemeralDbForWrite("drizzle-kit push", {
+          DATABASE_URL: DEV_URL,
+          [NON_EPHEMERAL_WRITE_ENV]: value,
+        }),
+      ).toThrow(/NICHT-Wegwerf-Datenbank/);
+    }
+  });
+
+  it("der Marker hebelt den Testlauf-Guard NICHT aus", () => {
+    expect(() =>
+      assertEphemeralTestDb({
+        DATABASE_URL: DEV_URL,
+        [NON_EPHEMERAL_WRITE_ENV]: "1",
+      }),
+    ).toThrow(/NICHT-Wegwerf-Datenbank/);
   });
 });

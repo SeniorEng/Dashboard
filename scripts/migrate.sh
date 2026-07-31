@@ -32,5 +32,12 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
+# `drizzle.config.ts` ist fail-closed und bricht auf Nicht-Wegwerf-DBs ab
+# (scripts/lib/ephemeral-db-guard.ts). Dieses Skript IST der legitime
+# Prod-Migrationspfad und erklärt seine Absicht deshalb ausdrücklich. Der Schutz
+# bleibt dort wirksam, wo er hingehört: beim nackten `npx drizzle-kit push` in
+# einer Shell, die eine fremde DATABASE_URL geerbt hat.
+export ALLOW_NON_EPHEMERAL_DB_WRITE=1
+
 echo "[migrate] drizzle-kit@${VERSION} push (Version gepinnt aus package-lock.json)"
 exec npx --yes "drizzle-kit@${VERSION}" push "$@"

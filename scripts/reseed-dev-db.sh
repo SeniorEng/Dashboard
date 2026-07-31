@@ -142,6 +142,12 @@ CREATE SCHEMA public;
 SQL
 
 # --- 3. Schema push -------------------------------------------------------
+# Schema-Push und beide Seeds sind seit dem Wegwerf-DB-Guard fail-closed
+# (scripts/lib/ephemeral-db-guard.ts) und laufen sonst nur auf `cc_test_`-DBs.
+# Dieses Skript zielt bewusst auf die DEV-DB und erklärt seine Absicht deshalb
+# ausdrücklich — abgesichert durch den eigenen `--apply`- + Hostname-Guard oben.
+export ALLOW_NON_EPHEMERAL_DB_WRITE=1
+
 echo
 echo "==> [3/5] drizzle-kit push --force ..."
 npx drizzle-kit push --force
