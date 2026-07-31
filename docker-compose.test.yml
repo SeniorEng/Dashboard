@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Lokale Test-Datenbank — Nachbau des CI-`tests`-Jobs (.github/workflows/ci.yml).
+#
+# NUR FÜR LOKALE TESTS. Nicht Teil des Prod-Deploys (Coolify baut aus dem
+# `Dockerfile`, nicht aus dieser Datei). Beide Container binden ausschließlich
+# auf 127.0.0.1 — kein Port ist von außen erreichbar, keine Firewall-Freigabe
+# nötig. Die Zugangsdaten sind Wegwerf-Credentials und stehen bewusst im Klartext.
+#
+# Unterschiede zu CI, alle beabsichtigt:
+#   1. DB heißt `cc_test_careconnect` statt `careconnect`. Der `cc_test_`-Präfix
+#      erfüllt Pfad 3 des Wegwerf-DB-Guards (scripts/lib/ephemeral-db-guard.ts),
+#      sodass der Schutz lokal AKTIV bleibt. CI umgeht ihn über `CI=true`
+#      (Pfad 1) — lokal setzen wir CI deshalb NICHT.
+#   2. Port-Bindings auf 127.0.0.1 statt auf alle Interfaces.
+#   3. Postgres-Daten auf begrenztem tmpfs (CI: Container-Layer).
+#   4. Kein `npm ci`/Teardown-Step — die macht CLAUDE.md als eigene Zeilen.
+#
+# ZWEI ABNEHMER, unterschiedliche Ansprüche an diesen Stack:
+#   - Orchestrator (`scripts/with-ephemeral-db.ts`, der Default) nutzt NUR den
+#     Postgres, direkt über TCP mit `DB_DRIVER=pg`. Er legt sich Per-Worker-
+#     Wegwerf-DBs an; über den Fixed-Target-Proxy (unten) würden die alle auf
+#     dieselbe DB kollabieren — deshalb ist der Proxy dort abgewählt.
+#   - 1:1-CI-Nachbau (Fallback, nur für CI-only-Fehlschläge) nutzt BEIDE
+#     Container, weil der gating `tests`-Job genau so läuft: eine geteilte DB
+#     hinter dem Neon-WS-Proxy.
+#
+# WICHTIG — der Neon-Proxy ist eine Fixed-Target-Brücke: er IGNORIERT den
+# DB-Namen aus `DATABASE_URL` und leitet jede Neon-Treiber-Verbindung auf sein
+# eigenes `PG_CONNECTION_STRING`. Das betrifft den App-Server und beide
+# Seed-Skripte; `drizzle-kit push` und `psql` gehen dagegen direkt über TCP.
+# Beide müssen daher DIESELBE Datenbank nennen — sonst landet das Schema in der
+# einen und die App in der anderen DB, ohne Fehlermeldung.
+# (Hintergrund: .agents/memory/ci-neon-proxy-fixed-target.md)
+#
+# Benutzung: siehe CLAUDE.md → „Integrationstests lokal fahren".
+# ---------------------------------------------------------------------------
+
+services:
+  postgres:
+    # Exakt der CI-Tag — kein Minor-Pin, damit lokal und CI dieselbe Version
+    # ziehen. Weicht der eine ab, weicht auch das Testverhalten ab.
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cc_test_careconnect
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cc_test_careconnect"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Kein named volume: die DB soll mit `docker compose down` restlos
+    # verschwinden. tmpfs hält sie zusätzlich aus dem Container-Layer heraus
+    # und macht die Läufe spürbar schneller.
+    # `size` ist gesetzt, weil tmpfs sonst bis zu 50% des Host-RAMs zieht — auf
+    # diesem Host laufen auch die Coolify-Prod-Container. Mit Limit wird aus
+    # Speicherdruck ein sauberes "no space left on device" in der TEST-DB.
+    tmpfs:
+      - /var/lib/postgresql/data:size=2g
+
+  neon-proxy:
+    # Der Neon-Serverless-Treiber (server/lib/db.ts, DB_DRIVER=neon als Default)
+    # spricht nur Secure-WS und kann sich nicht direkt mit Postgres verbinden.
+    # Ohne diesen Proxy bootet der App-Server nicht.
+    image: ghcr.io/timowilhelm/local-neon-http-proxy:main
+    environment:
+      # Muss auf dieselbe DB zeigen wie DATABASE_URL (siehe Kopf-Kommentar).
+      # `postgres` ist der Service-Name im Compose-Netz.
+      PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/cc_test_careconnect
+    ports:
+      - "127.0.0.1:4444:4444"
+    depends_on:
+      postgres:
+        condition: service_healthy
