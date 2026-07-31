@@ -154,41 +154,95 @@ dieselbe Suite lokal in Sekunden. Der CI-`tests`-Job bleibt die verbindliche
 Instanz — lokal ist die Vorstufe, nicht der Ersatz für den grünen Check am PR.
 
 `docker-compose.test.yml` baut den CI-Job nach: `postgres:16` + Neon-WS-Proxy,
-beide nur auf `127.0.0.1`. `.env.test.local` (gitignored) hält die Wegwerf-Werte;
-Inhalt siehe Datei-Kopf, jederzeit aus dieser Doku neu erstellbar.
+beide nur auf `127.0.0.1`.
+
+**Verhältnis zum Orchestrator** (`scripts/with-ephemeral-db.ts`,
+`docs/test-infrastructure.md`): Der Orchestrator bleibt der kanonische Weg für
+parallele Läufe (Per-Worker-Wegwerf-DBs, freie Ports, Template-Cache). Der
+Ablauf hier ist bewusst der **1:1-Nachbau des CI-Jobs** — feste DB, fester Port,
+Neon-WS-Proxy statt Direkt-TCP — damit CI-only-Fehlschläge lokal reproduzierbar
+sind. Wer nur „Tests laufen lassen" will, nimmt den Orchestrator; wer „warum ist
+das in CI rot?" beantworten will, nimmt diesen Ablauf. Der Orchestrator braucht
+zusätzlich `psql`/`pg_dump` im PATH (`sudo apt-get install postgresql-client`).
+
+`.env.test.local` ist gitignored und enthält genau diese Wegwerf-Werte:
 
 ```bash
+NODE_ENV=test
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/cc_test_careconnect
+NEON_LOCAL_WS_PROXY=localhost:4444
+ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+TEST_USER_EMAIL=ci-test@example.com
+TEST_USER_PASSWORD=TestPasswort123!
+SUPER_ADMIN_EMAIL=ci-test@example.com
+```
+
+Ablauf:
+
+```bash
+npm ci                                            # drizzle-kit-Version aus dem Lockfile
 docker compose -f docker-compose.test.yml up -d   # ggf. mit sudo (docker-Gruppe)
-set -a && source .env.test.local && set +a
-npx drizzle-kit push --force                      # Schema
-npx tsx scripts/ci-seed-superadmin.ts             # Login für globalSetup
-npx tsx scripts/seed-test-reference-data.ts       # Services, company_settings
-NODE_ENV=test npx tsx server/index.ts > server.log 2>&1 &
-curl -sf http://localhost:5000/api/health         # warten bis ok
+
+# Preflight — fail-closed. `guard` ist Vorbedingung JEDES schreibenden Schritts.
+unset CI TEST_DATABASE_URLS TEST_BASE_URLS        # `source` kann nur setzen, nie löschen
+set -a; . ./.env.test.local; set +a               # Semikolons, damit `set +a` immer läuft
+guard() { case "${DATABASE_URL##*/}" in cc_test_*) return 0;; \
+          *) echo "ABBRUCH: DATABASE_URL=$DATABASE_URL"; return 1;; esac; }
+ss -ltn | grep -q ':5000 ' && echo "ABBRUCH: Port 5000 belegt — erst freimachen"
+
+guard && npx drizzle-kit push --force             # Schema
+guard && npx tsx scripts/ci-seed-superadmin.ts    # Login für globalSetup
+guard && npx tsx scripts/seed-test-reference-data.ts   # Services, company_settings
+guard && { NODE_ENV=test npx tsx server/index.ts > server.log 2>&1 & echo $! > server.pid; }
+tail -3 server.log && curl -sf http://localhost:5000/api/health   # BEIDES prüfen
+
 npx vitest run tests/<pfad>/<datei>.test.ts       # oder ohne Pfad: volle Suite
+
+kill "$(cat server.pid)"; rm -f server.pid
 docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist weg
 ```
 
 Fallen:
 
+- **Kein Guard schützt `drizzle-kit push --force`.** `evaluateTestDbTarget` wird
+  nur aus `tests/globalSetup.ts` und `server/index.ts` (nur bei `NODE_ENV=test`)
+  gerufen — `drizzle.config.ts` und beide Seed-Skripte lesen `DATABASE_URL`
+  nackt. Schlägt das `source` fehl (Datei fehlt, falsches CWD), erbt der Schritt
+  die `DATABASE_URL` der Shell und fährt nicht-interaktives, potenziell
+  destruktives DDL gegen die **Dev-Prod-Kopie**. Deshalb das `guard &&` vor
+  jedem schreibenden Schritt — nicht wegkürzen.
 - **`CI` NICHT setzen.** `CI=true` schaltet den Wegwerf-DB-Guard ab
   (`scripts/lib/ephemeral-db-guard.ts`, Pfad 1). Lokal soll er greifen — deshalb
   heißt die DB `cc_test_careconnect` (Präfix erfüllt Pfad 3) statt wie in CI
-  `careconnect`. Das ist der einzige inhaltliche Unterschied zum CI-Job.
+  `careconnect`. Dasselbe gilt für `TEST_DATABASE_URLS` (Pfad 2, Rest aus einem
+  Orchestrator-Lauf) — daher das `unset` im Preflight.
+- **Port 5000 belegt = stiller Fehlschlag.** Der Server stirbt dann mit
+  `EADDRINUSE` nur in `server.log`, und `curl /api/health` antwortet **erfolgreich**
+  — vom Dev-Server. Die Health-Payload nennt weder `NODE_ENV` noch DB-Namen, man
+  merkt es also nicht. Die Tests schreiben danach in die Dev-DB. Deshalb der
+  Port-Check vorher und `tail server.log` vor dem `curl`.
 - **Der Neon-Proxy ist eine Fixed-Target-Brücke.** Er ignoriert den DB-Namen aus
   `DATABASE_URL` und leitet auf sein eigenes `PG_CONNECTION_STRING`. App-Server
   und Seed-Skripte gehen über den Proxy, `drizzle-kit push` und `psql` direkt
   über TCP. Nennen beide nicht dieselbe DB, landet das Schema in der einen und
   die App in der anderen — ohne Fehlermeldung.
+- **`cc_test_careconnect` ist Ziel des Orphan-Sweeps.** Der `cc_test_`-Präfix
+  meldet die DB auch beim Sweeper an (`scripts/lib/ephemeral-db-sweep.ts`).
+  `npm run test:unblock` oder ein Orchestrator-Start droppen sie, sobald keine
+  Verbindung dranhängt — Schema und Seeds sind dann weg.
 - **Lokale Baseline ≠ CI-Baseline.** Voller Lauf am 31.07.2026 auf `main`:
-  30 Dateien / 68 Tests rot (CI-`tests` auf `main`: 28 Dateien). Die Differenz ist
-  Host-Ausstattung, keine Regression — gegen die LOKALE Baseline diffen:
-  - `tests/billing/pdf-generator-resilience.test.ts` (8) + `zugferd-send-failure`
-    (1) — **kein Chromium** auf dem Host.
-  - `tests/architecture/dev-db-scripts-guard.test.ts` (9) — **kein `pg_dump`/
-    `psql`** im PATH (`sudo apt-get install postgresql-client` behebt das).
-  - `tests/equality/appointment-series-bulk-rebook.test.ts` (1) — Ursache
+  30 Dateien / 68 Tests rot; CI-`tests` auf `main`: 28 Dateien. **26 Dateien sind
+  in beiden rot** (die bekannte Baseline). Die Deltas sind vollständig:
+  - Nur lokal rot, Host-Ausstattung: `tests/billing/pdf-generator-resilience.test.ts`
+    (8) + `tests/billing/zugferd-send-failure.test.ts` (1) — **kein Chromium**;
+    `tests/architecture/dev-db-scripts-guard.test.ts` (9) — **kein `pg_dump`/
+    `psql`** im PATH (`sudo apt-get install postgresql-client` behebt das);
+    `tests/equality/appointment-series-bulk-rebook.test.ts` (1) — Ursache
     ungeklärt, vermutlich Flake.
+  - Diese vier sind die EINZIGEN, die „Host-Ausstattung" erklärt. Jede weitere
+    lokal rote Datei ist eine Regression, kein Rauschen. Die Baseline ist zudem
+    datums-fragil (Fixtures, `getFutureDate`-Wochenendrolle) — bei Zweifel neu
+    auf `main` erheben statt fortschreiben.
   Umgekehrt sind `tests/service-records.test.ts` und
   `tests/startup/dedupe-pending-monthly-service-records.test.ts` lokal grün und
   in CI rot (dort Setup-Flakes). Voller Lauf dauert lokal ~19 min.

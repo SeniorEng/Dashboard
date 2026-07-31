@@ -20,8 +20,9 @@ tmp/db-backups/
 test-results/
 playwright-report/
 
-# Log des lokal gestarteten Test-App-Servers (CLAUDE.md → Integrationstests lokal)
+# Log + PID des lokal gestarteten Test-App-Servers (CLAUDE.md → Integrationstests lokal)
 server.log
+server.pid
 
 # Stryker mutation testing (Task #770)
 reports/
