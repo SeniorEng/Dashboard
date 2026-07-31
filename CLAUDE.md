@@ -124,8 +124,21 @@ CI) läuft **autonom**. Ein Mensch klinkt sich nur an diesen vier Punkten ein:
 1. **Fachliche Weiche** — offene Domänen-Entscheidung, *bevor* gebaut wird
    (Variante A/B, GoBD-Frage). Greift nur, wenn wirklich offen. → Alrik entscheidet.
 2. **PR-Diff-Review** — Urteilsblick auf die Billing-/GoBD-Logik *vor* dem Merge.
-   → Cowork-Claude ODER der `reviewer`-Subagent (`.claude/agents/reviewer.md`),
-   der den Code nicht geschrieben hat.
+   → Cowork-Claude ODER ein Reviewer-Subagent, der den Code nicht geschrieben hat.
+   Zwei risiko-gestufte Reviewer, **explizit by name aufrufen** (kein
+   Auto-Routing — ein fehlgeleiteter kritischer PR verliert den zweiten Blick):
+   - **`deep-reviewer`** (`.claude/agents/deep-reviewer.md`, Opus) — **Default,
+     im Zweifel immer dieser.** Pflicht, sobald der Diff *irgendetwas* davon
+     berührt: Billing/Abrechnung, §45b-Budget/Verfall, Kostenträger-Auflösung,
+     Leistungsnachweis/Signatur, Auth/Permissions, Schema/Migrationen,
+     öffentliche API/Response-Schemata, Datenintegritäts-Formeln (Carryover, FIFO).
+   - **`light-reviewer`** (`.claude/agents/light-reviewer.md`, Haiku) — bewusste
+     Ausnahme, nur wenn der Diff *ausschließlich* aus Docs/Markdown, Config ohne
+     Logik, reinen Test-Refactorings, kosmetischen/Lint-Fixes oder Tippfehlern
+     besteht, **keinen** der deep-Pfade berührt und typischerweise < 100 Zeilen
+     ist. Er hat kein `Grep` und bricht bei kritischen Funden ab.
+
+   Beide ERSETZEN den früheren `reviewer`-Subagenten (Datei entfernt).
 3. **Merge + Deploy** — Admin-Merge nach `main` + Prod-Publish. → Alrik bestätigt.
 4. **Prod-Schreiboperation** — Dry-Run zuerst, dann ausdrückliche Freigabe je
    Schritt. → Alrik bestätigt.
