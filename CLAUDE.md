@@ -146,6 +146,55 @@ CI) läuft **autonom**. Ein Mensch klinkt sich nur an diesen vier Punkten ein:
 Alles dazwischen läuft ohne Rückfrage. Grundsatz: **Gate dort, wo Urteil oder
 Unumkehrbarkeit sitzt — nicht überall.**
 
+## Integrationstests lokal fahren
+
+**ERSETZT den CI-Roundtrip als einzigen Weg, Integrationstests zu sehen.** Vorher
+war jede Test-Frage ein Push + ~20 min CI + Artefakt-Download; jetzt läuft
+dieselbe Suite lokal in Sekunden. Der CI-`tests`-Job bleibt die verbindliche
+Instanz — lokal ist die Vorstufe, nicht der Ersatz für den grünen Check am PR.
+
+`docker-compose.test.yml` baut den CI-Job nach: `postgres:16` + Neon-WS-Proxy,
+beide nur auf `127.0.0.1`. `.env.test.local` (gitignored) hält die Wegwerf-Werte;
+Inhalt siehe Datei-Kopf, jederzeit aus dieser Doku neu erstellbar.
+
+```bash
+docker compose -f docker-compose.test.yml up -d   # ggf. mit sudo (docker-Gruppe)
+set -a && source .env.test.local && set +a
+npx drizzle-kit push --force                      # Schema
+npx tsx scripts/ci-seed-superadmin.ts             # Login für globalSetup
+npx tsx scripts/seed-test-reference-data.ts       # Services, company_settings
+NODE_ENV=test npx tsx server/index.ts > server.log 2>&1 &
+curl -sf http://localhost:5000/api/health         # warten bis ok
+npx vitest run tests/<pfad>/<datei>.test.ts       # oder ohne Pfad: volle Suite
+docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist weg
+```
+
+Fallen:
+
+- **`CI` NICHT setzen.** `CI=true` schaltet den Wegwerf-DB-Guard ab
+  (`scripts/lib/ephemeral-db-guard.ts`, Pfad 1). Lokal soll er greifen — deshalb
+  heißt die DB `cc_test_careconnect` (Präfix erfüllt Pfad 3) statt wie in CI
+  `careconnect`. Das ist der einzige inhaltliche Unterschied zum CI-Job.
+- **Der Neon-Proxy ist eine Fixed-Target-Brücke.** Er ignoriert den DB-Namen aus
+  `DATABASE_URL` und leitet auf sein eigenes `PG_CONNECTION_STRING`. App-Server
+  und Seed-Skripte gehen über den Proxy, `drizzle-kit push` und `psql` direkt
+  über TCP. Nennen beide nicht dieselbe DB, landet das Schema in der einen und
+  die App in der anderen — ohne Fehlermeldung.
+- **Lokale Baseline ≠ CI-Baseline.** Voller Lauf am 31.07.2026 auf `main`:
+  30 Dateien / 68 Tests rot (CI-`tests` auf `main`: 28 Dateien). Die Differenz ist
+  Host-Ausstattung, keine Regression — gegen die LOKALE Baseline diffen:
+  - `tests/billing/pdf-generator-resilience.test.ts` (8) + `zugferd-send-failure`
+    (1) — **kein Chromium** auf dem Host.
+  - `tests/architecture/dev-db-scripts-guard.test.ts` (9) — **kein `pg_dump`/
+    `psql`** im PATH (`sudo apt-get install postgresql-client` behebt das).
+  - `tests/equality/appointment-series-bulk-rebook.test.ts` (1) — Ursache
+    ungeklärt, vermutlich Flake.
+  Umgekehrt sind `tests/service-records.test.ts` und
+  `tests/startup/dedupe-pending-monthly-service-records.test.ts` lokal grün und
+  in CI rot (dort Setup-Flakes). Voller Lauf dauert lokal ~19 min.
+- Server neu starten nach Server-Code-Änderungen — die Tests sprechen den
+  gebooteten Prozess an, nicht den Quelltext.
+
 ## Stack & Wo was liegt
 
 - **Frontend** React 19 + Vite + Tailwind v4 (`client/src/`); **Backend** Express +

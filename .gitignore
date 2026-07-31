@@ -20,6 +20,9 @@ tmp/db-backups/
 test-results/
 playwright-report/
 
+# Log des lokal gestarteten Test-App-Servers (CLAUDE.md → Integrationstests lokal)
+server.log
+
 # Stryker mutation testing (Task #770)
 reports/
 # ...but keep audit/dry-run documentation under docs/reports/ tracked (GoBD-Auditspur)
