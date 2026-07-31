@@ -52,6 +52,21 @@ const cleanupCustomerIds: number[] = [];
 const cleanupApptIds: number[] = [];
 const cleanupEmployeeIds: number[] = [];
 
+/**
+ * Rechte-Hochstufungen, die in `afterAll` zurückgenommen werden MÜSSEN.
+ *
+ * `deactivateTestEmployee` kann das strukturell nicht: es geht über
+ * `POST /api/admin/users/:id/deactivate`, dort greift `denyIfPrivilegedTarget`
+ * (nur ein Super-Admin darf einen Super-Admin deaktivieren) und der Helper
+ * schluckt die 403. Ohne diesen Restore bliebe ein AKTIVER Super-Admin mit dem
+ * fest verdrahteten Testpasswort stehen — in der Wegwerf-DB egal, gegen eine
+ * Prod-Kopie nicht. Zusätzlich greifen sich andere Suiten „irgendeinen"
+ * Super-Admin per `limit(1)` ohne `ORDER BY`; ein zweiter Datensatz macht die
+ * Auswahl nichtdeterministisch. Idiom wie in
+ * tests/integration/reconcile-km-drift-leaves-audit-empty.test.ts.
+ */
+const privilegeRestores: { id: number; isAdmin: boolean; isSuperAdmin: boolean }[] = [];
+
 async function newCustomer(tag: string): Promise<number> {
   const cust = await createTestCustomer({ nachname: `LN1892-${tag}-${uniqueId()}` });
   const id = cust.id as number;
@@ -180,6 +195,17 @@ afterAll(async () => {
   }
   for (const id of cleanupCustomerIds) {
     await cleanupCustomer(id);
+  }
+  // ZUERST die Rechte zurücknehmen, DANN deaktivieren — sonst blockt
+  // `denyIfPrivilegedTarget` die Deaktivierung des Super-Admins.
+  for (const restore of privilegeRestores) {
+    try {
+      await db.update(users)
+        .set({ isAdmin: restore.isAdmin, isSuperAdmin: restore.isSuperAdmin })
+        .where(eq(users.id, restore.id));
+    } catch (err) {
+      console.error(`[1892] Rechte-Restore für User ${restore.id} fehlgeschlagen:`, err);
+    }
   }
   for (const id of cleanupEmployeeIds) {
     await deactivateTestEmployee(id);
@@ -662,9 +688,13 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
 
     // Die Ablehnung MUSS eine Spur hinterlassen. Der Guard wirft, damit rollt
     // die Transaktion zurück — der Audit-Eintrag läuft deshalb bewusst danach
-    // und OHNE Tx-Client. Zieht ihn jemand später „sauberer" in die
-    // Transaktion, verschwindet er lautlos; genau das nagelt diese Assertion
-    // fest.
+    // und OHNE Tx-Client.
+    //
+    // Reichweite dieser Assertion, damit sie niemanden falsch beruhigt: sie
+    // fällt um, sobald jemand den Tx-Client als `exec` durchreicht (dann wird
+    // der Insert mitgerollt). Sie fällt NICHT um, wenn der Aufruf lediglich in
+    // den Transaktionsblock verschoben wird, ohne `exec` zu setzen — dann
+    // läuft er weiter über den globalen Pool auf eigener Connection.
     const auditRows = await db
       .select({ id: auditLog.id, metadata: auditLog.metadata })
       .from(auditLog)
@@ -699,6 +729,14 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
     cleanupEmployeeIds.push(emp.id);
 
     // Ausdrücklich NUR Super-Admin, NICHT Admin — das ist der Kern des Falls.
+    // Ist-Zustand vorher merken, damit `afterAll` ihn zurücksetzen kann.
+    const before = await db.select({ isAdmin: users.isAdmin, isSuperAdmin: users.isSuperAdmin })
+      .from(users).where(eq(users.id, emp.id)).limit(1);
+    privilegeRestores.push({
+      id: emp.id,
+      isAdmin: before[0]?.isAdmin ?? false,
+      isSuperAdmin: before[0]?.isSuperAdmin ?? false,
+    });
     await db.update(users)
       .set({ isSuperAdmin: true, isAdmin: false })
       .where(eq(users.id, emp.id));
@@ -726,5 +764,25 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
     const covered = await coveredAppointmentIds(recordId);
     expect(covered, "entfernter Termin ist raus").not.toContain(apptA);
     expect(covered, "der zweite Termin bleibt").toContain(apptB);
+
+    // `adminForceDelete` ist das Feld, das die GoBD-Ausnahme dokumentiert, und
+    // hängt an derselben Prädikat-Quelle. Driftete `isAdmin` dort zurück auf
+    // `user.isAdmin`, stünde für diese Zwangslöschung still `false` im Audit —
+    // ohne dass irgendetwas sonst rot würde. Hier festgenagelt.
+    const deletedAudit = await db
+      .select({ metadata: auditLog.metadata })
+      .from(auditLog)
+      .where(and(
+        eq(auditLog.action, "appointment_deleted"),
+        eq(auditLog.entityType, "appointment"),
+        eq(auditLog.entityId, apptA),
+      ))
+      .orderBy(desc(auditLog.id))
+      .limit(1);
+    expect(deletedAudit.length, "Löschung ist auditiert").toBe(1);
+    expect(
+      (deletedAudit[0].metadata as any)?.adminForceDelete,
+      "Zwangslöschung eines dokumentierten Termins durch einen Super-Admin muss als adminForceDelete im Audit stehen",
+    ).toBe(true);
   });
 });
