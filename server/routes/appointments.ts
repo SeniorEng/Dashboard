@@ -1832,13 +1832,23 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
 
   const user = req.user!;
-  const isAdmin = user.isAdmin;
 
   const flags = await loadPolicyFlags(id, appointment);
   const policyAppt = toPolicyAppointment(appointment, flags);
   const policyUser = toPolicyUser(user);
   const decision = policyCanDelete(policyUser, policyAppt);
   if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
+
+  // Task #1892 — EINE Prädikat-Quelle für „zählt als Admin?": dieselbe, die
+  // die Policy oben benutzt (`isAdmin || isSuperAdmin`). Vorher stand hier
+  // `user.isAdmin`; beide Spalten sind unabhängig (shared/schema/users.ts),
+  // also wurde ein Super-Admin ohne `is_admin` von `canDeleteAppointment`
+  // unten mit 403 „Abgeschlossene Termine können nicht gelöscht werden"
+  // abgewiesen, obwohl die Policy ihm ALLOW gegeben hatte. Diese Variable
+  // speist alle drei Admin-Entscheidungen dieser Route: die Folgekosten-
+  // Validierung, den Korrektur-Zweig am signierten LN und das Audit-Feld
+  // `adminForceDelete` — sie müssen dieselbe Antwort geben.
+  const isAdmin = isAdminLike(policyUser);
 
   if (!isAdmin) {
     // Zusätzliche Service-seitige Validierung (z. B. Folgekosten-Sperren).
@@ -1890,13 +1900,9 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
       // verknüpften Leistungsnachweisen herausgelöst (reduktions-only, LN
       // bleibt mit beiden Unterschriften gültig). Nicht-Admins bleiben
       // gesperrt — die Policy hat sie oben schon abgelehnt, dieser Zweig ist
-      // die zweite, transaktionale Verteidigungslinie.
-      //
-      // WICHTIG: dasselbe Prädikat wie die Policy (`isAdminLike` =
-      // `isAdmin || isSuperAdmin`), nicht `user.isAdmin`. Beide Spalten sind
-      // unabhängig; ein Super-Admin ohne `is_admin` bekam sonst hier 409,
-      // obwohl `canDeleteAppointment` oben ALLOW gesagt hatte.
-      if (!isAdminLike(policyUser)) {
+      // die zweite, transaktionale Verteidigungslinie. `isAdmin` ist hier das
+      // Policy-Prädikat (`isAdminLike`, siehe oben), nicht `user.isAdmin`.
+      if (!isAdmin) {
         throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
       }
 
@@ -1927,23 +1933,19 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
           }
         }
         if (blockingLegs.length > 0) {
-          const legList = (rs: typeof blockingLegs) =>
-            rs.map((r) => `#${r.id}`).join(", ");
-          const signed = blockingLegs.filter((r) => r.reason === "signed");
-          const ownOutcome = blockingLegs.filter((r) => r.reason === "own_outcome");
-          const reasons: string[] = [];
-          if (signed.length > 0) {
-            reasons.push(`liegt auf einem unterschriebenen Leistungsnachweis (Termin ${legList(signed)})`);
-          }
-          if (ownOutcome.length > 0) {
-            reasons.push(`ist bereits abgeschlossen oder als „nicht angetroffen“ vermerkt (Termin ${legList(ownOutcome)})`);
-          }
+          // Eine Co-Visit-Gruppe entsteht über `secondAssignedEmployeeId` und
+          // hat damit genau ZWEI Legs — es kann also höchstens ein Partner
+          // blockieren. Ein Grund reicht; keine Mehrfach-Verknüpfung nötig.
+          const legList = blockingLegs.map((l) => `#${l.id}`).join(", ");
+          const reasonText = blockingLegs[0].reason === "signed"
+            ? "liegt auf einem unterschriebenen Leistungsnachweis"
+            : "ist bereits abgeschlossen oder als „nicht angetroffen“ vermerkt";
           // Für den Audit-Eintrag NACH dem Rollback aufheben (siehe unten).
           coVisitBlock = { legs: blockingLegs, groupId: appointment.coVisitGroupId };
           throw new AppError(
             409,
             "APPOINTMENT_CO_VISIT_LOCKED",
-            `Zwei-Kräfte-Einsatz — der Termin der zweiten Kraft ${reasons.join(" bzw. ")} und bliebe stehen. `
+            `Zwei-Kräfte-Einsatz — der Termin der zweiten Kraft (${legList}) ${reasonText} und bliebe stehen. `
               + "Es entstünde ein halber Einsatz. Bitte beide Termine separat behandeln.",
           );
         }
@@ -2012,21 +2014,29 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     // Eintrag läuft bewusst NACH dem Rollback und OHNE `exec`, sonst würde er
     // mit der Transaktion verworfen, die ihn ausgelöst hat.
     if (coVisitBlock) {
-      await auditService.log(
-        req.user!.id,
-        "appointment_co_visit_removal_blocked",
-        "appointment",
-        id,
-        {
-          customerId: appointment.customerId,
-          date: appointment.date,
-          coVisitGroupId: coVisitBlock.groupId,
-          blockingLegIds: coVisitBlock.legs.map((l) => l.id),
-          blockingReasons: coVisitBlock.legs.map((l) => ({ appointmentId: l.id, reason: l.reason })),
-          actor: { role: actorRole(user) },
-        },
-        ip
-      );
+      // Der Audit-Eintrag darf die 409 NIE verschlucken. `auditService.log`
+      // fängt Fehler ohne `exec` zwar bereits selbst ab — das ist aber ein
+      // Detail zwei Dateien weiter. Hier festgenagelt, damit es beim Umbau
+      // dort nicht still zur Fehlerquelle wird.
+      try {
+        await auditService.log(
+          req.user!.id,
+          "appointment_co_visit_removal_blocked",
+          "appointment",
+          id,
+          {
+            customerId: appointment.customerId,
+            date: appointment.date,
+            coVisitGroupId: coVisitBlock.groupId,
+            blockingLegIds: coVisitBlock.legs.map((l) => l.id),
+            blockingReasons: coVisitBlock.legs.map((l) => ({ appointmentId: l.id, reason: l.reason })),
+            actor: { role: actorRole(user) },
+          },
+          ip
+        );
+      } catch (auditErr) {
+        console.error("[appointments] Audit der abgelehnten Co-Visit-Korrektur fehlgeschlagen:", auditErr);
+      }
     }
     throw err;
   });

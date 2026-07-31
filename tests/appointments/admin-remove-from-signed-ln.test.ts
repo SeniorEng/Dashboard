@@ -24,6 +24,9 @@
  */
 import { validSignatureDataUrl } from "../helpers/valid-signature";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { db } from "../../server/lib/db";
+import { auditLog, users } from "@shared/schema";
+import { and, eq, desc } from "drizzle-orm";
 import {
   apiGet,
   apiPost,
@@ -162,7 +165,7 @@ beforeAll(async () => {
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   year = prev.getFullYear();
   month = prev.getMonth() + 1;
-  for (let day = 2; day <= 28 && workdays.length < 14; day++) {
+  for (let day = 2; day <= 28 && workdays.length < 16; day++) {
     const cur = new Date(year, month - 1, day);
     const dow = cur.getDay();
     if (dow !== 0 && dow !== 6) {
@@ -656,5 +659,72 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
       expect(still.status, `Leg ${legId} lebt weiter`).toBe(200);
     }
     expect(await coveredAppointmentIds(recordA), "LN A unverändert").toContain(legA.id);
+
+    // Die Ablehnung MUSS eine Spur hinterlassen. Der Guard wirft, damit rollt
+    // die Transaktion zurück — der Audit-Eintrag läuft deshalb bewusst danach
+    // und OHNE Tx-Client. Zieht ihn jemand später „sauberer" in die
+    // Transaktion, verschwindet er lautlos; genau das nagelt diese Assertion
+    // fest.
+    const auditRows = await db
+      .select({ id: auditLog.id, metadata: auditLog.metadata })
+      .from(auditLog)
+      .where(and(
+        eq(auditLog.action, "appointment_co_visit_removal_blocked"),
+        eq(auditLog.entityType, "appointment"),
+        eq(auditLog.entityId, legA.id),
+      ))
+      .orderBy(desc(auditLog.id))
+      .limit(1);
+
+    expect(
+      auditRows.length,
+      "abgelehnte Co-Visit-Korrektur muss trotz Rollback im Audit stehen",
+    ).toBe(1);
+    const meta = auditRows[0].metadata as any;
+    expect(meta?.blockingLegIds, "Audit weist das blockierende Leg aus").toContain(legB.id);
+    expect(
+      (meta?.blockingReasons ?? []).map((r: any) => r.reason),
+      "Audit hält den echten Grund fest (eigener Ausgang, kein Nachweis)",
+    ).toContain("own_outcome");
+  });
+
+  it("1892.11 – (k) Super-Admin ohne is_admin darf korrigieren (eine Prädikat-Quelle)", async () => {
+    // `is_admin` und `is_super_admin` sind unabhängige Spalten. Die Policy
+    // entscheidet mit `isAdminLike = isAdmin || isSuperAdmin`; die Route prüfte
+    // früher `user.isAdmin` und wies einen Super-Admin ohne `is_admin` mit 403
+    // „Abgeschlossene Termine können nicht gelöscht werden" ab — obwohl die
+    // Policy ihm längst ALLOW gegeben hatte. Dieser Test nagelt fest, dass
+    // beide Stellen dieselbe Antwort geben.
+    const emp = await createTestEmployee({ nachnamePrefix: "LN1892SuperAdmin" });
+    cleanupEmployeeIds.push(emp.id);
+
+    // Ausdrücklich NUR Super-Admin, NICHT Admin — das ist der Kern des Falls.
+    await db.update(users)
+      .set({ isSuperAdmin: true, isAdmin: false })
+      .where(eq(users.id, emp.id));
+    const check = await db.select({ isAdmin: users.isAdmin, isSuperAdmin: users.isSuperAdmin })
+      .from(users).where(eq(users.id, emp.id)).limit(1);
+    expect(check[0], "Testnutzer ist Super-Admin ohne is_admin").toEqual({ isAdmin: false, isSuperAdmin: true });
+
+    const customerId = await newCustomer("k");
+    const apptA = await createAndDocument(customerId, workdays[14], "09:00");
+    const apptB = await createAndDocument(customerId, workdays[15], "09:00");
+    const recordId = await createSignedRecord(customerId, [apptA, apptB]);
+
+    // Login NACH der Rechte-Änderung, damit die Session die Flags trägt.
+    const superAuth = await loginAs(emp.email, emp.password);
+    const delRes = await apiDeleteAs(superAuth, `/api/appointments/${apptA}`);
+    expect(
+      delRes.status,
+      `Super-Admin muss korrigieren dürfen, got ${delRes.status} ${JSON.stringify(delRes.data)}`,
+    ).toBe(200);
+
+    const after = await apiGet<any>(`/api/service-records/${recordId}`);
+    expect(after.status, "LN existiert weiter").toBe(200);
+    expect(after.data.status, "LN bleibt completed").toBe("completed");
+
+    const covered = await coveredAppointmentIds(recordId);
+    expect(covered, "entfernter Termin ist raus").not.toContain(apptA);
+    expect(covered, "der zweite Termin bleibt").toContain(apptB);
   });
 });
