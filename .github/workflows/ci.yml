@@ -959,20 +959,18 @@ jobs:
       - name: Build image
         run: docker build -t careconnect:ci .
 
-      # Der Coolify-Pre-Deploy-Command IM IMAGE, nicht auf dem Runner. Die
-      # Schritte oben pushen das Schema mit dem Repo-Checkout — dabei liegt
-      # alles da, was `drizzle.config.ts` importiert. Im Image gilt nur die
-      # COPY-Liste des Dockerfiles: fehlt dort etwas, bricht der echte
-      # Pre-Deploy mit „Cannot find module", ohne dass irgendein Gate es sieht
-      # (genau so passiert — Review zu PR #21). Das Schema ist hier bereits
-      # gepusht, der Lauf ist also ein No-Op-Diff und prüft nur den Pfad.
-      - name: Pre-deploy command inside the image (bash scripts/migrate.sh)
-        run: |
-          docker run --rm --network host \
-            -e DATABASE_URL="$DATABASE_URL" \
-            --entrypoint bash \
-            careconnect:ci scripts/migrate.sh --force
-
+      # HIER FEHLT ein Schritt, der den Coolify-Pre-Deploy IM IMAGE fährt
+      # (`docker run --entrypoint bash careconnect:ci scripts/migrate.sh --force`).
+      # Er ist absichtlich noch nicht drin: er wäre heute ROT, weil der
+      # Pre-Deploy im Image gar nicht laufen kann — `migrate.sh` ruft
+      # `npx --yes drizzle-kit@<version>`, und da drizzle-kit devDependency ist
+      # und `npm prune --omit=dev` es entfernt, lädt npx in den eigenen Cache
+      # und findet von dort aus `drizzle-orm` nicht ("Error please install
+      # required packages: 'drizzle-orm'"). Reproduziert im echten Image und im
+      # Repo-Baum mit verstecktem drizzle-kit. Der Defekt ist ÄLTER als der
+      # Guard (Task #1840) und wird getrennt entschieden — siehe PR #21,
+      # FINDING [P1]. Sobald er behoben ist, gehört dieser Schritt hierher:
+      # er ist die einzige Stelle, die den Prod-Migrationspfad wirklich ausübt.
       - name: Boot container and gate on /health == 200
         run: |
           docker run -d --name cc-app --network host \

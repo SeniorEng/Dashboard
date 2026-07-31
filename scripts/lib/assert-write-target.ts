@@ -14,6 +14,14 @@
 import { basename } from "node:path";
 import { assertEphemeralDbForWrite } from "./ephemeral-db-guard";
 
-assertEphemeralDbForWrite(
-  basename(process.argv[1] ?? "") || "schreibender Entrypoint",
-);
+try {
+  assertEphemeralDbForWrite(
+    basename(process.argv[1] ?? "") || "schreibender Entrypoint",
+  );
+} catch (err) {
+  // Der Wurf läge ausserhalb des try/catch in `main()` der Seed-Skripte und
+  // käme als roher Node-Stacktrace um den gerahmten Kasten heraus. Hier sauber
+  // abbrechen: nur die Meldung, Exit ≠ 0.
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
