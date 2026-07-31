@@ -193,12 +193,12 @@ ss -ltn | grep -q ':5000 ' && echo "ABBRUCH: Port 5000 belegt — erst freimache
 guard && npx drizzle-kit push --force             # Schema
 guard && npx tsx scripts/ci-seed-superadmin.ts    # Login für globalSetup
 guard && npx tsx scripts/seed-test-reference-data.ts   # Services, company_settings
-guard && { NODE_ENV=test npx tsx server/index.ts > server.log 2>&1 & echo $! > server.pid; }
+guard && { NODE_ENV=test npx tsx server/index.ts > server.log 2>&1 & }
 tail -3 server.log && curl -sf http://localhost:5000/api/health   # BEIDES prüfen
 
 npx vitest run tests/<pfad>/<datei>.test.ts       # oder ohne Pfad: volle Suite
 
-kill "$(cat server.pid)"; rm -f server.pid
+pkill -f 'server/index[.]ts'                      # Klammern: matcht sich nicht selbst
 docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist weg
 ```
 
@@ -221,6 +221,10 @@ Fallen:
   — vom Dev-Server. Die Health-Payload nennt weder `NODE_ENV` noch DB-Namen, man
   merkt es also nicht. Die Tests schreiben danach in die Dev-DB. Deshalb der
   Port-Check vorher und `tail server.log` vor dem `curl`.
+- **Kein PID-File für den Server.** `$!` liefert den `npx`-Wrapper, nicht den
+  lauschenden Node-Prozess — `kill "$!"` lässt Port 5000 belegt zurück. Deshalb
+  `pkill -f`. Die Klammern in `server/index[.]ts` sind kein Zierrat: ohne sie
+  matcht das Muster die eigene Kommandozeile und `pkill` erschießt die Shell.
 - **Der Neon-Proxy ist eine Fixed-Target-Brücke.** Er ignoriert den DB-Namen aus
   `DATABASE_URL` und leitet auf sein eigenes `PG_CONNECTION_STRING`. App-Server
   und Seed-Skripte gehen über den Proxy, `drizzle-kit push` und `psql` direkt
