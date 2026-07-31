@@ -15,6 +15,15 @@
 #   3. Postgres-Daten auf begrenztem tmpfs (CI: Container-Layer).
 #   4. Kein `npm ci`/Teardown-Step — die macht CLAUDE.md als eigene Zeilen.
 #
+# ZWEI ABNEHMER, unterschiedliche Ansprüche an diesen Stack:
+#   - Orchestrator (`scripts/with-ephemeral-db.ts`, der Default) nutzt NUR den
+#     Postgres, direkt über TCP mit `DB_DRIVER=pg`. Er legt sich Per-Worker-
+#     Wegwerf-DBs an; über den Fixed-Target-Proxy (unten) würden die alle auf
+#     dieselbe DB kollabieren — deshalb ist der Proxy dort abgewählt.
+#   - 1:1-CI-Nachbau (Fallback, nur für CI-only-Fehlschläge) nutzt BEIDE
+#     Container, weil der gating `tests`-Job genau so läuft: eine geteilte DB
+#     hinter dem Neon-WS-Proxy.
+#
 # WICHTIG — der Neon-Proxy ist eine Fixed-Target-Brücke: er IGNORIERT den
 # DB-Namen aus `DATABASE_URL` und leitet jede Neon-Treiber-Verbindung auf sein
 # eigenes `PG_CONNECTION_STRING`. Das betrifft den App-Server und beide

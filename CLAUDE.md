@@ -153,17 +153,13 @@ war jede Test-Frage ein Push + ~20 min CI + Artefakt-Download; jetzt läuft
 dieselbe Suite lokal in Sekunden. Der CI-`tests`-Job bleibt die verbindliche
 Instanz — lokal ist die Vorstufe, nicht der Ersatz für den grünen Check am PR.
 
-`docker-compose.test.yml` baut den CI-Job nach: `postgres:16` + Neon-WS-Proxy,
-beide nur auf `127.0.0.1`.
+Zwei Wege, klar getrennt: der **Orchestrator** ist der Default für alles, der
+**1:1-CI-Nachbau** ist der abgezäunte Fallback für CI-only-Fehlschläge.
 
-**Verhältnis zum Orchestrator** (`scripts/with-ephemeral-db.ts`,
-`docs/test-infrastructure.md`): Der Orchestrator bleibt der kanonische Weg für
-parallele Läufe (Per-Worker-Wegwerf-DBs, freie Ports, Template-Cache). Der
-Ablauf hier ist bewusst der **1:1-Nachbau des CI-Jobs** — feste DB, fester Port,
-Neon-WS-Proxy statt Direkt-TCP — damit CI-only-Fehlschläge lokal reproduzierbar
-sind. Wer nur „Tests laufen lassen" will, nimmt den Orchestrator; wer „warum ist
-das in CI rot?" beantworten will, nimmt diesen Ablauf. Der Orchestrator braucht
-zusätzlich `psql`/`pg_dump` im PATH (`sudo apt-get install postgresql-client`).
+`docker-compose.test.yml` liefert die fehlende Zutat: `postgres:16` + Neon-WS-Proxy,
+beide nur auf `127.0.0.1`, DB auf `tmpfs`. Voraussetzung auf dem Host:
+`psql`/`pg_dump` im PATH (`sudo apt-get install postgresql-client` — den **Client**,
+nicht `postgresql`; das Server-Paket belegt 5432 und kollidiert mit dem Container).
 
 `.env.test.local` ist gitignored und enthält genau diese Wegwerf-Werte:
 
@@ -177,7 +173,36 @@ TEST_USER_PASSWORD=TestPasswort123!
 SUPER_ADMIN_EMAIL=ci-test@example.com
 ```
 
-Ablauf:
+### Default: Orchestrator (`scripts/with-ephemeral-db.ts`)
+
+Der kanonische Weg — Details in `docs/test-infrastructure.md`. Er macht Push,
+beide Seeds, Per-Worker-Wegwerf-DBs, App-Server auf **frei vom OS vergebenen**
+Ports und den Teardown selbst; der Template-Cache macht warme Läufe schnell.
+
+```bash
+sudo docker compose -f docker-compose.test.yml up -d
+unset CI TEST_DATABASE_URLS TEST_BASE_URLS
+set -a; . ./.env.test.local; set +a
+unset NEON_LOCAL_WS_PROXY; export DB_DRIVER=pg      # PFLICHT, siehe unten
+npx tsx scripts/with-ephemeral-db.ts 5050 npx vitest run tests/<pfad>/<datei>.test.ts
+sudo docker compose -f docker-compose.test.yml down
+```
+
+**`DB_DRIVER=pg` ist hier nicht optional.** Mit dem Neon-Proxy kollabieren alle
+Per-Worker-DBs auf dessen Fixed Target — die Isolation, für die es den
+Orchestrator gibt, wäre still weg. Er geht deshalb direkt über TCP.
+
+### Fallback: 1:1-Nachbau des CI-Jobs
+
+> **Nur zum Reproduzieren von CI-only-Fehlschlägen.** Für alles andere den
+> Orchestrator nehmen.
+
+Nötig, weil der gating `tests`-Job **anders läuft als der Orchestrator**: EINE
+geteilte DB, fester Port 5000, alle Dateien nacheinander dagegen, App-Zugriff über
+den **Neon-WS-Proxy** statt Direkt-TCP. Genau daraus entstehen die Fehlschläge, die
+nur in CI auftreten (Cross-Datei-Kontamination in der geteilten DB, Proxy-Verhalten,
+Reihenfolge-Abhängigkeiten) — der Orchestrator mit seinen Per-Worker-DBs kann sie
+per Konstruktion nicht zeigen. Dieser Ablauf ist das einzige Werkzeug dafür.
 
 ```bash
 npm ci                                            # drizzle-kit-Version aus dem Lockfile
@@ -202,56 +227,64 @@ pkill -f 'server/index[.]ts'                      # Klammern: matcht sich nicht 
 docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist weg
 ```
 
-Fallen:
+Der `guard &&`-Zaun trägt diesen Ablauf — er ist die Sofortabsicherung dafür, dass
+`evaluateTestDbTarget` die Push-/Seed-Entrypoints (noch) nicht abdeckt. Nicht
+wegkürzen. Die Ausweitung des Guards auf diese Entrypoints ist ein eigener
+Follow-up.
+
+### Fallen
 
 - **Kein Guard schützt `drizzle-kit push --force`.** `evaluateTestDbTarget` wird
   nur aus `tests/globalSetup.ts` und `server/index.ts` (nur bei `NODE_ENV=test`)
   gerufen — `drizzle.config.ts` und beide Seed-Skripte lesen `DATABASE_URL`
   nackt. Schlägt das `source` fehl (Datei fehlt, falsches CWD), erbt der Schritt
   die `DATABASE_URL` der Shell und fährt nicht-interaktives, potenziell
-  destruktives DDL gegen die **Dev-Prod-Kopie**. Deshalb das `guard &&` vor
-  jedem schreibenden Schritt — nicht wegkürzen.
+  destruktives DDL gegen die **Dev-Prod-Kopie**. Deshalb das `guard &&`.
 - **`CI` NICHT setzen.** `CI=true` schaltet den Wegwerf-DB-Guard ab
   (`scripts/lib/ephemeral-db-guard.ts`, Pfad 1). Lokal soll er greifen — deshalb
   heißt die DB `cc_test_careconnect` (Präfix erfüllt Pfad 3) statt wie in CI
   `careconnect`. Dasselbe gilt für `TEST_DATABASE_URLS` (Pfad 2, Rest aus einem
   Orchestrator-Lauf) — daher das `unset` im Preflight.
-- **Port 5000 belegt = stiller Fehlschlag.** Der Server stirbt dann mit
-  `EADDRINUSE` nur in `server.log`, und `curl /api/health` antwortet **erfolgreich**
-  — vom Dev-Server. Die Health-Payload nennt weder `NODE_ENV` noch DB-Namen, man
-  merkt es also nicht. Die Tests schreiben danach in die Dev-DB. Deshalb der
-  Port-Check vorher und `tail server.log` vor dem `curl`.
+- **Port 5000 belegt = stiller Fehlschlag** (nur Fallback-Ablauf; der
+  Orchestrator vergibt freie Ports und hat das Problem nicht). Der Server stirbt
+  mit `EADDRINUSE` nur in `server.log`, und `curl /api/health` antwortet
+  **erfolgreich** — vom Dev-Server. Die Health-Payload nennt weder `NODE_ENV` noch
+  DB-Namen, man merkt es also nicht. Die Tests schreiben danach in die Dev-DB.
+  Deshalb der Port-Check vorher und `tail server.log` vor dem `curl`.
 - **Kein PID-File für den Server.** `$!` liefert den `npx`-Wrapper, nicht den
   lauschenden Node-Prozess — `kill "$!"` lässt Port 5000 belegt zurück. Deshalb
   `pkill -f`. Die Klammern in `server/index[.]ts` sind kein Zierrat: ohne sie
   matcht das Muster die eigene Kommandozeile und `pkill` erschießt die Shell.
 - **Der Neon-Proxy ist eine Fixed-Target-Brücke.** Er ignoriert den DB-Namen aus
-  `DATABASE_URL` und leitet auf sein eigenes `PG_CONNECTION_STRING`. App-Server
-  und Seed-Skripte gehen über den Proxy, `drizzle-kit push` und `psql` direkt
-  über TCP. Nennen beide nicht dieselbe DB, landet das Schema in der einen und
-  die App in der anderen — ohne Fehlermeldung.
+  `DATABASE_URL` und leitet auf sein eigenes `PG_CONNECTION_STRING`. Im
+  Fallback-Ablauf gehen App-Server und Seed-Skripte über den Proxy,
+  `drizzle-kit push` und `psql` direkt über TCP. Nennen beide nicht dieselbe DB,
+  landet das Schema in der einen und die App in der anderen — ohne Fehlermeldung.
+  Im Orchestrator-Ablauf ist der Proxy deshalb per `DB_DRIVER=pg` abgewählt.
 - **`cc_test_careconnect` ist Ziel des Orphan-Sweeps.** Der `cc_test_`-Präfix
   meldet die DB auch beim Sweeper an (`scripts/lib/ephemeral-db-sweep.ts`).
   `npm run test:unblock` oder ein Orchestrator-Start droppen sie, sobald keine
-  Verbindung dranhängt — Schema und Seeds sind dann weg.
+  Verbindung dranhängt — Schema und Seeds des Fallback-Ablaufs sind dann weg.
 - **Lokale Baseline ≠ CI-Baseline.** Voller Lauf am 31.07.2026 auf `main`:
   30 Dateien / 68 Tests rot; CI-`tests` auf `main`: 28 Dateien. **26 Dateien sind
   in beiden rot** (die bekannte Baseline). Die Deltas sind vollständig:
   - Nur lokal rot, Host-Ausstattung: `tests/billing/pdf-generator-resilience.test.ts`
     (8) + `tests/billing/zugferd-send-failure.test.ts` (1) — **kein Chromium**;
-    `tests/architecture/dev-db-scripts-guard.test.ts` (9) — **kein `pg_dump`/
-    `psql`** im PATH (`sudo apt-get install postgresql-client` behebt das);
     `tests/equality/appointment-series-bulk-rebook.test.ts` (1) — Ursache
     ungeklärt, vermutlich Flake.
-  - Diese vier sind die EINZIGEN, die „Host-Ausstattung" erklärt. Jede weitere
+  - `tests/architecture/dev-db-scripts-guard.test.ts` (9) war der vierte Fall —
+    seit `postgresql-client` auf dem Host installiert ist, grün (10/10). Damit
+    steht die Baseline bei **29 Dateien / 59 Tests**.
+  - Diese drei sind die EINZIGEN, die „Host-Ausstattung" erklärt. Jede weitere
     lokal rote Datei ist eine Regression, kein Rauschen. Die Baseline ist zudem
     datums-fragil (Fixtures, `getFutureDate`-Wochenendrolle) — bei Zweifel neu
     auf `main` erheben statt fortschreiben.
   Umgekehrt sind `tests/service-records.test.ts` und
   `tests/startup/dedupe-pending-monthly-service-records.test.ts` lokal grün und
   in CI rot (dort Setup-Flakes). Voller Lauf dauert lokal ~19 min.
-- Server neu starten nach Server-Code-Änderungen — die Tests sprechen den
-  gebooteten Prozess an, nicht den Quelltext.
+- Im Fallback-Ablauf den Server nach Server-Code-Änderungen neu starten — die
+  Tests sprechen den gebooteten Prozess an, nicht den Quelltext. Der Orchestrator
+  startet ihn pro Lauf frisch und hat das Problem nicht.
 
 ## Stack & Wo was liegt
 
