@@ -134,6 +134,17 @@ async function createSignedRecord(
   return res.data.id;
 }
 
+/**
+ * `POST /api/billing/generate` antwortet in ZWEI Formen: bei mehreren belegten
+ * Töpfen `{ splitInvoices: true, invoices: [...] }`, sonst ein blankes
+ * Invoice-Objekt (`invoice-calc.ts` → `return invoice` / `return splitResult[0]`).
+ * Die Testkunden hier belegen genau einen Topf, treffen also den zweiten Fall.
+ * Repo-Idiom, identisch zu tests/billing/*.
+ */
+function invoicesFromGenerate(data: any): any[] {
+  return data?.splitInvoices ? data.invoices : [data];
+}
+
 async function coveredAppointmentIds(recordId: number): Promise<number[]> {
   const res = await apiGet<any>(`/api/service-records/${recordId}/appointments`);
   const rows: any[] = Array.isArray(res.data) ? res.data : [];
@@ -236,7 +247,7 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
       billingYear: year,
     });
     expect([200, 201], `Rechnungslauf: ${JSON.stringify(invoiceRes.data)}`).toContain(invoiceRes.status);
-    const generated: any[] = invoiceRes.data.invoices ?? [];
+    const generated = invoicesFromGenerate(invoiceRes.data);
     expect(generated.length, "Rechnungslauf muss eine Rechnung erzeugen").toBeGreaterThanOrEqual(1);
     expect(
       generated.every((i) => i.status === "entwurf"),
@@ -359,9 +370,10 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
       billingYear: year,
     });
     expect([200, 201], `Rechnungslauf: ${JSON.stringify(invoiceRes.data)}`).toContain(invoiceRes.status);
-    const generated: any[] = invoiceRes.data.invoices ?? [];
+    const generated = invoicesFromGenerate(invoiceRes.data);
     expect(generated.length, "Rechnungslauf muss eine Rechnung erzeugen").toBeGreaterThanOrEqual(1);
-    const mainInvoiceId = generated[0].id as number;
+    const mainInvoiceId = generated[0]?.id as number;
+    expect(mainInvoiceId, `Rechnungs-ID aus dem Lauf: ${JSON.stringify(invoiceRes.data)}`).toBeTruthy();
 
     // Rechnung STELLEN — erst dann ist Storno der fachlich richtige Weg.
     const sendRes = await apiPatch<any>(`/api/billing/${mainInvoiceId}/status`, { status: "versendet" });
@@ -509,5 +521,70 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
       after.status,
       "LN ohne lebende Termine ist kein Nachweis mehr und wird soft-gelöscht — die Karteileiche darf ihn nicht am Leben halten",
     ).toBe(404);
+  });
+
+  it("1892.9 – (i) Co-Visit ohne lebenden Partner ist KEINE Sackgasse — Korrektur geht durch", async () => {
+    // `co_visit_group_id` wird nirgends wieder genullt: ein Leg, dessen Partner
+    // längst gelöscht wurde, trägt die Gruppe weiter. Der Guard darf deshalb
+    // nicht „ist das ein Co-Visit?" prüfen, sondern „gibt es einen Partner, den
+    // die Kaskade stehenlassen würde?". Sonst wäre dieser Termin DAUERHAFT
+    // nicht mehr korrigierbar — eine neue Sackgasse an genau der Stelle, an der
+    // #1892 eine beseitigt.
+    const empB = await createTestEmployee({ nachnamePrefix: "LN1892CoVisitOrphan" });
+    cleanupEmployeeIds.push(empB.id);
+
+    const customerId = await newCustomer("i");
+    await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: empB.id,
+      backupEmployeeId2: null,
+    });
+
+    const date = workdays[12];
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId,
+      date,
+      scheduledStart: "09:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+      secondAssignedEmployeeId: empB.id,
+    });
+    expect(createRes.status, `Co-Visit-Anlage: ${JSON.stringify(createRes.data)}`).toBe(201);
+    const groupId = createRes.data.coVisitGroupId;
+
+    const list = await apiGet<any[]>(`/api/appointments?date=${date}&customerId=${customerId}`);
+    const legs = (list.data as any[]).filter((a) => a.coVisitGroupId === groupId);
+    expect(legs.length, "Zwei-Kräfte-Einsatz hat genau zwei Legs").toBe(2);
+    for (const leg of legs) cleanupApptIds.push(leg.id);
+
+    const legA = legs.find((l) => l.assignedEmployeeId === auth.user.id)!;
+    const legB = legs.find((l) => l.assignedEmployeeId === empB.id)!;
+
+    await documentAppointment(legA.id, "09:00");
+    await documentAppointment(legB.id, "09:00");
+
+    // NUR Leg A kommt auf einen unterschriebenen Nachweis.
+    const recordA = await createSignedRecord(customerId, [legA.id], auth.user.id);
+
+    // Leg B löschen: die Kaskade überspringt das versiegelte Leg A, B ist weg.
+    // Zurück bleibt A mit einer Gruppen-ID ohne lebenden Partner.
+    const delB = await apiDelete(`/api/appointments/${legB.id}`);
+    expect(delB.status, `Leg B löschen: ${JSON.stringify(delB.data)}`).toBe(200);
+    const goneB = await apiGet<any>(`/api/appointments/${legB.id}`);
+    expect(goneB.status, "Leg B ist wirklich weg").toBe(404);
+    const stillA = await apiGet<any>(`/api/appointments/${legA.id}`);
+    expect(stillA.status, "das versiegelte Leg A hat die Kaskade überlebt").toBe(200);
+    expect(stillA.data.coVisitGroupId, "die Gruppen-ID bleibt stehen — genau das ist die Falle").toBeTruthy();
+
+    // Jetzt die Admin-Korrektur an A: kein lebender Partner ⇒ kein Halbzustand
+    // möglich ⇒ muss durchgehen.
+    const delA = await apiDelete(`/api/appointments/${legA.id}`);
+    expect(
+      delA.status,
+      `ohne lebenden Partner darf die Korrektur nicht blockiert werden: ${JSON.stringify(delA.data)}`,
+    ).toBe(200);
+
+    const after = await apiGet<any>(`/api/service-records/${recordA}`);
+    expect(after.status, "LN enthielt nur diesen Termin und ist damit leer ⇒ soft-gelöscht").toBe(404);
   });
 });

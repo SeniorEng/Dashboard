@@ -1886,19 +1886,34 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
         throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
       }
 
-      // Task #1892 — Zwei-Kräfte-Einsatz: KEIN einzelnes Leg aus einem
-      // unterschriebenen Nachweis lösen. Die Kaskade unten überspringt
-      // versiegelte Partner-Legs (`continue`); täte sie das hier, bliebe ein
-      // halber Einsatz auf einem signierten LN stehen — genau der Zustand, den
-      // #1615 ausschließt — und die Antwort meldete trotzdem Erfolg. Deshalb
-      // wird die Korrektur am Co-Visit vollständig abgelehnt, nicht halb
-      // ausgeführt.
+      // Task #1892 — Zwei-Kräfte-Einsatz: KEIN halber Einsatz. Die Kaskade
+      // unten überspringt Partner-Legs, die versiegelt sind oder einen eigenen
+      // echten Ausgang haben (`continue`). Liefe die Korrektur trotzdem durch,
+      // bliebe ein halbes Paar stehen — davon eine Hälfte auf einem signierten
+      // Nachweis — und die Antwort meldete Erfolg. Deshalb: ablehnen.
+      //
+      // Geprüft wird NICHT „ist das ein Co-Visit?", sondern „gibt es einen
+      // Partner, den die Kaskade stehenlassen würde?". `co_visit_group_id`
+      // wird nirgends wieder genullt; ein Leg, dessen Partner längst gelöscht
+      // ist, trägt die Gruppe weiter. Ein pauschales Ablehnen machte solche
+      // Termine DAUERHAFT unkorrigierbar — eine Sackgasse, wo dieser Task
+      // gerade eine beseitigt.
       if (appointment.coVisitGroupId != null) {
-        throw new AppError(
-          409,
-          "APPOINTMENT_CO_VISIT_LOCKED",
-          "Zwei-Kräfte-Einsatz — Partner-Leg liegt auf einem signierten Nachweis, bitte separat behandeln.",
-        );
+        const partners = await storage.getCoVisitPartnerAppointments(appointment.coVisitGroupId, id, txClient);
+        const blockingLegIds: number[] = [];
+        for (const partner of partners) {
+          const partnerBlocks =
+            !canModifyAppointment(partner.status as AppointmentStatus) ||
+            await storage.lockAndCheckAppointmentLocked(partner.id, txClient);
+          if (partnerBlocks) blockingLegIds.push(partner.id);
+        }
+        if (blockingLegIds.length > 0) {
+          throw new AppError(
+            409,
+            "APPOINTMENT_CO_VISIT_LOCKED",
+            "Zwei-Kräfte-Einsatz — Partner-Leg liegt auf einem signierten Nachweis, bitte separat behandeln.",
+          );
+        }
       }
 
       // GoBD — Storno first: Termine auf einer AKTIVEN Rechnung dürfen nicht

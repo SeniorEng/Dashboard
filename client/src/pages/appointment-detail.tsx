@@ -545,9 +545,9 @@ export default function AppointmentDetail() {
                 </p>
                 {appointment.coVisitGroupId != null && (
                   <p>
-                    Dieser Termin ist ein <strong>Zwei-Kräfte-Einsatz</strong>. Ein einzelnes Leg
-                    wird nicht aus einem unterschriebenen Nachweis entfernt — beide Termine müssen
-                    separat behandelt werden.
+                    Dieser Termin ist ein <strong>Zwei-Kräfte-Einsatz</strong>. Liegt der Termin der
+                    zweiten Kraft ebenfalls auf einem unterschriebenen Nachweis, wird die Korrektur
+                    abgelehnt — es bliebe sonst ein halber Einsatz stehen.
                   </p>
                 )}
               </div>
