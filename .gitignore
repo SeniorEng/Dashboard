@@ -22,6 +22,8 @@ playwright-report/
 
 # Log des lokal gestarteten Test-App-Servers (CLAUDE.md → Integrationstests lokal)
 server.log
+# Arbeitsverzeichnis des Ephemeral-DB-Orchestrators (Server-Bundle + Worker-Logs)
+.local/
 
 # Stryker mutation testing (Task #770)
 reports/

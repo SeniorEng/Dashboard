@@ -26,6 +26,19 @@ Cutover parallel gültig (Replit-Betrieb).
 - **Datensicherheit**: `push` ohne Argumente ist interaktiv. `bash scripts/migrate.sh
   --force` wendet Änderungen nicht-interaktiv an — INKL. potenziell destruktiver
   (Spalten-Drops). Vor `--force` den Schema-Diff prüfen. Bewusst kein Default.
+- **Absicht erklären, sonst fail-closed**: `drizzle.config.ts` und beide
+  Test-Seeds brechen auf jeder Nicht-Wegwerf-DB ab (Allow-List-SSoT
+  `scripts/lib/ephemeral-db-guard.ts`). Die drei legitimen Wege setzen
+  `ALLOW_NON_EPHEMERAL_DB_WRITE=1` selbst: `scripts/migrate.sh` (Prod-Pre-Deploy),
+  `npm run db:push` (Dev-Schema) und `scripts/reseed-dev-db.sh` (Dev-Reseed, hat
+  zusätzlich seinen `--apply`- + Hostname-Guard). Ein nackter
+  `npx drizzle-kit push` in einer Shell mit geerbter `DATABASE_URL` ist blockiert —
+  er war der Weg, auf dem `--force` versehentlich eine echte DB treffen konnte.
+  Der Guard läuft beim Config-Load, trifft also auch `generate`/`check`/`studio`
+  und `--dry-run`. **Den Marker nie von Hand in einer Shell setzen** — er gehört
+  in genau diese drei Skripte. `scripts/post-merge.sh` fährt `npm run db:push`
+  unbeaufsichtigt gegen die Dev-DB; das ist der einzige Weg, bei dem „Absicht
+  erklärt" nicht heißt, dass gerade jemand hinsieht.
 - **Idempotente Startup-DDL**: Ergänzend laufen die Fixes in `server/startup/**`
   beim Boot (z.B. km-/geo-numeric, invoice-per-pot). Die gehören NICHT in
   `drizzle-kit push` (siehe `replit.md` → Gotchas).
@@ -208,38 +221,32 @@ per Konstruktion nicht zeigen. Dieser Ablauf ist das einzige Werkzeug dafür.
 npm ci                                            # drizzle-kit-Version aus dem Lockfile
 docker compose -f docker-compose.test.yml up -d   # ggf. mit sudo (docker-Gruppe)
 
-# Preflight — fail-closed. `guard` ist Vorbedingung JEDES schreibenden Schritts.
 unset CI TEST_DATABASE_URLS TEST_BASE_URLS        # `source` kann nur setzen, nie löschen
 set -a; . ./.env.test.local; set +a               # Semikolons, damit `set +a` immer läuft
-guard() { case "${DATABASE_URL##*/}" in cc_test_*) return 0;; \
-          *) echo "ABBRUCH: DATABASE_URL=$DATABASE_URL"; return 1;; esac; }
 ss -ltn | grep -q ':5000 ' && echo "ABBRUCH: Port 5000 belegt — erst freimachen"
 
-guard && npx drizzle-kit push --force             # Schema
-guard && npx tsx scripts/ci-seed-superadmin.ts    # Login für globalSetup
-guard && npx tsx scripts/seed-test-reference-data.ts   # Services, company_settings
-guard && { NODE_ENV=test npx tsx server/index.ts > server.log 2>&1 & }
+npx drizzle-kit push --force                      # Schema
+npx tsx scripts/ci-seed-superadmin.ts             # Login für globalSetup
+npx tsx scripts/seed-test-reference-data.ts       # Services, company_settings
+NODE_ENV=test npx tsx server/index.ts > server.log 2>&1 &
 tail -3 server.log && curl -sf http://localhost:5000/api/health   # BEIDES prüfen
 
 npx vitest run tests/<pfad>/<datei>.test.ts       # oder ohne Pfad: volle Suite
 
-pkill -f 'server/index[.]ts'                      # Klammern: matcht sich nicht selbst
+fuser -k 5000/tcp                                 # Server stoppen (siehe Fallen)
 docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist weg
 ```
 
-Der `guard &&`-Zaun trägt diesen Ablauf — er ist die Sofortabsicherung dafür, dass
-`evaluateTestDbTarget` die Push-/Seed-Entrypoints (noch) nicht abdeckt. Nicht
-wegkürzen. Die Ausweitung des Guards auf diese Entrypoints ist ein eigener
-Follow-up.
-
 ### Fallen
 
-- **Kein Guard schützt `drizzle-kit push --force`.** `evaluateTestDbTarget` wird
-  nur aus `tests/globalSetup.ts` und `server/index.ts` (nur bei `NODE_ENV=test`)
-  gerufen — `drizzle.config.ts` und beide Seed-Skripte lesen `DATABASE_URL`
-  nackt. Schlägt das `source` fehl (Datei fehlt, falsches CWD), erbt der Schritt
-  die `DATABASE_URL` der Shell und fährt nicht-interaktives, potenziell
-  destruktives DDL gegen die **Dev-Prod-Kopie**. Deshalb das `guard &&`.
+- **Die schreibenden Entrypoints prüfen ihr Ziel selbst.** `drizzle.config.ts`
+  und beide Test-Seeds rufen die Allow-List-SSoT
+  (`scripts/lib/ephemeral-db-guard.ts`) und brechen ab, wenn die `DATABASE_URL`
+  nicht auf eine `cc_test_`-DB zeigt — auch bei geerbter oder leerer URL. Das
+  ERSETZT den früheren `guard()`-Shell-Zaun in diesem Ablauf. Die legitimen
+  Nicht-Test-Wege erklären ihre Absicht über `ALLOW_NON_EPHEMERAL_DB_WRITE=1`
+  (Details: oben unter „Migrationen"). Ein nackter `npx drizzle-kit push` oder
+  Seed-Aufruf gegen eine echte DB ist damit blockiert.
 - **`CI` NICHT setzen.** `CI=true` schaltet den Wegwerf-DB-Guard ab
   (`scripts/lib/ephemeral-db-guard.ts`, Pfad 1). Lokal soll er greifen — deshalb
   heißt die DB `cc_test_careconnect` (Präfix erfüllt Pfad 3) statt wie in CI
@@ -251,10 +258,12 @@ Follow-up.
   **erfolgreich** — vom Dev-Server. Die Health-Payload nennt weder `NODE_ENV` noch
   DB-Namen, man merkt es also nicht. Die Tests schreiben danach in die Dev-DB.
   Deshalb der Port-Check vorher und `tail server.log` vor dem `curl`.
-- **Kein PID-File für den Server.** `$!` liefert den `npx`-Wrapper, nicht den
-  lauschenden Node-Prozess — `kill "$!"` lässt Port 5000 belegt zurück. Deshalb
-  `pkill -f`. Die Klammern in `server/index[.]ts` sind kein Zierrat: ohne sie
-  matcht das Muster die eigene Kommandozeile und `pkill` erschießt die Shell.
+- **Server über den Port stoppen, nicht über PID oder Muster.** `$!` liefert den
+  `npx`-Wrapper, nicht den lauschenden Node-Prozess — `kill "$!"` lässt Port 5000
+  belegt zurück. Und `pkill -f 'server/index…'` erwischt sich selbst, sobald der
+  Ablauf als EIN Kommando läuft (Skript, `bash -c`): die eigene Kommandozeile
+  enthält das Muster, der Aufrufer stirbt mit. `fuser -k 5000/tcp` trifft genau
+  den Prozess, der den Port hält — interaktiv wie im Skript.
 - **Der Neon-Proxy ist eine Fixed-Target-Brücke.** Er ignoriert den DB-Namen aus
   `DATABASE_URL` und leitet auf sein eigenes `PG_CONNECTION_STRING`. Im
   Fallback-Ablauf gehen App-Server und Seed-Skripte über den Proxy,

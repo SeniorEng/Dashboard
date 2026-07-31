@@ -160,7 +160,11 @@ const customers = await storage.getCustomersWithAppointments(); // 1 query with 
 **Goal**: Drizzle schema matches the actual database state.
 
 ### Steps:
-1. Run: `npx drizzle-kit push --dry-run` and check for pending changes
+1. Run: `ALLOW_NON_EPHEMERAL_DB_WRITE=1 npx drizzle-kit push --dry-run` and check for
+   pending changes. The marker is required because `drizzle.config.ts` is
+   fail-closed against non-throwaway DBs (`scripts/lib/ephemeral-db-guard.ts`);
+   `--dry-run` writes nothing, but the guard runs at config load, before the
+   subcommand is known.
 2. Run: `reference/audit-queries.sql` → "Schema drift check"
 3. Compare column names, types, and constraints between Drizzle schema and actual DB
 4. Check for columns in DB but not in schema (manual additions)

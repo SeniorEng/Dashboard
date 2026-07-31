@@ -218,9 +218,13 @@ jobs:
       # verbindet beim reinen Config-Load nicht, der Guard ist nur erfüllt.
       # Ohne diese Env bricht knip mit „Configuration file load error" (exit 2)
       # ab, obwohl es keinerlei Dead-Code gibt.
+      # Der Dummy trägt den `cc_test_`-Präfix, damit er den Wegwerf-DB-Guard in
+      # `drizzle.config.ts` aus eigener Kraft erfüllt (Pfad 3) statt nur über das
+      # von GitHub gesetzte `CI=true` (Pfad 1) — sonst wäre `npx knip` lokal
+      # blockiert und der Grund erst nach längerem Suchen erkennbar.
       - name: Dead-code gate (knip — blocking, symbols to console)
         env:
-          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/knip"
+          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/cc_test_knip"
         run: npx --yes knip@5.88.1 --reporter symbols
 
       # Bei rotem Lauf zusätzlich den maschinenlesbaren JSON-Report erzeugen
@@ -230,7 +234,7 @@ jobs:
       - name: Generate knip JSON report (on failure)
         if: failure()
         env:
-          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/knip"
+          DATABASE_URL: "postgres://knip:knip@127.0.0.1:5432/cc_test_knip"
         run: npx --yes knip@5.88.1 --reporter json > knip-report.json || true
 
       - name: Upload knip report
@@ -955,6 +959,18 @@ jobs:
       - name: Build image
         run: docker build -t careconnect:ci .
 
+      # HIER FEHLT ein Schritt, der den Coolify-Pre-Deploy IM IMAGE fährt
+      # (`docker run --entrypoint bash careconnect:ci scripts/migrate.sh --force`).
+      # Er ist absichtlich noch nicht drin: er wäre heute ROT, weil der
+      # Pre-Deploy im Image gar nicht laufen kann — `migrate.sh` ruft
+      # `npx --yes drizzle-kit@<version>`, und da drizzle-kit devDependency ist
+      # und `npm prune --omit=dev` es entfernt, lädt npx in den eigenen Cache
+      # und findet von dort aus `drizzle-orm` nicht ("Error please install
+      # required packages: 'drizzle-orm'"). Reproduziert im echten Image und im
+      # Repo-Baum mit verstecktem drizzle-kit. Der Defekt ist ÄLTER als der
+      # Guard (Task #1840) und wird getrennt entschieden — siehe PR #21,
+      # FINDING [P1]. Sobald er behoben ist, gehört dieser Schritt hierher:
+      # er ist die einzige Stelle, die den Prod-Migrationspfad wirklich ausübt.
       - name: Boot container and gate on /health == 200
         run: |
           docker run -d --name cc-app --network host \

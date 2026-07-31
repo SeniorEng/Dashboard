@@ -17,6 +17,9 @@
  *
  * Aufruf:  npx tsx scripts/ci-seed-superadmin.ts
  */
+// MUSS der erste Import bleiben: prüft die Ziel-DB, bevor server/lib/db
+// ausgewertet wird (scripts/lib/assert-write-target.ts).
+import "./lib/assert-write-target";
 import { eq } from "drizzle-orm";
 import { db } from "../server/lib/db";
 import { users, userRoles } from "@shared/schema";
