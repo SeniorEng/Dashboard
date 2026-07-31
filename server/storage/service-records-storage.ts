@@ -556,9 +556,20 @@ export async function removeAppointmentFromServiceRecords(
   const now = new Date();
 
   for (const record of linked) {
+    // „Ist der LN jetzt leer?" MUSS dasselbe Prädikat benutzen wie der
+    // Renderpfad `getAppointmentsForServiceRecord` — also NUR lebende Termine
+    // zählen. `deleteAppointment` ist ein SOFT-Delete: der ON-DELETE-CASCADE
+    // der junction feuert dabei nie, die Verknüpfungs-Zeilen soft-gelöschter
+    // Termine bleiben liegen. Zählte man roh über die junction, hielten diese
+    // Karteileichen den LN künstlich „nicht leer" — Ergebnis wäre ein
+    // unterschriebener Nachweis, der null Termine rendert.
     const remaining = await txClient.select({ appointmentId: serviceRecordAppointments.appointmentId })
       .from(serviceRecordAppointments)
-      .where(eq(serviceRecordAppointments.serviceRecordId, record.recordId));
+      .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
+      .where(and(
+        eq(serviceRecordAppointments.serviceRecordId, record.recordId),
+        isNull(appointments.deletedAt),
+      ));
 
     const becameEmpty = remaining.length === 0;
     if (becameEmpty) {

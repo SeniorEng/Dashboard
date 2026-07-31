@@ -11,9 +11,16 @@
  *   (a) Admin entfernt einen von mehreren Terminen → LN bleibt `completed`,
  *       beide Unterschriften erhalten, ein Termin weniger, Budget zurückgebucht.
  *   (b) letzter Termin entfernt → LN soft-gelöscht.
- *   (c) Termin auf AKTIVER Rechnung → 409 (Storno first).
+ *   (c) Termin auf einer AKTIVEN Entwurfs-Rechnung → 409, Meldung nennt
+ *       „Entwurf verwerfen" (ein Entwurf wird NICHT storniert).
  *   (d) Nicht-Admin bleibt gesperrt.
  *   (e) Race: gleichzeitige Unterschrift vs. Admin-Korrektur bleibt konsistent.
+ *   (f) DER Kernfall aus #1892: Rechnung gestellt UND storniert → Entfernen
+ *       erlaubt. Das ist der Zweig, der das Prädikat „liegt auf einer AKTIVEN
+ *       Rechnung" von einem simplen „ist abgerechnet?" unterscheidet.
+ *   (g) Zwei-Kräfte-Einsatz → Korrektur wird ganz abgelehnt, nie halb
+ *       ausgeführt (kein halber Einsatz auf einem signierten Nachweis).
+ *   (h) Soft-gelöschte Termine halten den LN nicht künstlich „nicht leer".
  */
 import { validSignatureDataUrl } from "../helpers/valid-signature";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -84,6 +91,20 @@ async function createAndDocument(
   return createRes.data.id;
 }
 
+/** Dokumentiert einen bereits angelegten Termin (z.B. ein Co-Visit-Partner-Leg). */
+async function documentAppointment(appointmentId: number, time: string): Promise<void> {
+  const docRes = await apiPost<any>(`/api/appointments/${appointmentId}/document`, {
+    actualStart: time,
+    travelOriginType: "home",
+    travelKilometers: 0,
+    customerKilometers: 0,
+    services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "1892-Test" }],
+  });
+  if (docRes.status !== 200) {
+    throw new Error(`Dokumentation ${appointmentId} fehlgeschlagen: ${docRes.status} ${JSON.stringify(docRes.data)}`);
+  }
+}
+
 /** Sammel-LN über die übergebenen Termine, danach beidseitig unterschrieben. */
 async function createSignedRecord(
   customerId: number,
@@ -130,7 +151,7 @@ beforeAll(async () => {
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   year = prev.getFullYear();
   month = prev.getMonth() + 1;
-  for (let day = 2; day <= 28 && workdays.length < 8; day++) {
+  for (let day = 2; day <= 28 && workdays.length < 14; day++) {
     const cur = new Date(year, month - 1, day);
     const dow = cur.getDay();
     if (dow !== 0 && dow !== 6) {
@@ -204,7 +225,7 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
     ).toBe(404);
   });
 
-  it("1892.3 – (c) Termin auf AKTIVER Rechnung ⇒ 409, kein stiller Abbruch", async () => {
+  it("1892.3 – (c) Termin auf AKTIVER Entwurfs-Rechnung ⇒ 409, Meldung nennt „Entwurf verwerfen“", async () => {
     const customerId = await newCustomer("c");
     const appt = await createAndDocument(customerId, workdays[3], "09:00");
     const recordId = await createSignedRecord(customerId, [appt]);
@@ -215,11 +236,21 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
       billingYear: year,
     });
     expect([200, 201], `Rechnungslauf: ${JSON.stringify(invoiceRes.data)}`).toContain(invoiceRes.status);
+    const generated: any[] = invoiceRes.data.invoices ?? [];
+    expect(generated.length, "Rechnungslauf muss eine Rechnung erzeugen").toBeGreaterThanOrEqual(1);
+    expect(
+      generated.every((i) => i.status === "entwurf"),
+      "frisch erzeugte Rechnungen sind Entwürfe — genau der Fall, den dieser Test prüft",
+    ).toBe(true);
 
     const delRes = await apiDelete(`/api/appointments/${appt}`);
     expect(delRes.status, "abgerechneter Termin darf nicht entfernt werden").toBe(409);
     expect((delRes.data as any)?.error ?? (delRes.data as any)?.code).toBe("APPOINTMENT_INVOICED");
-    expect(String((delRes.data as any)?.message), "Meldung nennt den Storno-Weg").toMatch(/stornier/i);
+    // Ein Entwurf wird VERWORFEN, nicht storniert — die Meldung darf den
+    // Admin nicht auf einen Weg schicken, den es für einen Entwurf nicht gibt.
+    const message = String((delRes.data as any)?.message);
+    expect(message, "Meldung nennt das Verwerfen des Entwurfs").toMatch(/verwerf/i);
+    expect(message, "Meldung darf bei einem Entwurf NICHT zum Stornieren raten").not.toMatch(/stornier/i);
 
     // Nichts wurde angefasst: LN führt den Termin weiter.
     const covered = await coveredAppointmentIds(recordId);
@@ -311,5 +342,172 @@ describe("1892 — Admin entfernt Termin aus unterschriebenem Leistungsnachweis"
 
     // Termin B überlebt in jedem Fall im Nachweis.
     expect(covered, "der zweite Termin bleibt im LN").toContain(apptB);
+  });
+
+  it("1892.6 – (f) KERNFALL: gestellte Rechnung storniert ⇒ Termin darf entfernt werden", async () => {
+    // Der Realfall aus #1892 (RE-2026-0417 storniert über RE-2026-0500). Er
+    // unterscheidet „liegt auf einer AKTIVEN Rechnung" von „ist irgendwann
+    // abgerechnet worden": nach dem Storno ist der Termin wieder frei.
+    const customerId = await newCustomer("f");
+    const apptA = await createAndDocument(customerId, workdays[7], "09:00");
+    const apptB = await createAndDocument(customerId, workdays[8], "09:00");
+    const recordId = await createSignedRecord(customerId, [apptA, apptB]);
+
+    const invoiceRes = await apiPost<any>("/api/billing/generate", {
+      customerId,
+      billingMonth: month,
+      billingYear: year,
+    });
+    expect([200, 201], `Rechnungslauf: ${JSON.stringify(invoiceRes.data)}`).toContain(invoiceRes.status);
+    const generated: any[] = invoiceRes.data.invoices ?? [];
+    expect(generated.length, "Rechnungslauf muss eine Rechnung erzeugen").toBeGreaterThanOrEqual(1);
+    const mainInvoiceId = generated[0].id as number;
+
+    // Rechnung STELLEN — erst dann ist Storno der fachlich richtige Weg.
+    const sendRes = await apiPatch<any>(`/api/billing/${mainInvoiceId}/status`, { status: "versendet" });
+    expect(sendRes.status, `versenden: ${JSON.stringify(sendRes.data)}`).toBe(200);
+
+    // Solange sie steht: Entfernen abgelehnt, und JETZT ist „stornieren" der
+    // richtige Rat (nicht „verwerfen" wie beim Entwurf).
+    const blocked = await apiDelete(`/api/appointments/${apptA}`);
+    expect(blocked.status, "gestellte Rechnung blockiert die Korrektur").toBe(409);
+    expect((blocked.data as any)?.error ?? (blocked.data as any)?.code).toBe("APPOINTMENT_INVOICED");
+    expect(String((blocked.data as any)?.message), "gestellte Rechnung ⇒ Storno-Weg").toMatch(/stornier/i);
+
+    // Storno (mit Kaskade über etwaige Topf-Geschwister des Laufs).
+    const stornoRes = await apiPatch<any>(`/api/billing/${mainInvoiceId}/status`, {
+      status: "storniert",
+      cascadeRun: true,
+    });
+    expect(stornoRes.status, `storno: ${JSON.stringify(stornoRes.data)}`).toBe(200);
+    expect(stornoRes.data.status, "Original ist storniert").toBe("storniert");
+
+    // Jetzt ist der Termin frei — genau das ist der Kern von #1892.
+    const delRes = await apiDelete(`/api/appointments/${apptA}`);
+    expect(
+      delRes.status,
+      `nach Storno muss die Korrektur durchgehen: ${JSON.stringify(delRes.data)}`,
+    ).toBe(200);
+
+    const after = await apiGet<any>(`/api/service-records/${recordId}`);
+    expect(after.status, "LN existiert weiter (Termin B bleibt)").toBe(200);
+    expect(after.data.status, "LN bleibt completed").toBe("completed");
+
+    const covered = await coveredAppointmentIds(recordId);
+    expect(covered, "stornierter Termin ist aus dem LN raus").not.toContain(apptA);
+    expect(covered, "der zweite Termin bleibt").toContain(apptB);
+  });
+
+  it("1892.7 – (g) Zwei-Kräfte-Einsatz ⇒ Korrektur wird ganz abgelehnt, nie halb ausgeführt", async () => {
+    // Ohne diesen Guard würde Leg A aus seinem signierten LN gelöst und
+    // gelöscht, während das ebenfalls versiegelte Leg B still stehenbliebe
+    // (`continue` in der Kaskade) — ein halber Einsatz auf einem
+    // unterschriebenen Nachweis, und die Antwort meldete trotzdem Erfolg.
+    const empB = await createTestEmployee({ nachnamePrefix: "LN1892CoVisit" });
+    cleanupEmployeeIds.push(empB.id);
+
+    const customerId = await newCustomer("g");
+    await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: empB.id,
+      backupEmployeeId2: null,
+    });
+
+    const date = workdays[9];
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId,
+      date,
+      scheduledStart: "09:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+      secondAssignedEmployeeId: empB.id,
+    });
+    expect(createRes.status, `Co-Visit-Anlage: ${JSON.stringify(createRes.data)}`).toBe(201);
+    const groupId = createRes.data.coVisitGroupId;
+    expect(groupId, "Co-Visit muss eine Gruppe haben").toBeTruthy();
+
+    const list = await apiGet<any[]>(`/api/appointments?date=${date}&customerId=${customerId}`);
+    const legs = (list.data as any[]).filter((a) => a.coVisitGroupId === groupId);
+    expect(legs.length, "Zwei-Kräfte-Einsatz hat genau zwei Legs").toBe(2);
+    for (const leg of legs) cleanupApptIds.push(leg.id);
+
+    const legA = legs.find((l) => l.assignedEmployeeId === auth.user.id)!;
+    const legB = legs.find((l) => l.assignedEmployeeId === empB.id)!;
+
+    await documentAppointment(legA.id, "09:00");
+    await documentAppointment(legB.id, "09:00");
+
+    // Je Mitarbeiter ein eigener, beidseitig unterschriebener Nachweis — der
+    // Normalfall, jeder bündelt seinen eigenen Monat.
+    const recordA = await createSignedRecord(customerId, [legA.id], auth.user.id);
+    const recordB = await createSignedRecord(customerId, [legB.id], empB.id);
+
+    const delRes = await apiDelete(`/api/appointments/${legA.id}`);
+    expect(
+      delRes.status,
+      `Co-Visit-Korrektur muss abgelehnt werden, got ${delRes.status} ${JSON.stringify(delRes.data)}`,
+    ).toBe(409);
+    expect((delRes.data as any)?.error ?? (delRes.data as any)?.code).toBe("APPOINTMENT_CO_VISIT_LOCKED");
+    expect(String((delRes.data as any)?.message), "Meldung erklärt den Zwei-Kräfte-Fall").toMatch(/zwei-kräfte/i);
+
+    // Entscheidend: KEIN Halbzustand. Beide Legs leben, beide Nachweise
+    // führen ihren Termin unverändert.
+    for (const legId of [legA.id, legB.id]) {
+      const still = await apiGet<any>(`/api/appointments/${legId}`);
+      expect(still.status, `Leg ${legId} lebt weiter`).toBe(200);
+    }
+    expect(await coveredAppointmentIds(recordA), "LN A unverändert").toContain(legA.id);
+    expect(await coveredAppointmentIds(recordB), "LN B unverändert").toContain(legB.id);
+  });
+
+  it("1892.8 – (h) soft-gelöschter Termin hält den LN nicht künstlich „nicht leer“", async () => {
+    // `deleteAppointment` ist ein SOFT-Delete: der ON-DELETE-CASCADE der
+    // junction feuert nie, die Verknüpfungs-Zeile bleibt liegen. Zählte die
+    // „ist der LN leer?"-Prüfung roh über die junction, hielte diese
+    // Karteileiche den LN am Leben — Ergebnis wäre ein unterschriebener
+    // Nachweis, der null Termine rendert.
+    const customerId = await newCustomer("h");
+    const apptA = await createAndDocument(customerId, workdays[10], "09:00");
+    const apptB = await createAndDocument(customerId, workdays[11], "09:00");
+
+    // LN anlegen, aber NOCH NICHT unterschreiben — solange er `pending` ist,
+    // lässt sich Termin B regulär löschen (die junction-Zeile bleibt liegen).
+    const createRes = await apiPost<any>("/api/service-records", {
+      customerId,
+      employeeId: auth.user.id,
+      year,
+      month,
+      appointmentIds: [apptA, apptB],
+    });
+    expect(createRes.status, `LN-Anlage: ${JSON.stringify(createRes.data)}`).toBe(201);
+    const recordId = createRes.data.id;
+
+    const delB = await apiDelete(`/api/appointments/${apptB}`);
+    expect(delB.status, `Löschen bei pending-LN: ${JSON.stringify(delB.data)}`).toBe(200);
+
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost<any>(`/api/service-records/${recordId}/sign`, {
+        signerType,
+        signatureData: validSignatureDataUrl(),
+        signingLocation: "Vor Ort",
+      });
+      expect(sig.status, `Unterschrift ${signerType}: ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    // Über den RENDERPFAD geprüft (nicht über die rohe junction): der LN führt
+    // nur noch den einen lebenden Termin.
+    const coveredBefore = await coveredAppointmentIds(recordId);
+    expect(coveredBefore, "soft-gelöschter Termin wird nicht mehr gezeigt").not.toContain(apptB);
+    expect(coveredBefore, "der lebende Termin steht im LN").toEqual([apptA]);
+
+    // Letzten LEBENDEN Termin entfernen ⇒ der LN ist wirklich leer.
+    const delA = await apiDelete(`/api/appointments/${apptA}`);
+    expect(delA.status, `Admin-Korrektur: ${JSON.stringify(delA.data)}`).toBe(200);
+
+    const after = await apiGet<any>(`/api/service-records/${recordId}`);
+    expect(
+      after.status,
+      "LN ohne lebende Termine ist kein Nachweis mehr und wird soft-gelöscht — die Karteileiche darf ihn nicht am Leben halten",
+    ).toBe(404);
   });
 });

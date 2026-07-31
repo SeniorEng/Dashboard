@@ -179,13 +179,20 @@ export default function AppointmentDetail() {
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Der Termin konnte nicht gelöscht werden.";
-      // Task #1892 — Storno-first: der Termin hängt an einer aktiven Rechnung.
-      // Das ist kein technischer Fehler, sondern eine fachliche Reihenfolge:
-      // erst stornieren, dann entfernen. Deshalb eigener, erklärender Titel.
-      const isInvoiced = error instanceof ApiError && error.code === "APPOINTMENT_INVOICED";
+      // Task #1892 — Zwei fachliche Reihenfolgen, kein technischer Fehler:
+      // (1) der Termin hängt an einer aktiven Rechnung → erst die Rechnung
+      //     erledigen (Entwurf verwerfen bzw. gestellte Rechnung stornieren —
+      //     die genaue Meldung kommt vom Server),
+      // (2) Zwei-Kräfte-Einsatz → beide Legs separat behandeln.
+      // Beide bekommen einen eigenen, erklärenden Titel statt „Fehler".
+      const code = error instanceof ApiError ? error.code : undefined;
+      const title =
+        code === "APPOINTMENT_INVOICED" ? "Zuerst die Rechnung erledigen"
+        : code === "APPOINTMENT_CO_VISIT_LOCKED" ? "Zwei-Kräfte-Einsatz"
+        : "Fehler";
       toast({
         variant: "destructive",
-        title: isInvoiced ? "Zuerst Rechnung stornieren" : "Fehler",
+        title,
         description: message,
       });
     }
@@ -533,8 +540,16 @@ export default function AppointmentDetail() {
                   Enthält der Nachweis danach keinen Termin mehr, wird er entfernt.
                 </p>
                 <p>
-                  Ist der Termin bereits abgerechnet, muss die Rechnung zuerst storniert werden.
+                  Ist der Termin bereits abgerechnet, muss die Rechnung zuerst erledigt werden —
+                  ein Entwurf wird verworfen, eine gestellte Rechnung storniert.
                 </p>
+                {appointment.coVisitGroupId != null && (
+                  <p>
+                    Dieser Termin ist ein <strong>Zwei-Kräfte-Einsatz</strong>. Ein einzelnes Leg
+                    wird nicht aus einem unterschriebenen Nachweis entfernt — beide Termine müssen
+                    separat behandelt werden.
+                  </p>
+                )}
               </div>
             </div>
           )}

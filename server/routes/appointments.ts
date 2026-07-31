@@ -1886,16 +1886,38 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
         throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
       }
 
+      // Task #1892 — Zwei-Kräfte-Einsatz: KEIN einzelnes Leg aus einem
+      // unterschriebenen Nachweis lösen. Die Kaskade unten überspringt
+      // versiegelte Partner-Legs (`continue`); täte sie das hier, bliebe ein
+      // halber Einsatz auf einem signierten LN stehen — genau der Zustand, den
+      // #1615 ausschließt — und die Antwort meldete trotzdem Erfolg. Deshalb
+      // wird die Korrektur am Co-Visit vollständig abgelehnt, nicht halb
+      // ausgeführt.
+      if (appointment.coVisitGroupId != null) {
+        throw new AppError(
+          409,
+          "APPOINTMENT_CO_VISIT_LOCKED",
+          "Zwei-Kräfte-Einsatz — Partner-Leg liegt auf einem signierten Nachweis, bitte separat behandeln.",
+        );
+      }
+
       // GoBD — Storno first: Termine auf einer AKTIVEN Rechnung dürfen nicht
       // entfernt werden. Der Guard läuft INNERHALB der Transaktion unter dem
       // FOR-UPDATE-Lock, nicht als check-then-write daneben.
       const activeInvoices = await findActiveInvoicesForAppointments([id], txClient);
       if (activeInvoices.length > 0) {
         const numbers = [...new Set(activeInvoices.map((i) => i.invoiceNumber))].join(", ");
+        // Entwurfs-Rechnungen zählen als „aktiv" (sie binden den Termin), aber
+        // ein Entwurf wird VERWORFEN, nicht storniert — GoBD verlangt für den
+        // noch nicht gestellten Beleg kein Storno. Der Admin bekommt sonst
+        // einen Weg genannt, den es für ihn nicht gibt.
+        const allDraft = activeInvoices.every((i) => i.status === "entwurf");
         throw new AppError(
           409,
           "APPOINTMENT_INVOICED",
-          `Dieser Termin ist auf der Rechnung ${numbers} abgerechnet. Bitte zuerst die Rechnung stornieren, danach kann der Termin entfernt werden.`,
+          allDraft
+            ? `Für diesen Termin existiert der Rechnungsentwurf ${numbers}. Bitte zuerst den Entwurf verwerfen, danach kann der Termin entfernt werden.`
+            : `Dieser Termin ist auf der Rechnung ${numbers} abgerechnet. Bitte zuerst die Rechnung stornieren, danach kann der Termin entfernt werden.`,
         );
       }
 
