@@ -1,8 +1,4 @@
 {
-  "1124334": {
-    "active": true,
-    "notes": "brace-expansion DoS (GHSA-mh99-v99m-4gvg). Nur in v5.0.8 gepatcht; v5 aendert die API (Named-Export `expand` statt Default-Funktion) und bricht die verbliebenen v1/v2-Consumer minimatch@3 / readdir-glob / test-exclude>glob, die `require('brace-expansion')` als Funktion aufrufen. Die v5-Pfade (stryker/eslint/test-exclude) sind bereits auf 5.0.8 gebumpt. Rein Build-/Test-Tooling, keine attacker-controlled Glob-Pattern im Build -> allowlisted bis ein v1/v2-Backport erscheint."
-  },
   "1119502": {
     "active": true,
     "notes": "qs DoS (GHSA-q8mj-m7cp-5q26), moderate. Nur transitive Instanz typed-rest-client>qs@6.15.1; Top-Level-qs ist bereits 6.15.2 (gepatcht). Kein runtime-exponierter Pfad (typed-rest-client wird nicht mit qs.stringify+encodeValuesOnly gegen Null-Eintraege aufgerufen). Nicht CI-blockierend (audit --level high)."
