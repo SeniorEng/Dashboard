@@ -16,6 +16,7 @@ import { loadCustomerPriceContext } from "../storage/pricing/price-for";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
 import { resolveCustomerInsuranceAt } from "../storage/customer-mgmt/insurance";
 import { isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
+import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 
 export interface BuildLineItem extends Record<string, unknown> {
   appointmentId: number;
@@ -38,6 +39,18 @@ export interface BuildLineItem extends Record<string, unknown> {
   serviceDetails: string | null;
 }
 
+/**
+ * Idempotenz-Sperre der Abrechnungs-Engine: welche Termine dieses Kunden sind
+ * im ABRECHNUNGSZEITRAUM bereits auf einer aktiven Rechnung?
+ *
+ * „Aktiv" kommt aus der SSoT `activeInvoiceCondition`
+ * (`server/lib/appointment-invoiced.ts`). Der Zeitraum-Scope
+ * (`billing_year`/`billing_month`) ist ZUSÄTZLICH und bewusst hier — er gehört
+ * nicht zur Frage „aktive Rechnung", sondern zur Engine-Idempotenz. Ob er
+ * richtig ist, ist eine offene fachliche Frage (ein Termin auf einer Rechnung
+ * eines ANDEREN Zeitraums liest sich hier als „noch nicht abgerechnet") und
+ * bewusst nicht Teil dieser rein struktur-konsolidierenden Änderung.
+ */
 export async function getAlreadyInvoicedAppointmentIds(customerId: number, billingYear: number, billingMonth: number): Promise<number[]> {
   const rows = await db.select({ appointmentId: invoiceLineItems.appointmentId })
     .from(invoiceLineItems)
@@ -46,8 +59,7 @@ export async function getAlreadyInvoicedAppointmentIds(customerId: number, billi
       eq(invoicesTable.customerId, customerId),
       eq(invoicesTable.billingYear, billingYear),
       eq(invoicesTable.billingMonth, billingMonth),
-      ne(invoicesTable.status, "storniert"),
-      ne(invoicesTable.invoiceType, "stornorechnung")
+      activeInvoiceCondition(),
     ));
   return rows.map(r => r.appointmentId).filter((id): id is number => id !== null);
 }
@@ -185,8 +197,7 @@ export async function getUnbilledSignedAppointmentFactsByCustomer(
       inArray(invoicesTable.customerId, customerIds),
       eq(invoicesTable.billingYear, billingYear),
       eq(invoicesTable.billingMonth, billingMonth),
-      ne(invoicesTable.status, "storniert"),
-      ne(invoicesTable.invoiceType, "stornorechnung"),
+      activeInvoiceCondition(),
     ));
   for (const row of invoicedRows) {
     if (row.customerId == null || row.appointmentId == null) continue;

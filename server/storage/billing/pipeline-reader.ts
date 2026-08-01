@@ -9,6 +9,9 @@
  *    `planned`-Umsatz entspricht (€-Konservierung, Q1).
  *  - „dokumentiert & unterschrieben": `documentedAndSignedSqlRaw`
  *    (= SQL-Spiegel von `isAppointmentDocumentedAndSigned`).
+ *  - „Termin liegt auf einer aktiven Rechnung":
+ *    `activeInvoiceForAppointmentExistsSqlRaw`
+ *    (`server/lib/appointment-invoiced.ts`, Task #1892).
  *  - Stufen-/Side-/Aging-Zuordnung: die reinen Funktionen aus
  *    `shared/domain/billing-pipeline.ts`.
  *
@@ -26,6 +29,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
 import { serviceRecordWithStatusExistsSqlRaw } from "../../lib/appointment-signed";
+import { activeInvoiceForAppointmentExistsSqlRaw } from "../../lib/appointment-invoiced";
 import { getInvoices } from "../billing-storage";
 import {
   agingModelForBillingType,
@@ -132,12 +136,7 @@ export async function readBillingPipeline(
       (a.signature_data IS NOT NULL) AS has_direct_signature,
       ${serviceRecordWithStatusExistsSqlRaw("a", "completed")} AS has_completed_ln,
       ${serviceRecordWithStatusExistsSqlRaw("a", "employee_signed")} AS has_employee_signed_ln,
-      EXISTS (
-        SELECT 1 FROM invoice_line_items li
-        JOIN invoices i ON i.id = li.invoice_id
-        WHERE li.appointment_id = a.id
-          AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
-      ) AS is_invoiced
+      ${activeInvoiceForAppointmentExistsSqlRaw("a.id")} AS is_invoiced
     FROM appt_rev ar
     JOIN appointments a ON a.id = ar.id
     -- #1886: Erstberatungen (kundenlos, customer_id = NULL) fallen hier über den

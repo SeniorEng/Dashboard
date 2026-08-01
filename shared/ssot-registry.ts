@@ -198,6 +198,35 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "appointment-active-invoice",
+    question: "Liegt dieser Termin auf einer AKTIVEN Rechnung? (Task #1892)",
+    canonical: [
+      // Drizzle-Bedingung zum Komponieren …
+      { symbol: "activeInvoiceCondition", module: "server/lib/appointment-invoiced.ts" },
+      // … und die Roh-SQL-Zwillinge derselben Regel.
+      { symbol: "activeInvoiceForAppointmentExistsSqlRaw", module: "server/lib/appointment-invoiced.ts" },
+      { symbol: "latestActiveInvoiceForAppointmentLateralRaw", module: "server/lib/appointment-invoiced.ts" },
+      { symbol: "activeInvoicedAppointmentIdsSqlRaw", module: "server/lib/appointment-invoiced.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Query-Rand: das Storno-Paar (`status != 'storniert'` UND
+        // `invoice_type != 'stornorechnung'`) darf nur in der SSoT an
+        // `invoice_line_items.appointment_id` gebunden werden — auch nicht in
+        // der Umkehrform `<termin>.id IN (SELECT … appointment_id …)`.
+        //
+        // Bewusst NUR die SSoT-Datei: jeder Zusatz-Scope (Kunde, Zeitraum,
+        // Entwurfs-Ausschluss in `rebook-guards.ts`) wird daneben komponiert,
+        // nicht durch eine zweite Definition von „aktiv" erkauft.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "ACTIVE_INVOICE_PREDICATE_ALLOWLIST",
+        allowlist: ["server/lib/appointment-invoiced.ts"],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "month-close-readiness",
     question: "Ist ein Monat für einen Mitarbeiter abschließbar? (Blocker-Aggregation der Readiness)",
     canonical: [

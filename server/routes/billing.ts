@@ -43,6 +43,7 @@ import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc, sql } from "drizzle-orm";
+import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
@@ -519,8 +520,7 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
         inArray(invoicesTable.customerId, candidateIds),
         eq(invoicesTable.billingYear, year),
         eq(invoicesTable.billingMonth, month),
-        ne(invoicesTable.status, "storniert"),
-        ne(invoicesTable.invoiceType, "stornorechnung"),
+        activeInvoiceCondition(),
       ));
     const invoicedApptIds = new Set(invoicedRows.map(r => r.appointmentId));
 
