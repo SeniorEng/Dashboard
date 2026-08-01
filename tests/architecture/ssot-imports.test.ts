@@ -372,12 +372,23 @@ const RAW_STORNO_TYPE_RE = /invoice_type\s*!=\s*'stornorechnung'/i;
  * Geld-/Mengen-Aggregate über aktive Rechnungen, keine Frage nach EINEM Termin.
  */
 const RAW_APPOINTMENT_BOUND_RE = /\bappointment_id\s*(?:=|IN\s*\()/i;
-const RAW_APPOINTMENT_ID_PROJECTED_RE = /SELECT\s+(?:DISTINCT\s+)?[A-Za-z0-9_]*\.?appointment_id\b/i;
 
 /**
- * Rückblick-Spanne vor dem `invoice_line_items`-Vorkommen: die Projektion
- * (`SELECT DISTINCT li.appointment_id FROM …`) steht davor, nicht dahinter.
+ * Die Projektion steht VOR dem `invoice_line_items`-Token, deshalb ein
+ * Rückblick. Der Anker `FROM\s+$` bindet sie an GENAU dieses `FROM` — die
+ * Projektion muss die sein, die aus `invoice_line_items` liest. Ohne den Anker
+ * wäre die Regex tabellenblind und würde eine daneben stehende
+ * `SELECT sra.appointment_id FROM service_record_appointments`-Projektion auf
+ * ein benachbartes Geld-Aggregat beziehen (Falsch-Positiv).
+ *
+ * `[^()]*` hält Aggregate draußen: `SUM(li.total_cents)` und
+ * `COUNT(DISTINCT li.appointment_id)` enthalten Klammern und matchen nicht —
+ * sie projizieren keine Termin-MENGE.
  */
+const RAW_APPOINTMENT_ID_PROJECTED_RE =
+  /SELECT\s+(?:DISTINCT\s+)?[^()]*\bappointment_id\b[^()]*\bFROM\s+$/i;
+
+/** Rückblick-Spanne vor dem `invoice_line_items`-Vorkommen. */
 const ACTIVE_INVOICE_LOOKBEHIND = 200;
 
 const DRIZZLE_STORNO_STATUS_RE = /\bne\(\s*[A-Za-z0-9_.]*\.status\s*,\s*"storniert"\s*\)/;
@@ -637,7 +648,8 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
           "ausschließlich in `server/lib/appointment-invoiced.ts`. Komponiere " +
           "`activeInvoiceCondition()` (Drizzle) bzw. nutze " +
           "`activeInvoiceForAppointmentExistsSqlRaw` / " +
-          "`latestActiveInvoiceForAppointmentLateralRaw` (Roh-SQL) und hänge deinen " +
+          "`latestActiveInvoiceForAppointmentLateralRaw` / " +
+          "`activeInvoicedAppointmentIdsSqlRaw` (Roh-SQL) und hänge deinen " +
           "Zusatz-Scope (Kunde, Zeitraum …) daneben, statt „aktiv“ neu zu formulieren.",
       );
     }
