@@ -21,6 +21,10 @@
  *   A5  „Privatanteil erlaubt?" — keine eigene `acceptsPrivatePayment || selbstzahler`-
  *       Formel außerhalb der Privatzahler-SSoT (`isPrivatePaymentAllowed` in
  *       `shared/domain/budget-selbstzahler-validator.ts`).
+ *   A6  „Termin auf einer AKTIVEN Rechnung?" — das Storno-Paar
+ *       (`status != 'storniert'` UND `invoice_type != 'stornorechnung'`) darf
+ *       nur in der SSoT (`server/lib/appointment-invoiced.ts`) an
+ *       `invoice_line_items.appointment_id` gebunden werden.
  *
  * Zusammen mit den Schwester-Wächtern (`budget-single-reader.test.ts` für die
  * §45b-/Cap-Verfügbarkeits-SSoT, `budget-default-pots-ssot.test.ts` für die
@@ -40,6 +44,7 @@ import {
   type ScanFile,
   type GuardViolation,
 } from "./guard-helpers";
+import { ssotGuardAllowlist } from "@shared/ssot-registry";
 
 // ---------------------------------------------------------------------------
 // A1 — Cap-/Verfügbarkeits-SSoT (Import-Rand)
@@ -309,6 +314,91 @@ export function detectPrivatePaymentFormulaViolations(files: ScanFile[]): GuardV
 }
 
 // ---------------------------------------------------------------------------
+// A6 — „Termin auf einer AKTIVEN Rechnung?"-SSoT (Query-Rand)
+// ---------------------------------------------------------------------------
+
+/**
+ * Task #1892 — „Liegt dieser Termin auf einer AKTIVEN Rechnung?" (weder selbst
+ * storniert noch Stornorechnung) war neunfach handgeschrieben: teils wortgleich,
+ * teils als Kern mit zusätzlichem Scope (Kunde, Abrechnungs-Zeitraum). Genau so
+ * entsteht Drift zwischen „gilt als abgerechnet" in Anzeige, Schutz-Guard und
+ * Abrechnungs-Engine.
+ *
+ * Die SSoT ist `server/lib/appointment-invoiced.ts`
+ * (`activeInvoiceCondition` für Drizzle, `activeInvoiceForAppointmentExistsSqlRaw`
+ * / `latestActiveInvoiceForAppointmentLateralRaw` für Roh-SQL). Enger gescopte
+ * Aufrufer komponieren sie mit ihren Zusatzbedingungen — die Zusatz-Scopes
+ * bleiben sichtbar, „aktiv" wird nicht neu formuliert.
+ *
+ * ABGRENZUNG (bewusst eng): Erkannt wird nur das Storno-Paar, das an
+ * `invoice_line_items.appointment_id` GEBUNDEN ist. Die reine Frage „ist diese
+ * RECHNUNG aktiv?" (Umsatz-/Statistik-Aggregate ohne Termin-Bindung) ist eine
+ * ANDERE fachliche Frage mit eigenem, noch offenem Konsolidierungs-Vorhaben und
+ * wird hier absichtlich NICHT mitgefangen — sonst wäre die Allowlist eine
+ * Attrappe.
+ *
+ * Allowlist kommt aus der Registry (`appointment-active-invoice`):
+ * die SSoT selbst + `rebook-guards.ts`, das eine andere Frage stellt
+ * („bereits GESTELLTE Rechnung", zusätzlich `status != 'entwurf'`).
+ */
+const ACTIVE_INVOICE_PREDICATE_ALLOWLIST = new Set<string>(
+  ssotGuardAllowlist("appointment-active-invoice", "ACTIVE_INVOICE_PREDICATE_ALLOWLIST"),
+);
+
+/** Fenster um ein Vorkommen herum — grob eine SQL-/Query-Anweisung. */
+const ACTIVE_INVOICE_WINDOW = 600;
+
+const RAW_STORNO_STATUS_RE = /status\s*!=\s*'storniert'/i;
+const RAW_STORNO_TYPE_RE = /invoice_type\s*!=\s*'stornorechnung'/i;
+/**
+ * Termin-BINDUNG, nicht bloße Erwähnung: `li.appointment_id = a.id` oder
+ * `… IN (…)`. Ein Attributions-Join (`JOIN appointments a ON a.id =
+ * li.appointment_id`) und ein `appointment_id IS NOT NULL`-Filter matchen
+ * bewusst NICHT — das sind Aggregate über aktive Rechnungen, keine Frage nach
+ * EINEM Termin.
+ */
+const RAW_APPOINTMENT_BOUND_RE = /\bappointment_id\s*(?:=|IN\s*\()/i;
+
+const DRIZZLE_STORNO_STATUS_RE = /\bne\(\s*[A-Za-z0-9_.]*\.status\s*,\s*"storniert"\s*\)/;
+const DRIZZLE_STORNO_TYPE_RE = /\bne\(\s*[A-Za-z0-9_.]*\.invoiceType\s*,\s*"stornorechnung"\s*\)/;
+
+export function detectActiveInvoicePredicateViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (ACTIVE_INVOICE_PREDICATE_ALLOWLIST.has(rel)) continue;
+    // Whitespace normalisieren, damit das Fenster über Zeilenumbrüche greift.
+    const code = stripComments(content).replace(/\s+/g, " ");
+
+    for (const m of code.matchAll(/invoice_line_items/g)) {
+      const w = code.slice(m.index, m.index + ACTIVE_INVOICE_WINDOW);
+      if (RAW_APPOINTMENT_BOUND_RE.test(w) && RAW_STORNO_STATUS_RE.test(w) && RAW_STORNO_TYPE_RE.test(w)) {
+        out.push({
+          file: rel,
+          detail:
+            "baut das Storno-Paar in Roh-SQL selbst an `invoice_line_items.appointment_id` " +
+            "statt `activeInvoiceForAppointmentExistsSqlRaw`/`latestActiveInvoiceForAppointmentLateralRaw`",
+        });
+        break;
+      }
+    }
+
+    for (const m of code.matchAll(/invoiceLineItems\.appointmentId/g)) {
+      const w = code.slice(m.index, m.index + ACTIVE_INVOICE_WINDOW);
+      if (DRIZZLE_STORNO_STATUS_RE.test(w) && DRIZZLE_STORNO_TYPE_RE.test(w)) {
+        out.push({
+          file: rel,
+          detail:
+            "baut das Storno-Paar als Drizzle-Bedingung selbst statt `activeInvoiceCondition()` zu komponieren",
+        });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -508,6 +598,76 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
     expect(v.map((h) => h.file).sort()).toEqual([
       "server/routes/fake-private-a.ts",
       "server/routes/fake-private-b.ts",
+    ]);
+  });
+
+  it("A6: das Storno-Paar wird nur in der Aktive-Rechnung-SSoT an `appointment_id` gebunden", () => {
+    const v = detectActiveInvoicePredicateViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Aktive-Rechnung-SSoT verletzt — eigenes Storno-Prädikat am Termin gefunden:\n" +
+          formatViolations(v) +
+          "\n\nDie Frage „Liegt dieser Termin auf einer AKTIVEN Rechnung?“ gehört " +
+          "ausschließlich in `server/lib/appointment-invoiced.ts`. Komponiere " +
+          "`activeInvoiceCondition()` (Drizzle) bzw. nutze " +
+          "`activeInvoiceForAppointmentExistsSqlRaw` / " +
+          "`latestActiveInvoiceForAppointmentLateralRaw` (Roh-SQL) und hänge deinen " +
+          "Zusatz-Scope (Kunde, Zeitraum …) daneben, statt „aktiv“ neu zu formulieren.",
+      );
+    }
+  });
+
+  it("A6 (Negativ): eine termin-gebundene Kopie wird erkannt, Aggregate ohne Termin-Bindung und der SSoT-Aufruf nicht", () => {
+    const synthetic: ScanFile[] = [
+      {
+        // Roh-SQL-Kopie, korreliert auf einen Termin → Verstoß.
+        rel: "server/storage/fake-raw-copy.ts",
+        content: `const q = sql\`EXISTS (SELECT 1 FROM invoice_line_items li
+          JOIN invoices i ON i.id = li.invoice_id
+          WHERE li.appointment_id = a.id
+            AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung')\`;`,
+      },
+      {
+        // Drizzle-Kopie → Verstoß.
+        rel: "server/services/fake-drizzle-copy.ts",
+        content: `const rows = await db.select({ appointmentId: invoiceLineItems.appointmentId })
+          .from(invoiceLineItems)
+          .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+          .where(and(
+            inArray(invoiceLineItems.appointmentId, ids),
+            ne(invoicesTable.status, "storniert"),
+            ne(invoicesTable.invoiceType, "stornorechnung"),
+          ));`,
+      },
+      {
+        // Umsatz-Aggregat über aktive Rechnungen: Termin nur als
+        // Attributions-Join bzw. NOT-NULL-Filter → bewusst KEIN Verstoß
+        // (andere fachliche Frage, eigenes Konsolidierungs-Vorhaben).
+        rel: "server/storage/statistics/fake-revenue.ts",
+        content: `const q = sql\`SELECT SUM(li.total_cents) FROM invoice_line_items li
+          JOIN invoices i ON i.id = li.invoice_id
+          JOIN appointments a ON a.id = li.appointment_id
+          WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+            AND li.appointment_id IS NOT NULL\`;`,
+      },
+      {
+        // Korrekte Nutzung der SSoT → kein Verstoß.
+        rel: "server/storage/fake-ssot-user.ts",
+        content: `const q = sql\`SELECT \${activeInvoiceForAppointmentExistsSqlRaw("a.id")} AS is_invoiced\`;
+          const w = and(inArray(invoiceLineItems.appointmentId, ids), activeInvoiceCondition());`,
+      },
+      {
+        // Auskommentierte Kopie → `stripComments` entfernt sie, kein Verstoß.
+        rel: "server/storage/fake-commented-out.ts",
+        content: `// WHERE li.appointment_id = a.id AND i.status != 'storniert'
+          //   AND i.invoice_type != 'stornorechnung' — invoice_line_items
+          const q = 1;`,
+      },
+    ];
+    const v = detectActiveInvoicePredicateViolations(synthetic);
+    expect(v.map((h) => h.file).sort()).toEqual([
+      "server/services/fake-drizzle-copy.ts",
+      "server/storage/fake-raw-copy.ts",
     ]);
   });
 });

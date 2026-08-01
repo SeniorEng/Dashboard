@@ -5,9 +5,9 @@
  * Ein Termin gilt als geschützt, wenn er
  *   (a) an einem NICHT soft-gelöschten, employee- ODER customer-signierten
  *       `monthly_service_records` (Leistungsnachweis) hängt, ODER
- *   (b) als Line-Item auf einer NICHT-stornierten Rechnung auftaucht, die
- *       selbst keine Stornorechnung ist (`status != 'storniert'` UND
- *       `invoice_type != 'stornorechnung'`).
+ *   (b) als Line-Item auf einer AKTIVEN Rechnung auftaucht — „aktiv" kommt aus
+ *       der SSoT `activeInvoiceCondition` (`server/lib/appointment-invoiced.ts`,
+ *       Task #1892) und wird hier NICHT erneut formuliert.
  *
  * Diese Funktion konsolidiert zwei bislang getrennt implementierte Prüfungen:
  *   - die inline im Reconcile-Pfad liegende signierte-LN-Query
@@ -22,11 +22,11 @@
  *
  * Entwurfs-Rechnungen (`status = 'entwurf'`) sind absichtlich EINGESCHLOSSEN:
  * ein Termin auf einer noch nicht versendeten Entwurfs-Rechnung ist bereits
- * abgerechnet (die `!= 'storniert'`-Bedingung schließt `entwurf` mit ein,
- * analog `invoice-data.ts`).
+ * abgerechnet. Das steckt in `activeInvoiceCondition` selbst (die
+ * `!= 'storniert'`-Bedingung schließt `entwurf` mit ein).
  */
 
-import { and, eq, inArray, isNull, isNotNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, isNotNull, or } from "drizzle-orm";
 import {
   invoices as invoicesTable,
   invoiceLineItems,
@@ -34,6 +34,7 @@ import {
   serviceRecordAppointments,
 } from "@shared/schema";
 import { db, type DbOrTx } from "../lib/db";
+import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 
 export interface AppointmentProtectionResult {
   /** Vereinigung aller geschützten Termin-IDs ((a) ODER (b)). */
@@ -101,8 +102,7 @@ export async function getMutationProtectedAppointmentIds(
     .where(
       and(
         inArray(invoiceLineItems.appointmentId, appointmentIds),
-        ne(invoicesTable.status, "storniert"),
-        ne(invoicesTable.invoiceType, "stornorechnung"),
+        activeInvoiceCondition(),
       ),
     );
   for (const r of invoicedRows) {

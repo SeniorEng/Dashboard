@@ -27,6 +27,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
 import { documentedAndSignedSqlRaw } from "../../lib/appointment-signed";
+import { latestActiveInvoiceForAppointmentLateralRaw } from "../../lib/appointment-invoiced";
 import {
   assignAppointmentStage,
   assignInvoiceStage,
@@ -121,15 +122,7 @@ export async function readBillingTermine(
         COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
       LIMIT 1
     ) svc ON true
-    LEFT JOIN LATERAL (
-      SELECT i.id AS invoice_id, i.status AS invoice_status, i.invoice_type AS invoice_type
-      FROM invoice_line_items li
-      JOIN invoices i ON i.id = li.invoice_id
-      WHERE li.appointment_id = a.id
-        AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
-      ORDER BY i.id DESC
-      LIMIT 1
-    ) inv ON true
+    ${latestActiveInvoiceForAppointmentLateralRaw("a.id", "inv")}
     WHERE a.deleted_at IS NULL
       AND a.status IN ('scheduled','documenting','completed','customer_no_show')
       AND EXTRACT(YEAR FROM a.date::date) = ${billingYear}

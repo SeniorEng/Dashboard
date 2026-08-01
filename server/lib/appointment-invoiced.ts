@@ -17,10 +17,89 @@
  * Nimmt einen `DbOrTx`-Client entgegen, damit der Guard INNERHALB der
  * Lösch-Transaktion (unter dem FOR-UPDATE-Lock) laufen kann und nicht als
  * check-then-write daneben.
+ *
+ * ---------------------------------------------------------------------------
+ * Konsolidierung (SSoT-Registry `appointment-active-invoice`)
+ * ---------------------------------------------------------------------------
+ * Dieselbe Frage war zusätzlich als handgeschriebenes Prädikat über den ganzen
+ * Server verstreut — teils wortgleich, teils als Kern mit zusätzlichem Scope.
+ * `activeInvoiceCondition()` (Drizzle) und die beiden `…SqlRaw`-Bausteine
+ * (Roh-SQL) ERSETZEN diese Kopien: wortgleiche Stellen rufen sie direkt auf,
+ * enger gescopte Stellen komponieren sie mit ihren Zusatzbedingungen. Damit
+ * gibt es genau EINE Definition von „aktiv" — die Zusatz-Scopes bleiben
+ * sichtbar an ihrer Aufrufstelle stehen.
+ *
+ * Muster analog `server/lib/appointment-signed.ts`: Drizzle-Bedingung und
+ * Roh-SQL-Fragmente sind Zwillinge derselben Regel und MÜSSEN im Gleichschritt
+ * geändert werden. Der Architektur-Wächter A6 in
+ * `tests/architecture/ssot-imports.test.ts` bricht, sobald irgendwo sonst das
+ * Storno-Paar erneut an `invoice_line_items.appointment_id` gebunden wird.
  */
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import { invoiceLineItems, invoices as invoicesTable } from "@shared/schema";
 import { db, type DbOrTx } from "./db";
+
+/**
+ * DIE Definition von „aktive Rechnung" als Drizzle-Bedingung: weder selbst
+ * storniert noch eine Stornorechnung.
+ *
+ * Entwurfs-Rechnungen (`status = 'entwurf'`) sind bewusst EINGESCHLOSSEN — ein
+ * Termin auf einem noch nicht versendeten Entwurf gilt als abgerechnet.
+ *
+ * Zum Komponieren gedacht: `and(inArray(...), activeInvoiceCondition())`. Die
+ * Bedingung setzt voraus, dass `invoices` in der Query verfügbar ist (Join oder
+ * `from`).
+ */
+export function activeInvoiceCondition() {
+  return and(
+    ne(invoicesTable.status, "storniert"),
+    ne(invoicesTable.invoiceType, "stornorechnung"),
+  );
+}
+
+/**
+ * Roh-SQL-Zwilling für „liegt DIESER Termin auf einer aktiven Rechnung?".
+ *
+ * @param appointmentIdRef SQL-Ausdruck, der die Termin-ID liefert — z. B.
+ *   `"a.id"` (Alias der `appointments`-Tabelle) oder `"sra.appointment_id"`
+ *   (Junction-Spalte). Bewusst ein Ausdruck statt eines Tabellen-Alias: die
+ *   Aufrufer binden mal die Termin-Tabelle, mal eine Fremdschlüssel-Spalte.
+ */
+export function activeInvoiceForAppointmentExistsSqlRaw(appointmentIdRef: string): SQL {
+  const apptId = sql.raw(appointmentIdRef);
+  return sql`EXISTS (
+      SELECT 1 FROM invoice_line_items li
+      JOIN invoices i ON i.id = li.invoice_id
+      WHERE li.appointment_id = ${apptId}
+        AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+    )`;
+}
+
+/**
+ * Roh-SQL-Zwilling für „die ZULETZT angelegte aktive Rechnung dieses Termins".
+ * Liefert ein komplettes `LEFT JOIN LATERAL … ON true` mit den Spalten
+ * `invoice_id`, `invoice_status`, `invoice_type` unter `resultAlias`; ohne
+ * aktive Rechnung sind sie NULL.
+ *
+ * @param appointmentIdRef siehe `activeInvoiceForAppointmentExistsSqlRaw`.
+ * @param resultAlias Alias, unter dem die Spalten verfügbar werden.
+ */
+export function latestActiveInvoiceForAppointmentLateralRaw(
+  appointmentIdRef: string,
+  resultAlias: string,
+): SQL {
+  const apptId = sql.raw(appointmentIdRef);
+  const r = sql.raw(resultAlias);
+  return sql`LEFT JOIN LATERAL (
+      SELECT i.id AS invoice_id, i.status AS invoice_status, i.invoice_type AS invoice_type
+      FROM invoice_line_items li
+      JOIN invoices i ON i.id = li.invoice_id
+      WHERE li.appointment_id = ${apptId}
+        AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+      ORDER BY i.id DESC
+      LIMIT 1
+    ) ${r} ON true`;
+}
 
 /** Eine aktive Rechnung, die einen der abgefragten Termine berechnet. */
 export interface ActiveInvoiceRef {
@@ -52,8 +131,7 @@ export async function findActiveInvoicesForAppointments(
     .where(
       and(
         inArray(invoiceLineItems.appointmentId, [...appointmentIds]),
-        ne(invoicesTable.status, "storniert"),
-        ne(invoicesTable.invoiceType, "stornorechnung"),
+        activeInvoiceCondition(),
       ),
     );
 }

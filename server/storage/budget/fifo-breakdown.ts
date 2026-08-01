@@ -21,11 +21,12 @@
  *  und wird hier bewusst NICHT übermalt.)
  */
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
-import { and, eq, gte, lte, or, isNull, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, gte, lte, or, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { appointmentsRepo, budgetAllocationsRepo } from "../../repos";
 import { todayISO } from "@shared/utils/datetime";
 import { readUnifiedBudgetAvailability } from "./unified-reader";
+import { activeInvoiceCondition } from "../../lib/appointment-invoiced";
 
 export type Budget45bFifoPotType = "carryover" | "current_year";
 
@@ -185,9 +186,10 @@ async function loadBilledAppointmentIds(customerId: number): Promise<Set<number>
     .from(invoiceLineItems)
     .innerJoin(invoices, eq(invoiceLineItems.invoiceId, invoices.id))
     .where(and(
+      // Kunden-Scope zusätzlich; „aktiv" kommt aus der SSoT
+      // `activeInvoiceCondition` (server/lib/appointment-invoiced.ts).
       eq(invoices.customerId, customerId),
-      ne(invoices.status, "storniert"),
-      ne(invoices.invoiceType, "stornorechnung"),
+      activeInvoiceCondition(),
     ));
   return new Set(rows.map(r => r.appointmentId).filter((id): id is number => id !== null));
 }

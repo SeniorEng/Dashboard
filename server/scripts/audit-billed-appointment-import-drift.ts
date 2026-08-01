@@ -39,7 +39,7 @@
  */
 
 import { writeFileSync } from "node:fs";
-import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
   appointments,
@@ -54,6 +54,7 @@ import {
 } from "@shared/schema";
 import { isKmLineItem } from "@shared/domain/invoice-line-items";
 import { getMutationProtectedAppointmentIds } from "../services/appointment-billing-protection";
+import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 
 /** km-Toleranz für Line-Drift-Vergleich (2 NK quantisiert). */
 const KM_TOLERANCE = 0.01;
@@ -256,13 +257,13 @@ export async function findBilledImportDriftRows(opts: {
     .where(
       and(
         inArray(invoiceLineItems.appointmentId, protIds),
-        // Nur echte Abrechnungs-Belege als Baseline: identische Prädikate wie die
-        // Schutz-SSoT (`getMutationProtectedAppointmentIds`) — stornierte
-        // Rechnungen und Stornorechnungen sind KEINE gültige Baseline und dürfen
-        // weder als eingefrorene Momentaufnahme noch als Siegel-Zeit einfließen.
-        // Entwürfe (`entwurf`) bleiben bewusst drin (wie in der SSoT).
-        ne(invoicesTable.status, "storniert"),
-        ne(invoicesTable.invoiceType, "stornorechnung"),
+        // Nur echte Abrechnungs-Belege als Baseline: dieselbe „aktive Rechnung"-
+        // SSoT wie die Schutz-Prüfung (`getMutationProtectedAppointmentIds`) —
+        // stornierte Rechnungen und Stornorechnungen sind KEINE gültige Baseline
+        // und dürfen weder als eingefrorene Momentaufnahme noch als Siegel-Zeit
+        // einfließen. Entwürfe (`entwurf`) bleiben bewusst drin (steckt in der
+        // SSoT selbst).
+        activeInvoiceCondition(),
       ),
     );
   // Line-Items werden JE RECHNUNG getrennt gehalten (NICHT über mehrere

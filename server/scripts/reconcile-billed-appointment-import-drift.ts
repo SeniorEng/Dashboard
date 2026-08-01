@@ -57,7 +57,7 @@
  * 1 = mindestens ein offener Drift-Kandidat gefunden (CI-/Skript-freundlich).
  */
 
-import { and, eq, inArray, isNull, isNotNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, isNotNull, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../lib/db";
 import {
@@ -81,6 +81,7 @@ import {
   schedulePdfPersistInBackground,
 } from "../services/invoice-pdf-orchestrator";
 import { dbHostOf, PROD_HOST_PATTERN } from "../lib/dev-db-guard";
+import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 
 export interface Args {
   apply: boolean;
@@ -184,8 +185,7 @@ async function resolveSealedInvoiceIds(appointmentId: number): Promise<number[]>
     .where(
       and(
         eq(invoiceLineItems.appointmentId, appointmentId),
-        ne(invoicesTable.status, "storniert"),
-        ne(invoicesTable.invoiceType, "stornorechnung"),
+        activeInvoiceCondition(),
       ),
     );
   return Array.from(new Set(rows.map((r) => r.invoiceId)));

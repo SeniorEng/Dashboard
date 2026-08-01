@@ -9,6 +9,7 @@ import { billingPeriodFilter, buildKpi, dateFilter, getHealthThresholds, num, pe
 // Ausschluss im Zähler zählte die Kennzahl Erstberatungen als Lücke, die Liste
 // aber nicht (Count≠Liste). Kein Lohn-/Stunden-/km-Pfad — rein kundenseitig.
 import { notErstberatungSqlRaw } from "../../lib/appointment-signed";
+import { activeInvoiceForAppointmentExistsSqlRaw } from "../../lib/appointment-invoiced";
 
 /**
  * Task #1530 — Termin-genaues „noch abzurechnen"-Prädikat für einen
@@ -25,12 +26,21 @@ import { notErstberatungSqlRaw } from "../../lib/appointment-signed";
  * steht — unabhängig davon, ob für denselben Kunde+Monat bereits eine
  * (Geschwister-)Rechnung existiert.
  *
- * Die Regel „Termin ist bereits abgerechnet" ist dieselbe, die auch die
- * Abrechnungs-Engine nutzt (`getAlreadyInvoicedAppointmentIds` in
- * `server/services/invoice-data.ts`, eine SSoT): ein Termin zählt genau dann
- * als abgerechnet, wenn er ein Line-Item auf einer Rechnung hat, die weder
- * `storniert` noch eine `stornorechnung` ist. Stornierte Rechnungen geben ihre
- * Termine dadurch automatisch wieder in diese Liste frei.
+ * Die Regel „Termin ist bereits abgerechnet" kommt aus der SSoT
+ * `activeInvoiceForAppointmentExistsSqlRaw` (`server/lib/appointment-invoiced.ts`,
+ * Task #1892): ein Termin zählt genau dann als abgerechnet, wenn er ein
+ * Line-Item auf einer Rechnung hat, die weder `storniert` noch eine
+ * `stornorechnung` ist. Stornierte Rechnungen geben ihre Termine dadurch
+ * automatisch wieder in diese Liste frei.
+ *
+ * ACHTUNG — bewusst NICHT identisch mit der Idempotenz-Sperre der
+ * Abrechnungs-Engine: `getAlreadyInvoicedAppointmentIds`
+ * (`server/services/invoice-data.ts`) filtert ZUSÄTZLICH auf
+ * `invoices.billing_year`/`billing_month`, diese Sicht hier ist zeitraum-blind.
+ * Ein früherer Kommentar behauptete an dieser Stelle Gleichheit („dieselbe
+ * SSoT") — das war falsch; beide teilen nur den Kern „aktive Rechnung". Ob die
+ * Engine-Sperre ebenfalls zeitraum-blind werden soll, ist eine offene fachliche
+ * Frage und bewusst NICHT Teil dieser Konsolidierung.
  *
  * Task #1536 — Ausnahme „nichts abzurechnen": Ein No-Show-Termin
  * (`status='customer_no_show'`) mit unterdrückter Privatrechnung
@@ -46,12 +56,7 @@ function recordHasUnbilledAppointment(msrIdCol: SQL): SQL {
     JOIN appointments a ON a.id = sra.appointment_id AND a.deleted_at IS NULL
     WHERE sra.service_record_id = ${msrIdCol}
       AND NOT (a.status = 'customer_no_show' AND a.no_show_charge_suppressed = true)
-      AND NOT EXISTS (
-        SELECT 1 FROM invoice_line_items ili
-        JOIN invoices i ON i.id = ili.invoice_id
-        WHERE ili.appointment_id = sra.appointment_id
-          AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
-      )
+      AND NOT ${activeInvoiceForAppointmentExistsSqlRaw("sra.appointment_id")}
   )`;
 }
 
