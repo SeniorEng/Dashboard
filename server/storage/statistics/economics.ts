@@ -11,6 +11,7 @@ import { buildEconomics } from "@shared/domain/statistics/economics";
 import { getEntryTypeLabel } from "@shared/domain/time-entries";
 import { billingPeriodFilter, dateFilter, num, type ResolvedPeriod } from "./common";
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
+import { activeInvoicedAppointmentIdsSqlRaw } from "../../lib/appointment-invoiced";
 
 /** Nicht-abrechenbare Zeiterfassungs-Typen (Task #1355). */
 const NON_BILLABLE_TYPES = ["bueroarbeit", "vertrieb", "sonstiges", "krankheit", "urlaub"] as const;
@@ -249,10 +250,7 @@ async function stageHours(p: ResolvedPeriod): Promise<RevenueStageHours> {
     SELECT COALESCE(SUM(a.duration_promised), 0)::int AS invoiced
     FROM appointments a
     WHERE a.deleted_at IS NULL AND a.id IN (
-      SELECT DISTINCT li.appointment_id
-      FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
-      WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
-        AND li.appointment_id IS NOT NULL ${invFilter}
+      ${activeInvoicedAppointmentIdsSqlRaw(invFilter)}
     )
   `);
   const row = r.rows[0] as Record<string, unknown>;

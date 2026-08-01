@@ -50,11 +50,39 @@ import { db, type DbOrTx } from "./db";
  * Bedingung setzt voraus, dass `invoices` in der Query verfügbar ist (Join oder
  * `from`).
  */
-export function activeInvoiceCondition() {
-  return and(
+export function activeInvoiceCondition(): SQL {
+  const condition = and(
     ne(invoicesTable.status, "storniert"),
     ne(invoicesTable.invoiceType, "stornorechnung"),
   );
+  // `and(...)` ist typseitig `SQL | undefined` (leer bei null-Argumenten). Hier
+  // kann das nie eintreten, aber der Rückgabetyp MUSS `SQL` sein: ein
+  // durchgereichtes `undefined` in `.where(activeInvoiceCondition())` würde die
+  // WHERE-Klausel leeren — dann gälte JEDE Rechnung als aktiv, also exakt die
+  // Umkehrung des Prädikats. Fail-fast statt still falsch.
+  if (!condition) throw new Error("activeInvoiceCondition: leere Bedingung");
+  return condition;
+}
+
+/**
+ * Roh-SQL-Zwilling in Mengen-Form: die IDs aller Termine, die auf einer aktiven
+ * Rechnung liegen — als Sub-SELECT für `<termin>.id IN (…)` /
+ * `NOT IN (…)`-Formulierungen.
+ *
+ * `AND li.appointment_id IS NOT NULL` gehört bewusst zum Baustein: ohne diesen
+ * Filter liefert ein `NOT IN` über eine Menge mit NULL nach SQL-3VL gar keine
+ * Zeilen mehr (still leere Liste statt „keine Rechnung").
+ *
+ * @param extraInvoiceFilter Optionaler, mit `AND` beginnender Zusatz-Scope auf
+ *   `invoices` (z. B. Abrechnungs-Zeitraum). Wird ans Ende der WHERE-Klausel
+ *   gehängt; die Aufrufstelle behält damit ihren Scope sichtbar.
+ */
+export function activeInvoicedAppointmentIdsSqlRaw(extraInvoiceFilter: SQL = sql``): SQL {
+  return sql`SELECT DISTINCT li.appointment_id
+      FROM invoice_line_items li
+      JOIN invoices i ON i.id = li.invoice_id
+      WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+        AND li.appointment_id IS NOT NULL ${extraInvoiceFilter}`;
 }
 
 /**

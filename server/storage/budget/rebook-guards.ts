@@ -32,6 +32,7 @@ import { db, type DbOrTx } from "../../lib/db";
 import { AppError } from "../../lib/errors";
 import { isMonthClosed } from "../time-tracking/month-closing";
 import { appointmentsRepo } from "../../repos";
+import { activeInvoiceCondition } from "../../lib/appointment-invoiced";
 
 export interface RebookActor {
   userId: number;
@@ -142,7 +143,11 @@ export async function evaluateRebookBlockers(
     }
   }
 
-  // (2) Bereits gestellte (nicht-Entwurf, nicht-stornierte) Rechnung.
+  // (2) Bereits GESTELLTE Rechnung = aktive Rechnung (SSoT
+  //     `activeInvoiceCondition`, server/lib/appointment-invoiced.ts) UND
+  //     kein Entwurf. Der Entwurfs-Ausschluss ist der Zusatz-Scope DIESES
+  //     Guards und steht deshalb hier sichtbar daneben — Entwürfe zählen
+  //     überall sonst als abgerechnet, für die Umbuchung aber nicht.
   const issuedRows = await txClient
     .select({ appointmentId: invoiceLineItems.appointmentId })
     .from(invoiceLineItems)
@@ -150,9 +155,8 @@ export async function evaluateRebookBlockers(
     .where(
       and(
         inArray(invoiceLineItems.appointmentId, ids),
-        ne(invoicesTable.status, "storniert"),
+        activeInvoiceCondition(),
         ne(invoicesTable.status, "entwurf"),
-        ne(invoicesTable.invoiceType, "stornorechnung"),
       ),
     );
   const issuedInvoiceAppointmentIds = Array.from(

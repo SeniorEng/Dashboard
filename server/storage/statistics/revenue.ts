@@ -5,6 +5,7 @@ import { billingPeriodFilter, buildKpi, dateFilter, num, periodToResponse, previ
 import { getEconomics } from "./economics";
 import { marginPercent } from "@shared/domain/statistics/economics";
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
+import { activeInvoicedAppointmentIdsSqlRaw } from "../../lib/appointment-invoiced";
 
 function perAppointmentCte(p: ResolvedPeriod) {
   const dFilter = dateFilter(p, sql`a.date::date`);
@@ -558,10 +559,7 @@ export async function listProvenWithoutInvoiced(period: ResolvedPeriod): Promise
       )
     ),
     invoiced AS (
-      SELECT DISTINCT li.appointment_id FROM invoice_line_items li
-      JOIN invoices i ON i.id = li.invoice_id
-      WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
-        AND li.appointment_id IS NOT NULL
+      ${activeInvoicedAppointmentIdsSqlRaw(invFilter)}
     )
     SELECT p.id AS appointment_id,
       to_char(p.d, 'YYYY-MM-DD') AS date,
