@@ -43,7 +43,6 @@ import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc, sql } from "drizzle-orm";
-import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
@@ -87,7 +86,7 @@ import {
     storedInvoicePdfContainsLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
-import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer, getUnbilledSignedAppointmentFactsByCustomer, type UnbilledSignedFacts } from "../services/invoice-data";
+import { getAlreadyInvoicedAppointmentIds, getBlockingDraftInvoices, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer, getUnbilledSignedAppointmentFactsByCustomer, type UnbilledSignedFacts } from "../services/invoice-data";
 import { buildInvoiceDraft, generateInvoiceCore, PartialBillingConfirmationRequiredError } from "../services/invoice-calc";
 import { reduceInvoice45bToPaidAmount } from "../services/invoice-45b-reduction";
 import {
@@ -513,16 +512,14 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
       customerId: appointments.customerId,
     }).where(and(...rangeConds));
 
-    const invoicedRows = await db.select({ appointmentId: invoiceLineItems.appointmentId })
-      .from(invoiceLineItems)
-      .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
-      .where(and(
-        inArray(invoicesTable.customerId, candidateIds),
-        eq(invoicesTable.billingYear, year),
-        eq(invoicesTable.billingMonth, month),
-        activeInvoiceCondition(),
-      ));
-    const invoicedApptIds = new Set(invoicedRows.map(r => r.appointmentId));
+    // Task #1892 PR-2 — zeitraum-blind, identisch zur Engine-Sperre
+    // (`getAlreadyInvoicedAppointmentIds`). Ein im Bereich liegender Termin, der
+    // auf einer Rechnung eines ANDEREN Zeitraums liegt, ist abgerechnet und darf
+    // den Kunden nicht als abrechenbar zählen — sonst driftet die Liste gegen
+    // das, was `generate` tatsächlich tut.
+    const invoicedApptIds = new Set(
+      await getAlreadyInvoicedAppointmentIds(rangeAppts.map(a => a.id)),
+    );
 
     const eligibleByRange = new Set<number>();
     for (const a of rangeAppts) {

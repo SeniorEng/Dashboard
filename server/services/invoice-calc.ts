@@ -246,10 +246,14 @@ export async function buildInvoiceDraft(input: {
     throw badRequest(BILLING_BLOCK_MESSAGES.no_appointments);
   }
 
-  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
+  // Task #1892 PR-2 — ZEITRAUM-BLIND: gefragt wird „ist dieser Termin
+  // ueberhaupt schon abgerechnet?", nicht „im Monat X?". Ein Termin auf einer
+  // Rechnung eines anderen Abrechnungszeitraums war vorher unsichtbar und
+  // wurde ein zweites Mal berechnet.
+  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(allApptIds);
 
-  // Task #1813 — Termine unter den signierten LNs, die bereits in einer
-  // früheren Rechnung des Zeitraums abgerechnet wurden. Basis der
+  // Task #1813 — Termine unter den signierten LNs, die bereits auf einer
+  // aktiven Rechnung liegen (seit #1892 PR-2 zeitraum-uebergreifend). Basis der
   // „Nachberechnung"-Erkennung und des neutralen „N bereits abgerechnet"-Werts
   // in der Vorschau (ersetzt die mehrdeutige Doku-Lücken-Ableitung).
   const alreadyBilledAppointmentCount = alreadyInvoicedIds.length > 0
@@ -346,7 +350,19 @@ export async function buildInvoiceDraft(input: {
   // Grundlage sind DIESELBEN Signatur-/Abgerechnet-Fakten wie oben (kein zweiter
   // Ableitungspfad); rein erklärend — der Abrechnungs-Umfang bleibt unberührt.
   const billableApptIdSet = new Set(apptIds);
-  const alreadyInvoicedIdSet = new Set(alreadyInvoicedIds);
+  // Task #1892 PR-2 — die Erklärungs-Menge muss WEITER tragen als die Sperre.
+  // Die Sperre oben fragt nur die Termine unter den signierten LNs dieses
+  // Zeitraums (`allApptIds`). Ein dokumentierter Termin, der bereits
+  // abgerechnet ist, aber unter KEINEM abrechenbar-signierten LN dieses
+  // Zeitraums liegt (z. B. nach einem Wechsel des `billingType`), fiele sonst
+  // in den Signatur-Zweig unten — falscher Grund UND ein unnötiges
+  // Confirm-Gate, weil `already_billed` als einziger Grund KEINE
+  // `PartialBillingConfirmationRequiredError` auslöst. Deshalb hier eine
+  // eigene, rein ERKLÄRENDE Abfrage über alle dokumentierten Termine des
+  // Zeitraums. Der Abrechnungs-Umfang bleibt davon unberührt.
+  const alreadyInvoicedIdSet = new Set(
+    await getAlreadyInvoicedAppointmentIds(completedRows.map(r => r.id)),
+  );
   const unsignedRecordIds = serviceRecords
     .filter(sr => !isServiceRecordSignedForBilling(customer.billingType, sr.status))
     .map(sr => sr.id);
