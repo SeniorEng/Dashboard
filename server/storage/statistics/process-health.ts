@@ -33,14 +33,13 @@ import { activeInvoiceForAppointmentExistsSqlRaw } from "../../lib/appointment-i
  * `stornorechnung` ist. Stornierte Rechnungen geben ihre Termine dadurch
  * automatisch wieder in diese Liste frei.
  *
- * ACHTUNG — bewusst NICHT identisch mit der Idempotenz-Sperre der
- * Abrechnungs-Engine: `getAlreadyInvoicedAppointmentIds`
- * (`server/services/invoice-data.ts`) filtert ZUSÄTZLICH auf
- * `invoices.billing_year`/`billing_month`, diese Sicht hier ist zeitraum-blind.
- * Ein früherer Kommentar behauptete an dieser Stelle Gleichheit („dieselbe
- * SSoT") — das war falsch; beide teilen nur den Kern „aktive Rechnung". Ob die
- * Engine-Sperre ebenfalls zeitraum-blind werden soll, ist eine offene fachliche
- * Frage und bewusst NICHT Teil dieser Konsolidierung.
+ * Seit Task #1892 PR-2 ist das DIESELBE Regel wie in der Idempotenz-Sperre der
+ * Abrechnungs-Engine (`getAlreadyInvoicedAppointmentIds`,
+ * `server/services/invoice-data.ts`): beide sind zeitraum-blind, beide lesen
+ * „aktive Rechnung" aus dieser SSoT. Zwischenzeitlich filterte die Engine
+ * zusätzlich auf `invoices.billing_year`/`billing_month` — dieser Zeitraum-
+ * Scope war eine Doppelabrechnungs-Lücke und ist entfallen. Wer hier etwas
+ * ändert, ändert es auch für die Engine.
  *
  * Task #1536 — Ausnahme „nichts abzurechnen": Ein No-Show-Termin
  * (`status='customer_no_show'`) mit unterdrückter Privatrechnung
