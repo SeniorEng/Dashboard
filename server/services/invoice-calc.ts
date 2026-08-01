@@ -246,10 +246,14 @@ export async function buildInvoiceDraft(input: {
     throw badRequest(BILLING_BLOCK_MESSAGES.no_appointments);
   }
 
-  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
+  // Task #1892 PR-2 — ZEITRAUM-BLIND: gefragt wird „ist dieser Termin
+  // ueberhaupt schon abgerechnet?", nicht „im Monat X?". Ein Termin auf einer
+  // Rechnung eines anderen Abrechnungszeitraums war vorher unsichtbar und
+  // wurde ein zweites Mal berechnet.
+  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(allApptIds);
 
-  // Task #1813 — Termine unter den signierten LNs, die bereits in einer
-  // früheren Rechnung des Zeitraums abgerechnet wurden. Basis der
+  // Task #1813 — Termine unter den signierten LNs, die bereits auf einer
+  // aktiven Rechnung liegen (seit #1892 PR-2 zeitraum-uebergreifend). Basis der
   // „Nachberechnung"-Erkennung und des neutralen „N bereits abgerechnet"-Werts
   // in der Vorschau (ersetzt die mehrdeutige Doku-Lücken-Ableitung).
   const alreadyBilledAppointmentCount = alreadyInvoicedIds.length > 0

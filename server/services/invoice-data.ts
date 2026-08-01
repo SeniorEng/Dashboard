@@ -16,7 +16,7 @@ import { loadCustomerPriceContext } from "../storage/pricing/price-for";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
 import { resolveCustomerInsuranceAt } from "../storage/customer-mgmt/insurance";
 import { isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
-import { activeInvoiceCondition } from "../lib/appointment-invoiced";
+import { findActiveInvoicesForAppointments } from "../lib/appointment-invoiced";
 
 export interface BuildLineItem extends Record<string, unknown> {
   appointmentId: number;
@@ -40,28 +40,32 @@ export interface BuildLineItem extends Record<string, unknown> {
 }
 
 /**
- * Idempotenz-Sperre der Abrechnungs-Engine: welche Termine dieses Kunden sind
- * im ABRECHNUNGSZEITRAUM bereits auf einer aktiven Rechnung?
+ * Idempotenz-Sperre der Abrechnungs-Engine: welche der übergebenen Termine
+ * liegen bereits auf einer aktiven Rechnung — ZEITRAUM-BLIND?
  *
- * „Aktiv" kommt aus der SSoT `activeInvoiceCondition`
- * (`server/lib/appointment-invoiced.ts`). Der Zeitraum-Scope
- * (`billing_year`/`billing_month`) ist ZUSÄTZLICH und bewusst hier — er gehört
- * nicht zur Frage „aktive Rechnung", sondern zur Engine-Idempotenz. Ob er
- * richtig ist, ist eine offene fachliche Frage (ein Termin auf einer Rechnung
- * eines ANDEREN Zeitraums liest sich hier als „noch nicht abgerechnet") und
- * bewusst nicht Teil dieser rein struktur-konsolidierenden Änderung.
+ * Task #1892 (PR-2). ERSETZT die frühere Signatur
+ * `(customerId, billingYear, billingMonth)`, die über
+ * `invoices.billing_year`/`billing_month` filterte. Dieser Zeitraum-Scope war
+ * eine stille Lücke: ein Termin, der auf einer Rechnung eines ANDEREN
+ * Abrechnungszeitraums liegt, las sich hier als „noch nicht abgerechnet" und
+ * wurde ein zweites Mal berechnet. Die Frage der Engine ist nicht „im Monat X
+ * abgerechnet?", sondern „überhaupt abgerechnet?" — ein Termin wird genau
+ * einmal berechnet.
+ *
+ * Die neue Form fragt nicht mehr selbst, sondern KONSUMIERT die #1892-SSoT
+ * `findActiveInvoicesForAppointments` (`server/lib/appointment-invoiced.ts`).
+ * Damit gibt es für „liegt dieser Termin auf einer aktiven Rechnung?" genau
+ * eine Ableitung — Anzeige, Schutz-Guard und Engine können nicht mehr
+ * auseinanderlaufen. Der Kunden-Scope entfällt ersatzlos: ein Termin gehört zu
+ * genau einem Kunden, die Termin-Menge trägt die Eingrenzung bereits.
+ *
+ * Enger als vorher, nie weiter: die Sperre kann ab jetzt nur MEHR blockieren.
  */
-export async function getAlreadyInvoicedAppointmentIds(customerId: number, billingYear: number, billingMonth: number): Promise<number[]> {
-  const rows = await db.select({ appointmentId: invoiceLineItems.appointmentId })
-    .from(invoiceLineItems)
-    .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
-    .where(and(
-      eq(invoicesTable.customerId, customerId),
-      eq(invoicesTable.billingYear, billingYear),
-      eq(invoicesTable.billingMonth, billingMonth),
-      activeInvoiceCondition(),
-    ));
-  return rows.map(r => r.appointmentId).filter((id): id is number => id !== null);
+export async function getAlreadyInvoicedAppointmentIds(appointmentIds: readonly number[]): Promise<number[]> {
+  const rows = await findActiveInvoicesForAppointments(appointmentIds);
+  return Array.from(
+    new Set(rows.map(r => r.appointmentId).filter((id): id is number => id !== null)),
+  );
 }
 
 // Task #817: Verwaiste/blockierende Entwurfs-Rechnungen eines Zeitraums.
@@ -185,31 +189,19 @@ export async function getUnbilledSignedAppointmentFactsByCustomer(
     signedApptByCustomer.set(cid, set);
   }
 
-  // Bereits abgerechnete Termine je Kunde (spiegelt `getAlreadyInvoicedAppointmentIds`, batch).
-  const invoicedApptByCustomer = new Map<number, Set<number>>();
-  const invoicedRows = await db.select({
-    customerId: invoicesTable.customerId,
-    appointmentId: invoiceLineItems.appointmentId,
-  })
-    .from(invoiceLineItems)
-    .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
-    .where(and(
-      inArray(invoicesTable.customerId, customerIds),
-      eq(invoicesTable.billingYear, billingYear),
-      eq(invoicesTable.billingMonth, billingMonth),
-      activeInvoiceCondition(),
-    ));
-  for (const row of invoicedRows) {
-    if (row.customerId == null || row.appointmentId == null) continue;
-    const set = invoicedApptByCustomer.get(row.customerId) ?? new Set<number>();
-    set.add(row.appointmentId);
-    invoicedApptByCustomer.set(row.customerId, set);
-  }
+  // Bereits abgerechnete Termine (spiegelt `getAlreadyInvoicedAppointmentIds`,
+  // batch — und ist deshalb wie diese ZEITRAUM-BLIND, Task #1892 PR-2). Liefe
+  // der Spiegel weiter zeitraum-gescopt, erschiene ein Kunde in der Liste als
+  // abrechenbar, dessen Termine die Engine bereits sperrt — genau die
+  // Review-↔-Generate-Drift, gegen die #1790 gebaut wurde.
+  const allSignedApptIds = Array.from(
+    new Set(Array.from(signedApptByCustomer.values()).flatMap(s => Array.from(s))),
+  );
+  const invoicedApptIds = new Set(await getAlreadyInvoicedAppointmentIds(allSignedApptIds));
 
   for (const [cid, signedAppts] of signedApptByCustomer) {
-    const invoicedAppts = invoicedApptByCustomer.get(cid) ?? new Set<number>();
     let unbilled = 0;
-    for (const id of signedAppts) if (!invoicedAppts.has(id)) unbilled++;
+    for (const id of signedAppts) if (!invoicedApptIds.has(id)) unbilled++;
     result.set(cid, {
       signedAppointmentCount: signedAppts.size,
       unbilledAppointmentCount: unbilled,
