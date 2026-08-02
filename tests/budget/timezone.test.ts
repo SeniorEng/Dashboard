@@ -96,7 +96,10 @@ describe("Budget-Timezone — §45b-Carryover-Verfall und DST-Termin-Anlage (Ber
     expect(created[0].transactionType).toBe("write_off");
     expect(created[0].amountCents).toBe(-50000);
     expect(created[0].budgetType).toBe("entlastungsbetrag_45b");
-    expect(created[0].transactionDate).toBe("2026-06-30");
+    // §45b-Verfall-as-of — BEWUSSTE Änderung: Verfallsbuchung auf den ERSTEN Tag NACH
+    // der Frist. Die Grenze SELBST prüft weiterhin TZ-CASE-1 (30.06. 23:30 →
+    // kein Write-Off) — die hier getestete Zeitzonen-Aussage bleibt unberührt.
+    expect(created[0].transactionDate).toBe("2026-07-01");
 
     const persisted = await db
       .select()
