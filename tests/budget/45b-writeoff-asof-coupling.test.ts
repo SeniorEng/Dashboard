@@ -7,14 +7,21 @@
  * abgelaufenen Übertrag einen `write_off` an. Zwei Defekte hingen daran:
  *
  *   (1) NULL-Fehlkopplung. Die Pro-Allocation-Sicht in `computeFifoAvailability`
- *       zählte `consumption`+`write_off` OHNE Datumsfilter, obwohl die
- *       Topf-Summe daneben auf `transactionDate` filtert. Ein später datierter
- *       Write-Off ließ den Übertrag für eine RÜCKWIRKENDE H1-Buchung bereits
- *       aufgezehrt aussehen → die Konsumtion fiel in den `allocationId = null`-
- *       Zweig. Der Reader exkludiert Verbrauch gegen herausgefallene Töpfe per
+ *       zählte den `write_off` als Verzehr der Allocation mit. Da er beim
+ *       Buchen VORAB und am Ende des Verfallsfensters datiert angelegt wird,
+ *       ließ er den Übertrag für eine RÜCKWIRKENDE H1-Buchung bereits aufgezehrt
+ *       aussehen → die Konsumtion fiel in den `allocationId = null`-Zweig. Der
+ *       Reader exkludiert Verbrauch gegen herausgefallene Töpfe per
  *       `allocationId`, traf die NULL-Zeile nicht und belastete den laufenden
  *       Jahrestopf ein zweites Mal (Detektor: `45b-july-boundary-symmetry`,
  *       87.900 statt 91.700).
+ *
+ *       Der Fix schließt den `write_off` per TYP aus dieser Sicht aus, statt sie
+ *       nach Datum zu filtern. Ein Datumsfilter hätte die Gegenrichtung
+ *       aufgerissen — er gäbe eine von einer SPÄTEREN Buchung real erschöpfte
+ *       Allocation für eine rückwirkende Buchung wieder frei, deren Betrag dann
+ *       über dieselbe §45b-Exklusion aus dem Jahrestopf verschwände
+ *       (Verfügbarkeit zu hoch). Die Gegenprobe steht als eigener Test unten.
  *
  *   (2) Gesperrter 30.06. Der Write-Off war auf `expiresAt` (30.06.) datiert.
  *       Da die Verbrauchs-Summen `transactionDate <= Stichtag` zählen, war der
@@ -103,12 +110,15 @@ afterAll(async () => {
  * liegt in der Zukunft, es gibt also keine Monats-Aufstockung, die die
  * Zuordnungs-Aussagen verwässern könnte.
  */
-async function makeCarryoverOnlyCustomer(prefix: string): Promise<BudgetScenarioHandle> {
+async function makeCarryoverOnlyCustomer(
+  prefix: string,
+  opts: { acceptsPrivatePayment?: boolean } = {},
+): Promise<BudgetScenarioHandle> {
   const h = await setupBudgetScenario({
     customerNamePrefix: prefix,
     pflegegrad: 3,
     billingType: "pflegekasse_gesetzlich",
-    acceptsPrivatePayment: false,
+    acceptsPrivatePayment: opts.acceptsPrivatePayment ?? false,
     pflegegradSeit: "2099-01-01",
     types: [
       { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
@@ -193,6 +203,55 @@ describe("§45b-Verfall-as-of — Write-Off koppelt rückwirkende Buchungen nich
       rows.filter(r => r.transactionType === "consumption" && r.allocationId === null),
       "keine NULL-gekoppelte §45b-Konsumtion im Übertrags-Fenster",
     ).toHaveLength(0);
+  });
+
+  it("GEGENPROBE: eine spätere Buchung, die den Übertrag real aufzehrt, gibt ihn für eine rückwirkende Buchung NICHT wieder frei", async () => {
+    // Gegenrichtung zum Test darüber, und die Falle bei diesem Fix: Würde die
+    // Pro-Allocation-Sicht `consumption` nach Datum filtern (statt nur den
+    // `write_off` auszuschließen), sähe die rückwirkende Februar-Buchung den
+    // Übertrag als frei an, obwohl die Juni-Buchung ihn längst verbraucht hat.
+    // Sie bekäme `allocationId = Übertrag`, fiele damit unter die §45b-Exklusion
+    // für herausgefallene Töpfe — und verschwände nach dem Verfall komplett aus
+    // dem Verbrauch. Die Verfügbarkeit wäre um den rückwirkenden Betrag ZU HOCH,
+    // also geldwirksam in die permissive Richtung.
+    // Privater Topf, damit die Juni-Buchung den Übertrag ÜBERSTEIGEN darf und
+    // der Rest überläuft, statt am Hard-Block zu scheitern. Ohne Überlauf ließe
+    // sich „Übertrag real erschöpft" gar nicht herstellen.
+    const h = await makeCarryoverOnlyCustomer("T45BVA-DEPLETED", { acceptsPrivatePayment: true });
+    const allocId = await carryoverAllocationId(h.customerId);
+
+    freezeTime(AFTER_EXPIRY);
+    await processExpiredCarryover(h.customerId);
+
+    // Juni-Buchung ÜBER den Übertrag hinaus ⇒ er ist danach real erschöpft.
+    const june = await book(h, LAST_VALID_DAY, 300);
+    expect(Math.abs(june.amountCents)).toBeGreaterThan(0);
+    const consumedByJune = await db.select().from(budgetTransactions).where(and(
+      eq(budgetTransactions.customerId, h.customerId),
+      eq(budgetTransactions.allocationId, allocId),
+      eq(budgetTransactions.transactionType, "consumption"),
+    ));
+    expect(
+      consumedByJune.reduce((s, r) => s + Math.abs(r.amountCents), 0),
+      "die Juni-Buchung muss den Übertrag voll aufgezehrt haben",
+    ).toBe(CARRYOVER_CENTS);
+
+    // Rückwirkende Februar-Buchung: der Übertrag ist verbraucht, sie darf NICHT
+    // an ihm hängen.
+    const feb = await book(h, H1_DATE, 60);
+    expect(
+      feb.allocationId,
+      "erschöpfter Übertrag darf für eine rückwirkende Buchung nicht wieder aufleben",
+    ).not.toBe(allocId);
+
+    // Die Allocation ist über `consumption` nie über ihren Betrag hinaus belegt.
+    const rows = await db.select().from(budgetTransactions).where(and(
+      eq(budgetTransactions.customerId, h.customerId),
+      eq(budgetTransactions.allocationId, allocId),
+      eq(budgetTransactions.transactionType, "consumption"),
+    ));
+    const consumedOnAlloc = rows.reduce((s, r) => s + Math.abs(r.amountCents), 0);
+    expect(consumedOnAlloc).toBeLessThanOrEqual(CARRYOVER_CENTS);
   });
 
   it("Write-Off ist auf den 01.07. datiert (erster Tag NACH der Frist), nicht auf den 30.06.", async () => {

@@ -213,31 +213,35 @@ export async function computeFifoAvailability(
   let consumedBySpecial = new Map<number, number>();
   let reversalBySpecial = new Map<number, number>();
 
-  // §45b-Verfall-as-of — As-of-Stichtag für die PRO-ALLOCATION-Sicht.
+  // §45b-Verfall-as-of — der Verfalls-`write_off` gehört NICHT in die
+  // PRO-ALLOCATION-Sicht.
   //
-  // Die Pro-Allocation-Maps beantworten „wieviel dieses EINEN Guthabens ist
-  // schon aufgebraucht". Sie liefen bisher ohne jeden Datumsfilter, während die
-  // Topf-Summe unten sehr wohl auf `transactionDate` filtert. Genau diese
-  // Asymmetrie war die Wurzel der NULL-Fehlkopplung: Der Verfalls-`write_off`
-  // wird beim Buchen VORAB angelegt (`syncCarryoverAndExpiry` läuft mit
-  // `todayISO()`, siehe `createCascadeConsumption`) und trägt ein Datum am Ende
-  // des Verfallsfensters. Für eine RÜCKWIRKENDE Buchung im 1. Halbjahr wirkte
-  // dieser später datierte Write-Off so, als sei der Übertrag am Buchungstag
-  // bereits aufgezehrt → die Allocation wurde übersprungen → die Konsumtion
-  // fiel in den `allocationId = null`-Zweig. Der Reader exkludiert Verbrauch
-  // gegen herausgefallene Töpfe per `allocationId`, traf die NULL-Zeile nicht
-  // und belastete damit den laufenden Jahrestopf doppelt.
+  // Diese Maps beantworten „wieviel dieses EINEN Guthabens ist schon
+  // aufgebraucht". `write_off` mitzuzählen war die Wurzel der
+  // NULL-Fehlkopplung: Die Verfallsbuchung wird beim Buchen VORAB angelegt
+  // (`syncCarryoverAndExpiry` läuft mit `todayISO()`, siehe
+  // `createCascadeConsumption`) und liegt am Ende des Verfallsfensters. Für
+  // eine RÜCKWIRKENDE Buchung im 1. Halbjahr wirkte sie so, als sei der
+  // Übertrag am Buchungstag bereits aufgezehrt → die Allocation wurde
+  // übersprungen → die Konsumtion fiel in den `allocationId = null`-Zweig. Der
+  // Reader exkludiert Verbrauch gegen herausgefallene Töpfe per `allocationId`,
+  // traf die NULL-Zeile nicht und belastete den laufenden Jahrestopf doppelt.
   //
-  // BEWUSST nur eine OBERGRENZE (`<= transactionDate`), NICHT das volle
-  // Fenster der Topf-Summe: Guthaben-Verzehr ist kumulativ und endgültig. Ein
-  // §45a-Verbrauch aus einem früheren Monat (bzw. §39 aus einem früheren Jahr)
-  // hat die Allocation wirklich aufgebraucht; würde man die UNTERgrenze des
-  // Cap-Fensters mitspiegeln, ließe man bereits verbrauchtes Guthaben wieder
-  // auferstehen und ordnete neue Buchungen einer erschöpften Allocation zu.
-  // Falsch ist in JEDEM Topf nur das Mitzählen von Zeilen, die NACH dem
-  // Buchungsdatum liegen — das ist die reine as-of-Regel.
-  const allocationAsOfFilter = lte(budgetTransactions.transactionDate, today);
-
+  // Ein `write_off` kann hier NIE legitim zählen, deshalb der Typ-Ausschluss
+  // statt eines Datumsfilters: Er entsteht ausschließlich für abgelaufene
+  // Überträge (`processExpiredCarryover`). Liegt der Stichtag NACH der Frist,
+  // ist die Allocation schon durch die `expiresAt >= today`-Klausel oben aus
+  // `specialAllocations` gefallen — die Zeile ist dann irrelevant. Liegt er
+  // davor, ist der Verfall aus Sicht des Buchungstags ein ZUKÜNFTIGES Ereignis
+  // und darf das Guthaben nicht mindern. Irrelevant oder falsch, nie richtig.
+  //
+  // `consumption`/`reversal` bleiben BEWUSST ungefiltert (unverändert): Der
+  // Verzehr eines Guthabens ist kumulativ und endgültig — auch eine später
+  // datierte Buchung hat die Allocation real aufgebraucht. Ein Datumsfilter
+  // hier würde eine bereits erschöpfte Allocation für eine rückwirkende
+  // Buchung wieder freigeben und den Betrag über die §45b-Exklusion aus dem
+  // Jahrestopf herausfallen lassen (Verfügbarkeit zu hoch — geldwirksam in die
+  // permissive Richtung).
   if (allSpecialIds.length > 0) {
     const consumptionResult = await d.select({
       allocationId: budgetTransactions.allocationId,
@@ -246,8 +250,7 @@ export async function computeFifoAvailability(
       .from(budgetTransactions)
       .where(and(
         inArray(budgetTransactions.allocationId, allSpecialIds),
-        sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
-        allocationAsOfFilter
+        eq(budgetTransactions.transactionType, "consumption")
       ))
       .groupBy(budgetTransactions.allocationId);
 
@@ -258,8 +261,7 @@ export async function computeFifoAvailability(
       .from(budgetTransactions)
       .where(and(
         inArray(budgetTransactions.allocationId, allSpecialIds),
-        eq(budgetTransactions.transactionType, "reversal"),
-        allocationAsOfFilter
+        eq(budgetTransactions.transactionType, "reversal")
       ))
       .groupBy(budgetTransactions.allocationId);
 
