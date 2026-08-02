@@ -248,18 +248,43 @@ afterAll(async () => {
 });
 
 describe("INC-1: Parallele Rechnungs-Generierung", () => {
-  it("INC-1.1 — 10 parallele POST /api/billing/generate für SAME customer/month vergeben 10 eindeutige, lückenlose Nummern (kein 500/UNIQUE)", async () => {
-    const prepared = await prepareCustomerForInvoice("SAME");
-    const billingYear = prepared.year;
+  // Task #1892 — 10 VERSCHIEDENE Kunden, nicht mehr zehnmal derselbe.
+  //
+  // Die Absicht des Tests ist unverändert: die nebenläufige Vergabe der
+  // Rechnungsnummern — 10 eindeutige, lückenlose RE-Nummern, kein 500 aus einem
+  // UNIQUE-Race. Nur das Szenario war falsch gewählt. Mit EINEM Kunden verlangte
+  // die Assertion `successNumbers.length === 10`, dass zehn parallele Läufe
+  // dieselben Termine zehnmal abrechnen — also genau die Doppelabrechnung, die
+  // die neue Idempotenz-Sperre (Kunden-Lock + In-Tx-Nachprüfung) beseitigt. Der
+  // Test hätte den Bug damit zementiert.
+  //
+  // Verschiedene Kunden greifen verschiedene Lock-Schlüssel
+  // (`pg_advisory_xact_lock(1892, customerId)`) und laufen deshalb weiterhin
+  // ECHT konkurrent gegen den gemeinsamen Nummernkreis — der Wettlauf um die
+  // Nummer bleibt also erhalten, der um dieselben Termine verschwindet. Den
+  // gleichen-Kunden-Fall deckt INC-3.1 mit der jetzt richtigen Erwartung ab.
+  it("INC-1.1 — 10 parallele POST /api/billing/generate für 10 VERSCHIEDENE Kunden vergeben 10 eindeutige, lückenlose Nummern (kein 500/UNIQUE)", async () => {
+    const prepared: PreparedInvoiceCustomer[] = [];
+    for (let i = 0; i < 10; i++) {
+      prepared.push(await prepareCustomerForInvoice(`P${i}`));
+    }
+    const billingYear = prepared[0].year;
+    // Alle Kunden werden im selben Lauf vorbereitet; sollte die Vorbereitung
+    // eine Monatsgrenze überschreiten, wäre die Sequenz-Erwartung unten nicht
+    // mehr aussagekräftig.
+    expect(
+      new Set(prepared.map((p) => `${p.year}-${p.month}`)).size,
+      `Alle 10 Kunden müssen im selben Abrechnungsmonat liegen`,
+    ).toBe(1);
 
     type GenResult = { status: number; data: GenerateResponse | InvoiceLite };
     const settled = await runInParallel(
-      Array.from({ length: 10 }, () => async (arrive) => {
+      prepared.map((p) => async (arrive: () => Promise<void>) => {
         await arrive();
         return apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
-          customerId: prepared.customerId,
-          billingMonth: prepared.month,
-          billingYear: prepared.year,
+          customerId: p.customerId,
+          billingMonth: p.month,
+          billingYear: p.year,
         });
       }),
     );
@@ -500,4 +525,65 @@ describe("INC-3: Storno-Atomarität bei injiziertem Fehler", () => {
     const reread = list.data.find((i) => i.id === original.id);
     expect(reread?.status, `Original-Status muss durch Rollback unverändert bleiben`).toBe("versendet");
   }, 60_000);
+});
+
+describe("INC-3: Idempotenz-Sperre unter Nebenläufigkeit", () => {
+  it("INC-3.1 — zwei gleichzeitige generate für DENSELBEN Kunden erzeugen GENAU EINE Rechnung; der zweite läuft in already_billed", async () => {
+    const prepared = await prepareCustomerForInvoice("RACE");
+
+    type GenResult = { status: number; data: GenerateResponse | InvoiceLite | { message?: string } };
+    const settled = await runInParallel(
+      Array.from({ length: 2 }, () => async (arrive) => {
+        await arrive();
+        return apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
+          customerId: prepared.customerId,
+          billingMonth: prepared.month,
+          billingYear: prepared.year,
+        });
+      }),
+    );
+
+    for (let i = 0; i < settled.length; i++) {
+      expect(settled[i].status, `Call #${i} muss fulfillen (kein Timeout/Deadlock)`).toBe("fulfilled");
+    }
+    const responses = settled
+      .filter((r): r is PromiseFulfilledResult<GenResult> => r.status === "fulfilled")
+      .map((r) => r.value);
+
+    const okays = responses.filter((r) => r.status === 200 || r.status === 201);
+    const rejected = responses.filter((r) => r.status !== 200 && r.status !== 201);
+
+    for (const r of okays) {
+      const data = r.data as GenerateResponse;
+      const invs = data.splitInvoices && data.invoices ? data.invoices : [r.data as InvoiceLite];
+      for (const inv of invs) cleanupInvoiceIds.push(inv.id);
+    }
+
+    expect(
+      okays.length,
+      `Genau EIN Lauf darf abrechnen — sonst liegen dieselben Termine auf zwei aktiven Rechnungen. ` +
+      `Antworten: ${responses.map((r) => `${r.status}:${JSON.stringify(r.data)}`).join(" | ")}`,
+    ).toBe(1);
+
+    expect(rejected.length, `Der zweite Lauf muss abgelehnt werden`).toBe(1);
+    expect(
+      rejected[0].status,
+      `Ablehnung muss ein sauberes 400 sein, kein 500 (Deadlock/UNIQUE-Symptom): ${JSON.stringify(rejected[0].data)}`,
+    ).toBe(400);
+    expect(
+      JSON.stringify(rejected[0].data),
+      `Ablehnungsgrund muss "bereits abgerechnet" sein: ${JSON.stringify(rejected[0].data)}`,
+    ).toContain("bereits abgerechnet");
+
+    // Gegenprobe am Bestand: nach dem Rennen darf genau EINE aktive Rechnung
+    // fuer diesen Kunden existieren.
+    const list = await apiGet<InvoiceLite[]>(`/api/billing?customerId=${prepared.customerId}`);
+    const active = list.data.filter(
+      (i) => i.status !== "storniert" && i.invoiceType !== "stornorechnung",
+    );
+    expect(
+      active.length,
+      `Genau eine aktive Rechnung erwartet, bekam: ${active.map((i) => `${i.invoiceNumber}(${i.status})`).join(", ")}`,
+    ).toBe(1);
+  }, 120_000);
 });

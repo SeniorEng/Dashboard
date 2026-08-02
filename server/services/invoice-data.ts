@@ -10,12 +10,12 @@ import { FINAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, budgetTransactions } from "@shared/schema";
 import { eq, and, isNull, inArray, notInArray, ne, desc, or, gte, lt, lte, sql } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
 import { loadCustomerPriceContext } from "../storage/pricing/price-for";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
 import { resolveCustomerInsuranceAt } from "../storage/customer-mgmt/insurance";
-import { isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
+import { isServiceRecordSignedForBilling, BILLING_BLOCK_MESSAGES } from "@shared/domain/billing-eligibility";
 import { findActiveInvoicesForAppointments } from "../lib/appointment-invoiced";
 
 export interface BuildLineItem extends Record<string, unknown> {
@@ -61,11 +61,69 @@ export interface BuildLineItem extends Record<string, unknown> {
  *
  * Enger als vorher, nie weiter: die Sperre kann ab jetzt nur MEHR blockieren.
  */
-export async function getAlreadyInvoicedAppointmentIds(appointmentIds: readonly number[]): Promise<number[]> {
-  const rows = await findActiveInvoicesForAppointments(appointmentIds);
+export async function getAlreadyInvoicedAppointmentIds(
+  appointmentIds: readonly number[],
+  client: DbOrTx = db,
+): Promise<number[]> {
+  const rows = await findActiveInvoicesForAppointments(appointmentIds, client);
   return Array.from(
     new Set(rows.map(r => r.appointmentId).filter((id): id is number => id !== null)),
   );
+}
+
+/**
+ * Namensraum der Abrechnungs-Sperre. Ein fester erster Schlüssel trennt sie von
+ * jedem anderen Advisory-Lock der Anwendung; der zweite ist die Kunden-ID.
+ */
+const BILLING_LOCK_NAMESPACE = 1892;
+
+/**
+ * Serialisiert die Rechnungserstellung PRO KUNDE innerhalb der laufenden
+ * Transaktion.
+ *
+ * `pg_advisory_xact_lock` blockiert, bis ein konkurrierender Lauf für denselben
+ * Kunden committet oder zurückgerollt hat, und wird beim Transaktionsende
+ * automatisch freigegeben — es gibt keinen Pfad, auf dem die Sperre liegen
+ * bleibt (anders als bei einem Session-Lock, der bei Pool-Wiederverwendung
+ * hängen bliebe).
+ *
+ * Der Schlüssel ist der KUNDE, nicht der Zeitraum: seit #1892 PR-2 ist die
+ * Idempotenz-Frage zeitraum-blind, also müssen sich auch zwei Läufe für
+ * verschiedene Monate desselben Kunden serialisieren — sie können dieselben
+ * Termine betreffen.
+ */
+export async function lockCustomerForBilling(client: DbOrTx, customerId: number): Promise<void> {
+  await client.execute(
+    sql`SELECT pg_advisory_xact_lock(${BILLING_LOCK_NAMESPACE}::int, ${customerId}::int)`,
+  );
+}
+
+/**
+ * Autoritative Idempotenz-Prüfung INNERHALB der Schreib-Transaktion.
+ *
+ * ERSETZT die Vor-Transaktions-Prüfung in `generateInvoiceCore` als
+ * verbindliche Entscheidung. Jene bleibt bestehen, aber nur noch für das, was
+ * sie leisten kann: den Entwurf bauen und die Vorschau-Zahlen füllen. Als
+ * Sperre taugte sie nicht — zwischen ihrem `SELECT` und dem `INSERT` lag ein
+ * offenes Fenster, in dem ein paralleler Lauf dieselben Termine abrechnen
+ * konnte (check-then-write). Zwei gleichzeitige `POST /api/billing/generate`
+ * für denselben Kunden erzeugten so zwei Rechnungen über dieselben Termine.
+ *
+ * Zusammen mit `lockCustomerForBilling` ist das Fenster zu: der zweite Lauf
+ * wartet auf den Lock, sieht danach die committeten Zeilen des ersten und
+ * bricht mit derselben Meldung ab, die auch der Vorab-Pfad verwendet
+ * (`BILLING_BLOCK_MESSAGES.already_billed`) — eine Formulierung, kein
+ * zweiter Begriff.
+ */
+export async function assertAppointmentsNotYetInvoiced(
+  client: DbOrTx,
+  appointmentIds: readonly number[],
+): Promise<void> {
+  if (appointmentIds.length === 0) return;
+  const already = await getAlreadyInvoicedAppointmentIds(appointmentIds, client);
+  if (already.length > 0) {
+    throw badRequest(BILLING_BLOCK_MESSAGES.already_billed);
+  }
 }
 
 // Task #817: Verwaiste/blockierende Entwurfs-Rechnungen eines Zeitraums.

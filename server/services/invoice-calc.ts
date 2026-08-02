@@ -25,7 +25,7 @@ import { auditService } from "./audit";
 import { readTestFaults } from "../lib/test-fault-injector";
 import { getCachedCompanySettings } from "./cache";
 import { schedulePdfPersistInBackground } from "./invoice-pdf-orchestrator";
-import { getAlreadyInvoicedAppointmentIds, getServiceRecordsForPeriod, getAppointmentIdsFromServiceRecords, buildLineItemsFromAppointments, getBudgetSplitForAppointments, getInsuranceData, findNetZeroBilledAppointments } from "./invoice-data";
+import { getAlreadyInvoicedAppointmentIds, getServiceRecordsForPeriod, getAppointmentIdsFromServiceRecords, buildLineItemsFromAppointments, getBudgetSplitForAppointments, getInsuranceData, findNetZeroBilledAppointments, lockCustomerForBilling, assertAppointmentsNotYetInvoiced } from "./invoice-data";
 import { rebookNetZeroAppointmentConsumption } from "../storage/budget/rebook-storage";
 import type { BuildLineItem } from "./invoice-data";
 
@@ -621,6 +621,14 @@ export async function generateInvoiceCore(
     const asOfIso = billingPeriodAsOfISO(billingYear, billingMonth, dateTo);
 
     const splitResult = await withAudit(async (tx, audit) => {
+      // Nebenläufigkeit: erst den Kunden sperren, dann die Idempotenz IN der
+      // Transaktion nachprüfen. Die Prüfung weiter oben (Zeile ~253) baut den
+      // Entwurf, taugt aber nicht als Sperre — zwischen ihrem SELECT und diesem
+      // INSERT lag ein offenes Fenster, in dem ein paralleler Lauf dieselben
+      // Termine abrechnen konnte. Siehe `assertAppointmentsNotYetInvoiced`.
+      await lockCustomerForBilling(tx, customerId);
+      await assertAppointmentsNotYetInvoiced(tx, draft.apptIds);
+
       const createdInvoices: Invoice[] = [];
       // Deterministische Reihenfolge gemäß POT_ORDER — die Rechnungsnummern
       // folgen damit der gleichen Sortierung wie der Cascade.
@@ -835,6 +843,12 @@ export async function generateInvoiceCore(
   let invoiceNumber: string;
   try {
     ({ invoice, invoiceNumber } = await withAudit(async (tx, audit) => {
+      // Siehe Split-Pfad oben: Kunden-Lock + autoritative Idempotenz-Prüfung
+      // innerhalb der Transaktion. Beide Schreibpfade nutzen dieselben zwei
+      // Funktionen — kein zweiter Sperr-Begriff.
+      await lockCustomerForBilling(tx, customerId);
+      await assertAppointmentsNotYetInvoiced(tx, draft.apptIds);
+
       const number = await getNextInvoiceNumberTx(tx, billingYear);
       const invoiceData = {
         invoiceNumber: number,
