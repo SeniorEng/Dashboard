@@ -58,6 +58,7 @@ import {
   processExpiredCarryover,
   upsertCarryoverAllocation,
 } from "../../server/storage/budget/allocation-storage";
+import { getAvailableForDate } from "../../server/storage/budget/import-availability";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { freezeTime, thawTime } from "../helpers/frozen-clock";
 import { getAuthCookie, runCleanup } from "../test-utils";
@@ -74,6 +75,8 @@ const H1_DATE = `${YEAR}-02-16`;
 const LAST_VALID_DAY = EXPIRES_AT;
 /** „Jetzt" nach dem Verfall — der Verfallslauf hat den Write-Off bereits gesetzt. */
 const AFTER_EXPIRY = `${YEAR}-08-15T10:00:00+02:00`;
+/** Lese-Stichtag nach dem Verfall: der Übertrag ist aus `Allocated` gefallen. */
+const AFTER_EXPIRY_READ = `${YEAR}-07-15`;
 
 const TZ_BEFORE = process.env.TZ;
 let hwServiceId: number;
@@ -110,15 +113,12 @@ afterAll(async () => {
  * liegt in der Zukunft, es gibt also keine Monats-Aufstockung, die die
  * Zuordnungs-Aussagen verwässern könnte.
  */
-async function makeCarryoverOnlyCustomer(
-  prefix: string,
-  opts: { acceptsPrivatePayment?: boolean } = {},
-): Promise<BudgetScenarioHandle> {
+async function makeCarryoverOnlyCustomer(prefix: string): Promise<BudgetScenarioHandle> {
   const h = await setupBudgetScenario({
     customerNamePrefix: prefix,
     pflegegrad: 3,
     billingType: "pflegekasse_gesetzlich",
-    acceptsPrivatePayment: opts.acceptsPrivatePayment ?? false,
+    acceptsPrivatePayment: false,
     pflegegradSeit: "2099-01-01",
     types: [
       { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
@@ -134,6 +134,43 @@ async function makeCarryoverOnlyCustomer(
     amountCents: CARRYOVER_CENTS,
   });
   return h;
+}
+
+/**
+ * Wie `makeCarryoverOnlyCustomer`, aber MIT laufender Monats-Aufstockung
+ * (Anker 2024). Nötig, wo die Aussage ein Betrag im Jahrestopf ist.
+ */
+async function makeAccruingCustomer(prefix: string): Promise<BudgetScenarioHandle> {
+  const h = await setupBudgetScenario({
+    customerNamePrefix: prefix,
+    pflegegrad: 2,
+    billingType: "pflegekasse_gesetzlich",
+    acceptsPrivatePayment: false,
+    pflegegradSeit: "2024-01-01",
+    types: [
+      { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+      { type: "umwandlung_45a", priority: 2, enabled: false },
+      { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
+    ],
+  });
+  handles.push(h);
+  await upsertCarryoverAllocation({
+    customerId: h.customerId,
+    budgetType: "entlastungsbetrag_45b",
+    sourceYear: PREV_YEAR,
+    amountCents: CARRYOVER_CENTS,
+  });
+  return h;
+}
+
+/** Σ|consumption| gegen EINE Allocation (ohne write_off, ohne reversal). */
+async function consumedOnAllocation(customerId: number, allocationId: number): Promise<number> {
+  const rows = await db.select().from(budgetTransactions).where(and(
+    eq(budgetTransactions.customerId, customerId),
+    eq(budgetTransactions.allocationId, allocationId),
+    eq(budgetTransactions.transactionType, "consumption"),
+  ));
+  return rows.reduce((s, r) => s + Math.abs(r.amountCents), 0);
 }
 
 async function carryoverAllocationId(customerId: number): Promise<number> {
@@ -214,27 +251,27 @@ describe("§45b-Verfall-as-of — Write-Off koppelt rückwirkende Buchungen nich
     // für herausgefallene Töpfe — und verschwände nach dem Verfall komplett aus
     // dem Verbrauch. Die Verfügbarkeit wäre um den rückwirkenden Betrag ZU HOCH,
     // also geldwirksam in die permissive Richtung.
-    // Privater Topf, damit die Juni-Buchung den Übertrag ÜBERSTEIGEN darf und
-    // der Rest überläuft, statt am Hard-Block zu scheitern. Ohne Überlauf ließe
-    // sich „Übertrag real erschöpft" gar nicht herstellen.
-    const h = await makeCarryoverOnlyCustomer("T45BVA-DEPLETED", { acceptsPrivatePayment: true });
+    // Dieser Kunde hat BEWUSST einen laufenden Jahrestopf (Anker 2024 statt
+    // 2099): Die eigentliche Aussage ist ein BETRAG — der rückwirkende Verbrauch
+    // muss den Jahrestopf belasten. Auf einem Übertrags-only-Kunden wäre der
+    // Jahrestopf null und der Betragsfehler unbeobachtbar; die reale Regression
+    // war genau ein Betragsfehler, nicht nur eine Fehlzuordnung.
+    const h = await makeAccruingCustomer("T45BVA-DEPLETED");
     const allocId = await carryoverAllocationId(h.customerId);
 
     freezeTime(AFTER_EXPIRY);
     await processExpiredCarryover(h.customerId);
 
-    // Juni-Buchung ÜBER den Übertrag hinaus ⇒ er ist danach real erschöpft.
+    // Juni-Buchung ÜBER den Übertrag hinaus ⇒ er ist danach real erschöpft
+    // (Rest läuft in den laufenden Jahrestopf, kein Hard-Block).
     const june = await book(h, LAST_VALID_DAY, 300);
     expect(Math.abs(june.amountCents)).toBeGreaterThan(0);
-    const consumedByJune = await db.select().from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, h.customerId),
-      eq(budgetTransactions.allocationId, allocId),
-      eq(budgetTransactions.transactionType, "consumption"),
-    ));
     expect(
-      consumedByJune.reduce((s, r) => s + Math.abs(r.amountCents), 0),
+      await consumedOnAllocation(h.customerId, allocId),
       "die Juni-Buchung muss den Übertrag voll aufgezehrt haben",
     ).toBe(CARRYOVER_CENTS);
+
+    const availBefore = (await getAvailableForDate(h.customerId, AFTER_EXPIRY_READ)).total45b;
 
     // Rückwirkende Februar-Buchung: der Übertrag ist verbraucht, sie darf NICHT
     // an ihm hängen.
@@ -244,14 +281,20 @@ describe("§45b-Verfall-as-of — Write-Off koppelt rückwirkende Buchungen nich
       "erschöpfter Übertrag darf für eine rückwirkende Buchung nicht wieder aufleben",
     ).not.toBe(allocId);
 
-    // Die Allocation ist über `consumption` nie über ihren Betrag hinaus belegt.
-    const rows = await db.select().from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, h.customerId),
-      eq(budgetTransactions.allocationId, allocId),
-      eq(budgetTransactions.transactionType, "consumption"),
-    ));
-    const consumedOnAlloc = rows.reduce((s, r) => s + Math.abs(r.amountCents), 0);
-    expect(consumedOnAlloc).toBeLessThanOrEqual(CARRYOVER_CENTS);
+    // DIE Geld-Aussage: der rückwirkende Betrag belastet den Jahrestopf voll.
+    // Hing die Buchung faelschlich am (ab Juli herausfallenden) Übertrag, fiele
+    // sie unter die §45b-Exklusion und das Delta waere 0 — die Verfügbarkeit
+    // waere um den vollen Betrag zu hoch.
+    const availAfter = (await getAvailableForDate(h.customerId, AFTER_EXPIRY_READ)).total45b;
+    expect(
+      availBefore - availAfter,
+      "rückwirkender Verbrauch muss den laufenden Jahrestopf um genau seinen Betrag senken",
+    ).toBe(Math.abs(feb.amountCents));
+
+    // Und die tragende Invariante: eine Allocation ist über `consumption` nie
+    // über ihren Betrag hinaus belegt. Genau sie macht die `allocationId`-
+    // basierte §45b-Exklusion überhaupt sicher.
+    expect(await consumedOnAllocation(h.customerId, allocId)).toBeLessThanOrEqual(CARRYOVER_CENTS);
   });
 
   it("Write-Off ist auf den 01.07. datiert (erster Tag NACH der Frist), nicht auf den 30.06.", async () => {
