@@ -98,6 +98,20 @@ const DENY: Array<[string, string]> = [
   ["echo boese &> /etc/cron.d/x", "Redirect &>"],
   ["echo x > ~/.local/bin/python3", "Redirect auf den PATH-Interpreter"],
   ["tee ~/.local/bin/python3 < /tmp/shim", "tee auf den PATH-Interpreter"],
+  ["echo a\r\nsudo -n true", "mehrzeilig mit CRLF"],
+  ["echo a\n\nsudo -n true", "mehrzeilig mit Leerzeile"],
+  ["git push origin HEAD", "HEAD als Ziel-Ref (auf main ein Direktpush)"],
+  // `git -C`/`-c` nehmen einen Wert; wer ihn als Subkommando liest, schaltet
+  // alle git-Regeln ab.
+  ["git -C /home/dev/dashboard push origin main", "git -C vor push"],
+  ["git -c protocol.version=2 push origin main", "git -c vor push"],
+  ["git -C . reset --hard origin/main", "git -C vor reset --hard"],
+  ["git -C . clean -fd", "git -C vor clean -fd"],
+  // Ein führender Redirect darf nicht als Kommando gelesen werden.
+  ["> /tmp/log sudo -n id", "führender Redirect vor sudo"],
+  ["2> /tmp/log sudo -n id", "führender Redirect mit Deskriptor"],
+  ["> /tmp/log docker ps", "führender Redirect vor docker"],
+  ["> /tmp/log git push origin main", "führender Redirect vor push nach main"],
 ];
 
 // Selbstschutz: der Gate darf sich nicht selbst entschärfen.
@@ -115,21 +129,38 @@ const DENY_SELF: Array<[string, string]> = [
 
 // BEWUSST OFFEN — dokumentiert, nicht versehentlich.
 //
-// Diese Kommandos kommen durch. Das ist eine Entscheidung, keine Lücke im
-// Sinne eines Fehlers: Der Gate ist ein Stolperdraht gegen Versehen, kein
+// DIE REGEL, an der die Grenze verläuft: geprüft wird das ERSTE WORT jedes
+// Teilkommandos. Alles, was das eigentliche Kommando dahinter versteckt, läuft
+// vorbei. Die Liste unten sind Vertreter dieser Regel, keine abschließende
+// Aufzählung — wer eine neue Versteck-Form findet, findet keinen Fehler,
+// sondern dieselbe Grenze an einer neuen Stelle.
+//
+// Das ist eine Entscheidung: Der Gate ist ein Stolperdraht gegen Versehen, kein
 // Sandbox-Ersatz. Ein Filter, der Präfixe, Variablen-Expansion,
-// Command-Substitution und Verzeichnis-Umbenennungen vollständig abdeckt,
-// blockiert normale Arbeit — und vollständig wird er trotzdem nie.
+// Command-Substitution und Verzeichnis-Umbenennungen abdeckt, blockiert normale
+// Arbeit — und vollständig wird er trotzdem nie.
 //
 // Der Test hält sie als `allow` fest, damit die Grenze SICHTBAR ist. Verschiebt
 // jemand später eine Zeile von hier nach `DENY`, ist das eine bewusste
 // Erweiterung; verschwindet eine Zeile hier still, fällt es auf.
 const BEWUSST_OFFEN: Array<[string, string]> = [
   ["echo $(sudo id)", "Command-Substitution wird nicht rekursiv geprüft"],
-  ["env sudo -n true", "Präfix-Kommandos werden nicht abgestreift"],
+  ["env sudo -n true", "Präfix-Kommando `env`"],
+  ["command sudo -n true", "Präfix-Kommando `command`"],
+  ["nohup sudo -n true", "Präfix-Kommando `nohup`"],
   ["X=sudo; $X -n true", "Variablen-Expansion sieht das Gate nicht"],
+  ["echo /etc/nginx | xargs rm -rf", "`xargs` baut das Kommando erst zur Laufzeit"],
+  ["find /etc -name '*.conf' -exec rm -f {} +", "`find -exec` ebenso"],
+  ["eval 'git push origin main'", "`eval` ebenso"],
   ["mv .claude .claude-off", "Selbstschutz greift auf den Pfad, nicht auf das Verzeichnis"],
-  ["git checkout -- .claude/hooks/bash-gate.py", "git ist Lese-Allowlist (die Ausnahme schützte nichts, siehe Hook-Kommentar)"],
+  ["rm -rf .claude", "dasselbe, als Löschung"],
+  // `git` steht in der Lese-Allowlist, weil die Ausnahme nichts schützte
+  // (`git checkout main -- .`, `git stash`, `git restore .` kommen ohne den
+  // Pfad aus) und nur das Versionieren des Gates unmöglich machte. Der Preis:
+  // seit der Versionierung kann `git` den Hook auf einen älteren, schwächeren
+  // Stand zurücksetzen.
+  ["git checkout -- .claude/hooks/bash-gate.py", "git kann den Hook zurücksetzen"],
+  ["git rm .claude/hooks/bash-gate.py", "git kann den Hook löschen"],
 ];
 
 const ALLOW: Array<[string, string]> = [
@@ -179,6 +210,30 @@ const ALLOW: Array<[string, string]> = [
   ["git add .claude/hooks/bash-gate.py", "Gate versionieren"],
   ["git diff .claude/hooks/bash-gate.py", "Gate-Diff ansehen"],
   ["npm run check\nnpm run lint", "mehrzeilig, beide Zeilen harmlos"],
+  // Der Zeilen-Split darf NICHT mitten in ein Argument schneiden. Alle
+  // folgenden Fälle wurden von der ersten Fassung des Splits abgelehnt — es
+  // ist die Alltagsarbeit dieses Repos, inklusive seines Commit-Stils.
+  ["npx vitest run \\\n  tests/billing/foo.test.ts", "Backslash-Fortsetzung"],
+  ["npm run check \\\n && npm run lint", "Backslash-Fortsetzung mit &&"],
+  ["git commit -m 'Zeile eins\n\nZeile zwei'", "mehrabsätzige Commit-Message"],
+  ["gh pr create --title x --body 'Zeile eins\n\nZeile zwei'", "mehrzeiliger PR-Body"],
+  [
+    "cat > docs/x.md <<'EOF'\ndocker compose -f docker-compose.test.yml up -d\nEOF",
+    "Heredoc-Rumpf ist Daten, kein Kommando",
+  ],
+  [
+    "cat > /tmp/x.md <<'EOF'\nsiehe .claude/hooks/bash-gate.py\nEOF",
+    "Heredoc-Rumpf darf den Selbstschutz nicht auslösen",
+  ],
+  // `curl`-Nachbarschaft zählt nur bei echter Pipe — sonst stirbt der
+  // Preflight aus CLAUDE.md.
+  ["curl -sf http://localhost:5000/api/health\nbash scripts/migrate.sh", "curl, dann bash in Zeile 2"],
+  ["curl -sf http://x/health && bash scripts/test.sh", "curl && bash"],
+  ["git push --dry-run", "read-only Push-Check"],
+  ["git push -n", "read-only Push-Check, Kurzform"],
+  // `~` wird aufgelöst; /home/dev/dashboard ist ein sicherer Pfad.
+  ["echo x > ~/dashboard/out.log", "Redirect nach ~/dashboard"],
+  ["npm run check > ~/dashboard/out.log 2>&1", "Log-Redirect nach ~/dashboard"],
 ];
 
 // Fail-closed: alles, was nicht sauber interpretierbar ist, MUSS deny sein.

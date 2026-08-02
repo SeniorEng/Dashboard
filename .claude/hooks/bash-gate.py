@@ -4,11 +4,16 @@
 STOLPERDRAHT GEGEN VERSEHEN — KEIN SANDBOX-ERSATZ.
 Dieses Gate faengt das versehentlich getippte `sudo …`, `docker …`,
 `git push origin main` oder `rm -rf /…`. Es ist ein Kommando-FILTER und als
-solcher grundsaetzlich umgehbar: Praefixe (`env`, `command`, `nohup`, `{ …; }`),
-Variablen-Expansion (`X=sudo; $X …`), `xargs`/`find -exec`, `eval`, oder ein
-umbenanntes Verzeichnis (`mv .claude .claude-off`) laufen daran vorbei. Das ist
-BEWUSST nicht geschlossen — ein Filter, der all das faengt, blockiert normale
-Arbeit, und vollstaendig wird er trotzdem nie.
+solcher grundsaetzlich umgehbar. Die Regel, an der die Grenze verlaeuft:
+**geprueft wird das ERSTE WORT jedes Teilkommandos.** Alles, was das
+eigentliche Kommando dahinter versteckt, laeuft vorbei — Praefix-Kommandos
+(`env`, `command`, `nohup`, `time`, `{ …; }`), Variablen-Expansion
+(`X=sudo; $X …`), Command-Substitution (`$(sudo id)`), `xargs`, `find -exec`,
+`eval`, Heredoc-Ruempfe an eine Shell, oder ein umbenanntes Verzeichnis
+(`mv .claude .claude-off`). Das ist BEWUSST nicht geschlossen — ein Filter, der
+all das faengt, blockiert normale Arbeit, und vollstaendig wird er trotzdem nie.
+`tests/architecture/bash-gate.test.ts` haelt diese Grenze als Block
+`BEWUSST_OFFEN` fest, damit sie sichtbar bleibt.
 **Unbeaufsichtigter Betrieb mit fremdem Input braucht eine Sandbox, nicht
 diesen Filter.**
 
@@ -33,7 +38,6 @@ import re
 import shlex
 import sys
 
-# Wohin geschrieben/geloescht werden darf, ohne dass es das System trifft.
 SAFE_PREFIXES = (
     "/home/dev/dashboard/",
     "/tmp/",
@@ -42,28 +46,20 @@ SAFE_PREFIXES = (
     "/home/dev/.local/share/claude/",
 )
 
-# --- Selbstschutz -----------------------------------------------------------
-# Das Gate soll sich nicht mit einem Handgriff selbst entschaerfen. Der Check
-# ist ein Substring-Treffer auf den geschriebenen Pfad und faengt entsprechend
-# nur die direkte Schreibweise — `mv .claude .claude-off` oder ein Symlink
-# laufen vorbei (siehe Kopf: Stolperdraht, keine Barriere).
 PROTECTED_RE = re.compile(r"\.claude/hooks|settings\.local\.json")
 
-# Kommandos, die diese Pfade nur LESEN. `awk` fehlt bewusst (`print > datei`
-# schreibt). `git` steht hier DRIN: die frueher gewaehlte Ausnahme sollte
-# `git checkout -- <hook>` verhindern, hat das aber nie geleistet
-# (`git checkout main -- .`, `git stash`, `git restore .` kommen ohne den Pfad
-# aus und liefen durch) — sie kostete nur Reibung: `git add .claude/hooks/...`
-# war unmoeglich, das Versionieren des Gates brauchte ein pfadfreies
-# `git add -A`. Reibung ohne Schutz ist es nicht wert.
+# Kommandos, die die geschuetzten Pfade nur LESEN. `awk` fehlt bewusst
+# (`print > datei` schreibt). `git` steht drin: die fruehere Ausnahme sollte
+# `git checkout -- <hook>` verhindern, hat das nie geleistet (`git checkout
+# main -- .`, `git stash`, `git restore .` kommen ohne den Pfad aus) und machte
+# nur das Versionieren des Gates unmoeglich. Dass `git` damit den Hook auf einen
+# aelteren Stand zuruecksetzen kann, ist eine bewusst offene Klasse.
 READONLY_CMDS = frozenset({
     "cat", "head", "tail", "less", "more", "grep", "rg", "ls", "stat", "wc",
     "diff", "cmp", "md5sum", "sha256sum", "file", "realpath", "dirname",
     "basename", "sort", "uniq", "cut", "jq", "git",
 })
 
-# Kommandos, die als erstes Wort eines Teilkommandos gesperrt sind. Geprueft
-# wird der BASENAME des Tokens, `/usr/bin/sudo` und `"sudo"` zaehlen also mit.
 BLOCKED_COMMANDS = {
     "sudo": "`sudo` ist gesperrt — Host-Administration laeuft ueber Alrik, nicht ueber den Executor.",
     "doas": "`doas` ist gesperrt — siehe `sudo`.",
@@ -75,10 +71,17 @@ SHELLS = ("bash", "sh", "zsh")
 DOWNLOADERS = ("curl", "wget")
 
 OPERATORS = (";", "&&", "||", "|", "&")
+REDIRECTS = (">", ">>", ">|", "&>", "&>>", "<", "<<", "<<<")
+
+# git-Flags, die einen WERT nach sich ziehen. Ohne die Liste laese
+# `git -C <dir> push …` das Verzeichnis als Subkommando und alle git-Regeln
+# waeren aus.
+GIT_VALUE_FLAGS = ("-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--namespace")
+
+HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
 def emit(decision, reason):
-    # Kompakte Separatoren: der Wrapper prueft die Entscheidung als Substring.
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -91,93 +94,144 @@ def emit(decision, reason):
 
 def is_safe_path(p):
     """Absolute Pfade nur unter den Wegwerf-/Projekt-Wurzeln gelten als sicher.
-    Relative Pfade sind sicher, weil das cwd das Projekt ist."""
-    if p.startswith("~"):
-        return False
+    Relative Pfade sind sicher, weil das cwd das Projekt ist. `~` wird aufgeloest,
+    damit `~/dashboard/out.log` nicht faelschlich als Systempfad gilt."""
+    p = os.path.expanduser(p)
     if not p.startswith("/"):
         return True
     p = os.path.normpath(p)
+    if p in ("/home/dev/.claude", "/home/dev/dashboard/.claude"):
+        return False
     return any(p.startswith(pref) or p + "/" == pref for pref in SAFE_PREFIXES)
 
 
-def lex(line):
-    """Eine Zeile in Tokens zerlegen; Operatoren kommen als eigene Tokens."""
-    lx = shlex.shlex(line, posix=True, punctuation_chars=True)
+def try_lex(text):
+    """Tokens oder None, wenn der Text (noch) nicht lexbar ist."""
+    lx = shlex.shlex(text, posix=True, punctuation_chars=True)
     lx.whitespace_split = True
     try:
         return list(lx)
     except ValueError:
-        emit("deny", "Kommando nicht parsebar (unbalancierte Quotes) — fail-closed.")
+        return None
+
+
+def logical_lines(cmd):
+    """Physische Zeilen zu logischen Kommandozeilen zusammenfassen.
+
+    Der Zeilen-Split ist noetig, weil `shlex` `\\n` als gewoehnlichen Whitespace
+    behandelt: ohne ihn waere ein mehrzeiliger Block EIN Segment und alles ab
+    Zeile 2 entkaeme allen Regeln (`echo start\\nrm -rf /etc/nginx`).
+
+    Er darf aber nicht MITTEN in ein Argument schneiden. Drei Faelle:
+      - Backslash-Fortsetzung (`npx vitest run \\`),
+      - mehrzeilige gequotete Argumente (`git commit -m 'Absatz eins\\n\\nzwei'`),
+      - Heredocs (`cat > x.md <<'EOF' … EOF`).
+    Die ersten beiden werden mit der Folgezeile zusammengehaengt, bis der Text
+    lexbar ist; der Heredoc-RUMPF wird uebersprungen — er ist Daten, kein
+    Kommando. Ohne das lehnte das Gate genau die Arbeit ab, die es durchlassen
+    soll: mehrabsaetzige Commit-Messages, `gh pr create --body '…'` und jede
+    Doku, die `docker compose` erwaehnt.
+    """
+    raw = cmd.replace("\r\n", "\n").split("\n")
+    out = []
+    i = 0
+    while i < len(raw):
+        line = raw[i]
+        while line.rstrip().endswith("\\") and i + 1 < len(raw):
+            line = line.rstrip()[:-1] + " " + raw[i + 1]
+            i += 1
+        while try_lex(line) is None and i + 1 < len(raw):
+            i += 1
+            line = line + "\n" + raw[i]
+        if line.strip():
+            out.append(line)
+        m = HEREDOC_RE.search(line)
+        if m:
+            delim = m.group(2)
+            i += 1
+            while i < len(raw) and raw[i].strip() != delim:
+                i += 1
+        i += 1
+    return out
 
 
 def segments(cmd):
-    """Kommando in Teilkommandos zerlegen.
-
-    ZEILENWEISE zuerst: `shlex` behandelt `\\n` als gewoehnlichen Whitespace und
-    gibt ihn NIE als Token zurueck. Ein mehrzeiliger Block war dadurch EIN
-    Segment, dessen `base` das erste Wort der ersten Zeile ist — alles ab Zeile 2
-    entkam saemtlichen Token-Regeln (`echo start\\nrm -rf /etc/nginx` lief
-    durch). Mehrzeilige Bloecke sind fuer das Bash-Tool der Normalfall, nicht
-    die Ausnahme.
-
-    Danach je Zeile am Shell-Lexer trennen — NICHT per Regex-Split: der zerriss
-    Klammern INNERHALB von Quotes und lehnte `python3 -c "open(...)"` oder
-    `awk '{print $1}'` faelschlich ab.
-
-    Rueckgabe: Liste von Token-Listen, fuehrende ENV-Zuweisungen abgestreift.
-    """
+    """Liste von (vorheriger Operator, Tokens). ENV-Zuweisungen und fuehrende
+    Redirects werden abgestreift — `> /tmp/log sudo -n id` haette sonst `>` als
+    Kommando gelesen und jede Regel des Segments abgeschaltet."""
     out = []
-    for line in cmd.splitlines():
-        if not line.strip():
-            continue
-        segs, cur = [], []
-        for t in lex(line):
+    for line in logical_lines(cmd):
+        toks = try_lex(line)
+        if toks is None:
+            emit("deny", "Kommando nicht parsebar (unbalancierte Quotes) — fail-closed.")
+        cur, prev_op = [], None
+        pending_op = None
+        for t in toks:
             if t in OPERATORS:
                 if cur:
-                    segs.append(cur)
-                cur = []
-            elif t in ("(", ")"):
+                    out.append((prev_op, cur))
+                cur, prev_op = [], t
+                pending_op = t
                 continue
-            else:
-                cur.append(t)
+            if t in ("(", ")"):
+                continue
+            cur.append(t)
         if cur:
-            segs.append(cur)
-        for s in segs:
-            while s and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", s[0]):
-                s = s[1:]
-            if s:
-                out.append(s)
-    return out
+            out.append((prev_op, cur))
+        _ = pending_op
+
+    cleaned = []
+    for op, s in out:
+        while s and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", s[0]):
+            s = s[1:]
+        # `> /tmp/log cmd` und `2> /tmp/log cmd`. Der Lexer liefert die
+        # Dateideskriptor-Ziffer als EIGENES Token, deshalb beide Formen.
+        while True:
+            if len(s) >= 2 and s[0] in REDIRECTS:
+                s = s[2:]
+            elif len(s) >= 3 and re.fullmatch(r"\d+", s[0]) and s[1] in REDIRECTS:
+                s = s[3:]
+            else:
+                break
+        if s:
+            cleaned.append((op, s))
+    return cleaned
+
+
+def git_subcommand(rest):
+    """Erstes Nicht-Flag-Token, aber Flags MIT WERT ueberspringen."""
+    i = 0
+    while i < len(rest):
+        t = rest[i]
+        if t in GIT_VALUE_FLAGS:
+            i += 2
+            continue
+        if t.startswith("-"):
+            i += 1
+            continue
+        return t
+    return ""
 
 
 def check(cmd):
     segs = segments(cmd)
 
-    # `curl … | sh` — geprueft am Segment, nicht am Rohtext. Die fruehere
-    # Rohtext-Regex hielt `cat /tmp/a | grep foo.sh` faelschlich fuer eine
-    # Shell-Pipe, weil `\bsh\b` auch in Dateinamen trifft.
-    for i, toks in enumerate(segs[:-1]):
-        if os.path.basename(toks[0]) in DOWNLOADERS:
-            nxt = os.path.basename(segs[i + 1][0])
-            if nxt in SHELLS:
+    # `curl … | sh` — nur bei einer echten Pipe. Die fruehere Rohtext-Regex hielt
+    # `cat /tmp/a | grep foo.sh` fuer eine Shell-Pipe; die reine Nachbarschaft
+    # ohne Operator-Pruefung sperrte `curl -sf http://x/health && bash script.sh`.
+    for i in range(len(segs) - 1):
+        if os.path.basename(segs[i][1][0]) in DOWNLOADERS:
+            nxt_op, nxt = segs[i + 1]
+            if nxt_op == "|" and os.path.basename(nxt[0]) in SHELLS:
                 return "deny", "Download nach Shell-Pipe (`curl|bash`) — nicht auditierbar, gesperrt."
 
-    for toks in segs:
+    for _op, toks in segs:
         base = os.path.basename(toks[0])
         rest = toks[1:]
 
-        # Gesperrte Kommandos am Segmentanfang. Der BASENAME faengt auch
-        # `/usr/bin/sudo`; Quotes hat der Lexer bereits entfernt. Bewusst KEIN
-        # Rohtext-Treffer mehr: der lehnte jede Erwaehnung ab — `grep -rn docker
-        # CLAUDE.md`, `git commit -m 'fix: sudo handling'` oder ein
-        # `gh pr create --body '… docker compose …'` waren nicht ausfuehrbar.
         if base in BLOCKED_COMMANDS:
             return "deny", BLOCKED_COMMANDS[base]
 
-        # Selbstschutz: zeigt ein Token auf Hook-Skripte oder die Settings, ist
-        # nur eine kleine Menge reiner Lese-Kommandos zugelassen. Substring-
-        # Treffer, erfasst also auch Pfade INNERHALB von Quotes, z.B.
-        # `python3 -c "open('.claude/hooks/bash-gate.py','w')"`.
         if any(PROTECTED_RE.search(t) for t in toks):
             if base not in READONLY_CMDS:
                 return "deny", (
@@ -186,9 +240,6 @@ def check(cmd):
                     "sich nicht selbst entschaerfen. Aenderungen macht Alrik."
                 )
 
-        # `bash -c "<kommando>"` versteckt das eigentliche Kommando in einem
-        # String-Argument. Nutzlast rekursiv durch dasselbe Gate schicken.
-        # Kombinierte Flags (`-lc`, `-ic`) zaehlen mit.
         if base in SHELLS:
             for i, t in enumerate(rest):
                 if re.match(r"^-[a-z]*c$", t) and i + 1 < len(rest):
@@ -198,22 +249,25 @@ def check(cmd):
                     break
 
         if base == "git":
-            sub = next((t for t in rest if not t.startswith("-")), "")
+            sub = git_subcommand(rest)
             if sub == "push":
                 if any(t in ("--force", "-f", "--force-with-lease", "--mirror") or
                        t.startswith("--force-with-lease=") for t in rest):
                     return "deny", "`git push --force` — ueberschreibt fremde Historie, gesperrt."
                 for t in rest:
                     ref = t.split(":")[-1].lstrip("+")
-                    if ref in ("main", "master") or ref.endswith("/main") or ref.endswith("/master"):
+                    if ref in ("main", "master", "HEAD") or ref.endswith("/main") or ref.endswith("/master"):
                         return "deny", "Direkter Push nach `main`/`master` — Aenderungen laufen ueber PR + Merge durch Alrik (Gate 3)."
                 # Nackter `git push` schiebt den aktuellen Branch — auf `main`
-                # also ein Direktpush. Das Gate kennt den Branch nicht, deshalb
-                # wird die Ziel-Angabe verlangt.
-                if not [t for t in rest if not t.startswith("-") and t != "push"]:
+                # also ein Direktpush, und das Gate kennt den Branch nicht.
+                # `--dry-run`/`-n` sind ausgenommen: das schreibt nichts, und
+                # die Regel ohne diese Ausnahme sperrte den read-only Check.
+                dry = any(t in ("--dry-run", "-n") for t in rest)
+                targets = [t for t in rest if not t.startswith("-") and t != "push"]
+                if not dry and not targets:
                     return "deny", (
                         "`git push` ohne Ziel — auf `main` waere das ein Direktpush. "
-                        "Bitte Remote und Branch ausdruecklich nennen."
+                        "Bitte Remote und Branch ausdruecklich nennen (oder `--dry-run`)."
                     )
             if sub == "reset" and "--hard" in rest:
                 return "deny", "`git reset --hard` — verwirft nicht committete Arbeit unwiederbringlich."
@@ -232,7 +286,7 @@ def check(cmd):
             args = [t for t in rest if not t.startswith("-")]
             if recursive or force:
                 for a in args:
-                    if a in ("/", "~") or a.startswith("~") or not is_safe_path(a):
+                    if a in ("/", "~") or not is_safe_path(a):
                         return "deny", f"`rm -rf` auf `{a}` — ausserhalb von Projekt/Wegwerf-Pfaden; mehrdeutig, deshalb gesperrt."
                     if "*" in a and a.startswith("/"):
                         return "deny", f"`rm -rf` mit Glob auf absolutem Pfad (`{a}`) — Treffermenge nicht vorhersehbar."
@@ -242,8 +296,6 @@ def check(cmd):
                 if (a.startswith("/") or a.startswith("~")) and not is_safe_path(a):
                     return "deny", f"`{base}` auf Systempfad `{a}` — gesperrt."
 
-        # Schreib-Redirects in Systempfade. `>|` und `&>` werden vom Lexer als
-        # eigene Interpunktions-Tokens geliefert und zaehlen mit.
         for i, t in enumerate(toks):
             if t in (">", ">>", ">|", "&>", "&>>") and i + 1 < len(toks):
                 target = toks[i + 1]

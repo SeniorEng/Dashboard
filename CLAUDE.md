@@ -188,9 +188,20 @@ Wichtig für Änderungen: **`permissions.ask` muss leer bleiben.** Gemessen gilt
 eine `ask`-Regel NICHT aufheben. Der Hook ERSETZT die `ask`-Liste; kommt sie
 zurück, prompten ihre Muster wieder, egal was der Hook sagt. Das `deny`-Array
 bleibt als zweite Lage, weil es ein Hook-`allow` schlägt und damit auch einen
-Fehler im Hook abfängt. Der Hook schützt sich selbst (schreibender Zugriff auf
-`.claude/hooks/**` und `settings.local.json` ist gesperrt, Edit/Write auf
-`.claude/**` ebenso) — Änderungen daran macht Alrik.
+Fehler im Hook abfängt.
+
+Der Hook schützt sich **teilweise** selbst: Bash-Kommandos, die `.claude/hooks/**`
+oder `settings.local.json` schreiben, sind gesperrt, Edit/Write auf `.claude/**`
+ebenso — Änderungen daran macht Alrik, und praktisch heißt das: die Dateien
+werden außerhalb dieses Verzeichnisses gebaut, geprüft und dann von Hand
+hineinkopiert. **Nicht** gesperrt sind Wege, die den Pfad nicht buchstäblich
+nennen: `mv .claude .claude-off`, `rm -rf .claude` und — seit der Versionierung
+neu — `git checkout <alter-commit> -- .claude/hooks/bash-gate.py`, also das
+Zurücksetzen auf eine schwächere Gate-Version. `git` steht bewusst in der
+Lese-Allowlist, weil die frühere Ausnahme nichts schützte (`git checkout main
+-- .`, `git stash`, `git restore .` kommen ohne den Pfad aus) und nur das
+Versionieren unmöglich machte. Das ist derselbe Stolperdraht-Anspruch wie oben,
+kein Widerspruch dazu.
 
 ## Integrationstests lokal fahren
 

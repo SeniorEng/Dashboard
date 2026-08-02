@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # PreToolUse-Gate fuer das Bash-Tool (matcher: "Bash").
 #
 # STOLPERDRAHT GEGEN VERSEHEN — KEIN SANDBOX-ERSATZ. Details und die bewusst
