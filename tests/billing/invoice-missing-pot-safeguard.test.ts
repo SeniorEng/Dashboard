@@ -39,6 +39,7 @@ import {
   cleanupCustomer,
   runCleanup,
 } from "../test-utils";
+import { billingReferenceDate, billingReferenceMonth } from "../helpers/billing-month";
 
 const POT_CAPACITY_CENTS = 13100; // §45b gesetzliches Monats-Maximum
 const APPT_MINUTES = 30;
@@ -112,7 +113,7 @@ async function setupSinglePotCustomer(monthStartIso: string): Promise<number> {
 
 /** Legt einen vergangenen Werktags-Alltagsbegleitung-Termin im Monat an. */
 async function createAppt(customerId: number, year: number, month: number, tag: string): Promise<{ id: number; date: string; time: string }> {
-  const today = new Date();
+  const today = billingReferenceDate();
   const lastDay = new Date(year, month, 0).getDate();
   for (let day = lastDay; day >= 1; day--) {
     const cand = new Date(year, month - 1, day);
@@ -193,9 +194,7 @@ afterAll(async () => {
 
 describe("Task #1096 — 'Missing Budget Pot'-Invariante (End-to-End)", () => {
   it("Negativ: Kassen-Rechnung ohne auflösbaren Topf → 400 + invoice_creation_pot_unresolved-Audit", async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const { year, month } = billingReferenceMonth();
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
     const customerId = await setupSinglePotCustomer(monthStart);
@@ -242,9 +241,7 @@ describe("Task #1096 — 'Missing Budget Pot'-Invariante (End-to-End)", () => {
   }, 180_000);
 
   it("Positiv: Single-§45b-Kassenrechnung wird erstellt und mit budgetType gestempelt", async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const { year, month } = billingReferenceMonth();
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
     const customerId = await setupSinglePotCustomer(monthStart);

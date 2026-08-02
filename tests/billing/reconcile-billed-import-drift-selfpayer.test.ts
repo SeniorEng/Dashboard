@@ -55,6 +55,7 @@ import {
   cleanupCustomer,
   runCleanup,
 } from "../test-utils";
+import { billingReferenceDate, billingReferenceMonth } from "../helpers/billing-month";
 
 const AB_HOURLY_CENTS = 4200; // Alltagsbegleitung, siehe scripts/seed-test-reference-data.ts
 const APPT_MINUTES = 60;
@@ -118,7 +119,7 @@ async function setupSelfPayerCustomer(): Promise<number> {
 
 /** Legt einen Alltagsbegleitung-Termin in einem freien Werktags-Slot an. */
 async function createAppt(year: number, month: number): Promise<{ id: number; date: string; time: string }> {
-  const today = new Date();
+  const today = billingReferenceDate();
   const lastDay = new Date(year, month, 0).getDate();
   for (let day = lastDay; day >= 1; day--) {
     const cand = new Date(year, month - 1, day);
@@ -237,9 +238,7 @@ beforeAll(async () => {
     .limit(1);
   superadminId = sa?.id ?? auth.user.id;
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
+  const { year, month } = billingReferenceMonth();
 
   customerId = await setupSelfPayerCustomer();
 

@@ -63,6 +63,7 @@ import {
   uniqueId,
   cleanupCustomer,
 } from "../test-utils";
+import { billingReferenceDate, billingReferenceMonth } from "../helpers/billing-month";
 
 const AB_HOURLY_CENTS = 4200; // Alltagsbegleitung, siehe scripts/seed-test-reference-data.ts
 
@@ -182,7 +183,7 @@ async function setupPrivateOverflowCustomer(label: string, monthStartIso: string
 /** Legt einen langen Alltagsbegleitung-Termin in einem freien (vergangenen)
  *  Werktags-Slot an. */
 async function createAppt(customerId: number, year: number, month: number): Promise<{ id: number; date: string; time: string }> {
-  const today = new Date();
+  const today = billingReferenceDate();
   const lastDay = new Date(year, month, 0).getDate();
   for (let day = lastDay; day >= 1; day--) {
     const cand = new Date(year, month - 1, day);
@@ -401,9 +402,7 @@ beforeAll(async () => {
     .returning({ id: importBatches.id });
   importBatchId = batch.id;
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
+  const { year, month } = billingReferenceMonth();
   const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
   // Seriell seeden — dieselbe Mitarbeiter-Zuweisung teilt sich die Slots.

@@ -40,6 +40,15 @@ services:
     # Exakt der CI-Tag — kein Minor-Pin, damit lokal und CI dieselbe Version
     # ziehen. Weicht der eine ab, weicht auch das Testverhalten ab.
     image: postgres:16
+    # Der Stack läuft PERSISTENT: der Routine-Loop des Executors darf kein
+    # `docker`/`sudo` mehr brauchen (passwortloses sudo für `dev` entfällt).
+    # `unless-stopped` bringt den Postgres nach Host-Reboot und Docker-Restart
+    # von selbst zurück, respektiert aber ein ausdrückliches `docker stop`.
+    # Unkritisch trotz tmpfs: beim Neustart ist das Datenverzeichnis leer, das
+    # Image führt `initdb` erneut aus, und der Orchestrator legt Schema, Seeds
+    # und Template-Cache pro Lauf ohnehin neu an — er verliert höchstens den
+    # warmen Cache, nie einen Zustand, auf den ein Test sich verlässt.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -61,6 +70,12 @@ services:
       - /var/lib/postgresql/data:size=2g
 
   neon-proxy:
+    # BEWUSST OHNE `restart`-Policy — anders als der Postgres oben. Ihn braucht
+    # nur der 1:1-CI-Nachbau (Fallback), und der ist ein administrativer
+    # Einzelaufruf mit `sudo`. Der Orchestrator-Pfad wählt ihn per `DB_DRIVER=pg`
+    # ausdrücklich ab (`scripts/with-ephemeral-db.ts` nennt weder Proxy noch
+    # Port 4444), also gehört er nicht in den dauerhaft laufenden Teil.
+    #
     # Der Neon-Serverless-Treiber (server/lib/db.ts, DB_DRIVER=neon als Default)
     # spricht nur Secure-WS und kann sich nicht direkt mit Postgres verbinden.
     # Ohne diesen Proxy bootet der App-Server nicht.

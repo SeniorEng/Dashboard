@@ -47,6 +47,7 @@ import {
   cleanupCustomer,
   runCleanup,
 } from "../test-utils";
+import { billingReferenceDate, billingReferenceMonth } from "../helpers/billing-month";
 
 const AB_HOURLY_CENTS = 4200; // Alltagsbegleitung, siehe scripts/seed-test-reference-data.ts
 
@@ -129,7 +130,7 @@ async function setupCustomer(limit45bCents: number, monthStartIso: string): Prom
 /** Sucht einen freien (vergangenen) Werktags-Slot im Monat und legt dort einen
  *  Alltagsbegleitung-Termin der gewünschten Dauer an. */
 async function createAppt(customerId: number, year: number, month: number, durationMinutes: number): Promise<{ id: number; date: string; time: string }> {
-  const today = new Date();
+  const today = billingReferenceDate();
   const lastDay = new Date(year, month, 0).getDate();
   for (let day = lastDay; day >= 1; day--) {
     const cand = new Date(year, month - 1, day);
@@ -228,9 +229,7 @@ afterAll(async () => {
 
 describe("Storno-dann-Neuabrechnung — echter API-Flow (Task #1013)", () => {
   it("T1 — gemischt live(§45b) + storniert(§45a): genau EINE Kasse-Rechnung, keine §45a-Phantom-Rechnung", async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const { year, month } = billingReferenceMonth();
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
     // §45b niedrig (5000) → 90-min-AB-Termin (6300) läuft in §45a über.
@@ -266,9 +265,7 @@ describe("Storno-dann-Neuabrechnung — echter API-Flow (Task #1013)", () => {
   }, 120_000);
 
   it("T2 — Einzeltopf netto null (§45b storniert): Re-Derivation auf §45b, KEIN Selbstzahler-Fallback", async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const { year, month } = billingReferenceMonth();
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
     // §45b komfortabel (13100) → 30-min-AB-Termin (2100) passt komplett rein.
