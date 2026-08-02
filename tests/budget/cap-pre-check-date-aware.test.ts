@@ -18,6 +18,7 @@ import { appointments, appointmentServices } from "@shared/schema";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { getAuthCookie, runCleanup, apiGet } from "../test-utils";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -26,29 +27,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await runCleanup();
 });
-
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
 
 function weekdayInNextMonth(): string {
   const next = new Date();
@@ -89,7 +67,7 @@ describe("Task #425 — §45b Pre-Check ist date-aware (Jahrestopf-Modell)", () 
       },
       appointments: [
         {
-          date: weekdayInCurrentMonth(),
+          date: pastWeekdayInBillingMonth(),
           scheduledStart: "09:00",
           services: [{ code: "hauswirtschaft", durationMinutes: 60 }],
           document: true,
@@ -105,7 +83,7 @@ describe("Task #425 — §45b Pre-Check ist date-aware (Jahrestopf-Modell)", () 
   });
 
   it("erlaubt 60min-HW im AKTUELLEN Monat solange Topf-Verfügbarkeit reicht (kein Monats-Cap mehr)", async () => {
-    const date = weekdayInCurrentMonth();
+    const date = pastWeekdayInBillingMonth();
     const [appt] = await db.insert(appointments).values({
       customerId: scenario.customerId,
       assignedEmployeeId: employeeId,

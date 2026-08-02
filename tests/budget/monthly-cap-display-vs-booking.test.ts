@@ -32,6 +32,7 @@ import {
   setupBudgetScenario,
   type BudgetScenarioHandle,
 } from "../helpers/budget-scenarios";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -41,28 +42,10 @@ afterAll(async () => {
   await runCleanup();
 });
 
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
+// Anker-Termindatum: die Lese-Pfade MÜSSEN denselben Stichtag verwenden, sonst
+// zeigt der Overview-Reader (Default `todayISO()`) in einen anderen Monat als
+// der Termin liegt und `currentMonthUsedCents` bleibt 0.
+const APPT_DATE = pastWeekdayInBillingMonth();
 
 describe("Task #425 — §45b Jahrestopf: Anzeige == Buchung", () => {
   let scenario: BudgetScenarioHandle;
@@ -89,7 +72,7 @@ describe("Task #425 — §45b Jahrestopf: Anzeige == Buchung", () => {
       },
       appointments: [
         {
-          date: weekdayInCurrentMonth(),
+          date: APPT_DATE,
           scheduledStart: "09:00",
           services: [{ code: "hauswirtschaft", durationMinutes: 60 }],
           document: true,
@@ -104,7 +87,7 @@ describe("Task #425 — §45b Jahrestopf: Anzeige == Buchung", () => {
   });
 
   it("Overview liefert monthlyLimitCents=null und currentMonthAvailableCents==availableCents", async () => {
-    const res = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    const res = await apiGet<any>(`/api/budget/${scenario.customerId}/overview?date=${APPT_DATE}`);
     expect(res.status).toBe(200);
     const s45b = res.data.entlastungsbetrag45b;
 

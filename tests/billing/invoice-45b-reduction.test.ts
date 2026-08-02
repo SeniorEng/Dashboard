@@ -41,6 +41,7 @@ import {
   setupBudgetScenario,
   type BudgetScenarioHandle,
 } from "../helpers/budget-scenarios";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 const POT_45B = "entlastungsbetrag_45b";
 const POT_45A = "umwandlung_45a";
@@ -53,25 +54,6 @@ const OVERFLOW_CENTS = APPT_COST_CENTS - PAID_CENTS; // 3600 → Ziel-Topf.
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 const handles: BudgetScenarioHandle[] = [];
-
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Jüngster vergangener Werktag im (aktuellen) Monat — deterministisches,
- *  dokumentierbares Termindatum (kein Wochenende, nicht in der Zukunft). */
-function latestPastWeekday(year: number, month: number): string {
-  const today = new Date();
-  const isCurrentMonth = year === today.getFullYear() && month === today.getMonth() + 1;
-  const lastDay = new Date(year, month, 0).getDate();
-  const maxDay = isCurrentMonth ? today.getDate() : lastDay;
-  for (let d = maxDay; d >= 1; d--) {
-    const cand = new Date(year, month - 1, d);
-    const dow = cand.getDay();
-    if (dow !== 0 && dow !== 6) return ymd(cand);
-  }
-  throw new Error(`kein vergangener Werktag in ${month}/${year}`);
-}
 
 interface ScenarioTypeSpec {
   type: typeof POT_45A | "ersatzpflege_39_42a";
@@ -87,11 +69,9 @@ async function setupScenario(opts: {
   acceptsPrivatePayment: boolean;
   targetType?: ScenarioTypeSpec;
 }): Promise<{ handle: BudgetScenarioHandle; date: string; year: number; month: number }> {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
+  const { year, month } = billingReferenceMonth();
   const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-  const date = latestPastWeekday(year, month);
+  const date = pastWeekdayInBillingMonth();
 
   const types = [
     { type: POT_45B, enabled: true, priority: 1, monthlyLimitCents: 13100 },

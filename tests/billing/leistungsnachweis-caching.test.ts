@@ -28,31 +28,9 @@ import {
   getAuthCookie,
 } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
-
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
 
 let scenario: BudgetScenarioHandle;
 let authCookie: string;
@@ -63,7 +41,7 @@ const cleanupInvoiceIds: number[] = [];
 beforeAll(async () => {
   const auth = await getAuthCookie();
   authCookie = auth.cookie;
-  const apptDate = weekdayInCurrentMonth();
+  const apptDate = pastWeekdayInBillingMonth();
   scenario = await setupBudgetScenario({
     customerNamePrefix: "LNC",
     pflegegrad: 3,
@@ -87,9 +65,7 @@ beforeAll(async () => {
 
   // LN signieren und Rechnung generieren — einmalig, sodass alle weiteren
   // Tests auf der gleichen Rechnung arbeiten können.
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
+  const { year, month } = billingReferenceMonth();
   const sr = await apiPost<any>("/api/service-records", {
     customerId: scenario.customerId,
     employeeId: scenario.employeeId,

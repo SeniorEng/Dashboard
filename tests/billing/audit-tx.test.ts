@@ -34,23 +34,9 @@ import {
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { db } from "../../server/lib/db";
 import { sql } from "drizzle-orm";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
-
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
 
 async function countAuditEntries(action: string, entityId: number): Promise<number> {
   const res = await db.execute(sql`
@@ -111,9 +97,7 @@ let createdInvoiceIdA = 0;
 let createdInvoiceIdB = 0;
 
 async function createSignedSr(scenario: BudgetScenarioHandle): Promise<{ year: number; month: number }> {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
+  const { year, month } = billingReferenceMonth();
   const srRes = await apiPost<any>("/api/service-records", {
     customerId: scenario.customerId,
     employeeId: scenario.employeeId,
@@ -134,7 +118,7 @@ async function createSignedSr(scenario: BudgetScenarioHandle): Promise<{ year: n
 
 beforeAll(async () => {
   await getAuthCookie();
-  const apptDate = weekdayInCurrentMonth();
+  const apptDate = pastWeekdayInBillingMonth();
   const baseSpec = {
     pflegegrad: 3 as const,
     billingType: "selbstzahler" as const,
