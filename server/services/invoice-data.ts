@@ -10,7 +10,7 @@ import { FINAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, budgetTransactions } from "@shared/schema";
 import { eq, and, isNull, inArray, notInArray, ne, desc, or, gte, lt, lte, sql } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
-import { db, type DbOrTx } from "../lib/db";
+import { db, type DbOrTx, type Tx } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
 import { loadCustomerPriceContext } from "../storage/pricing/price-for";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
@@ -92,8 +92,8 @@ const BILLING_LOCK_NAMESPACE = 1892;
  * verschiedene Monate desselben Kunden serialisieren — sie können dieselben
  * Termine betreffen.
  */
-export async function lockCustomerForBilling(client: DbOrTx, customerId: number): Promise<void> {
-  await client.execute(
+export async function lockCustomerForBilling(tx: Tx, customerId: number): Promise<void> {
+  await tx.execute(
     sql`SELECT pg_advisory_xact_lock(${BILLING_LOCK_NAMESPACE}::int, ${customerId}::int)`,
   );
 }
@@ -116,11 +116,11 @@ export async function lockCustomerForBilling(client: DbOrTx, customerId: number)
  * zweiter Begriff.
  */
 export async function assertAppointmentsNotYetInvoiced(
-  client: DbOrTx,
+  tx: Tx,
   appointmentIds: readonly number[],
 ): Promise<void> {
   if (appointmentIds.length === 0) return;
-  const already = await getAlreadyInvoicedAppointmentIds(appointmentIds, client);
+  const already = await getAlreadyInvoicedAppointmentIds(appointmentIds, tx);
   if (already.length > 0) {
     throw badRequest(BILLING_BLOCK_MESSAGES.already_billed);
   }

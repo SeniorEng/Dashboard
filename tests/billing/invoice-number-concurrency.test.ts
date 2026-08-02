@@ -262,7 +262,7 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
   // (`pg_advisory_xact_lock(1892, customerId)`) und laufen deshalb weiterhin
   // ECHT konkurrent gegen den gemeinsamen Nummernkreis — der Wettlauf um die
   // Nummer bleibt also erhalten, der um dieselben Termine verschwindet. Den
-  // gleichen-Kunden-Fall deckt INC-3.1 mit der jetzt richtigen Erwartung ab.
+  // gleichen-Kunden-Fall deckt INC-4.1 mit der jetzt richtigen Erwartung ab.
   it("INC-1.1 — 10 parallele POST /api/billing/generate für 10 VERSCHIEDENE Kunden vergeben 10 eindeutige, lückenlose Nummern (kein 500/UNIQUE)", async () => {
     const prepared: PreparedInvoiceCustomer[] = [];
     for (let i = 0; i < 10; i++) {
@@ -527,8 +527,8 @@ describe("INC-3: Storno-Atomarität bei injiziertem Fehler", () => {
   }, 60_000);
 });
 
-describe("INC-3: Idempotenz-Sperre unter Nebenläufigkeit", () => {
-  it("INC-3.1 — zwei gleichzeitige generate für DENSELBEN Kunden erzeugen GENAU EINE Rechnung; der zweite läuft in already_billed", async () => {
+describe("INC-4: Idempotenz-Sperre unter Nebenläufigkeit", () => {
+  it("INC-4.1 — zwei gleichzeitige generate für DENSELBEN Kunden erzeugen GENAU EINE Rechnung; der zweite läuft in already_billed", async () => {
     const prepared = await prepareCustomerForInvoice("RACE");
 
     type GenResult = { status: number; data: GenerateResponse | InvoiceLite | { message?: string } };
