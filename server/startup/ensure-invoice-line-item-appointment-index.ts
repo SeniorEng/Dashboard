@@ -31,22 +31,45 @@ import { log } from "../lib/log";
  * unter `server/startup/**` sind der etablierte Ort für additives DDL.
  *
  * `CREATE INDEX` (ohne `CONCURRENTLY`) nimmt für die Dauer des Aufbaus eine
- * `SHARE`-Sperre auf die Tabelle, blockiert also Schreibvorgänge. Das ist hier
- * vertretbar und bewusst gewählt: Der Aufruf läuft beim Container-Start, bevor
- * Traffic anliegt, `CONCURRENTLY` kann nicht in einer Transaktion laufen und
- * hinterlässt bei Abbruch einen ungültigen Index, der von Hand aufgeräumt
- * werden müsste. Ab dem zweiten Start ist das Statement dank
- * `IF NOT EXISTS` ein No-Op.
+ * `SHARE`-Sperre auf die Tabelle und blockiert damit Schreibvorgänge.
+ *
+ * Die naheliegende Beruhigung „läuft beim Start, bevor Traffic anliegt" stimmt
+ * NICHT und wurde im Review widerlegt: `runStartupTasks()` läuft im
+ * `httpServer.listen`-Callback und wird nicht awaited, der Container nimmt also
+ * bereits Requests an; und weil der Index (korrekterweise) auch im Drizzle-
+ * Modell steht, legt ihn in Prod ohnehin zuerst der Pre-Deploy
+ * (`scripts/migrate.sh` → `drizzle-kit push`) an — während der ALTE Container
+ * vollen Traffic bedient.
+ *
+ * Tragfähig ist nur das zweite Argument: `CONCURRENTLY` hinterlässt bei Abbruch
+ * einen ungültigen Index, der von Hand aufgeräumt werden müsste. Deshalb bleibt
+ * es beim nicht-nebenläufigen Aufbau — aber mit `lock_timeout`. Ohne das würde
+ * sich `CREATE INDEX` hinter einem laufenden Abrechnungslauf in die Lock-Queue
+ * stellen und alle nachfolgenden Schreiber (Rechnungserstellung, Storno) hinter
+ * sich aufstauen, unbegrenzt. Mit Timeout bricht der Versuch nach 5 s ab; der
+ * nächste Boot wiederholt ihn, `IF NOT EXISTS` macht ihn dann zum No-Op.
+ *
+ * `CREATE INDEX` ohne `CONCURRENTLY` darf in einer Transaktion laufen — nur so
+ * greift `SET LOCAL`.
  */
 export const INVOICE_LINE_ITEMS_APPOINTMENT_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS invoice_line_items_appointment_id_idx
     ON invoice_line_items (appointment_id)
 `;
 
+/** Timeout für die `SHARE`-Sperre, siehe Kopf-Kommentar. */
+export const INVOICE_LINE_ITEMS_APPOINTMENT_INDEX_LOCK_TIMEOUT_SQL =
+  `SET LOCAL lock_timeout = '5s'`;
+
 export async function ensureInvoiceLineItemAppointmentIndex(): Promise<void> {
-  try {
-    await db.execute(sql.raw(INVOICE_LINE_ITEMS_APPOINTMENT_INDEX_SQL));
-  } catch (err) {
-    log(`ensureInvoiceLineItemAppointmentIndex: ${err}`, "startup");
-  }
+  // Bewusst KEIN eigenes try/catch: der Aufrufer in `server/index.ts` fängt und
+  // loggt bereits. Zwei Ebenen hätten bedeutet, dass die äußere nie greift und
+  // ein dauerhafter Fehlschlag (z.B. fehlende Rechte) still bleibt, während der
+  // Seq-Scan-Zustand weiterläuft. Gleiches Muster wie
+  // `ensure-audit-parent-deletion.ts`.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql.raw(INVOICE_LINE_ITEMS_APPOINTMENT_INDEX_LOCK_TIMEOUT_SQL));
+    await tx.execute(sql.raw(INVOICE_LINE_ITEMS_APPOINTMENT_INDEX_SQL));
+  });
+  log("ensureInvoiceLineItemAppointmentIndex: invoice_line_items_appointment_id_idx sichergestellt", "startup");
 }
