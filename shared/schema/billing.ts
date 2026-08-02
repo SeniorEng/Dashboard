@@ -170,6 +170,13 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   sortOrder: integer("sort_order").notNull().default(0),
 }, (table) => [
   index("invoice_line_items_invoice_id_idx").on(table.invoiceId),
+  // Task #1892 — Gegenrichtung zum `invoice_id`-Index: seit der zeitraum-blinden
+  // Idempotenz (#24) filtern die heißen Lesepfade ausschließlich über
+  // `appointment_id`. Muss identisch in `server/startup/
+  // ensure-invoice-line-item-appointment-index.ts` stehen — sonst droppt der
+  // nächste `drizzle-kit push` den nur dort angelegten Index wieder (genau das
+  // hat `tests/startup/startup-schema-drift.test.ts` gefangen).
+  index("invoice_line_items_appointment_id_idx").on(table.appointmentId),
 ]);
 
 export const createInvoiceSchema = z.object({

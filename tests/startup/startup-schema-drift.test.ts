@@ -78,6 +78,7 @@ import {
   CUSTOMER_IDEMPOTENCY_UNIQUE_INDEX_SQL,
   CUSTOMER_IDEMPOTENCY_EXPIRES_INDEX_SQL,
 } from "../../server/startup/ensure-customer-idempotency-schema";
+import { INVOICE_LINE_ITEMS_APPOINTMENT_INDEX_SQL } from "../../server/startup/ensure-invoice-line-item-appointment-index";
 import {
   AUDIT_PARENT_DELETION_COLUMN_SQL,
   AUDIT_PARENT_DELETION_INDEX_SQL,
@@ -699,6 +700,15 @@ const INDEX_SOURCES: IndexSource[] = [
     realTable: "invoices",
     drizzleTable: invoices,
     tempColumns: "billing_run_id text",
+  },
+  {
+    // Task #1892 — Index fuer die zeitraum-blinde Idempotenz-Abfrage.
+    label: "ensure-invoice-line-item-appointment-index: invoice_line_items_appointment_id_idx",
+    rawSql: INVOICE_LINE_ITEMS_APPOINTMENT_INDEX_SQL,
+    indexName: "invoice_line_items_appointment_id_idx",
+    realTable: "invoice_line_items",
+    drizzleTable: invoiceLineItems,
+    tempColumns: "appointment_id integer",
   },
   {
     label:
