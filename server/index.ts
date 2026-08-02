@@ -302,6 +302,17 @@ async function runStartupTasks() {
       log(`Idempotency-Schema-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1892 — Index auf `invoice_line_items.appointment_id`. Seit der
+    // zeitraum-blinden Idempotenz (#24) filtern drei heiße Lesepfade nur noch
+    // über diese Spalte; ohne Index ist das ein Seq-Scan pro Aufruf. Rein
+    // additiv, idempotent.
+    const { ensureInvoiceLineItemAppointmentIndex } = await import("./startup/ensure-invoice-line-item-appointment-index");
+    try {
+      await ensureInvoiceLineItemAppointmentIndex();
+    } catch (err) {
+      log(`Index invoice_line_items.appointment_id fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { ensureAuditParentDeletionColumn } = await import("./startup/ensure-audit-parent-deletion");
     try {
       await ensureAuditParentDeletionColumn();
