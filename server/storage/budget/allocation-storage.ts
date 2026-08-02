@@ -9,7 +9,7 @@ import {
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
 import { eq, and, sql, lt, lte, gte, isNull, isNotNull, desc, asc, inArray, or } from "drizzle-orm";
-import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
+import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth, addDays } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 import { formatEuroDE } from "@shared/utils/money";
@@ -1620,6 +1620,18 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
 
 export async function processExpiredCarryover(customerId: number, _tx?: DbClient): Promise<import("@shared/schema").BudgetTransaction[]> {
   const d = _tx ?? db;
+  // §45b-Verfall-as-of — `todayISO()` ist hier RICHTIG und bleibt (geprüft, nicht
+  // übernommen): Die Frage dieser Funktion lautet „welche Frist ist JETZT
+  // abgelaufen", nicht „wie war der Stand zu einem Stichtag". Sie hat keinen
+  // as-of-Parameter und wird als Seiteneffekt aus Buchungs-/Lesepfaden mit
+  // beliebigem `transactionDate` gerufen — ein Buchungsdatum als Kriterium
+  // würde Verfall je nach gebuchtem Termin vor- oder zurückdatieren.
+  // Falsch war nicht das Auswahl-Kriterium, sondern das DATUM der erzeugten
+  // Buchung (siehe `writeOffDate` unten) und dass die Pro-Allocation-Sicht im
+  // `consumption-engine` diese später datierte Zeile ohne as-of-Filter gegen
+  // rückwirkende Buchungen gerechnet hat.
+  // `expiresAt < today` ist strikt: am 30.06. ist der Übertrag noch nutzbar,
+  // erst ab dem 01.07. verfällt er — deckungsgleich zum `writeOffDate`.
   const today = todayISO();
 
   const expiredAllocations = await budgetAllocationsRepo.selectFrom(d)
@@ -1692,10 +1704,23 @@ export async function processExpiredCarryover(customerId: number, _tx?: DbClient
     // schützt auf DB-Ebene gegen doppelte Verfalls-Buchungen pro Allokation.
     // Bei Konflikt liefert RETURNING ein leeres Array, ohne die Transaktion
     // zu poisonieren.
+    // §45b-Verfall-as-of — Der Verfall wird auf den ERSTEN Tag NACH der Frist datiert
+    // (30.06. → 01.07.), nicht auf die Frist selbst.
+    //
+    // §45b Abs. 3 lässt das Guthaben mit ABLAUF des 30.06. verfallen — der
+    // 30.06. gehört also noch zum nutzbaren Fenster, und genau so filtert die
+    // Allocation-Auswahl (`expiresAt >= Stichtag`, einschließend). Ein auf den
+    // 30.06. datierter Write-Off machte den Topf ausgerechnet an seinem letzten
+    // gültigen Tag leer: die Verbrauchs-Summen zählen `transactionDate <=
+    // Stichtag`, der Write-Off fiel damit in den 30.06. selbst und zehrte ihn
+    // auf. Eine legitime 30.06.-Buchung war nach dem Verfallslauf blockiert.
+    // Mit dem 01.07. liegt die Verfallsbuchung erstmals außerhalb des Fensters.
+    const writeOffDate = addDays(allocation.expiresAt!, 1);
+
     const writeOff = await d.insert(budgetTransactions).values({
       customerId,
       budgetType: "entlastungsbetrag_45b",
-      transactionDate: allocation.expiresAt!,
+      transactionDate: writeOffDate,
       transactionType: "write_off",
       amountCents: -remaining,
       allocationId: allocation.id,
