@@ -24,7 +24,6 @@ import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import {
   apiGet,
   getAuthCookie,
-  getTodayDate,
   runCleanup,
 } from "../test-utils";
 import {
@@ -32,6 +31,7 @@ import {
   type BudgetScenarioHandle,
 } from "../helpers/budget-scenarios";
 import { bookConsumption } from "../helpers/budget-booking";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -40,29 +40,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await runCleanup();
 });
-
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
 
 interface OverviewResponse {
   entlastungsbetrag45b: {
@@ -91,7 +68,7 @@ describe("Equality §45b — Cost-Estimate vs ECHTE Engine-Buchung", () => {
   for (const c of cases) {
     it(`[${c.name}] cost-estimate.totalCents == gebuchte Cents UND availableCents-Δ == gebucht`, async () => {
       const auth = await getAuthCookie();
-      const date = weekdayInCurrentMonth();
+      const date = pastWeekdayInBillingMonth();
       const scenario: BudgetScenarioHandle = await setupBudgetScenario({
         customerNamePrefix: "T427-45B",
         pflegegrad: 2,
@@ -118,14 +95,13 @@ describe("Equality §45b — Cost-Estimate vs ECHTE Engine-Buchung", () => {
       });
       try {
         // 1) ANZEIGE vor Buchung
-        const today = getTodayDate();
         const estBefore = await apiGet<EstimateResponse>(
-          `/api/budget/${scenario.customerId}/cost-estimate?date=${today}` +
+          `/api/budget/${scenario.customerId}/cost-estimate?date=${date}` +
             `&hauswirtschaftMinutes=${c.hwMin}&alltagsbegleitungMinutes=${c.abMin}` +
             `&travelKilometers=0&customerKilometers=0`,
         );
         const overviewBefore = await apiGet<OverviewResponse>(
-          `/api/budget/${scenario.customerId}/overview`,
+          `/api/budget/${scenario.customerId}/overview?date=${date}`,
         );
         const displayedTotal = estBefore.data.totalCents;
         const availableBefore = overviewBefore.data.entlastungsbetrag45b.availableCents;
@@ -144,7 +120,7 @@ describe("Equality §45b — Cost-Estimate vs ECHTE Engine-Buchung", () => {
 
         // 3) ANZEIGE nach Buchung
         const overviewAfter = await apiGet<OverviewResponse>(
-          `/api/budget/${scenario.customerId}/overview`,
+          `/api/budget/${scenario.customerId}/overview?date=${date}`,
         );
         const availableAfter = overviewAfter.data.entlastungsbetrag45b.availableCents;
 
@@ -200,7 +176,7 @@ describe("Equality §45b — Monatslimit ist Aufstockungsrate, KEIN Buchungs-Cap
   for (const c of setCases) {
     it(`[${c.name}] §45b bucht voll aus dem akkumulierten Topf, kein Monats-Cap, kein Selbstzahler-Ueberlauf`, async () => {
       const auth = await getAuthCookie();
-      const date = weekdayInCurrentMonth();
+      const date = pastWeekdayInBillingMonth();
       const scenario: BudgetScenarioHandle = await setupBudgetScenario({
         customerNamePrefix: "T45B-NOCAP",
         pflegegrad: 3,
@@ -218,14 +194,13 @@ describe("Equality §45b — Monatslimit ist Aufstockungsrate, KEIN Buchungs-Cap
         initialBalance: { type: "entlastungsbetrag_45b", amountCents: POT_CENTS, validFrom: "2026-01-01" },
       });
       try {
-        const today = getTodayDate();
         const estBefore = await apiGet<EstimateResponse>(
-          `/api/budget/${scenario.customerId}/cost-estimate?date=${today}` +
+          `/api/budget/${scenario.customerId}/cost-estimate?date=${date}` +
             `&hauswirtschaftMinutes=${c.hwMin}&alltagsbegleitungMinutes=0` +
             `&travelKilometers=0&customerKilometers=0`,
         );
         const ov0 = await apiGet<OverviewResponse>(
-          `/api/budget/${scenario.customerId}/overview`,
+          `/api/budget/${scenario.customerId}/overview?date=${date}`,
         );
         const displayedTotal = estBefore.data.totalCents;
         const availBefore = ov0.data.entlastungsbetrag45b.availableCents;
@@ -253,7 +228,7 @@ describe("Equality §45b — Monatslimit ist Aufstockungsrate, KEIN Buchungs-Cap
         });
 
         const ov1 = await apiGet<OverviewResponse>(
-          `/api/budget/${scenario.customerId}/overview`,
+          `/api/budget/${scenario.customerId}/overview?date=${date}`,
         );
         const availAfter = ov1.data.entlastungsbetrag45b.availableCents;
         const monthUsedAfter = ov1.data.entlastungsbetrag45b.currentMonthUsedCents;

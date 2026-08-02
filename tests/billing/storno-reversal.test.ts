@@ -25,36 +25,17 @@ import {
   runCleanup,
 } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
-
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 let scenario: BudgetScenarioHandle;
 const cleanupSrIds: number[] = [];
+// Anker-Termindatum: die Lese-Pfade unten MÜSSEN denselben Stichtag verwenden,
+// sonst zeigt der Overview-Reader (Default `todayISO()`) in einen anderen Monat
+// als der Termin liegt.
+const apptDate = pastWeekdayInBillingMonth();
 
 beforeAll(async () => {
   await getAuthCookie();
-  const apptDate = weekdayInCurrentMonth();
   scenario = await setupBudgetScenario({
     customerNamePrefix: "K2Storno",
     pflegegrad: 3,
@@ -87,9 +68,7 @@ afterAll(async () => {
 
 describe("K2 — Storno reversiert §45b-Budget-Transaktionen", () => {
   it("K2.1 — Nach Storno zeigt §45b currentMonthUsedCents = 0", async () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth() + 1;
+    const { year, month } = billingReferenceMonth();
     const auth = await getAuthCookie();
 
     // LN für aktuellen Monat erzeugen + signieren.
@@ -127,7 +106,7 @@ describe("K2 — Storno reversiert §45b-Budget-Transaktionen", () => {
     expect(kasseInv?.id, "Kassen-/Hauptrechnung muss erzeugt sein").toBeDefined();
 
     // Snapshot vor Storno: §45b ist verbraucht.
-    const beforeRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    const beforeRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview?date=${apptDate}`);
     expect(beforeRes.status).toBe(200);
     const before45b = beforeRes.data.entlastungsbetrag45b;
     expect(before45b.currentMonthUsedCents, "Vor Storno muss §45b Verbrauch > 0 sein").toBeGreaterThan(0);
@@ -137,7 +116,7 @@ describe("K2 — Storno reversiert §45b-Budget-Transaktionen", () => {
     expect(stornoRes.status, `storno: ${JSON.stringify(stornoRes.data)}`).toBe(200);
 
     // Nach Storno (Phase-2 Erwartung): Budget zurückgebucht.
-    const afterRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    const afterRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview?date=${apptDate}`);
     expect(afterRes.status).toBe(200);
     const after45b = afterRes.data.entlastungsbetrag45b;
 

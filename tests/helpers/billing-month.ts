@@ -69,3 +69,44 @@ export function billingReferenceMonth(now: Date = new Date()): {
     month: reference.getMonth() + 1,
   };
 }
+
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Jüngster VERGANGENER Werktag im Abrechnungs-Monat des Ankertags, als
+ * `YYYY-MM-DD`.
+ *
+ * ERSETZT die zwölf wortgleich duplizierten `weekdayInCurrentMonth()`-Kopien in
+ * den Test-Dateien sowie `latestPastWeekday()` in
+ * `tests/billing/invoice-45b-reduction.test.ts`.
+ *
+ * Die Kopien hatten zwei Ausprägungen, beide kalender-fragil:
+ *  - „nur rückwärts, sonst `throw`": kippt am Monatsanfang, wenn es noch keinen
+ *    vergangenen Werktag gibt (01./02.08.2026 = Sa/So).
+ *  - „rückwärts, sonst VORWÄRTS": liefert in genau derselben Lage ein
+ *    ZUKUNFTSDATUM. Das ist die tückischere Variante — die Fixture legt den
+ *    Termin an, aber die as-of-Leser (`transactionDate <= heute`) zählen ihn
+ *    nicht, und der Test scheitert mit „erwartet 3800, war 0" statt mit einem
+ *    Datums-Fehler.
+ *
+ * Weil der Ankertag notfalls in den Vormonat ausweicht, existiert immer ein
+ * vergangener Werktag — die Funktion kann nicht scheitern. Wer zusätzlich Jahr/
+ * Monat braucht (Leistungsnachweis, Rechnungslauf), MUSS sie aus
+ * `billingReferenceMonth()` ziehen und nicht aus `new Date()`, sonst zeigen
+ * Termin und Abrechnungsmonat in verschiedene Monate.
+ */
+export function pastWeekdayInBillingMonth(now: Date = new Date()): string {
+  const ref = billingReferenceDate(now);
+  for (let day = ref.getDate(); day >= 1; day--) {
+    const cand = new Date(ref.getFullYear(), ref.getMonth(), day);
+    const dow = cand.getDay();
+    if (dow !== 0 && dow !== 6) return ymd(cand);
+  }
+  // Unerreichbar: `billingReferenceDate` garantiert >= MIN_PAST_WEEKDAYS.
+  throw new Error(
+    `pastWeekdayInBillingMonth: kein vergangener Werktag in ${ref.getMonth() + 1}/${ref.getFullYear()} — ` +
+      `Ankertag-Invariante verletzt (siehe billing-month.test.ts)`,
+  );
+}

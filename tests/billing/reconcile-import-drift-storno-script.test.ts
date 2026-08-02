@@ -44,30 +44,7 @@ import {
   runCleanup,
   uniqueId,
 } from "../test-utils";
-
-/** Vergangener Werktag im aktuellen Monat (Termin muss abrechenbar sein). */
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 /**
  * Ein vollständig abgerechneter Termin (Pflegekasse). `split:true` erzwingt über
@@ -254,7 +231,7 @@ afterAll(async () => {
 
 describe("Task #1656 — Reparatur-Skript-Pfad storniert sicher, spiegelt SSoT & trägt Skript-Metadaten", () => {
   it("reconcile(dry-run) mutiert nichts; reconcile(--apply) storniert nur Ziel, Storno je Topf, Budget zurück, Audit mit reason/batchId", async () => {
-    const apptDate = weekdayInCurrentMonth();
+    const apptDate = pastWeekdayInBillingMonth();
 
     // --- 1) Ziel-Kunde: abgerechneter Split-Termin. ---
     const { appointmentId, serviceRecordId } = await seedBilledAppointment({

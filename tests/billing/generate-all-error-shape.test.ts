@@ -23,30 +23,16 @@ import {
   runCleanup,
 } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
-
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
 
 let scenario: BudgetScenarioHandle;
 const cleanupSrIds: number[] = [];
 
 beforeAll(async () => {
   await getAuthCookie();
-  const apptDate = weekdayInCurrentMonth();
+  const apptDate = pastWeekdayInBillingMonth();
   scenario = await setupBudgetScenario({
     customerNamePrefix: "Auto_T586",
     pflegegrad: 3,
@@ -71,12 +57,12 @@ beforeAll(async () => {
 
   // Signierter LN ist Voraussetzung dafür, dass der Kunde in
   // `eligible-customers` (und damit in der `generate-all`-Schleife) landet.
-  const today = new Date();
+  const { year, month } = billingReferenceMonth();
   const srRes = await apiPost<any>("/api/service-records", {
     customerId: scenario.customerId,
     employeeId: scenario.employeeId,
-    year: today.getFullYear(),
-    month: today.getMonth() + 1,
+    year,
+    month,
   });
   expect(srRes.status, `SR create: ${JSON.stringify(srRes.data)}`).toBe(201);
   cleanupSrIds.push(srRes.data.id);
@@ -101,7 +87,7 @@ describe("Task #586 — /generate-all liefert bei Fehler immer JSON", () => {
   it("antwortet mit Content-Type application/json und einem message-Feld, wenn generateInvoiceCore wirft", async () => {
     const auth = await getAuthCookie();
     const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
-    const today = new Date();
+    const { year, month } = billingReferenceMonth();
 
     const response = await fetch(`${BASE_URL}/api/billing/generate-all`, {
       method: "POST",
@@ -114,8 +100,8 @@ describe("Task #586 — /generate-all liefert bei Fehler immer JSON", () => {
         "x-test-inject-fault": "audit_log",
       },
       body: JSON.stringify({
-        billingMonth: today.getMonth() + 1,
-        billingYear: today.getFullYear(),
+        billingMonth: month,
+        billingYear: year,
       }),
     });
 

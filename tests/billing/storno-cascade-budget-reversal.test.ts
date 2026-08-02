@@ -47,6 +47,7 @@ import {
   runCleanup,
   uniqueId,
 } from "../test-utils";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 const NUMERIC_COLUMNS = [
   "amountCents",
@@ -109,30 +110,6 @@ function expectAllZero(sums: ColumnSums, label: string): void {
   }
 }
 
-/** Vergangener Werktag im aktuellen Monat (Termin muss abrechenbar sein). */
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
-
 let customerId: number;
 let employeeId: number;
 let hwServiceId: number;
@@ -183,10 +160,8 @@ afterAll(async () => {
 
 describe("Task #788 — Cascade-Storno reversiert Multi-Topf-Budget über den echten Rechnungs-Flow", () => {
   it("Multi-Topf-Split-Rechnung (§45b → §45a) mit km: PATCH storno+cascadeRun bucht jede Spalte je Topf/Allocation/Kunde auf 0 zurück", async () => {
-    const apptDate = weekdayInCurrentMonth();
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth() + 1;
+    const apptDate = pastWeekdayInBillingMonth();
+    const { year, month } = billingReferenceMonth();
 
     // §45b knapp → Cascade muss in §45a überlaufen (Multi-Topf-Konsumtion).
     await apiPost(`/api/budget/${customerId}/initial-budget`, {

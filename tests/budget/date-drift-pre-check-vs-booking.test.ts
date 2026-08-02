@@ -24,6 +24,7 @@ import { createConsumptionTransaction } from "../../server/storage/budget/consum
 import { getAvailableForDate } from "../../server/storage/budget/import-availability";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { apiGet, getAuthCookie, runCleanup } from "../test-utils";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 beforeAll(async () => { await getAuthCookie(); });
 afterAll(async () => { await runCleanup(); });
@@ -55,19 +56,6 @@ async function makeAppt(customerId: number, employeeId: number, date: string) {
     plannedDurationMinutes: 60,
   });
   return appt.id;
-}
-
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== today.getMonth()) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
 }
 
 function weekdayInPrevMonth(): string {
@@ -113,7 +101,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         },
         appointments: [
           {
-            date: weekdayInCurrentMonth(),
+            date: pastWeekdayInBillingMonth(),
             scheduledStart: "09:00",
             services: [{ code: "hauswirtschaft", durationMinutes: 60 }],
             document: true,
@@ -196,7 +184,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
       // Eine heutige Buchung darf die Verfügbarkeit für ein VERGANGENES
       // Termindatum nicht beeinflussen (netConsumed ist date-bounded auf
       // `transactionDate <= asOfDate`).
-      const todayDate = weekdayInCurrentMonth();
+      const todayDate = pastWeekdayInBillingMonth();
       const todayApptId = await makeAppt(scenario.customerId, scenario.employeeId, todayDate);
       await createConsumptionTransaction({
         customerId: scenario.customerId,

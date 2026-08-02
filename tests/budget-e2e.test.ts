@@ -17,6 +17,7 @@ import { processExpiredCarryover, upsertCarryoverAllocation } from "../server/st
 import { getBudgetSummary } from "../server/storage/budget/summary-queries";
 import { db } from "../server/lib/db";
 import { sql } from "drizzle-orm";
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "./helpers/billing-month";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -41,33 +42,6 @@ function pastWeekday(daysBack = 7): string {
     return d.toISOString().split("T")[0];
   }
   throw new Error("Kein Werktag im Lookup-Fenster gefunden");
-}
-
-/**
- * Picks the most recent weekday inside the current calendar month. Falls
- * back to a future weekday inside the same month if no past one exists.
- */
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
 }
 
 
@@ -689,7 +663,7 @@ describe("INT-11: §45b-Monatslimit ist KEIN Buchungs-Cap (akkumulierter Jahrest
   it("INT-11.2 – Termin erstellen + dokumentieren (Kosten > 10€)", async () => {
     if (!serviceId) return;
 
-    const dateStr = weekdayInCurrentMonth();
+    const dateStr = pastWeekdayInBillingMonth();
     const createRes = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: scenario.customerId,
       date: dateStr,
@@ -1095,7 +1069,7 @@ describe("INT-15: Storno-Netting currentMonthUsedCents (§45b im aktuellen Monat
       ],
       appointments: [
         {
-          date: weekdayInCurrentMonth(),
+          date: pastWeekdayInBillingMonth(),
           scheduledStart: "03:00",
           services: [{ code: "hauswirtschaft", durationMinutes: 60 }],
           document: true,

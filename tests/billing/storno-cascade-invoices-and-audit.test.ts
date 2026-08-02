@@ -44,30 +44,7 @@ import {
   runCleanup,
   uniqueId,
 } from "../test-utils";
-
-/** Vergangener Werktag im aktuellen Monat (Termin muss abrechenbar sein). */
-function weekdayInCurrentMonth(): string {
-  const today = new Date();
-  const month = today.getMonth();
-  const year = today.getFullYear();
-  for (let offset = 0; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  for (let offset = 1; offset <= 28; offset++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + offset);
-    if (d.getMonth() !== month || d.getFullYear() !== year) break;
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;
-    return d.toISOString().split("T")[0];
-  }
-  throw new Error("Kein Werktag im aktuellen Monat gefunden");
-}
+import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
 
 async function consumptionNetPerPot(customerId: number): Promise<Map<string, number>> {
   const rows: BudgetTransaction[] = await db
@@ -131,10 +108,8 @@ afterAll(async () => {
 
 describe("Task #1652 — Cascade-Storno erzeugt Storno-Rechnungen + Audit identisch zur früheren Inline-Logik", () => {
   it("PATCH storno+cascadeRun: eine stornorechnung je Topf-Geschwister, Originale storniert, Budget zurückgebucht, invoice_cancelled je Original", async () => {
-    const apptDate = weekdayInCurrentMonth();
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth() + 1;
+    const apptDate = pastWeekdayInBillingMonth();
+    const { year, month } = billingReferenceMonth();
 
     // §45b knapp → Cascade nach §45a → Multi-Topf-Split-Rechnung.
     await apiPost(`/api/budget/${customerId}/initial-budget`, {
