@@ -174,6 +174,22 @@ beide nur auf `127.0.0.1`, DB auf `tmpfs`. Voraussetzung auf dem Host:
 `psql`/`pg_dump` im PATH (`sudo apt-get install postgresql-client` — den **Client**,
 nicht `postgresql`; das Server-Paket belegt 5432 und kollidiert mit dem Container).
 
+**Der Test-Postgres läuft PERSISTENT — der Routine-Loop startet ihn nicht.**
+Er hat `restart: unless-stopped` und kommt nach Host-Reboot/Docker-Restart von
+selbst zurück. Das ERSETZT das `sudo docker compose up/down` als Teil jedes
+Testlaufs: **`dev` bekommt kein passwortloses `sudo` mehr, und der Routine-Loop
+darf weder `sudo` noch `docker` brauchen** (er ist auch nicht in der
+`docker`-Gruppe — `docker ps` ohne `sudo` ist verweigert). Routine-Weg =
+DB läuft schon, direkt Tests fahren; der Orchestrator spricht sie nur über
+`DATABASE_URL`/`psql` an. Die `docker compose`-Zeilen unten sind **einmalig/
+administrativ** (Erstaufsetzen, Image-Wechsel, bewusstes Stoppen) — nicht in den
+Loop kopieren. Läuft die DB wirklich mal nicht, ist das ein administrativer
+Vorfall für Alrik, kein Schritt, den der Executor selbst nachholt.
+
+Der Neon-Proxy hat bewusst KEINE `restart`-Policy: ihn braucht nur der
+Fallback-Ablauf, und der ist ohnehin administrativ. Der Orchestrator wählt ihn
+per `DB_DRIVER=pg` ab.
+
 `.env.test.local` ist gitignored und enthält genau diese Wegwerf-Werte:
 
 ```bash
@@ -192,13 +208,20 @@ Der kanonische Weg — Details in `docs/test-infrastructure.md`. Er macht Push,
 beide Seeds, Per-Worker-Wegwerf-DBs, App-Server auf **frei vom OS vergebenen**
 Ports und den Teardown selbst; der Template-Cache macht warme Läufe schnell.
 
+Der Routine-Ablauf — **ohne `sudo`, ohne `docker`**, die DB läuft bereits:
+
 ```bash
-sudo docker compose -f docker-compose.test.yml up -d
 unset CI TEST_DATABASE_URLS TEST_BASE_URLS
 set -a; . ./.env.test.local; set +a
 unset NEON_LOCAL_WS_PROXY; export DB_DRIVER=pg      # PFLICHT, siehe unten
 npx tsx scripts/with-ephemeral-db.ts 5050 npx vitest run tests/<pfad>/<datei>.test.ts
-sudo docker compose -f docker-compose.test.yml down
+```
+
+Nur einmalig/administrativ (nicht im Loop) — Stack aufsetzen bzw. bewusst stoppen:
+
+```bash
+sudo docker compose -f docker-compose.test.yml up -d     # einmalig, bleibt oben
+sudo docker compose -f docker-compose.test.yml down      # nur absichtlich
 ```
 
 **`DB_DRIVER=pg` ist hier nicht optional.** Mit dem Neon-Proxy kollabieren alle
@@ -208,7 +231,9 @@ Orchestrator gibt, wäre still weg. Er geht deshalb direkt über TCP.
 ### Fallback: 1:1-Nachbau des CI-Jobs
 
 > **Nur zum Reproduzieren von CI-only-Fehlschlägen.** Für alles andere den
-> Orchestrator nehmen.
+> Orchestrator nehmen. Dieser Ablauf ist **administrativ**: er braucht den
+> Neon-Proxy (also `sudo docker compose up`) und wirft die persistente Test-DB
+> mit `down` weg. Nicht aus dem Routine-Loop heraus fahren — bei Bedarf Alrik.
 
 Nötig, weil der gating `tests`-Job **anders läuft als der Orchestrator**: EINE
 geteilte DB, fester Port 5000, alle Dateien nacheinander dagegen, App-Zugriff über
@@ -219,7 +244,7 @@ per Konstruktion nicht zeigen. Dieser Ablauf ist das einzige Werkzeug dafür.
 
 ```bash
 npm ci                                            # drizzle-kit-Version aus dem Lockfile
-docker compose -f docker-compose.test.yml up -d   # ggf. mit sudo (docker-Gruppe)
+sudo docker compose -f docker-compose.test.yml up -d   # administrativ; holt den Neon-Proxy dazu
 
 unset CI TEST_DATABASE_URLS TEST_BASE_URLS        # `source` kann nur setzen, nie löschen
 set -a; . ./.env.test.local; set +a               # Semikolons, damit `set +a` immer läuft
@@ -234,7 +259,9 @@ tail -3 server.log && curl -sf http://localhost:5000/api/health   # BEIDES prüf
 npx vitest run tests/<pfad>/<datei>.test.ts       # oder ohne Pfad: volle Suite
 
 fuser -k 5000/tcp                                 # Server stoppen (siehe Fallen)
-docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist weg
+sudo docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist weg
+# Danach den persistenten Stack wieder hochfahren (`up -d`) — der Routine-Loop
+# erwartet eine laufende Test-DB und startet sie selbst nicht.
 ```
 
 ### Fallen
