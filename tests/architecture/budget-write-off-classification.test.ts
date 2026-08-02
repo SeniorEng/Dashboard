@@ -38,8 +38,11 @@ const ALLOWLIST: Record<string, WriteOffView> = {
   // Zusätzlich `getAvailableCarryoverCents` (Pro-Allocation-Rest).
   "server/storage/budget/summary-queries.ts": "allocation-view",
 
-  // FIFO-Carryover-Verbrauch pro Spezial-Allokation; spiegelt
-  // Topf-Sicht.
+  // Topf-Summe (`totalNetConsumed`) zählt write_off mit — Topf-Sicht.
+  // ACHTUNG: die PRO-ALLOCATION-Sicht derselben Datei
+  // (`consumedBySpecial`/`reversalBySpecial`) zählt ihn seit
+  // §45b-Verfall-as-of ausdrücklich NICHT; siehe den Produzenten-Wächter
+  // unten und docs/budget-ssot-inventory.md §1.4.
   "server/storage/budget/consumption-engine.ts": "allocation-view",
 
   // Task #1129 — §45b FIFO-Aufschlüsselung (read-only Visualisierung). Der
@@ -161,5 +164,56 @@ describe("Architektur — `write_off`-Asymmetrie (Task #727 Phase 1.3)", () => {
           `in docs/budget-ssot-inventory.md an.`,
       );
     }
+  });
+
+  /**
+   * §45b-Verfall-as-of — Produzenten-Invariante.
+   *
+   * `computeFifoAvailability` schließt `write_off` per TYP aus der
+   * PRO-ALLOCATION-Sicht aus (statt per Datumsfilter). Diese Vereinfachung ist
+   * NUR deshalb immer korrekt, weil jeder existierende `write_off` zu einem
+   * abgelaufenen Übertrag gehört: `processExpiredCarryover` filtert auf
+   * `source = 'carryover'` und `expiresAt IS NOT NULL AND expiresAt < today`.
+   * Eine solche Allocation steht in `specialAllocations` nur, solange die Frist
+   * am Buchungstag NOCH LÄUFT — dort ist der Verfall ein zukünftiges Ereignis
+   * und darf das Guthaben nicht mindern.
+   *
+   * Käme eine ZWEITE Schreibstelle dazu (naheliegend: „Guthaben manuell
+   * abschreiben" auf `initial_balance`/`manual_adjustment`, die typischerweise
+   * `expiresAt = NULL` haben), bräche die Invariante STILL und in die
+   * permissive Richtung: so eine Allocation steht dauerhaft in
+   * `specialAllocations`, ihr Write-Off würde sie nie mindern — und bei
+   * `initial_balance` bewegt der §45b-Exklusionspfad Geld.
+   *
+   * Deshalb dieser Stolperdraht statt nur einer Kommentar-Begründung.
+   */
+  it("Es gibt genau EINE Schreibstelle für `transactionType: 'write_off'`", () => {
+    const scanRoots = ["server", "shared"].map((p) => join(ROOT, p));
+    const insertSites: string[] = [];
+    // Objekt-Literal-Feld einer Insert-Payload — nicht SQL-Listen/Vergleiche.
+    const insertRe = /transactionType\s*:\s*['"]write_off['"]/;
+
+    for (const root of scanRoots) {
+      try {
+        statSync(root);
+      } catch {
+        continue;
+      }
+      for (const file of walk(root)) {
+        const rel = relative(ROOT, file).split(sep).join("/");
+        if (rel.startsWith("tests/")) continue;
+        if (!insertRe.test(readFileSync(file, "utf-8"))) continue;
+        insertSites.push(rel);
+      }
+    }
+
+    expect(
+      insertSites.sort(),
+      "Neue write_off-Schreibstelle: Prüfe, ob sie NUR abgelaufene Überträge " +
+        "(`source='carryover'`, gesetztes `expiresAt`) betrifft. Falls nicht, ist " +
+        "der Typ-Ausschluss in `computeFifoAvailability` (Pro-Allocation-Sicht) " +
+        "nicht mehr gedeckt und muss durch eine explizite Fristprüfung ersetzt " +
+        "werden — sonst mindert der Verfall das Guthaben nie.",
+    ).toEqual(["server/storage/budget/allocation-storage.ts"]);
   });
 });

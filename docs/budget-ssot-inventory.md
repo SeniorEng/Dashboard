@@ -173,6 +173,22 @@
 
 → Vier Aggregations-Definitionen für „Verbrauch", abhängig vom Aufrufpfad.
 
+**Ergänzung (§45b-Verfall-as-of):** Die TOPF-Summen oben zählen `write_off` mit —
+das bleibt so. Die PRO-ALLOCATION-Sicht in `consumption-engine.computeFifoAvailability`
+zählt ihn dagegen ausdrücklich NICHT mehr: Die Verfallsbuchung entsteht nur für
+abgelaufene Überträge und ist aus Sicht eines Buchungstags INNERHALB des Fensters
+ein zukünftiges Ereignis; liegt der Tag nach der Frist, ist die Allocation ohnehin
+schon aus `specialAllocations` gefallen. Sie mitzuzählen ließ rückwirkende
+Buchungen auf `allocationId = null` fallen (Doppelbelastung des Jahrestopfs).
+`consumption`/`reversal` bleiben dort bewusst ungefiltert — Guthaben-Verzehr ist
+kumulativ. Die Verfallsbuchung trägt seither `expiresAt + 1 Tag` (01.07.), damit
+der 30.06. als letzter rechtlich gültiger Tag nutzbar bleibt.
+
+Die Pro-Allocation-Frage („wieviel dieses EINEN Guthabens ist verbraucht") hat
+weiterhin KEINE SSoT: `computeFifoAvailability`, `fifo-breakdown.ts` und das tote
+`getAvailableCarryoverCents` rechnen sie je eigenständig — nur die erste ist
+korrigiert. Siehe FINDINGs im zugehörigen PR.
+
 ---
 
 ## 2. CLIENT-Inventar

@@ -1708,7 +1708,12 @@ describe("INT-20: §45b Carryover-Verfall nach 30.06. (deterministisch, clock-in
     expect(writeOff.transactionType).toBe("write_off");
     expect(writeOff.budgetType).toBe("entlastungsbetrag_45b");
     expect(writeOff.amountCents).toBe(-carryoverCents);
-    expect(writeOff.transactionDate).toBe(`${curYear}-06-30`);
+    // §45b-Verfall-as-of — BEWUSSTE Änderung: die Verfallsbuchung trägt den ERSTEN Tag
+    // NACH der Frist. Auf den 30.06. datiert zehrte sie den Topf an seinem
+    // letzten rechtlich gültigen Tag auf (§45b Abs. 3: Verfall mit ABLAUF des
+    // 30.06.), sodass eine legitime 30.06.-Buchung blockiert war. Details +
+    // Gegenprobe: tests/budget/45b-writeoff-asof-coupling.test.ts.
+    expect(writeOff.transactionDate).toBe(`${curYear}-07-01`);
 
     const again = await processExpiredCarryover(scenario.customerId);
     expect(again.length).toBe(0);
