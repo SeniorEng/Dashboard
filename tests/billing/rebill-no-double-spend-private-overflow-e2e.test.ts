@@ -56,6 +56,7 @@ import {
   cleanupCustomer,
   runCleanup,
 } from "../test-utils";
+import { billingReferenceDate, billingReferenceMonth } from "../helpers/billing-month";
 
 const AB_HOURLY_CENTS = 4200; // Alltagsbegleitung, siehe scripts/seed-test-reference-data.ts
 
@@ -163,7 +164,7 @@ async function createAppt(
   tag: string,
   order: "earliest" | "latest",
 ): Promise<{ id: number; date: string; time: string }> {
-  const today = new Date();
+  const today = billingReferenceDate();
   const lastDay = new Date(year, month, 0).getDate();
   const days = order === "latest"
     ? Array.from({ length: lastDay }, (_, i) => lastDay - i)
@@ -297,9 +298,7 @@ afterAll(async () => {
 
 describe("Re-Rechnung darf bei §45a→PRIVAT-Überlauf keinen Topf doppelt verbrauchen — E2E (Task #1028)", () => {
   it("bill A (§45a-Kasse + Privat-Split) → cascade-storno → re-bill A (re-book beide Anteile) → bill B (komplett privat): pro Topf Ledger === aktive Rechnungen, Privat bleibt 19 % USt / Selbstzahler", async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const { year, month } = billingReferenceMonth();
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
     customerId = await setupPrivateOverflowCustomer(monthStart);
