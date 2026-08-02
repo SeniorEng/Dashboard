@@ -48,6 +48,7 @@ import {
   cleanupCustomer,
   runCleanup,
 } from "../test-utils";
+import { billingReferenceDate, billingReferenceMonth } from "../helpers/billing-month";
 
 const AB_HOURLY_CENTS = 4200; // Alltagsbegleitung, siehe scripts/seed-test-reference-data.ts
 
@@ -159,7 +160,7 @@ async function createAppt(
   tag: string,
   order: "earliest" | "latest",
 ): Promise<{ id: number; date: string; time: string }> {
-  const today = new Date();
+  const today = billingReferenceDate();
   const lastDay = new Date(year, month, 0).getDate();
   const days = order === "latest"
     ? Array.from({ length: lastDay }, (_, i) => lastDay - i)
@@ -293,9 +294,7 @@ afterAll(async () => {
 
 describe("Re-Rechnung darf bei MEHREREN Töpfen keinen Topf doppelt verbrauchen — E2E (Task #1025)", () => {
   it("bill A (§45b→§45a Split) → cascade-storno → re-bill A (re-book beide Töpfe) → bill B: pro Topf Ledger === aktive Rechnungen, ≤ Kapazität", async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const { year, month } = billingReferenceMonth();
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
     customerId = await setupMultiPotCustomer(monthStart);

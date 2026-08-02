@@ -44,6 +44,7 @@ import {
   cleanupCustomer,
   runCleanup,
 } from "../test-utils";
+import { billingReferenceDate, billingReferenceMonth } from "../helpers/billing-month";
 
 const AB_HOURLY_CENTS = 4200; // Alltagsbegleitung, siehe scripts/seed-test-reference-data.ts
 const POT_CAPACITY_CENTS = 13100; // §45b gesetzliches Monats-Maximum
@@ -119,7 +120,7 @@ async function setupSinglePotCustomer(monthStartIso: string): Promise<number> {
 /** Sucht einen freien (vergangenen) Werktags-Slot im Monat und legt dort einen
  *  Alltagsbegleitung-Termin an. `exclude` sperrt einen bereits belegten Tag. */
 async function createAppt(year: number, month: number, exclude: string | null, tag: string): Promise<{ id: number; date: string; time: string }> {
-  const today = new Date();
+  const today = billingReferenceDate();
   const lastDay = new Date(year, month, 0).getDate();
   for (let day = lastDay; day >= 1; day--) {
     const cand = new Date(year, month - 1, day);
@@ -243,9 +244,7 @@ afterAll(async () => {
 
 describe("Re-Rechnung darf §45b nicht doppelt verbrauchen — E2E (Task #1021)", () => {
   it("bill A → storno → re-bill A (re-book) → bill B: Ledger === aktive Rechnungen, ≤ Kapazität", async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    const { year, month } = billingReferenceMonth();
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
     customerId = await setupSinglePotCustomer(monthStart);
