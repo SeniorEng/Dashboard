@@ -12,6 +12,11 @@ vite.config.ts.*
 *.pem
 *.key
 
+# Python-Bytecode. Entsteht, sobald jemand `.claude/hooks/bash-gate.py` als
+# Modul importiert (z.B. beim Review) — gehoert nie ins Repo.
+__pycache__/
+*.pyc
+
 # Pre-publish DB-Backups (siehe docs/pre-publish-backup-runbook.md)
 tmp/db-backups/
 # DB-Dumps (auch Root-Level) — nie ins Repo (Task #1840)

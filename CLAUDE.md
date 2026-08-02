@@ -159,6 +159,50 @@ CI) läuft **autonom**. Ein Mensch klinkt sich nur an diesen vier Punkten ein:
 Alles dazwischen läuft ohne Rückfrage. Grundsatz: **Gate dort, wo Urteil oder
 Unumkehrbarkeit sitzt — nicht überall.**
 
+### Der Bash-Gate ist ein Stolperdraht, kein Sandbox-Ersatz
+
+Damit „läuft ohne Rückfrage" nicht heißt „läuft ohne Schranke", prüft ein
+PreToolUse-Hook (`.claude/hooks/bash-gate.sh` + `bash-gate.py`, Wächter:
+`tests/architecture/bash-gate.test.ts`) jedes Bash-Kommando und sperrt die
+gefährliche Handvoll: `sudo`, `docker`, `git push --force`, Push nach
+`main`/`master`, `gh pr merge`, `rm -rf` auf System-/Home-Pfaden,
+`git reset --hard`, `git clean -f`, `curl|bash`, `chmod`/`chown` auf
+Systempfaden, Schreib-Redirects nach `/etc`, `/usr` & Co. Default ist `allow`.
+
+**Er fängt Versehen, keinen Vorsatz.** Er ist ein Kommando-Filter und als
+solcher grundsätzlich umgehbar — Präfixe (`env`, `command`, `nohup`, `{ …; }`),
+Variablen-Expansion (`X=sudo; $X …`), Command-Substitution, `xargs`/`find -exec`
+oder ein umbenanntes Verzeichnis (`mv .claude .claude-off`) laufen daran vorbei.
+Das ist bewusst offen und im Test als Block `BEWUSST_OFFEN` festgehalten, statt
+es zu verschweigen: ein Filter, der all das abdeckt, blockiert normale Arbeit,
+und vollständig wird er trotzdem nie.
+
+**Unbeaufsichtigter Betrieb mit fremdem Input braucht eine Sandbox, nicht
+diesen Filter.** Fremder Input heißt alles, was nicht von Alrik kommt —
+Issue-Texte, PR-Kommentare, gescrapte Inhalte, Fremd-Repos. Für den heutigen
+Betrieb (Aufgaben von Alrik, eigenes Repo) ist der Stolperdraht angemessen; er
+ist keine Grundlage, auf der man den Kreis der Auftraggeber erweitert.
+
+Wichtig für Änderungen: **`permissions.ask` muss leer bleiben.** Gemessen gilt
+`Hook-deny > Regel-deny > Regel-ask > Hook-allow > Regel-allow` — ein Hook kann
+eine `ask`-Regel NICHT aufheben. Der Hook ERSETZT die `ask`-Liste; kommt sie
+zurück, prompten ihre Muster wieder, egal was der Hook sagt. Das `deny`-Array
+bleibt als zweite Lage, weil es ein Hook-`allow` schlägt und damit auch einen
+Fehler im Hook abfängt.
+
+Der Hook schützt sich **teilweise** selbst: Bash-Kommandos, die `.claude/hooks/**`
+oder `settings.local.json` schreiben, sind gesperrt, Edit/Write auf `.claude/**`
+ebenso — Änderungen daran macht Alrik, und praktisch heißt das: die Dateien
+werden außerhalb dieses Verzeichnisses gebaut, geprüft und dann von Hand
+hineinkopiert. **Nicht** gesperrt sind Wege, die den Pfad nicht buchstäblich
+nennen: `mv .claude .claude-off`, `rm -rf .claude` und — seit der Versionierung
+neu — `git checkout <alter-commit> -- .claude/hooks/bash-gate.py`, also das
+Zurücksetzen auf eine schwächere Gate-Version. `git` steht bewusst in der
+Lese-Allowlist, weil die frühere Ausnahme nichts schützte (`git checkout main
+-- .`, `git stash`, `git restore .` kommen ohne den Pfad aus) und nur das
+Versionieren unmöglich machte. Das ist derselbe Stolperdraht-Anspruch wie oben,
+kein Widerspruch dazu.
+
 ## Integrationstests lokal fahren
 
 **ERSETZT den CI-Roundtrip als einzigen Weg, Integrationstests zu sehen.** Vorher
