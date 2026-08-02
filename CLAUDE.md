@@ -301,23 +301,38 @@ sudo docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist w
   meldet die DB auch beim Sweeper an (`scripts/lib/ephemeral-db-sweep.ts`).
   `npm run test:unblock` oder ein Orchestrator-Start droppen sie, sobald keine
   Verbindung dranhängt — Schema und Seeds des Fallback-Ablaufs sind dann weg.
-- **Lokale Baseline ≠ CI-Baseline.** Voller Lauf am 31.07.2026 auf `main`:
-  30 Dateien / 68 Tests rot; CI-`tests` auf `main`: 28 Dateien. **26 Dateien sind
-  in beiden rot** (die bekannte Baseline). Die Deltas sind vollständig:
-  - Nur lokal rot, Host-Ausstattung: `tests/billing/pdf-generator-resilience.test.ts`
-    (8) + `tests/billing/zugferd-send-failure.test.ts` (1) — **kein Chromium**;
-    `tests/equality/appointment-series-bulk-rebook.test.ts` (1) — Ursache
-    ungeklärt, vermutlich Flake.
-  - `tests/architecture/dev-db-scripts-guard.test.ts` (9) war der vierte Fall —
-    seit `postgresql-client` auf dem Host installiert ist, grün (10/10). Damit
-    steht die Baseline bei **29 Dateien / 59 Tests**.
-  - Diese drei sind die EINZIGEN, die „Host-Ausstattung" erklärt. Jede weitere
-    lokal rote Datei ist eine Regression, kein Rauschen. Die Baseline ist zudem
-    datums-fragil (Fixtures, `getFutureDate`-Wochenendrolle) — bei Zweifel neu
-    auf `main` erheben statt fortschreiben.
-  Umgekehrt sind `tests/service-records.test.ts` und
-  `tests/startup/dedupe-pending-monthly-service-records.test.ts` lokal grün und
-  in CI rot (dort Setup-Flakes). Voller Lauf dauert lokal ~19 min.
+- **Lokale Baseline ≠ CI-Baseline, und sie ist datums-fragil.** Voller Lauf am
+  02.08.2026 auf `main` (`024f1e13`, nach #28): **78 rote Tests / 37 Dateien**
+  von 3628, ~19 min. Aufgeschlüsselt:
+  - **§45b-Budget-Mathematik — 21 Tests / 11 Dateien.** Fachlicher Defekt, keine
+    Infrastruktur. Ursächlich belegt: `tests/equality/45b-cap.test.ts` (6) und
+    `tests/billing/storno-reversal.test.ts` K2.1 (`availableCents Δ 0` bei
+    gebuchten 3800) sowie `tests/budget/45b-july-boundary-symmetry.test.ts`
+    (`87900` statt `91700` — die Zahlen der dokumentierten Wurzelanalyse). Die
+    übrigen (`budget-e2e` 4, `45b-forecast-*` 3, `carryover-no-double-count`,
+    `monthly-cap-display-vs-booking` 2, `race-writeoff`, `task-684`,
+    `budget.test`) liegen thematisch auf Carryover/Verfall/Aufstockung, sind
+    aber NICHT als derselbe Defekt verifiziert.
+  - **Host-Ausstattung — 11 Tests / 2 Dateien**, alle mit
+    `ChromiumUnavailableError` (`invoice-pdf-margins` 6,
+    `pdf-generator-resilience` 5). Das ist die EINZIGE host-erklärte Menge;
+    `zugferd-send-failure` und je ein Teil der beiden PDF-Dateien scheitern
+    anders und zählen NICHT hierher.
+  - **Weiterhin datumsabhängig — 7 Tests / 4 Dateien.** #28 hat die
+    `createAppt`-Familie (13 Dateien) auf `tests/helpers/billing-month.ts`
+    umgestellt, aber zwei Fixtures tragen dasselbe Muster eigenständig:
+    `tests/billing/invoice-45b-reduction.test.ts` (eigener `latestPastWeekday`,
+    `kein vergangener Werktag in 8/2026`) und `setupBudgetScenario` in
+    `tests/helpers/budget-scenarios.ts` (`appointment fehlgeschlagen
+    (status=400, date=…)`) → `45b-fifo-breakdown-consistency`,
+    `cascade-concurrency`, `storno-keeps-ln-active`. Beide gehören auf den
+    Ankertag umgestellt.
+  - **Rest — 39 Tests / 22 Dateien**, gemischt (Architektur-Wächter,
+    `team-lead-schreibrechte`, `billing-flow`, UI-Unit-Mocks, Einzelfälle).
+  **Die Zahl gilt für diesen Tag.** Sie steigt und fällt mit der Kalenderlage —
+  am 31.07.2026 waren es 29 Dateien / 59 Tests. Bei Zweifel neu auf `main`
+  erheben statt fortschreiben, und PRs immer per **same-day-A/B** gegen einen
+  frischen `main`-Lauf diffen, nie gegen eine notierte Zahl.
 - Im Fallback-Ablauf den Server nach Server-Code-Änderungen neu starten — die
   Tests sprechen den gebooteten Prozess an, nicht den Quelltext. Der Orchestrator
   startet ihn pro Lauf frisch und hat das Problem nicht.
