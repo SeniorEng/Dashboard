@@ -59,6 +59,24 @@ export const RECONCILE_COLUMN_TYPE_TARGETS: ReadonlyArray<{
     targetType: "timestamptz",
     expectedDataType: "timestamp with time zone",
   },
+  // Dieselbe Klasse, aufgedeckt vom neuen ADD-COLUMN-Coverage-Scan im
+  // Drift-Wächter: `ensure-qonto-advice-match-schema.ts` legte die Spalte als
+  // plain `timestamp` an, das Drizzle-Modell nutzt den `timestamp`-Helper mit
+  // `withTimezone: true`. Das DDL ist inzwischen korrigiert — das heilt aber nur
+  // NEUE Datenbanken (`ADD COLUMN IF NOT EXISTS` altert eine vorhandene Spalte
+  // nicht nach). Erst dieser Eintrag versöhnt Bestands-DBs.
+  //
+  // Die Konversion ist für DIESE Spalte funktional inert: sie wird
+  // ausschließlich auf Truthiness geprüft (null vs. nicht-null, siehe
+  // `server/routes/admin/qonto.ts`), und eine timestamp→timestamptz-Umdeutung
+  // kann die Null-heit eines Werts nicht ändern — nur den interpretierten
+  // Zeitpunkt, den kein Pfad ausliest.
+  {
+    table: "qonto_transactions",
+    column: "advice_suggestion_dismissed_at",
+    targetType: "timestamptz",
+    expectedDataType: "timestamp with time zone",
+  },
 ];
 
 export async function reconcileDriftedColumnTypes(): Promise<void> {

@@ -172,6 +172,7 @@ const DRIZZLE_TABLES: Record<string, PgTable> = {
   invoice_line_items: invoiceLineItems,
   audit_log: auditLog,
   employee_time_entries: employeeTimeEntries,
+  qonto_transactions: qontoTransactions,
   users,
 };
 
