@@ -30,29 +30,28 @@ const BASE_DB = `cc_test_baseline_${process.pid.toString(36)}_${randomBytes(3).t
 /**
  * Constraints, die die Laufzeit-DB trägt, die Baseline aber nicht.
  *
- * Jeder Eintrag ist eine offene Aufgabe, kein Freibrief. Die Ursache muss NICHT
- * „fehlt im Modell" sein — der derzeit einzige Eintrag steht sehr wohl im
- * Modell, nur unter einem anderen Namen, und ist damit ein Duplikat. Was zu tun
- * ist, steht je Eintrag im `why`; siehe die FINDINGs im A2-PR.
+ * Jeder Eintrag waere eine offene Aufgabe, kein Freibrief. Die Liste ist
+ * derzeit LEER — der frühere einzige Eintrag
+ * (`audit_log_parent_deletion_id_fkey`) war kein fehlender Constraint, sondern
+ * ein Duplikat aus einem Deploy-Ping-Pong: `push` droppte den FK, der Boot legte
+ * ihn namensgleich wieder an. Der Startup-Pfad prüft jetzt SPALTEN-basiert und
+ * erzeugt keinen Zweitling mehr (`server/startup/ensure-audit-parent-deletion.ts`,
+ * gepinnt in `tests/startup/startup-schema-drift.test.ts`).
+ *
+ * Eine leere Liste ist hier die STRENGSTE Fassung, nicht die schwaechste: jeder
+ * neue startup-only Constraint laesst den Test sofort rot laufen.
  *
  * ANNAHME: Die Laufzeit-DB wurde nach `push` auch GEBOOTET. Ein Snapshot
  * dazwischen hätte die startup-erzeugten Objekte nicht und liesse diesen Test
  * rot laufen. Orchestrator und CI garantieren die Reihenfolge.
+ *
+ * ZWEITE ANNAHME (neu): Die Laufzeit-DB wurde mit dem AKTUELLEN Code gebootet.
+ * Eine DB, die noch ein Boot der namensbasierten Fassung gesehen hat, traegt den
+ * `..._fkey` weiterhin — dort meldet dieser Test zu Recht eine veraltete Liste.
+ * Der Orchestrator baut pro Lauf frisch; eine langlebige lokale Test-DB muss
+ * einmal neu gepusht werden.
  */
-const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [
-  {
-    name: "audit_log_parent_deletion_id_fkey",
-    why:
-      "DUPLIKAT, kein fehlender Constraint. Das Drizzle-Modell hat die " +
-      "Selbstreferenz laengst (`parentDeletionId.references(() => auditLog.id)`), " +
-      "nur unter dem von Drizzle vergebenen Namen " +
-      "`audit_log_parent_deletion_id_audit_log_id_fk` — der steht in der Baseline. " +
-      "`ensure-audit-parent-deletion.ts` legt daneben einen zweiten, funktional " +
-      "identischen FK unter dem Postgres-Default-Namen `..._fkey` an. Die " +
-      "Laufzeit-DB traegt beide. Welcher weichen soll, ist eine offene " +
-      "Entscheidung (Drop in Prod = Gate 4) — siehe FINDING im A2-PR.",
-  },
-];
+const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [];
 
 type Snapshot = Record<string, Map<string, string>>;
 

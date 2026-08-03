@@ -82,6 +82,7 @@ import {
 import { INVOICE_LINE_ITEMS_APPOINTMENT_INDEX_SQL } from "../../server/startup/ensure-invoice-line-item-appointment-index";
 import {
   AUDIT_PARENT_DELETION_COLUMN_SQL,
+  AUDIT_PARENT_DELETION_FK_SQL,
   AUDIT_PARENT_DELETION_INDEX_SQL,
 } from "../../server/startup/ensure-audit-parent-deletion";
 import {
@@ -1726,5 +1727,145 @@ describe("Startup Trigger-Drift (server/startup/**)", () => {
         .map(([name, file]) => `${name} (${file})`)
         .join(", ")}. Als StartupTriggerSpec deklarieren (renderCreateTriggerSql).`,
     ).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Startup-FK-Anlage: das Deploy-Ping-Pong auf `audit_log.parent_deletion_id`.
+//
+// `drizzle-kit push` droppt jeden FK, der nicht im Modell steht. Prueft der
+// Startup-Pfad die Existenz ueber den NAMEN, legt der naechste Boot ihn wieder
+// an — und die DB traegt zwei funktional identische FKs samt zwei vollstaendigen
+// Saetzen interner RI-Trigger auf der schreibintensivsten Tabelle der App.
+//
+// Ein reiner Quelltext-Test wuerde das nicht sehen: beide Varianten sind
+// syntaktisch gueltiges, idempotent aussehendes DDL. Gemessen wird deshalb die
+// REALITAET (`pg_constraint`) plus eine Negativ-Kontrolle, die das alte
+// Verhalten auf einer Wegwerf-Tabelle reproduziert.
+// ---------------------------------------------------------------------------
+const AUDIT_PARENT_FKS_SQL = sql`
+  SELECT c.conname AS name
+  FROM pg_constraint c
+  JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+  WHERE c.conrelid = 'audit_log'::regclass
+    AND c.contype = 'f'
+    AND a.attname = 'parent_deletion_id'
+  ORDER BY c.conname
+`;
+
+describe("Startup FK-Drift (audit_log.parent_deletion_id)", () => {
+  it("traegt genau EINEN FK, und zwar unter dem Drizzle-Namen", async () => {
+    const rows = (await db.execute(AUDIT_PARENT_FKS_SQL)).rows as Array<{
+      name: string;
+    }>;
+    expect(
+      rows.map((r) => r.name),
+      "Zwei FKs auf derselben Spalte = das Deploy-Ping-Pong ist zurueck. " +
+        "Kanonisch ist der Drizzle-Name (Modell + Baseline + Konvention aller " +
+        "129 FKs); der PostgreSQL-Default `..._fkey` hat keine Modellquelle.",
+    ).toEqual(["audit_log_parent_deletion_id_audit_log_id_fk"]);
+  });
+
+  it("ein zweiter Boot legt nichts Zweites an (Startup-DDL ist ein No-Op)", async () => {
+    // Genau die Zusage, die die alte namensbasierte Pruefung gebrochen hat.
+    // In einer Transaktion mit Rollback: waere das DDL wider Erwarten KEIN
+    // No-Op, bliebe die Test-DB trotzdem sauber.
+    let after: string[] = [];
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.execute(sql.raw(AUDIT_PARENT_DELETION_FK_SQL));
+        after = ((await tx.execute(AUDIT_PARENT_FKS_SQL)).rows as Array<{
+          name: string;
+        }>).map((r) => r.name);
+        throw new Error("ROLLBACK_PROBE");
+      }),
+    ).rejects.toThrow("ROLLBACK_PROBE");
+
+    expect(after).toEqual(["audit_log_parent_deletion_id_audit_log_id_fk"]);
+  });
+
+  it("Negativ-Kontrolle: die alte NAMENS-basierte Pruefung erzeugt den Zweitling", async () => {
+    // Ohne diesen Test waere „genau einer" oben nicht von „die Abfrage findet
+    // generell nur einen" zu unterscheiden. Auf einer TEMP-Tabelle wird der
+    // Bug reproduziert: FK liegt unter dem Drizzle-artigen Namen, die
+    // namensbasierte Pruefung sucht den PostgreSQL-Default und findet ihn nicht.
+    const probe = nextProbeName();
+    let byName: string[] = [];
+    let byColumn: string[] = [];
+
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql.raw(`
+          CREATE TEMP TABLE ${probe} (
+            id integer PRIMARY KEY,
+            parent_deletion_id integer,
+            CONSTRAINT ${probe}_fk1
+              FOREIGN KEY (parent_deletion_id) REFERENCES ${probe}(id)
+          )
+        `),
+      );
+
+      const fks = async () =>
+        (
+          await tx.execute(
+            sql.raw(`
+              SELECT c.conname AS name
+              FROM pg_constraint c
+              JOIN pg_attribute a
+                ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+              WHERE c.conrelid = '${probe}'::regclass
+                AND c.contype = 'f'
+                AND a.attname = 'parent_deletion_id'
+              ORDER BY c.conname
+            `),
+          )
+        ).rows.map((r) => (r as { name: string }).name);
+
+      expect(await fks(), "Aufbau der Probe misslungen").toHaveLength(1);
+
+      // ALT: namensbasiert auf den PostgreSQL-Default-Namen.
+      await tx.execute(
+        sql.raw(`
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint WHERE conname = '${probe}_parent_deletion_id_fkey'
+            ) THEN
+              ALTER TABLE ${probe}
+              ADD CONSTRAINT ${probe}_parent_deletion_id_fkey
+              FOREIGN KEY (parent_deletion_id) REFERENCES ${probe}(id);
+            END IF;
+          END $$;
+        `),
+      );
+      byName = await fks();
+
+      // NEU: spaltenbasiert — findet den vorhandenen FK und legt nichts an.
+      // Auf dem Stand NACH der alten Anlage geprueft: die Zahl darf nicht
+      // weiter steigen.
+      await tx.execute(
+        sql.raw(
+          AUDIT_PARENT_DELETION_FK_SQL.replace(/audit_log/g, probe).replace(
+            `${probe}_parent_deletion_id_${probe}_id_fk`,
+            `${probe}_fk3`,
+          ),
+        ),
+      );
+      byColumn = await fks();
+
+      throw new Error("ROLLBACK_PROBE");
+    }).catch((err: unknown) => {
+      if ((err as Error).message !== "ROLLBACK_PROBE") throw err;
+    });
+
+    expect(
+      byName,
+      "Die alte namensbasierte Pruefung MUSS hier einen zweiten FK erzeugen — " +
+        "tut sie das nicht, misst dieser Test den Bug nicht mehr.",
+    ).toHaveLength(2);
+    expect(
+      byColumn,
+      "Die spaltenbasierte Pruefung darf auf derselben Spalte nichts hinzufuegen.",
+    ).toHaveLength(2);
   });
 });
