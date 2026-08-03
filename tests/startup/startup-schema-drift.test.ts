@@ -151,9 +151,7 @@ import {
   type TriggerEvent,
   renderCreateTriggerSql,
 } from "../../server/startup/trigger-spec";
-import { AUDIT_LOG_TRIGGERS } from "../../server/startup/ensure-audit-log-immutable";
-import { BUDGET_TRANSACTIONS_TRIGGERS } from "../../server/startup/ensure-budget-transactions-immutability";
-import { GOBD_TABLE_TRIGGERS } from "../../server/startup/ensure-gobd-table-immutability";
+import { ALL_STARTUP_TRIGGER_SPECS } from "../../server/startup/trigger-registry";
 
 // ===========================================================================
 // Drizzle-Tabellen-Registry: DB-Tabellenname → Drizzle-Modell.
@@ -1432,11 +1430,9 @@ describe("Startup CHECK-Constraint-Drift (server/startup/**)", () => {
 // exakt so gebunden, wie die Spec behauptet.
 // ===========================================================================
 
-const ALL_STARTUP_TRIGGER_SPECS: StartupTriggerSpec[] = [
-  ...AUDIT_LOG_TRIGGERS,
-  ...BUDGET_TRANSACTIONS_TRIGGERS,
-  ...GOBD_TABLE_TRIGGERS,
-];
+// `ALL_STARTUP_TRIGGER_SPECS` lebt seit A1 in der produktiven SSoT
+// (`server/startup/trigger-registry.ts`) — vorher war die Vereinigung hier im
+// Test definiert, und die Migration haette sich ihre eigene bauen muessen.
 
 // pg_trigger.tgtype-Bitmaske (siehe PostgreSQL-Quelle catalog/pg_trigger.h).
 const TG_ROW = 1 << 0;

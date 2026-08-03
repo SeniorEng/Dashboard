@@ -7,59 +7,12 @@ import {
   renderDropTriggerSql,
 } from "./trigger-spec";
 
-// Task #943 — Trigger-Funktionen + Trigger-Specs als SSoT-Konstanten exportiert,
-// damit der Startup-Schema-Drift-Wächter sie gegen ihre erwartete Bindung prüft.
-export const AUDIT_LOG_PREVENT_MUTATION_FN_SQL = `
-    CREATE OR REPLACE FUNCTION audit_log_prevent_mutation()
-    RETURNS trigger AS $$
-    BEGIN
-      IF current_setting('app.allow_audit_log_mutation', true) = 'on' THEN
-        RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
-      END IF;
-      RAISE EXCEPTION
-        'audit_log ist GoBD-technisch unveraenderbar (% verweigert)', TG_OP
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `;
+import {
+  AUDIT_LOG_PREVENT_MUTATION_FN_SQL,
+  AUDIT_LOG_PREVENT_TRUNCATE_FN_SQL,
+  AUDIT_LOG_TRIGGERS,
+} from "./trigger-registry";
 
-export const AUDIT_LOG_PREVENT_TRUNCATE_FN_SQL = `
-    CREATE OR REPLACE FUNCTION audit_log_prevent_truncate()
-    RETURNS trigger AS $$
-    BEGIN
-      RAISE EXCEPTION
-        'audit_log ist GoBD-technisch unveraenderbar (TRUNCATE verweigert)'
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `;
-
-export const AUDIT_LOG_TRIGGERS: StartupTriggerSpec[] = [
-  {
-    name: "audit_log_no_update_trigger",
-    table: "audit_log",
-    timing: "BEFORE",
-    events: ["UPDATE"],
-    level: "ROW",
-    functionName: "audit_log_prevent_mutation",
-  },
-  {
-    name: "audit_log_no_delete_trigger",
-    table: "audit_log",
-    timing: "BEFORE",
-    events: ["DELETE"],
-    level: "ROW",
-    functionName: "audit_log_prevent_mutation",
-  },
-  {
-    name: "audit_log_no_truncate_trigger",
-    table: "audit_log",
-    timing: "BEFORE",
-    events: ["TRUNCATE"],
-    level: "STATEMENT",
-    functionName: "audit_log_prevent_truncate",
-  },
-];
 
 /**
  * GoBD: technische Unveränderbarkeit von `audit_log` (Task #824).

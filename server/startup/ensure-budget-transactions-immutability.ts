@@ -7,79 +7,13 @@ import {
   renderDropTriggerSql,
 } from "./trigger-spec";
 
-// Task #1273 (Budget-Ledger Stufe B) — die GoBD-Härtung ist von `budget_ledger`
-// auf `budget_transactions` UMGEZOGEN (umbenannt + Ziel-Tabelle gewechselt,
-// NICHT dupliziert). `budget_transactions` ist ab Stufe B die EINE append-only
-// Finanz-Schicht; der frühere `budget_ledger`-Spiegel ist in Stufe C
-// (Task #1274) ersatzlos entfernt.
-export const BUDGET_TRANSACTIONS_PREVENT_UPDATE_FN_SQL = `
-    CREATE OR REPLACE FUNCTION budget_transactions_prevent_update()
-    RETURNS trigger AS $$
-    BEGIN
-      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
-        RETURN NEW;
-      END IF;
-      RAISE EXCEPTION
-        'budget_transactions: GoBD-UPDATE verboten (append-only; Korrektur nur via neue reversal-/consumption-Zeile)'
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `;
+import {
+  BUDGET_TRANSACTIONS_PREVENT_UPDATE_FN_SQL,
+  BUDGET_TRANSACTIONS_PREVENT_DELETE_FN_SQL,
+  BUDGET_TRANSACTIONS_PREVENT_TRUNCATE_FN_SQL,
+  BUDGET_TRANSACTIONS_TRIGGERS,
+} from "./trigger-registry";
 
-export const BUDGET_TRANSACTIONS_PREVENT_DELETE_FN_SQL = `
-    CREATE OR REPLACE FUNCTION budget_transactions_prevent_delete()
-    RETURNS trigger AS $$
-    BEGIN
-      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
-        RETURN OLD;
-      END IF;
-      RAISE EXCEPTION
-        'budget_transactions: GoBD-Hard-Delete verboten (append-only Finanz-Ledger)'
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `;
-
-export const BUDGET_TRANSACTIONS_PREVENT_TRUNCATE_FN_SQL = `
-    CREATE OR REPLACE FUNCTION budget_transactions_prevent_truncate()
-    RETURNS trigger AS $$
-    BEGIN
-      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
-        RETURN NULL;
-      END IF;
-      RAISE EXCEPTION
-        'budget_transactions: GoBD-TRUNCATE verboten'
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `;
-
-export const BUDGET_TRANSACTIONS_TRIGGERS: StartupTriggerSpec[] = [
-  {
-    name: "budget_transactions_no_update_trigger",
-    table: "budget_transactions",
-    timing: "BEFORE",
-    events: ["UPDATE"],
-    level: "ROW",
-    functionName: "budget_transactions_prevent_update",
-  },
-  {
-    name: "budget_transactions_no_delete_trigger",
-    table: "budget_transactions",
-    timing: "BEFORE",
-    events: ["DELETE"],
-    level: "ROW",
-    functionName: "budget_transactions_prevent_delete",
-  },
-  {
-    name: "budget_transactions_no_truncate_trigger",
-    table: "budget_transactions",
-    timing: "BEFORE",
-    events: ["TRUNCATE"],
-    level: "STATEMENT",
-    functionName: "budget_transactions_prevent_truncate",
-  },
-];
 
 /**
  * GoBD: technische Unveränderbarkeit der finanziellen `budget_transactions`-
