@@ -29,8 +29,27 @@ export const QONTO_MATCHED_ADVICE_ID_COLUMN_SQL = `ALTER TABLE qonto_transaction
      ADD COLUMN IF NOT EXISTS matched_payment_advice_id integer
      REFERENCES payment_advices(id)`;
 
+/**
+ * Zeitzonen-behaftet — Projekt-Konvention.
+ *
+ * Diese Spalte wurde ursprünglich als plain `timestamp` (ohne Zeitzone)
+ * angelegt, während das Drizzle-Modell den `timestamp`-Helper aus
+ * `shared/schema/common.ts` nutzt, der IMMER `withTimezone: true` setzt. Der
+ * Spaltentyp hing damit davon ab, welcher Pfad sie erzeugt hat: per
+ * `drizzle-kit push` gebaute DBs bekamen `timestamptz`, per Startup-DDL gebaute
+ * `timestamp`. Aufgedeckt hat das der neue ADD-COLUMN-Coverage-Scan im
+ * Drift-Wächter.
+ *
+ * ACHTUNG — diese Korrektur wirkt NUR auf DBs, in denen die Spalte noch nicht
+ * existiert: `ADD COLUMN IF NOT EXISTS` lässt eine vorhandene Spalte
+ * unangetastet und altert sie NICHT nach. Bestehende Datenbanken behalten
+ * `timestamp`, bis die Spalte in `RECONCILE_COLUMN_TYPE_TARGETS`
+ * (`reconcile-drifted-column-types.ts`) aufgenommen wird — dort passiert das
+ * idempotente `ALTER COLUMN … SET DATA TYPE`. Das ist bewusst ein eigener,
+ * gegateter Schritt, weil es eine Typkonvertierung auf echten Daten ist.
+ */
 export const QONTO_ADVICE_DISMISSED_AT_COLUMN_SQL = `ALTER TABLE qonto_transactions
-     ADD COLUMN IF NOT EXISTS advice_suggestion_dismissed_at timestamp`;
+     ADD COLUMN IF NOT EXISTS advice_suggestion_dismissed_at timestamptz`;
 
 export const QONTO_MATCHED_ADVICE_UNIQUE_INDEX_SQL = `CREATE UNIQUE INDEX IF NOT EXISTS qonto_transactions_matched_advice_unique_idx
      ON qonto_transactions (matched_payment_advice_id)
