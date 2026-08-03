@@ -81,8 +81,13 @@ export const RECONCILE_COLUMN_TYPE_TARGETS: ReadonlyArray<{
 
 export async function reconcileDriftedColumnTypes(): Promise<void> {
   const changed: string[] = [];
+  const failed: string[] = [];
 
   for (const target of RECONCILE_COLUMN_TYPE_TARGETS) {
+    // Pro Target isoliert: ohne das würde ein Fehlschlag bei Target n alle
+    // folgenden still überspringen (der try/catch liegt sonst erst im Boot-
+    // Aufrufer), und im Log stünde nur eine Zeile.
+    try {
     const res = await db.execute(sql`
       SELECT data_type
       FROM information_schema.columns
@@ -97,13 +102,38 @@ export async function reconcileDriftedColumnTypes(): Promise<void> {
     // Bereits korrekt → nichts zu tun (Idempotenz).
     if (dataType === target.expectedDataType) continue;
 
-    await db.execute(sql.raw(
-      `ALTER TABLE "${target.table}" ALTER COLUMN "${target.column}" SET DATA TYPE ${target.targetType} USING "${target.column}"::${target.targetType}`,
-    ));
+    // `SET LOCAL TimeZone='UTC'` ist hier NICHT Kosmetik, sondern der Kern der
+    // Korrektheit dieser Konversion:
+    //
+    // Der Schreibpfad legt UTC-Wanduhrzeiten ab (Drizzle serialisiert `Date`
+    // über `toISOString()`; beim Cast in eine `timestamp without time zone`-
+    // Spalte verwirft Postgres das `Z`). Das `USING …::timestamptz` deutet diese
+    // naive Zeit dann in der SESSION-Zeitzone. Ohne Festlegung ist das der
+    // Server-Default der Ziel-DB — auf PG16 gemessen:
+    //   TimeZone=UTC             → Wert unverändert, KEIN Table-Rewrite
+    //   TimeZone=Europe/Berlin   → Wert −2 h, VOLLER Table-Rewrite
+    // Beides — stille Wertverschiebung und ACCESS-EXCLUSIVE-Dauer — hinge damit
+    // an einer Größe, die wir auf der Ziel-DB nicht kennen. Mit UTC ist die
+    // Konversion instant-erhaltend und bleibt auf dem rewrite-freien Pfad.
+    //
+    // `SET LOCAL` gilt nur bis zum Ende dieser Transaktion und lässt die
+    // Session danach unberührt.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL TimeZone = 'UTC'`);
+      await tx.execute(sql.raw(
+        `ALTER TABLE "${target.table}" ALTER COLUMN "${target.column}" SET DATA TYPE ${target.targetType} USING "${target.column}"::${target.targetType}`,
+      ));
+    });
     changed.push(`${target.table}.${target.column}: ${dataType}→${target.targetType}`);
+    } catch (err) {
+      failed.push(`${target.table}.${target.column} (${err})`);
+    }
   }
 
   if (changed.length > 0) {
     log(`Drift-Spaltentypen versöhnt: ${changed.join(", ")}`, "startup");
+  }
+  if (failed.length > 0) {
+    log(`Drift-Spaltentypen NICHT versöhnt: ${failed.join("; ")}`, "startup");
   }
 }
