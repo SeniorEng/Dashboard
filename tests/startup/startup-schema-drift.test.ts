@@ -99,6 +99,11 @@ import { INVOICE_LINE_ITEM_QUANTITY_COLUMNS_SQL } from "../../server/startup/ens
 import { INVOICE_RENDER_SNAPSHOT_COLUMN_SQL } from "../../server/startup/ensure-invoice-render-snapshot";
 import { INVOICE_STORNO_REFS_COLUMN_SQL } from "../../server/startup/migrate-invoice-storno-refs";
 import { INVOICE_ZUGFERD_XML_COLUMN_SQL } from "../../server/startup/migrate-invoice-zugferd-xml";
+import { APPOINTMENTS_CO_VISIT_GROUP_INDEX_SQL } from "../../server/startup/ensure-appointment-co-visit-group";
+import {
+  QONTO_MATCHED_ADVICE_UNIQUE_INDEX_SQL,
+  QONTO_MATCHED_ADVICE_INDEX_SQL,
+} from "../../server/startup/ensure-qonto-advice-match-schema";
 
 // --- ALTER-TYPE registries -------------------------------------------------
 import {
@@ -125,6 +130,10 @@ import {
   APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_NAME,
   APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_SQL,
 } from "../../server/startup/migrate-erstberatung-customers";
+import {
+  QONTO_MATCH_XOR_CHECK_NAME,
+  QONTO_MATCH_XOR_CHECK_SQL,
+} from "../../server/startup/ensure-qonto-advice-match-schema";
 
 // --- Trigger specs (SSoT) --------------------------------------------------
 import {
@@ -791,6 +800,34 @@ const INDEX_SOURCES: IndexSource[] = [
     tempColumns:
       "role text, service_id integer, valid_from date, deleted_at timestamptz",
   },
+  {
+    // Task #1613 — Co-Visit-Lookup in der Overlap-Prüfung.
+    label: "ensure-appointment-co-visit-group: appointments_co_visit_group_id_idx",
+    rawSql: APPOINTMENTS_CO_VISIT_GROUP_INDEX_SQL,
+    indexName: "appointments_co_visit_group_id_idx",
+    realTable: "appointments",
+    drizzleTable: appointments,
+    tempColumns: "co_visit_group_id text",
+  },
+  {
+    // Task #1672 — ein Avis ↔ höchstens eine Sammelzahlung (partiell).
+    label:
+      "ensure-qonto-advice-match-schema: qonto_transactions_matched_advice_unique_idx",
+    rawSql: QONTO_MATCHED_ADVICE_UNIQUE_INDEX_SQL,
+    indexName: "qonto_transactions_matched_advice_unique_idx",
+    realTable: "qonto_transactions",
+    drizzleTable: qontoTransactions,
+    tempColumns: "matched_payment_advice_id integer",
+  },
+  {
+    // Task #1672 — reiner Lookup-Index auf derselben FK-Spalte.
+    label: "ensure-qonto-advice-match-schema: qonto_transactions_matched_advice_idx",
+    rawSql: QONTO_MATCHED_ADVICE_INDEX_SQL,
+    indexName: "qonto_transactions_matched_advice_idx",
+    realTable: "qonto_transactions",
+    drizzleTable: qontoTransactions,
+    tempColumns: "matched_payment_advice_id integer",
+  },
 ];
 
 /** Indexe, die woanders abgesichert sind und vom Coverage-Scan ignoriert werden. */
@@ -998,6 +1035,17 @@ const CHECK_SOURCES: CheckSource[] = [
     realTable: "appointments",
     tempColumns: "prospect_id integer, customer_id integer",
     expectedPredicate: "prospect_id IS NOT NULL OR customer_id IS NOT NULL",
+  },
+  {
+    // Task #1672 — XOR: eine Qonto-Transaktion zeigt entweder auf eine
+    // Einzelrechnung ODER auf ein Sammel-Avis, nie auf beides.
+    label: "ensure-qonto-advice-match-schema: qonto_transactions_match_xor",
+    rawSql: QONTO_MATCH_XOR_CHECK_SQL,
+    constraintName: QONTO_MATCH_XOR_CHECK_NAME,
+    realTable: "qonto_transactions",
+    tempColumns: "matched_invoice_id integer, matched_payment_advice_id integer",
+    expectedPredicate:
+      "NOT (matched_invoice_id IS NOT NULL AND matched_payment_advice_id IS NOT NULL)",
   },
 ];
 

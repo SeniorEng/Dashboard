@@ -17,25 +17,51 @@ import { log } from "../lib/log";
  * Kein `drizzle-kit push`. Bei existierenden verletzenden Daten schlägt nur der
  * jeweilige Schritt fehl (Fehler geloggt, Boot läuft weiter).
  */
+// Einzeln exportierte SSoT-Konstanten statt nur des Sammel-Arrays: der
+// Drift-Wächter (`tests/startup/startup-schema-drift.test.ts`) spielt JEDE
+// dieser Anweisungen gegen eine TEMP-Tabelle und vergleicht das von PostgreSQL
+// normalisierte Ergebnis mit der Drizzle-Deklaration. Dafür braucht er die
+// Statements benannt und einzeln — ein Index-Griff ins Array wäre gegen jede
+// Umsortierung fragil. Das ausgeführte SQL bleibt unverändert; `QONTO_ADVICE_MATCH_DDL`
+// wird unten aus genau diesen Konstanten zusammengesetzt.
+
+export const QONTO_MATCHED_ADVICE_UNIQUE_INDEX_SQL = `CREATE UNIQUE INDEX IF NOT EXISTS qonto_transactions_matched_advice_unique_idx
+     ON qonto_transactions (matched_payment_advice_id)
+     WHERE matched_payment_advice_id IS NOT NULL`;
+
+export const QONTO_MATCHED_ADVICE_INDEX_SQL = `CREATE INDEX IF NOT EXISTS qonto_transactions_matched_advice_idx
+     ON qonto_transactions (matched_payment_advice_id)`;
+
+export const QONTO_MATCH_XOR_CHECK_NAME = "qonto_transactions_match_xor";
+
+/**
+ * Plain-DDL des XOR-Checks — OHNE den `DO`-Idempotenz-Mantel.
+ *
+ * Der Mantel unten prüft auf den festen Constraint-Namen; er ist für die
+ * Laufzeit richtig, macht das Statement für den Drift-Wächter aber unbrauchbar
+ * (der biegt Tabelle UND Namen auf eine Probe um — die `IF NOT EXISTS`-Abfrage
+ * würde weiter den ECHTEN Namen sehen, ihn auf der realen Tabelle finden und
+ * das Anlegen der Probe still überspringen). Deshalb ist das nackte
+ * `ALTER TABLE … ADD CONSTRAINT` die SSoT und der Mantel wird daraus gebaut.
+ */
+export const QONTO_MATCH_XOR_CHECK_SQL = `ALTER TABLE qonto_transactions
+         ADD CONSTRAINT ${QONTO_MATCH_XOR_CHECK_NAME}
+         CHECK (NOT (matched_invoice_id IS NOT NULL AND matched_payment_advice_id IS NOT NULL))`;
+
 export const QONTO_ADVICE_MATCH_DDL: string[] = [
   `ALTER TABLE qonto_transactions
      ADD COLUMN IF NOT EXISTS matched_payment_advice_id integer
      REFERENCES payment_advices(id)`,
   `ALTER TABLE qonto_transactions
      ADD COLUMN IF NOT EXISTS advice_suggestion_dismissed_at timestamp`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS qonto_transactions_matched_advice_unique_idx
-     ON qonto_transactions (matched_payment_advice_id)
-     WHERE matched_payment_advice_id IS NOT NULL`,
-  `CREATE INDEX IF NOT EXISTS qonto_transactions_matched_advice_idx
-     ON qonto_transactions (matched_payment_advice_id)`,
+  QONTO_MATCHED_ADVICE_UNIQUE_INDEX_SQL,
+  QONTO_MATCHED_ADVICE_INDEX_SQL,
   `DO $$
    BEGIN
      IF NOT EXISTS (
-       SELECT 1 FROM pg_constraint WHERE conname = 'qonto_transactions_match_xor'
+       SELECT 1 FROM pg_constraint WHERE conname = '${QONTO_MATCH_XOR_CHECK_NAME}'
      ) THEN
-       ALTER TABLE qonto_transactions
-         ADD CONSTRAINT qonto_transactions_match_xor
-         CHECK (NOT (matched_invoice_id IS NOT NULL AND matched_payment_advice_id IS NOT NULL));
+       ${QONTO_MATCH_XOR_CHECK_SQL};
      END IF;
    END $$`,
 ];
