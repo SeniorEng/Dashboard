@@ -2,7 +2,6 @@ import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 import {
-  type StartupTriggerSpec,
   renderCreateTriggerSql,
   renderDropTriggerSql,
 } from "./trigger-spec";

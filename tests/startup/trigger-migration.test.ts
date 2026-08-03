@@ -52,7 +52,8 @@ async function functionDefs(tx: Tx): Promise<Map<string, string>> {
 /** Normalisierte Trigger-Definitionen, geschlüsselt auf `tabelle.trigger`. */
 async function triggerDefs(tx: Tx): Promise<Map<string, string>> {
   const res = await tx.execute(sql`
-    SELECT c.relname AS tbl, t.tgname, pg_get_triggerdef(t.oid) AS def
+    SELECT c.relname AS tbl, t.tgname,
+           pg_get_triggerdef(t.oid) || ' [tgenabled=' || t.tgenabled::text || ']' AS def
     FROM pg_trigger t
     JOIN pg_class c ON c.oid = t.tgrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -166,6 +167,63 @@ describe("A1 — Trigger-Migration == Startup-Renderer", () => {
     for (const [key, def] of before.trgs) {
       expect(after.trgs.get(key), `Trigger-Bindung weicht ab: ${key}`).toBe(def);
     }
+  });
+
+  it("baut aus dem NICHTS wieder exakt denselben Stand (Neubau-Fall)", async () => {
+    // Der Vorher/Nachher-Vergleich oben pinnt „aendert nichts". Dieser Test
+    // pinnt „baut alles aus dem Nichts" — die Aussage, die Track C braucht,
+    // wenn die Startup-DDL aus ist und die Migration allein laeuft. Er faengt
+    // damit z.B. eine Migration, die nur DROPs enthaelt, eine falsche
+    // Reihenfolge (Trigger vor seiner Funktion) oder ein Statement, das nur
+    // gegen bereits vorhandene Objekte funktioniert.
+    //
+    // Was er NICHT kann, und das ist wichtig zu wissen: ein Loch in der SSoT
+    // selbst. Faellt eine Spec ganz heraus, legt der Renderer den Trigger
+    // ebenfalls nicht an — dann fehlt er im Ausgangsstand UND im Neubau, und
+    // beide Seiten sind sich einig. Der nicht-zirkulaere Anker dagegen sind die
+    // Verhaltenstests (tests/audit-log-immutable.test.ts,
+    // tests/gobd-table-immutability.test.ts,
+    // tests/budget-transactions-immutability.test.ts), die pruefen, dass die
+    // Schreibversuche tatsaechlich scheitern.
+    let before = { fns: new Map<string, string>(), trgs: new Map<string, string>() };
+
+    await db
+      .transaction(async (tx) => {
+        before = { fns: await functionDefs(tx), trgs: await triggerDefs(tx) };
+
+        for (const [key] of before.trgs) {
+          const [tbl, name] = key.split(".");
+          await tx.execute(sql.raw(`DROP TRIGGER "${name}" ON "${tbl}"`));
+        }
+        for (const name of before.fns.keys()) {
+          await tx.execute(sql.raw(`DROP FUNCTION "${name}"()`));
+        }
+        expect((await triggerDefs(tx)).size, "Aufraeumen unvollstaendig").toBe(0);
+        expect((await functionDefs(tx)).size, "Aufraeumen unvollstaendig").toBe(0);
+
+        await tx.execute(sql.raw(migrationSql));
+
+        const rebuilt = { fns: await functionDefs(tx), trgs: await triggerDefs(tx) };
+        expect(
+          [...rebuilt.trgs.keys()].sort(),
+          "Die Migration allein baut nicht dieselben Trigger.",
+        ).toEqual([...before.trgs.keys()].sort());
+        expect(
+          [...rebuilt.fns.keys()].sort(),
+          "Die Migration allein baut nicht dieselben Funktionen.",
+        ).toEqual([...before.fns.keys()].sort());
+        for (const [k, def] of before.trgs) {
+          expect(rebuilt.trgs.get(k), `Neubau weicht ab (Trigger): ${k}`).toBe(def);
+        }
+        for (const [k, def] of before.fns) {
+          expect(rebuilt.fns.get(k), `Neubau weicht ab (Funktion): ${k}`).toBe(def);
+        }
+
+        throw new Error("__rollback__");
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof Error) || err.message !== "__rollback__") throw err;
+      });
   });
 
   it("droppt die verwaisten budget_ledger-Funktionen", async () => {

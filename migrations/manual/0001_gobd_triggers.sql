@@ -9,6 +9,13 @@
 -- Drizzle kann Trigger und Funktionen nicht ausdruecken; diese Datei ist
 -- deshalb die handgefuehrte Haelfte des Schema-Bauplans neben der
 -- generierten Baseline (A2).
+--
+-- AUSFUEHRUNG: NUR transaktional und mit Abbruch bei Fehler --
+--   psql "$DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f <diese Datei>
+-- Ohne -1/ON_ERROR_STOP laeuft psql nach einem Fehler weiter und endet mit
+-- Exit 0 — der Fail-fast des DROP-Blocks unten waere dann wirkungslos.
+-- Der programmatische Migrator (A3) faehrt jede Migration ohnehin in einer
+-- Transaktion; dort gilt die Zusage strukturell.
 
 -- ---------------------------------------------------------------------------
 -- 1) Verwaiste Funktionen der ersatzlos entfernten `budget_ledger`.
@@ -17,7 +24,8 @@
 -- aber nicht; am 03.08.2026 read-only in Prod nachgewiesen (14 statt 11).
 -- BEWUSST OHNE CASCADE: haengt wider Erwarten doch etwas daran, MUSS die
 -- Migration hier scheitern statt es still mitzureissen.
--- Steht am Anfang, damit dieser Fall auffaellt, bevor irgendetwas gebaut wird.
+-- Steht am Anfang, damit dieser Fall auffaellt, bevor irgendetwas gebaut wird
+-- — vorausgesetzt, die Datei laeuft transaktional (siehe Kopf).
 -- ---------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS budget_ledger_prevent_delete();
 DROP FUNCTION IF EXISTS budget_ledger_prevent_update();
@@ -37,7 +45,7 @@ CREATE OR REPLACE FUNCTION audit_log_prevent_mutation()
         'audit_log ist GoBD-technisch unveraenderbar (% verweigert)', TG_OP
         USING ERRCODE = 'restrict_violation';
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- audit_log_prevent_truncate
 CREATE OR REPLACE FUNCTION audit_log_prevent_truncate()
@@ -47,7 +55,7 @@ CREATE OR REPLACE FUNCTION audit_log_prevent_truncate()
         'audit_log ist GoBD-technisch unveraenderbar (TRUNCATE verweigert)'
         USING ERRCODE = 'restrict_violation';
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- budget_transactions_prevent_update
 CREATE OR REPLACE FUNCTION budget_transactions_prevent_update()
@@ -60,7 +68,7 @@ CREATE OR REPLACE FUNCTION budget_transactions_prevent_update()
         'budget_transactions: GoBD-UPDATE verboten (append-only; Korrektur nur via neue reversal-/consumption-Zeile)'
         USING ERRCODE = 'restrict_violation';
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- budget_transactions_prevent_delete
 CREATE OR REPLACE FUNCTION budget_transactions_prevent_delete()
@@ -73,7 +81,7 @@ CREATE OR REPLACE FUNCTION budget_transactions_prevent_delete()
         'budget_transactions: GoBD-Hard-Delete verboten (append-only Finanz-Ledger)'
         USING ERRCODE = 'restrict_violation';
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- budget_transactions_prevent_truncate
 CREATE OR REPLACE FUNCTION budget_transactions_prevent_truncate()
@@ -86,7 +94,7 @@ CREATE OR REPLACE FUNCTION budget_transactions_prevent_truncate()
         'budget_transactions: GoBD-TRUNCATE verboten'
         USING ERRCODE = 'restrict_violation';
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- budget_allocations_prevent_resurrect
 CREATE OR REPLACE FUNCTION budget_allocations_prevent_resurrect()
@@ -102,7 +110,7 @@ CREATE OR REPLACE FUNCTION budget_allocations_prevent_resurrect()
       END IF;
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- budget_allocations_prevent_delete
 CREATE OR REPLACE FUNCTION budget_allocations_prevent_delete()
@@ -115,7 +123,7 @@ CREATE OR REPLACE FUNCTION budget_allocations_prevent_delete()
         'budget_allocations: GoBD-Hard-Delete verboten (nur Soft-Delete via deleted_at)'
         USING ERRCODE = 'restrict_violation';
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- cbts_prevent_delete
 CREATE OR REPLACE FUNCTION cbts_prevent_delete()
@@ -128,7 +136,7 @@ CREATE OR REPLACE FUNCTION cbts_prevent_delete()
         'customer_budget_type_settings: GoBD-Hard-Delete verboten (append-only Historisierung)'
         USING ERRCODE = 'restrict_violation';
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- invoices_prevent_finalized_delete
 CREATE OR REPLACE FUNCTION invoices_prevent_finalized_delete()
@@ -144,7 +152,7 @@ CREATE OR REPLACE FUNCTION invoices_prevent_finalized_delete()
       END IF;
       RETURN OLD;
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- invoice_line_items_prevent_finalized_mutation
 CREATE OR REPLACE FUNCTION invoice_line_items_prevent_finalized_mutation()
@@ -165,7 +173,7 @@ CREATE OR REPLACE FUNCTION invoice_line_items_prevent_finalized_mutation()
       END IF;
       RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- gobd_prevent_truncate
 CREATE OR REPLACE FUNCTION gobd_prevent_truncate()
@@ -178,7 +186,7 @@ CREATE OR REPLACE FUNCTION gobd_prevent_truncate()
         'GoBD: TRUNCATE auf % verboten', TG_TABLE_NAME
         USING ERRCODE = 'restrict_violation';
     END;
-    $$ LANGUAGE plpgsql;;
+    $$ LANGUAGE plpgsql;
 
 -- ---------------------------------------------------------------------------
 -- 3) Trigger-Bindungen.

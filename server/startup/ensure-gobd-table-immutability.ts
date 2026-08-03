@@ -2,7 +2,6 @@ import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 import {
-  type StartupTriggerSpec,
   renderCreateTriggerSql,
   renderDropTriggerSql,
 } from "./trigger-spec";
@@ -14,7 +13,6 @@ import {
   GOBD_INVOICES_PREVENT_FINALIZED_DELETE_FN_SQL,
   GOBD_LINE_ITEMS_PREVENT_FINALIZED_MUTATION_FN_SQL,
   GOBD_PREVENT_TRUNCATE_FN_SQL,
-  GOBD_TRUNCATE_PROTECTED_TABLES,
   GOBD_TABLE_TRIGGERS,
 } from "./trigger-registry";
 

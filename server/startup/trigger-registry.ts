@@ -327,8 +327,12 @@ export interface StartupTriggerFunction {
 }
 
 /**
- * Die elf lebenden Trigger-Funktionen, in der Reihenfolge, in der die
- * `ensure-*`-Migrationen sie zur Laufzeit anlegen.
+ * Die elf lebenden Trigger-Funktionen.
+ *
+ * Die Reihenfolge hier ist die Lese-Reihenfolge dieser Datei, NICHT die
+ * Boot-Reihenfolge (die ist audit → gobd → budget_transactions, siehe
+ * `server/index.ts`). Das ist folgenlos: die Migration legt alle Funktionen an,
+ * bevor sie den ersten Trigger bindet.
  */
 export const ALL_STARTUP_TRIGGER_FUNCTIONS: readonly StartupTriggerFunction[] = [
   { name: "audit_log_prevent_mutation", sql: AUDIT_LOG_PREVENT_MUTATION_FN_SQL },

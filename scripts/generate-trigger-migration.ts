@@ -22,7 +22,16 @@ import {
 } from "../server/startup/trigger-registry";
 import { renderCreateTriggerSql, renderDropTriggerSql } from "../server/startup/trigger-spec";
 
-export const TRIGGER_MIGRATION_PATH = join("migrations", "0023_gobd_triggers.sql");
+/**
+ * Bewusst NICHT im `out`-Verzeichnis von drizzle-kit (`./migrations`):
+ *  - dessen `meta/_journal.json` ist kaputt (kennt 0020–0022 nicht) und wird in
+ *    A2 neu gebaut; ein `drizzle-kit generate` vergaebe als naechsten Index 20
+ *    und kollidierte mit dem vorhandenen `0020_*`,
+ *  - A2 archiviert den Ordner — diese Datei ginge mit.
+ * Sie ist die HANDGEFUEHRTE Haelfte des Bauplans und gehoert deshalb neben,
+ * nicht in die generierte Baseline.
+ */
+export const TRIGGER_MIGRATION_PATH = join("migrations", "manual", "0001_gobd_triggers.sql");
 
 export function renderTriggerMigration(): string {
   const out: string[] = [];
@@ -38,6 +47,13 @@ export function renderTriggerMigration(): string {
   out.push("-- Drizzle kann Trigger und Funktionen nicht ausdruecken; diese Datei ist");
   out.push("-- deshalb die handgefuehrte Haelfte des Schema-Bauplans neben der");
   out.push("-- generierten Baseline (A2).");
+  out.push("--");
+  out.push("-- AUSFUEHRUNG: NUR transaktional und mit Abbruch bei Fehler --");
+  out.push("--   psql \"$DATABASE_URL\" -1 -v ON_ERROR_STOP=1 -f <diese Datei>");
+  out.push("-- Ohne -1/ON_ERROR_STOP laeuft psql nach einem Fehler weiter und endet mit");
+  out.push("-- Exit 0 — der Fail-fast des DROP-Blocks unten waere dann wirkungslos.");
+  out.push("-- Der programmatische Migrator (A3) faehrt jede Migration ohnehin in einer");
+  out.push("-- Transaktion; dort gilt die Zusage strukturell.");
   out.push("");
 
   out.push("-- ---------------------------------------------------------------------------");
@@ -47,7 +63,8 @@ export function renderTriggerMigration(): string {
   out.push("-- aber nicht; am 03.08.2026 read-only in Prod nachgewiesen (14 statt 11).");
   out.push("-- BEWUSST OHNE CASCADE: haengt wider Erwarten doch etwas daran, MUSS die");
   out.push("-- Migration hier scheitern statt es still mitzureissen.");
-  out.push("-- Steht am Anfang, damit dieser Fall auffaellt, bevor irgendetwas gebaut wird.");
+  out.push("-- Steht am Anfang, damit dieser Fall auffaellt, bevor irgendetwas gebaut wird");
+  out.push("-- — vorausgesetzt, die Datei laeuft transaktional (siehe Kopf).");
   out.push("-- ---------------------------------------------------------------------------");
   for (const fn of ORPHANED_TRIGGER_FUNCTIONS) {
     out.push(`DROP FUNCTION IF EXISTS ${fn}();`);
@@ -59,7 +76,7 @@ export function renderTriggerMigration(): string {
   out.push("-- ---------------------------------------------------------------------------");
   for (const fn of ALL_STARTUP_TRIGGER_FUNCTIONS) {
     out.push(`-- ${fn.name}`);
-    out.push(`${fn.sql.trim()};`);
+    out.push(`${fn.sql.trim().replace(/;$/, "")};`);
     out.push("");
   }
 
@@ -75,7 +92,10 @@ export function renderTriggerMigration(): string {
     out.push("");
   }
 
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  // Kein globales Kollabieren von Leerzeilen: das wuerde auch IN Funktions-
+  // rumpfe greifen und deren `prosrc` gegenueber dem Renderer veraendern.
+  // Die Bloecke oben erzeugen ohnehin genau eine Leerzeile als Fuge.
+  return out.join("\n").trimEnd() + "\n";
 }
 
 function main(): void {
