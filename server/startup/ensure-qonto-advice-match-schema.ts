@@ -25,6 +25,13 @@ import { log } from "../lib/log";
 // Umsortierung fragil. Das ausgeführte SQL bleibt unverändert; `QONTO_ADVICE_MATCH_DDL`
 // wird unten aus genau diesen Konstanten zusammengesetzt.
 
+export const QONTO_MATCHED_ADVICE_ID_COLUMN_SQL = `ALTER TABLE qonto_transactions
+     ADD COLUMN IF NOT EXISTS matched_payment_advice_id integer
+     REFERENCES payment_advices(id)`;
+
+export const QONTO_ADVICE_DISMISSED_AT_COLUMN_SQL = `ALTER TABLE qonto_transactions
+     ADD COLUMN IF NOT EXISTS advice_suggestion_dismissed_at timestamp`;
+
 export const QONTO_MATCHED_ADVICE_UNIQUE_INDEX_SQL = `CREATE UNIQUE INDEX IF NOT EXISTS qonto_transactions_matched_advice_unique_idx
      ON qonto_transactions (matched_payment_advice_id)
      WHERE matched_payment_advice_id IS NOT NULL`;
@@ -49,11 +56,8 @@ export const QONTO_MATCH_XOR_CHECK_SQL = `ALTER TABLE qonto_transactions
          CHECK (NOT (matched_invoice_id IS NOT NULL AND matched_payment_advice_id IS NOT NULL))`;
 
 export const QONTO_ADVICE_MATCH_DDL: string[] = [
-  `ALTER TABLE qonto_transactions
-     ADD COLUMN IF NOT EXISTS matched_payment_advice_id integer
-     REFERENCES payment_advices(id)`,
-  `ALTER TABLE qonto_transactions
-     ADD COLUMN IF NOT EXISTS advice_suggestion_dismissed_at timestamp`,
+  QONTO_MATCHED_ADVICE_ID_COLUMN_SQL,
+  QONTO_ADVICE_DISMISSED_AT_COLUMN_SQL,
   QONTO_MATCHED_ADVICE_UNIQUE_INDEX_SQL,
   QONTO_MATCHED_ADVICE_INDEX_SQL,
   `DO $$
