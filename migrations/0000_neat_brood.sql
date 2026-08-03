@@ -381,8 +381,7 @@ CREATE TABLE "appointments" (
 	"no_show_charge_suppression_reason" text,
 	"import_batch_id" integer,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"deleted_at" timestamp with time zone,
-	CONSTRAINT "appointments_prospect_or_customer_check" CHECK (prospect_id IS NOT NULL OR customer_id IS NOT NULL)
+	"deleted_at" timestamp with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "budget_allocations" (

@@ -30,16 +30,13 @@ const BASE_DB = `cc_test_baseline_${process.pid.toString(36)}_${randomBytes(3).t
 /**
  * Constraints, die die Laufzeit-DB trägt, die Baseline aber nicht.
  *
- * Jeder Eintrag waere eine offene Aufgabe, kein Freibrief. Die Liste ist
- * derzeit LEER — der frühere einzige Eintrag
- * (`audit_log_parent_deletion_id_fkey`) war kein fehlender Constraint, sondern
- * ein Duplikat aus einem Deploy-Ping-Pong: `push` droppte den FK, der Boot legte
- * ihn namensgleich wieder an. Der Startup-Pfad prüft jetzt SPALTEN-basiert und
- * erzeugt keinen Zweitling mehr (`server/startup/ensure-audit-parent-deletion.ts`,
- * gepinnt in `tests/startup/startup-schema-drift.test.ts`).
+ * Jeder Eintrag ist eine offene Aufgabe, kein Freibrief.
  *
- * Eine leere Liste ist hier die STRENGSTE Fassung, nicht die schwaechste: jeder
- * neue startup-only Constraint laesst den Test sofort rot laufen.
+ * Der frühere Eintrag `audit_log_parent_deletion_id_fkey` ist WEG: er war kein
+ * fehlender Constraint, sondern ein Duplikat aus einem Deploy-Ping-Pong. Der
+ * Startup-Pfad prüft jetzt SPALTEN-basiert und erzeugt keinen Zweitling mehr
+ * (`server/startup/ensure-audit-parent-deletion.ts`, gepinnt in
+ * `tests/startup/startup-schema-drift.test.ts`).
  *
  * ANNAHME: Die Laufzeit-DB wurde nach `push` auch GEBOOTET. Ein Snapshot
  * dazwischen hätte die startup-erzeugten Objekte nicht und liesse diesen Test
@@ -51,7 +48,22 @@ const BASE_DB = `cc_test_baseline_${process.pid.toString(36)}_${randomBytes(3).t
  * Der Orchestrator baut pro Lauf frisch; eine langlebige lokale Test-DB muss
  * einmal neu gepusht werden.
  */
-const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [];
+const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [
+  {
+    name: "appointments_prospect_or_customer_check",
+    why:
+      "ABSICHTLICH startup-only. In PROD existiert der CHECK nicht (Schema-Dump " +
+      "03.08.2026) — `migrate-erstberatung-customers.ts` ueberspringt das " +
+      "ADD CONSTRAINT, sobald Termine ohne prospect_id UND ohne customer_id " +
+      "vorliegen, und protokolliert nur eine Zeile. In Prod gibt es solche " +
+      "Bestandsdaten, in der Dev-Kopie nicht — deshalb traegt die Laufzeit-DB " +
+      "hier ihn, Prod aber nicht. Im Drizzle-Modell waere er ein Constraint, den " +
+      "jede frisch gebaute DB haette und Prod nicht: genau die Asymmetrie, an " +
+      "der die A3-Gegenprobe (von Null == Prod, Diff 0) scheitern wuerde. " +
+      "Ihn zu erzwingen ist eine fachliche Entscheidung + Datenbereinigung, " +
+      "kein Migrations-Thema — siehe FINDING.",
+  },
+];
 
 type Snapshot = Record<string, Map<string, string>>;
 
