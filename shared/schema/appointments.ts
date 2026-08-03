@@ -1,5 +1,5 @@
-import { pgTable, text, integer, serial, time, date, boolean, index, numeric, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
-import { isNull } from "drizzle-orm";
+import { pgTable, text, integer, serial, time, date, boolean, index, numeric, jsonb, check, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { isNull, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp } from "./common";
@@ -179,6 +179,16 @@ export const appointments = pgTable("appointments", {
   index("appointments_prospect_id_idx").on(table.prospectId),
   index("appointments_series_id_idx").on(table.seriesId),
   index("appointments_co_visit_group_id_idx").on(table.coVisitGroupId),
+  // Task #1841 / A2 — bis hierhin legte NUR der Startup-Pfad diesen Constraint
+  // an (`server/startup/migrate-erstberatung-customers.ts`); das Modell kannte
+  // ihn nicht, also fehlte er der generierten Baseline. Prädikat wortgleich zur
+  // laufenden DB (`pg_get_constraintdef`), Name unverändert — ein abweichender
+  // Name würde beim nächsten `push` einen ZWEITEN, gleichbedeutenden Constraint
+  // anlegen statt den vorhandenen zu erkennen.
+  check(
+    "appointments_prospect_or_customer_check",
+    sql`prospect_id IS NOT NULL OR customer_id IS NOT NULL`,
+  ),
 ]);
 
 // ============================================

@@ -1,38 +1,53 @@
-# Migrations
+# `migrations/` — die generierte Schema-Baseline
 
-Die SQL-Dateien in diesem Ordner werden von `drizzle-kit` aus dem Drizzle-Schema in `shared/schema/` generiert. **Sie werden nicht automatisch zur Laufzeit ausgeführt** — der Server enthält keinen Migrate-Runner. Schema-Änderungen werden im Alltag mit `npm run db:push` direkt aus dem Drizzle-Schema synchronisiert.
+## Was hier liegt
 
-Für Änderungen, die `db:push` als destruktiv einstuft (z. B. das Entfernen von Spalten mit Daten), sind die Migrations-Dateien hier die Anlaufstelle. Sie werden manuell ausgeführt — entweder per `psql`, über das Replit-Database-Tool oder die Drizzle-Konsole.
+| Datei | Was |
+|---|---|
+| `0000_*.sql` | Baseline: alle Tabellen, Spalten, Indizes und die im Drizzle-Modell ausgedrückten Constraints. **Generiert** aus `shared/schema.ts` per `npx drizzle-kit generate`. |
+| `meta/` | Journal + Snapshots von `drizzle-kit`. Maßgeblich für Reihenfolge und Diff-Basis. |
+| `manual/` | Objekte, die Drizzle nicht ausdrücken kann (Trigger, Funktionen). Eigene README dort. |
 
-## Nicht in diesem Ordner: `migrations/manual/`
+Die alte, kaputte Historie liegt inaktiv unter `../migrations_legacy/`.
 
-Objekte, die Drizzle nicht ausdrücken kann (Trigger, Funktionen), liegen in
-`migrations/manual/` — bewusst außerhalb dieses `out`-Verzeichnisses, damit ein
-`drizzle-kit generate` keine Index-Kollision erzeugt und ein Archivieren dieses
-Ordners sie nicht mitnimmt. Siehe `migrations/manual/README.md`.
+## Diese Datei ist zum STEMPELN da, nicht zum Ausführen
 
-## Reihenfolge
+Das ist der wichtigste Satz hier. Die Baseline beschreibt den Zustand, den
+**bestehende Datenbanken bereits haben**. Sie wird beim Cutover als „angewendet"
+im Migrator-Ledger vermerkt, **ohne ausgeführt zu werden** — das Schema ist ja
+schon da.
 
-`migrations/meta/_journal.json` ist die maßgebliche Liste. Neuere Migrationen am Ende anhängen, niemals Lücken in den Index-Nummern lassen.
+Wer sie versehentlich gegen eine bestehende DB fährt, bricht beim ersten
+`CREATE TABLE` ab (kein `IF NOT EXISTS`); transaktional gefahren bleibt das
+folgenlos. Zerstören kann sie nichts — sie enthält kein `DROP`, `DELETE`,
+`UPDATE` oder `TRUNCATE`, nur additive Statements. Trotzdem: **nicht** das
+`psql -f`-Muster aus `manual/README.md` hierher übertragen. Das gilt dort für
+eine handgeführte Migration, nicht für die Baseline.
 
-Hand-geschriebene Migrationen (z. B. punktuelle Datenkorrekturen, Idempotenz-Patches) haben keine eigene `<idx>_snapshot.json` in `migrations/meta/`. Das ist erwartetes Verhalten — Snapshots werden nur von `drizzle-kit generate` erzeugt, nicht für manuell geschriebene SQL. Existierende Beispiele: `0001`, `0007`, `0008`, `0011`, `0015`, `0016`.
+Ausgeführt wird sie nur auf einer **leeren** DB — beim Neuaufbau von Null, etwa
+im Struktur-Inventar-Test (`tests/startup/baseline-structure-inventory.test.ts`).
 
-## Manuelle Ausführung in Production
-
-Beispiel (psql) — vollständige Reihenfolge des Mai-2026-Cleanups:
+## Neu erzeugen
 
 ```bash
-psql "$DATABASE_URL" -f migrations/0015_add_vacation_entitlement_history.sql
-psql "$DATABASE_URL" -f migrations/0016_fix_vacation_allowance_total_days_numeric.sql
-psql "$DATABASE_URL" -f migrations/0014_remove_lbnr_personalnummer.sql
+npx drizzle-kit generate      # braucht eine DATABASE_URL, siehe unten
 ```
 
-Wichtig: Vor destruktiven Migrationen (DROP COLUMN / DROP TABLE) immer ein Backup ziehen — entweder über `pg_dump` oder via `SELECT … INTO outfile` der relevanten Spalten. Die Backups dieser Bereinigung liegen unter `attached_assets/schema-drift-backup-2026-05/`.
+`drizzle.config.ts` ruft beim Config-Load `assertEphemeralDbForWrite()` — der
+Aufruf bricht auf einer Nicht-Wegwerf-DB ab, auch bei `generate`. Also gegen die
+Test-DB laufen lassen:
 
-## Cleanup Mai 2026
+```bash
+set -a; . ./.env.test.local; set +a
+npx drizzle-kit generate
+```
 
-- `0014_remove_lbnr_personalnummer.sql` entfernt die nicht mehr referenzierten Spalten `users.lbnr`, `users.personalnummer` und `invoice_line_items.employee_lbnr`. In allen drei Spalten waren zum Zeitpunkt der Migration ausschließlich `NULL`-Werte; ein CSV-Snapshot liegt unter `attached_assets/schema-drift-backup-2026-05/`.
-- `0015_add_vacation_entitlement_history.sql` legt die mit Task #279 eingeführte Tabelle nach. Idempotent — kann gefahrlos mehrfach ausgeführt werden.
-- `0016_fix_vacation_allowance_total_days_numeric.sql` korrigiert die Drift, dass `employee_vacation_allowance.total_days` im Drizzle-Schema `numeric(5,2)`, in der DB aber noch `integer` war. Anteilige Jahresansprüche (z. B. 12,67) liefen vorher in `22P02 invalid input syntax for type integer`. Verlustfreier Cast.
+Ändert sich am Modell nichts, meldet der Aufruf „No schema changes, nothing to
+migrate".
 
-Reihenfolge in Production: erst `0015` (Tabelle anlegen) und `0016` (Type-Cast), dann `0014` (Spalten droppen). Die drei Migrationen sind unabhängig voneinander, müssen aber alle laufen.
+## Was die Baseline NICHT enthält
+
+- Trigger und Trigger-Funktionen → `manual/0001_gobd_triggers.sql`
+- Zwei Constraints, die nur der Startup-Pfad anlegt und die im Drizzle-Modell
+  fehlen. Sie sind gemessen und dokumentiert:
+  `docs/schema-baseline-inventory.md`.
