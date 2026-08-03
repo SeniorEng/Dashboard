@@ -69,9 +69,16 @@ export const QONTO_MATCH_XOR_CHECK_NAME = "qonto_transactions_match_xor";
  * würde weiter den ECHTEN Namen sehen, ihn auf der realen Tabelle finden und
  * das Anlegen der Probe still überspringen). Deshalb ist das nackte
  * `ALTER TABLE … ADD CONSTRAINT` die SSoT und der Mantel wird daraus gebaut.
+ *
+ * Der Name steht hier BEWUSST literal statt als `${…}`-Interpolation: der
+ * CHECK-Coverage-Scan im Drift-Wächter liest Quelltext und erkennt nur einen
+ * literalen Bezeichner nach `ADD CONSTRAINT`. Mit Interpolation wäre dieser
+ * Constraint für den Scan unsichtbar — er könnte später aus CHECK_SOURCES
+ * fallen, ohne dass etwas rot wird. Ein Test pinnt, dass Name und SQL
+ * zusammenpassen.
  */
 export const QONTO_MATCH_XOR_CHECK_SQL = `ALTER TABLE qonto_transactions
-         ADD CONSTRAINT ${QONTO_MATCH_XOR_CHECK_NAME}
+         ADD CONSTRAINT qonto_transactions_match_xor
          CHECK (NOT (matched_invoice_id IS NOT NULL AND matched_payment_advice_id IS NOT NULL))`;
 
 export const QONTO_ADVICE_MATCH_DDL: string[] = [

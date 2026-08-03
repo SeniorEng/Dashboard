@@ -393,10 +393,10 @@ const CREATE_SOURCES: CreateSource[] = [
     rawSql: CUSTOMER_IDEMPOTENCY_CREATE_TABLE_SQL,
     realTable: "customer_creation_idempotency_keys",
     drizzleTable: customerCreationIdempotencyKeys,
-    // KEINE fullParity: `created_by_user_id` kommt erst per nachgelagertem
-    // ADD COLUMN dazu (Bestands-DBs hatten die Tabelle ohne die Spalte) und
-    // wird deshalb unten in ALTER_SOURCES geprüft, nicht hier.
-    fullParity: false,
+    // fullParity bleibt an: das CREATE-SQL legt `created_by_user_id` selbst an.
+    // Der zusätzliche ALTER_SOURCES-Eintrag prüft nur den Kompatibilitäts-Pfad
+    // für Bestands-DBs, die die Tabelle noch ohne die Spalte haben.
+    fullParity: true,
   },
   {
     label: "ensure-role-wage-rates: role_wage_rates",
@@ -556,34 +556,68 @@ const ALTER_COVERAGE_ALLOWLIST = new Set<string>([
   "invoice_line_items.quantity_raw",
 ]);
 
+const RE_BLOCK_COMMENT = new RegExp(String.raw`/\*[\s\S]*?\*/`, "g");
+const RE_LINE_COMMENT = new RegExp(String.raw`//[^\n]*`, "g");
+
 /**
  * Alle Regex-Treffer ueber die Quelltexte in `server/startup/**`.
  *
  * JS-Kommentare werden entfernt, damit erlaeuternde Prosa (z.B. ein im
  * Fliesstext zitiertes `ADD COLUMN IF NOT EXISTS …`) keine Phantom-Treffer
- * erzeugt — nur echte DDL in Template-Strings soll zaehlen. Gleiche Regel wie
- * im bereits vorhandenen Index-Coverage-Scan.
+ * erzeugt — nur echte DDL in Template-Strings soll zaehlen.
+ *
+ * ERSETZT die vier wortgleichen Inline-Schleifen, die die Coverage-Scans fuer
+ * INDEX, CHECK und TRIGGER bisher jeweils selbst mitbrachten. Eine Haertung
+ * (z.B. die Rekursion in Unterverzeichnisse unten) erreicht damit alle Scans
+ * statt nur einen.
+ *
+ * `readdirSync` war in den Alt-Kopien NICHT rekursiv, obwohl alle Docstrings
+ * `server/startup/**` versprachen — eine Datei in einem Unterverzeichnis waere
+ * still unsichtbar gewesen. Hier wird wirklich abgestiegen.
  */
-const RE_BLOCK_COMMENT = new RegExp(String.raw`/\*[\s\S]*?\*/`, "g");
-const RE_LINE_COMMENT = new RegExp(String.raw`//[^\n]*`, "g");
-
 function scanStartupSources(
   re: RegExp,
+  skipFiles: ReadonlySet<string> = new Set(),
 ): Array<{ m: RegExpExecArray; file: string }> {
-  const startupDir = join(process.cwd(), "server", "startup");
   const out: Array<{ m: RegExpExecArray; file: string }> = [];
-  for (const entry of readdirSync(startupDir)) {
-    if (!entry.endsWith(".ts")) continue;
-    const full = join(startupDir, entry);
-    if (!statSync(full).isFile()) continue;
-    const sourceText = readFileSync(full, "utf8")
-      .replace(RE_BLOCK_COMMENT, "")
-      .replace(RE_LINE_COMMENT, "");
-    const rx = new RegExp(re.source, re.flags);
-    let m: RegExpExecArray | null;
-    while ((m = rx.exec(sourceText)) !== null) out.push({ m, file: entry });
-  }
+
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entry.endsWith(".ts") || skipFiles.has(entry)) continue;
+      const sourceText = readFileSync(full, "utf8")
+        .replace(RE_BLOCK_COMMENT, "")
+        .replace(RE_LINE_COMMENT, "");
+      const rx = new RegExp(re.source, re.flags);
+      let m: RegExpExecArray | null;
+      while ((m = rx.exec(sourceText)) !== null) out.push({ m, file: entry });
+    }
+  };
+  walk(join(process.cwd(), "server", "startup"));
   return out;
+}
+
+/**
+ * Ein Coverage-Scan, der NICHTS mehr findet, ist die gefährlichste Variante:
+ * er meldet „alles abgedeckt", weil seine Regex nicht mehr greift. Deshalb
+ * pinnen alle Scans eine Untergrenze — mindestens so viele Treffer, wie die
+ * zugehörige Registry Einträge hat.
+ */
+function expectScanFoundSomething(
+  found: ReadonlyMap<string, string>,
+  atLeast: number,
+  what: string,
+): void {
+  expect(
+    found.size,
+    `Der ${what}-Scan hat nur ${found.size} Treffer in server/startup/** gefunden, ` +
+      `erwartet mindestens ${atLeast}. Vermutlich greift die Regex nicht mehr — ` +
+      `ein leerer Scan meldet faelschlich "alles abgedeckt".`,
+  ).toBeGreaterThanOrEqual(atLeast);
 }
 
 describe("Startup Schema-Drift (server/startup/**)", () => {
@@ -691,6 +725,7 @@ describe("Startup Schema-Drift (server/startup/**)", () => {
     )) {
       found.set(m[1], file);
     }
+    expectScanFoundSomething(found, CREATE_SOURCES.length, "CREATE TABLE");
 
     const uncovered = [...found.entries()].filter(
       ([name]) => !covered.has(name) && !CREATE_COVERAGE_ALLOWLIST.has(name),
@@ -729,6 +764,7 @@ describe("Startup Schema-Drift (server/startup/**)", () => {
       let c: RegExpExecArray | null;
       while ((c = re.exec(m[2])) !== null) found.set(`${table}.${c[1]}`, file);
     }
+    expectScanFoundSomething(found, ALTER_SOURCES.length, "ADD COLUMN");
 
     const uncovered = [...found.entries()].filter(
       ([name]) => !covered.has(name) && !ALTER_COVERAGE_ALLOWLIST.has(name),
@@ -1140,26 +1176,13 @@ describe("Startup Index-Drift (server/startup/**)", () => {
 
   it("jeder CREATE-INDEX in server/startup/** ist vom Drift-Wächter abgedeckt", () => {
     const covered = new Set(INDEX_SOURCES.map((s) => s.indexName));
-    const startupDir = join(process.cwd(), "server", "startup");
-
     const found = new Map<string, string>(); // indexName -> Datei
-    for (const entry of readdirSync(startupDir)) {
-      if (!entry.endsWith(".ts")) continue;
-      const full = join(startupDir, entry);
-      if (!statSync(full).isFile()) continue;
-      // JS-Kommentare entfernen, damit erläuternde Prosa (z.B. ein im Fließtext
-      // zitiertes `CREATE UNIQUE INDEX IF NOT EXISTS …`) keine Phantom-Treffer
-      // erzeugt — nur echte DDL in Template-Strings soll zählen.
-      const sourceText = readFileSync(full, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
-      const re =
-        /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(sourceText)) !== null) {
-        found.set(m[1], entry);
-      }
+    for (const { m, file } of scanStartupSources(
+      /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi,
+    )) {
+      found.set(m[1], file);
     }
+    expectScanFoundSomething(found, INDEX_SOURCES.length, "CREATE INDEX");
 
     const uncovered = [...found.entries()].filter(
       ([name]) => !covered.has(name) && !INDEX_COVERAGE_ALLOWLIST.has(name),
@@ -1370,23 +1393,13 @@ describe("Startup CHECK-Constraint-Drift (server/startup/**)", () => {
 
   it("jeder ADD CONSTRAINT … CHECK in server/startup/** ist abgedeckt", () => {
     const covered = new Set(CHECK_SOURCES.map((s) => s.constraintName));
-    const startupDir = join(process.cwd(), "server", "startup");
-
     const found = new Map<string, string>(); // constraintName -> Datei
-    for (const entry of readdirSync(startupDir)) {
-      if (!entry.endsWith(".ts")) continue;
-      const full = join(startupDir, entry);
-      if (!statSync(full).isFile()) continue;
-      const sourceText = readFileSync(full, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
-      const re =
-        /ADD\s+CONSTRAINT\s+([A-Za-z_][A-Za-z0-9_]*)\s+CHECK\b/gi;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(sourceText)) !== null) {
-        found.set(m[1], entry);
-      }
+    for (const { m, file } of scanStartupSources(
+      /ADD\s+CONSTRAINT\s+([A-Za-z_][A-Za-z0-9_]*)\s+CHECK\b/gi,
+    )) {
+      found.set(m[1], file);
     }
+    expectScanFoundSomething(found, CHECK_SOURCES.length, "ADD CONSTRAINT … CHECK");
 
     const uncovered = [...found.entries()].filter(
       ([name]) => !covered.has(name) && !CHECK_COVERAGE_ALLOWLIST.has(name),
@@ -1570,26 +1583,25 @@ describe("Startup Trigger-Drift (server/startup/**)", () => {
 
   it("jeder CREATE TRIGGER in server/startup/** ist über eine Spec abgedeckt", () => {
     const covered = new Set(ALL_STARTUP_TRIGGER_SPECS.map((s) => s.name));
-    const startupDir = join(process.cwd(), "server", "startup");
-
     const found = new Map<string, string>(); // triggerName -> Datei
-    for (const entry of readdirSync(startupDir)) {
-      if (!entry.endsWith(".ts")) continue;
+    for (const { m, file } of scanStartupSources(
+      /CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+([A-Za-z_][A-Za-z0-9_]*)/gi,
       // trigger-spec.ts ist der Renderer (enthält `CREATE TRIGGER ${...}`),
       // keine Migration → nicht scannen.
-      if (entry === "trigger-spec.ts") continue;
-      const full = join(startupDir, entry);
-      if (!statSync(full).isFile()) continue;
-      const sourceText = readFileSync(full, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
-      const re =
-        /CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+([A-Za-z_][A-Za-z0-9_]*)/gi;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(sourceText)) !== null) {
-        found.set(m[1], entry);
-      }
+      new Set(["trigger-spec.ts"]),
+    )) {
+      found.set(m[1], file);
     }
+    // BEWUSST 0 als Untergrenze — und das ist ein Befund, kein Schlendrian:
+    // Trigger werden ausschliesslich aus Specs gerendert
+    // (`trigger-spec.ts` → `renderCreateTriggerSql`), der einzige literale
+    // `CREATE TRIGGER` im Bestand steht in genau diesem Renderer, den der Scan
+    // ueberspringt. Dieser Coverage-Test findet daher IMMER die leere Menge und
+    // hat noch nie etwas geprueft. Er bleibt als Stolperdraht fuer den Fall,
+    // dass jemand kuenftig rohes Trigger-DDL in eine Startup-Datei schreibt —
+    // die eigentliche Spec-Vollstaendigkeit braucht einen anderen Mechanismus
+    // (siehe FINDING im PR).
+    expectScanFoundSomething(found, 0, "CREATE TRIGGER");
 
     const uncovered = [...found.entries()].filter(
       ([name]) => !covered.has(name),
