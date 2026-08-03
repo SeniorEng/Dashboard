@@ -375,3 +375,25 @@ export const ORPHANED_TRIGGER_FUNCTIONS: readonly string[] = [
   "budget_ledger_prevent_update",
   "budget_ledger_prevent_truncate",
 ];
+
+/** Tabelle, auf der die Alt-RULEs sitzen. */
+export const LEGACY_RULE_TABLE = "audit_log";
+
+/**
+ * Alte, GoBD-schwache `DO INSTEAD NOTHING`-RULEs auf `audit_log`.
+ *
+ * Solange eine davon existiert, schreibt sie das Statement um und der
+ * BEFORE-Trigger feuert NIE — `DELETE`/`UPDATE` laufen still ins Leere
+ * (`DELETE 0`, keine Exception). Genau der Vektor, den Task #824 abgeschafft
+ * hat. Sie werden nirgends im Repo erzeugt; sie stammen aus der Vor-Repo-Zeit
+ * und können nur durch einen Restore aus einem alten Backup zurückkehren.
+ *
+ * Drei Verbraucher, EINE Liste: der defensive Drop beim Startup, der
+ * Laufzeit-Verifier (`lingeringRules` → `/api/health`) und die versionierte
+ * Migration. Vorher standen die Namen doppelt — hartkodiert in den beiden
+ * `DROP RULE`-Statements und noch einmal in der Verifier-Liste.
+ */
+export const FORBIDDEN_AUDIT_LOG_RULES = [
+  "audit_log_no_update",
+  "audit_log_no_delete",
+] as const;

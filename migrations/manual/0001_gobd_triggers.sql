@@ -32,6 +32,22 @@ DROP FUNCTION IF EXISTS budget_ledger_prevent_update();
 DROP FUNCTION IF EXISTS budget_ledger_prevent_truncate();
 
 -- ---------------------------------------------------------------------------
+-- 1b) Alte, GoBD-schwache `DO INSTEAD NOTHING`-RULEs auf `audit_log`.
+--
+-- Spiegelt den defensiven Drop, den `ensure-audit-log-immutable.ts` heute bei
+-- jedem Boot faehrt und den Track C mit der Startup-DDL entfernen wuerde.
+-- Ohne ihn kann eine RULE per Backup-Restore zurueckkehren: sie schreibt das
+-- Statement um, der BEFORE-Trigger feuert NIE, und `DELETE`/`UPDATE` auf
+-- `audit_log` laufen still ins Leere (`DELETE 0`, keine Exception) — der
+-- #824-Vektor. Prod hat sie heute nicht; genau deshalb sieht ihn weder die
+-- A1-Gegenprobe noch die A3-Prod-Gegenprobe.
+--
+-- Idempotent (`IF EXISTS`): auf einer sauberen DB ein No-Op.
+-- ---------------------------------------------------------------------------
+DROP RULE IF EXISTS audit_log_no_update ON audit_log;
+DROP RULE IF EXISTS audit_log_no_delete ON audit_log;
+
+-- ---------------------------------------------------------------------------
 -- 2) Trigger-Funktionen.
 -- ---------------------------------------------------------------------------
 -- audit_log_prevent_mutation

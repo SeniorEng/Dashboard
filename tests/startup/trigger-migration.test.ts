@@ -23,6 +23,8 @@ import { db } from "../../server/lib/db";
 import {
   ALL_STARTUP_TRIGGER_FUNCTIONS,
   ALL_STARTUP_TRIGGER_SPECS,
+  FORBIDDEN_AUDIT_LOG_RULES,
+  LEGACY_RULE_TABLE,
   ORPHANED_TRIGGER_FUNCTIONS,
 } from "../../server/startup/trigger-registry";
 import {
@@ -218,6 +220,60 @@ describe("A1 — Trigger-Migration == Startup-Renderer", () => {
         for (const [k, def] of before.fns) {
           expect(rebuilt.fns.get(k), `Neubau weicht ab (Funktion): ${k}`).toBe(def);
         }
+
+        throw new Error("__rollback__");
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof Error) || err.message !== "__rollback__") throw err;
+      });
+  });
+
+  it("entfernt Alt-RULEs und stellt damit den audit_log-Schutz wirklich her", async () => {
+    // Nicht nur „die Zeile steht in der Datei": Wir stellen den gefaehrlichen
+    // Zustand her (RULE da → BEFORE-Trigger feuert nie, DELETE laeuft still ins
+    // Leere), fahren die Migration und pruefen, dass der Schutz DANACH greift.
+    await db
+      .transaction(async (tx) => {
+        for (const rule of FORBIDDEN_AUDIT_LOG_RULES) {
+          await tx.execute(sql.raw(
+            `CREATE RULE ${rule} AS ON ${rule.endsWith("update") ? "UPDATE" : "DELETE"} ` +
+            `TO ${LEGACY_RULE_TABLE} DO INSTEAD NOTHING`));
+        }
+        const rulesBefore = await tx.execute(sql`
+          SELECT rulename FROM pg_rules
+          WHERE schemaname = current_schema() AND tablename = ${LEGACY_RULE_TABLE}`);
+        expect(
+          (rulesBefore.rows as Array<Record<string, unknown>>).length,
+          "Setup fehlgeschlagen: Alt-RULEs nicht angelegt",
+        ).toBe(FORBIDDEN_AUDIT_LOG_RULES.length);
+
+        // Vorbedingung: MIT der RULE schluckt die DB das DELETE still.
+        // `user_id` ist NOT NULL mit FK — irgendeinen existierenden User nehmen.
+        await tx.execute(sql.raw(
+          `INSERT INTO audit_log (user_id, action, entity_type, entity_id)
+           SELECT id, 'probe', 'probe', 1 FROM users LIMIT 1`));
+        const swallowed = await tx.execute(sql.raw(
+          `DELETE FROM audit_log WHERE action = 'probe'`));
+        expect(
+          swallowed.rowCount ?? 0,
+          "Vorbedingung verfehlt: die RULE haette das DELETE schlucken muessen",
+        ).toBe(0);
+
+        await tx.execute(sql.raw(migrationSql));
+
+        const rulesAfter = await tx.execute(sql`
+          SELECT rulename FROM pg_rules
+          WHERE schemaname = current_schema() AND tablename = ${LEGACY_RULE_TABLE}`);
+        expect(
+          (rulesAfter.rows as Array<Record<string, unknown>>).map((r) => r.rulename),
+          "Die Migration hat die Alt-RULEs nicht entfernt.",
+        ).toEqual([]);
+
+        // Und jetzt greift der Trigger wirklich: das DELETE MUSS scheitern.
+        await expect(
+          tx.execute(sql.raw(`DELETE FROM audit_log WHERE action = 'probe'`)),
+          "Nach der Migration muss der BEFORE-Trigger das DELETE ablehnen.",
+        ).rejects.toThrow();
 
         throw new Error("__rollback__");
       })

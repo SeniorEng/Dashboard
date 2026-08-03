@@ -10,6 +10,8 @@ import {
   AUDIT_LOG_PREVENT_MUTATION_FN_SQL,
   AUDIT_LOG_PREVENT_TRUNCATE_FN_SQL,
   AUDIT_LOG_TRIGGERS,
+  FORBIDDEN_AUDIT_LOG_RULES,
+  LEGACY_RULE_TABLE,
 } from "./trigger-registry";
 
 
@@ -39,8 +41,11 @@ export async function ensureAuditLogImmutable(): Promise<void> {
   // Alte still-schluckende RULEs entfernen. Eine `ON DELETE DO INSTEAD NOTHING`
   // RULE schreibt das Statement so um, dass der BEFORE-DELETE-Trigger gar nicht
   // mehr feuern würde — die RULEs MÜSSEN also weichen, damit der Trigger greift.
-  await db.execute(sql`DROP RULE IF EXISTS audit_log_no_delete ON audit_log`);
-  await db.execute(sql`DROP RULE IF EXISTS audit_log_no_update ON audit_log`);
+  // Aus der SSoT statt hartkodiert — dieselbe Liste, die der Verifier unten
+  // gegen `pg_rules` haelt und die die versionierte Migration mitfuehrt.
+  for (const rule of FORBIDDEN_AUDIT_LOG_RULES) {
+    await db.execute(sql.raw(`DROP RULE IF EXISTS ${rule} ON ${LEGACY_RULE_TABLE}`));
+  }
 
   await db.execute(sql.raw(AUDIT_LOG_PREVENT_MUTATION_FN_SQL));
   await db.execute(sql.raw(AUDIT_LOG_PREVENT_TRUNCATE_FN_SQL));
@@ -60,15 +65,9 @@ export const REQUIRED_AUDIT_LOG_TRIGGERS = AUDIT_LOG_TRIGGERS.map(
   (t) => t.name,
 );
 
-/**
- * Alte, GoBD-schwache `DO INSTEAD NOTHING`-RULEs, die NICHT mehr existieren
- * dürfen — solange sie da sind, würde das UPDATE/DELETE still verschluckt und
- * der BEFORE-Trigger nie feuern.
- */
-export const FORBIDDEN_AUDIT_LOG_RULES = [
-  "audit_log_no_update",
-  "audit_log_no_delete",
-] as const;
+// `FORBIDDEN_AUDIT_LOG_RULES` lebt seit A1 in `trigger-registry.ts` (SSoT) und
+// wird hier nur re-exportiert, damit bestehende Importe unveraendert bleiben.
+export { FORBIDDEN_AUDIT_LOG_RULES } from "./trigger-registry";
 
 export interface AuditLogImmutabilityStatus {
   /** True nur, wenn alle Trigger da sind UND keine Alt-RULEs mehr existieren. */

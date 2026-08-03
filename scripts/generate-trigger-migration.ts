@@ -18,6 +18,8 @@ import { join } from "node:path";
 import {
   ALL_STARTUP_TRIGGER_FUNCTIONS,
   ALL_STARTUP_TRIGGER_SPECS,
+  FORBIDDEN_AUDIT_LOG_RULES,
+  LEGACY_RULE_TABLE,
   ORPHANED_TRIGGER_FUNCTIONS,
 } from "../server/startup/trigger-registry";
 import { renderCreateTriggerSql, renderDropTriggerSql } from "../server/startup/trigger-spec";
@@ -68,6 +70,24 @@ export function renderTriggerMigration(): string {
   out.push("-- ---------------------------------------------------------------------------");
   for (const fn of ORPHANED_TRIGGER_FUNCTIONS) {
     out.push(`DROP FUNCTION IF EXISTS ${fn}();`);
+  }
+  out.push("");
+
+  out.push("-- ---------------------------------------------------------------------------");
+  out.push("-- 1b) Alte, GoBD-schwache `DO INSTEAD NOTHING`-RULEs auf `audit_log`.");
+  out.push("--");
+  out.push("-- Spiegelt den defensiven Drop, den `ensure-audit-log-immutable.ts` heute bei");
+  out.push("-- jedem Boot faehrt und den Track C mit der Startup-DDL entfernen wuerde.");
+  out.push("-- Ohne ihn kann eine RULE per Backup-Restore zurueckkehren: sie schreibt das");
+  out.push("-- Statement um, der BEFORE-Trigger feuert NIE, und `DELETE`/`UPDATE` auf");
+  out.push("-- `audit_log` laufen still ins Leere (`DELETE 0`, keine Exception) — der");
+  out.push("-- #824-Vektor. Prod hat sie heute nicht; genau deshalb sieht ihn weder die");
+  out.push("-- A1-Gegenprobe noch die A3-Prod-Gegenprobe.");
+  out.push("--");
+  out.push("-- Idempotent (`IF EXISTS`): auf einer sauberen DB ein No-Op.");
+  out.push("-- ---------------------------------------------------------------------------");
+  for (const rule of FORBIDDEN_AUDIT_LOG_RULES) {
+    out.push(`DROP RULE IF EXISTS ${rule} ON ${LEGACY_RULE_TABLE};`);
   }
   out.push("");
 
