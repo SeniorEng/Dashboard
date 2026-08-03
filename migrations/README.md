@@ -45,9 +45,24 @@ npx drizzle-kit generate
 Ändert sich am Modell nichts, meldet der Aufruf „No schema changes, nothing to
 migrate".
 
+**Beim Neu-Erzeugen der Baseline zwei Handgriffe nicht vergessen**: `generate`
+vergibt jedes Mal einen neuen Zufallsnamen (`0000_good_prism.sql` o.ä.). Datei
+zurück auf `0000_neat_brood.sql` benennen und den `tag` in
+`meta/_journal.json` mitziehen — sonst ist der Diff Datei-weg/Datei-neu statt
+einer Zeile, und der Journal-Tag zeigt ins Leere.
+
+**Ab A3 ist `0000` eingefroren.** Sobald der programmatische Migrator die
+Baseline in `__drizzle_migrations` stempelt, vergleicht drizzles `migrate()` den
+gespeicherten `created_at` gegen das `when` aus dem Journal. Ein Neu-Generieren
+von `0000` bumpt dieses `when` — die Baseline gälte dann als neuer als der
+Stempel und würde auf einer bestehenden DB **erneut angewendet**, mit Abbruch am
+ersten `CREATE TABLE`. Heute folgenlos (kein Runner wendet das an), ab A3 nicht
+mehr: dann gehören Modelländerungen in eine Folge-Migration `0001…`, nicht in
+eine neue `0000`.
+
 ## Was die Baseline NICHT enthält
 
 - Trigger und Trigger-Funktionen → `manual/0001_gobd_triggers.sql`
-- Zwei Constraints, die nur der Startup-Pfad anlegt und die im Drizzle-Modell
-  fehlen. Sie sind gemessen und dokumentiert:
-  `docs/schema-baseline-inventory.md`.
+- **Einen** Constraint, den nur der Startup-Pfad anlegt und der im Drizzle-Modell
+  bewusst fehlt (`appointments_prospect_or_customer_check` — Prod hat ihn nicht).
+  Gemessen und begründet in `docs/schema-baseline-inventory.md`.

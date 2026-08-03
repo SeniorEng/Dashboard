@@ -182,19 +182,21 @@ export const appointments = pgTable("appointments", {
   // KEIN `appointments_prospect_or_customer_check` hier — bewusst.
   //
   // A2 hatte ihn ins Modell gehoben, weil die Dev-Kopie ihn trägt. Der
-  // Prod-Schema-Dump vom 03.08.2026 zeigt: in Prod existiert er NICHT. Grund
-  // steht im Startup-Pfad selbst — `migrate-erstberatung-customers.ts`
-  // überspringt das `ADD CONSTRAINT`, sobald Termine ohne `prospect_id` UND ohne
-  // `customer_id` existieren, und protokolliert nur eine Zeile. In Prod gibt es
-  // solche Bestandsdaten, in der Dev-Kopie nicht.
+  // Prod-Schema-Dump vom 03.08.2026 zeigt: in Prod existiert er NICHT. Im Modell
+  // wäre er damit ein Constraint, den die Baseline auf jeder frischen DB anlegt,
+  // den Prod aber nicht hat — genau die Asymmetrie, die A3 ("von Null gebaut ==
+  // Prod, Diff 0") aufdecken müsste.
   //
-  // Im Modell wäre er damit ein Constraint, den die Baseline auf jeder frischen
-  // DB anlegt, den Prod aber nicht hat — genau die Asymmetrie, die A3
-  // ("von Null gebaut == Prod, Diff 0") aufdecken müsste.
+  // WARUM er in Prod fehlt, ist offen: `migrate-erstberatung-customers.ts` hat
+  // das `ADD CONSTRAINT` bei seinem EINMALIGEN, ledger-gegateten Lauf
+  // übersprungen — ob wegen verletzender Bestandsdaten oder weil ein
+  // Replit-Publish-Diff den Constraint zuvor gedroppt hat, ist unbelegt.
+  // Details und die zwei entscheidenden Queries: docs/schema-baseline-inventory.md.
   //
-  // Ihn zu ERZWINGEN ist eine fachliche Entscheidung plus Datenbereinigung und
-  // ausdrücklich NICHT Teil dieser Änderung (FINDING im PR). Fällt die
-  // Entscheidung, muss er in BEIDE Wege: Startup-Pfad und Baseline.
+  // Ihn zu ERZWINGEN ist eine fachliche Entscheidung und NICHT Teil dieser
+  // Änderung (FINDING im PR). Wegen des Ledgers bräuchte es dann eine NEUE
+  // Migration plus den Eintrag im Modell — der vorhandene Startup-Pfad allein
+  // wäre in Prod ein No-op.
 ]);
 
 // ============================================

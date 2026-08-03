@@ -42,26 +42,36 @@ const BASE_DB = `cc_test_baseline_${process.pid.toString(36)}_${randomBytes(3).t
  * dazwischen hätte die startup-erzeugten Objekte nicht und liesse diesen Test
  * rot laufen. Orchestrator und CI garantieren die Reihenfolge.
  *
- * ZWEITE ANNAHME (neu): Die Laufzeit-DB wurde mit dem AKTUELLEN Code gebootet.
- * Eine DB, die noch ein Boot der namensbasierten Fassung gesehen hat, traegt den
+ * ZWEITE ANNAHME: Die Laufzeit-DB wurde mit dem AKTUELLEN Code gebootet. Eine DB,
+ * die noch ein Boot der namensbasierten FK-Fassung gesehen hat, traegt den
  * `..._fkey` weiterhin — dort meldet dieser Test zu Recht eine veraltete Liste.
- * Der Orchestrator baut pro Lauf frisch; eine langlebige lokale Test-DB muss
- * einmal neu gepusht werden.
+ * Abhilfe: neu pushen.
+ *
+ * DRITTE ANNAHME: Die Laufzeit-DB ist FRISCH. Fuer den CHECK unten gilt die
+ * Abhilfe von oben NICHT — sie ist dort die Ursache. `drizzle-kit push` droppt
+ * ihn (er steht nicht mehr im Modell), und `scripts/post-merge.sh` faehrt
+ * `npm run db:push` unbeaufsichtigt gegen die Dev-DB. Zurueck kommt er nicht:
+ * die Anlage ist ledger-gegated (`budget_migrations`) und dort laengst als
+ * gelaufen vermerkt. Auf so einer DB meldet dieser Test „Liste ist veraltet" —
+ * richtig ist dann eine frische DB oder das Loeschen des Ledger-Eintrags
+ * `migrate-erstberatung-customers`, nicht ein weiterer Push.
  */
 const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [
   {
     name: "appointments_prospect_or_customer_check",
     why:
-      "ABSICHTLICH startup-only. In PROD existiert der CHECK nicht (Schema-Dump " +
-      "03.08.2026) — `migrate-erstberatung-customers.ts` ueberspringt das " +
-      "ADD CONSTRAINT, sobald Termine ohne prospect_id UND ohne customer_id " +
-      "vorliegen, und protokolliert nur eine Zeile. In Prod gibt es solche " +
-      "Bestandsdaten, in der Dev-Kopie nicht — deshalb traegt die Laufzeit-DB " +
-      "hier ihn, Prod aber nicht. Im Drizzle-Modell waere er ein Constraint, den " +
+      "ABSICHTLICH startup-only. GEMESSEN: in Prod existiert der CHECK nicht " +
+      "(Schema-Dump 03.08.2026). Im Drizzle-Modell waere er ein Constraint, den " +
       "jede frisch gebaute DB haette und Prod nicht: genau die Asymmetrie, an " +
       "der die A3-Gegenprobe (von Null == Prod, Diff 0) scheitern wuerde. " +
-      "Ihn zu erzwingen ist eine fachliche Entscheidung + Datenbereinigung, " +
-      "kein Migrations-Thema — siehe FINDING.",
+      "WARUM er in Prod fehlt, ist OFFEN — `migrate-erstberatung-customers.ts` " +
+      "hat das ADD CONSTRAINT bei seinem EINMALIGEN, ledger-gegateten Lauf " +
+      "uebersprungen (`budget_migrations`; laeuft nicht bei jedem Boot). Ob das " +
+      "an verletzenden Bestandsdaten lag oder ob ein Replit-Publish-Diff den " +
+      "Constraint gedroppt hat, ist unbelegt; zwei read-only Queries in " +
+      "docs/schema-baseline-inventory.md entscheiden es. Ihn zu erzwingen ist " +
+      "eine fachliche Entscheidung und braucht wegen des Ledgers eine NEUE " +
+      "Migration, nicht nur den vorhandenen Startup-Pfad — siehe FINDING.",
   },
 ];
 
