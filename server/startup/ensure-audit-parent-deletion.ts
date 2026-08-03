@@ -10,15 +10,18 @@ import { log } from "../lib/log";
  *
  * Der FK wird SPALTEN-basiert geprüft. Vorher stand hier eine NAMENS-basierte
  * Prüfung auf `audit_log_parent_deletion_id_fkey` — den PostgreSQL-Default-
- * Namen, den das Drizzle-Modell nicht kennt. Ergebnis war ein Deploy-Ping-Pong:
- * `drizzle-kit push` droppt den `_fkey` (steht nicht im Modell), der nächste
- * Boot legt ihn namensgleich wieder an. Beide FKs liegen deshalb nebeneinander
- * in der laufenden DB — funktional identisch, aber mit einem zweiten,
- * vollständigen Satz interner RI-Trigger auf der schreibintensivsten Tabelle.
+ * Namen, den das Drizzle-Modell nicht kennt. Ergebnis war ein Ping-Pong:
+ * `drizzle-kit push --force` droppte den `_fkey` (steht nicht im Modell), der
+ * nächste Boot legte ihn namensgleich wieder an. Die DB trug daraufhin beide —
+ * funktional identisch, aber mit einem zweiten, vollständigen Satz interner
+ * RI-Trigger auf der schreibintensivsten Tabelle der App. Bestands-DBs (u.a.
+ * Prod, Stand 03.08.2026) tragen das Duplikat weiterhin; dieser Code legt es
+ * nicht mehr nach, entfernt es aber auch nicht.
  *
  * Kanonisch ist der Drizzle-Name `audit_log_parent_deletion_id_audit_log_id_fk`:
  * er steht im Modell (`shared/schema/audit.ts`), in der Baseline
- * (`migrations/0000_*.sql`) und folgt der Konvention aller 129 FKs des Schemas.
+ * (`migrations/0000_*.sql`) und folgt der Konvention der 128 anderen FKs des
+ * Schemas.
  * Die spaltenbasierte Prüfung findet ihn, egal unter welchem Namen er entstand,
  * und legt deshalb nichts Zweites an.
  */
