@@ -62,10 +62,13 @@ parentDeletionId: integer("parent_deletion_id").references((): AnyPgColumn => au
 
 — nur unter dem von Drizzle vergebenen Namen
 `audit_log_parent_deletion_id_audit_log_id_fk`. Der steht in der Baseline.
-`server/startup/ensure-audit-parent-deletion.ts` legt daneben einen **zweiten**,
+`server/startup/ensure-audit-parent-deletion.ts` legte daneben einen **zweiten**,
 funktional identischen FK unter dem Postgres-Default-Namen `..._fkey` an.
 
-In der laufenden DB liegen deshalb beide:
+Der folgende Abschnitt beschreibt den Befund im **Präsens des Zeitpunkts der
+Erhebung**; die Korrektur steht darunter.
+
+In der DB lagen deshalb beide:
 
 ```
 audit_log_parent_deletion_id_audit_log_id_fk | FOREIGN KEY (parent_deletion_id) REFERENCES audit_log(id)
@@ -81,17 +84,32 @@ schreibintensivsten Tabelle der App.
 **Ihn dem Modell hinzuzufügen wäre falsch**: dann stünden zwei FKs in der
 Baseline, und die Redundanz wäre auf Dauer gestellt.
 
-### Es ist ein Deploy-Ping-Pong, kein Altbestand
+### Es ist ein Ping-Pong — gemessen auf dem `--force`-Pfad
 
 Gemessen: `drizzle-kit push --force` **droppt** den `_fkey` — er steht ja nicht
-im Modell. `ensure-audit-parent-deletion.ts` prüft seine Existenz aber über den
-**Namen** (`WHERE conname = 'audit_log_parent_deletion_id_fkey'`) und legt ihn
-beim nächsten Boot sofort wieder an.
+im Modell. `ensure-audit-parent-deletion.ts` prüfte seine Existenz aber über den
+**Namen** (`WHERE conname = 'audit_log_parent_deletion_id_fkey'`) und legte ihn
+beim nächsten Boot sofort wieder an. Die Reihenfolge push→boot erklärt, warum die
+Laufzeit-DB beide trug — kein historischer Zufall.
 
-In Prod heißt das bei jedem Deploy: Pre-Deploy droppt einen Constraint auf
-`audit_log`, der Boot fügt ihn wieder ein. Das erklärt auch, warum die
-Laufzeit-DB beide trägt — die Reihenfolge push→boot ist der Grund, nicht ein
-historischer Zufall.
+**Für Prod ist das eine Vermutung, keine Messung.** Der Coolify-Pre-Deploy fährt
+`bash scripts/migrate.sh` **ohne** `--force` (`scripts/migrate.sh:43` reicht
+Argumente nur durch), und ohne `--force` ist `push` interaktiv — ob ein
+destruktives `DROP CONSTRAINT` dort überhaupt angewendet wird, ist hier nicht
+belegt. Gemessen ist nur: Prod trägt beide FKs (Schema-Dump 03.08.2026).
+**Wie** das Duplikat dort entstanden ist, weiß dieses Dokument nicht.
+
+Das entscheidet, was an Gate 4 zu tun ist:
+
+- Droppt der Pre-Deploy den `_fkey` tatsächlich, erledigt der nächste reguläre
+  Deploy dieser Änderung ihn von selbst — dann ist Gate 4 nur eine Nachkontrolle.
+- Droppt er ihn nicht, bleibt der Constraint bis zu einem ausdrücklichen
+  manuellen Drop liegen.
+
+Klären lässt sich das ohne Prod-Schreibzugriff: über den tatsächlich in Coolify
+konfigurierten Pre-Deploy-Command, über das Pre-Deploy-Log des letzten Deploys
+(steht dort ein `DROP CONSTRAINT ..._fkey`?), oder über einen erneuten
+`pg_dump --schema-only` **nach** dem nächsten Deploy.
 
 ### Behoben: spaltenbasierte Prüfung statt namensbasierter
 
@@ -113,10 +131,16 @@ genau ein FK auf der Spalte, unter dem Drizzle-Namen; ein zweiter Boot ist ein
 No-Op; plus eine Negativ-Kontrolle auf einer TEMP-Tabelle, die das alte
 namensbasierte Verhalten reproduziert (dort entsteht der Zweitling wirklich).
 
-**Prod trägt das Duplikat weiterhin.** Der Schema-Dump vom 03.08.2026 zeigt beide
-FKs nebeneinander. Der einmalige Drop dort ist eine Prod-Schreiboperation
-(Gate 4) und NICHT Teil dieser Änderung — er wird aber ab jetzt halten, weil kein
-Boot ihn mehr nachlegt.
+**Prod trägt das Duplikat weiterhin** (Schema-Dump 03.08.2026). Sicher ist nur:
+ab jetzt **hält** ein Drop dort, weil kein Boot ihn mehr nachlegt. Ob er von
+selbst durch den nächsten Pre-Deploy passiert oder ausdrücklich gefahren werden
+muss, ist die offene Frage aus dem Abschnitt oben — beides ist Gate 4 (Kontrolle
+bzw. Schreiboperation), nichts davon Teil dieser Änderung.
+
+Wird er manuell gefahren: **genau `audit_log_parent_deletion_id_fkey` droppen**
+und den Drizzle-Namen stehen lassen. Fielen beide, legt der nächste Boot den FK
+neu an — inklusive Validierungs-Scan unter `ACCESS EXCLUSIVE` auf der
+schreibintensivsten Tabelle, mitten im Start.
 
 ### Annahmen, auf denen die Messung beruht
 

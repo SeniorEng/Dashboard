@@ -1762,7 +1762,7 @@ describe("Startup FK-Drift (audit_log.parent_deletion_id)", () => {
       rows.map((r) => r.name),
       "Zwei FKs auf derselben Spalte = das Deploy-Ping-Pong ist zurueck. " +
         "Kanonisch ist der Drizzle-Name (Modell + Baseline + Konvention aller " +
-        "129 FKs); der PostgreSQL-Default `..._fkey` hat keine Modellquelle.",
+        "128 anderen FKs); der PostgreSQL-Default `..._fkey` hat keine Modellquelle.",
     ).toEqual(["audit_log_parent_deletion_id_audit_log_id_fk"]);
   });
 
@@ -1823,7 +1823,25 @@ describe("Startup FK-Drift (audit_log.parent_deletion_id)", () => {
 
       expect(await fks(), "Aufbau der Probe misslungen").toHaveLength(1);
 
-      // ALT: namensbasiert auf den PostgreSQL-Default-Namen.
+      // REIHENFOLGE IST TRAGEND: erst NEU, dann ALT — beide auf demselben
+      // Ausgangsstand (ein FK, unter dem Drizzle-artigen Namen).
+      //
+      // Andersherum waere die zweite Haelfte vakuum: nachdem die alte Pruefung
+      // `..._fkey` angelegt hat, findet AUCH SIE ihn beim naechsten Lauf und
+      // tut nichts. „Zahl steigt nicht" haette die neue Fassung dann nicht von
+      // der alten unterschieden.
+      await tx.execute(
+        sql.raw(
+          AUDIT_PARENT_DELETION_FK_SQL.replace(/audit_log/g, probe).replace(
+            `${probe}_parent_deletion_id_${probe}_id_fk`,
+            `${probe}_fk_neu`,
+          ),
+        ),
+      );
+      byColumn = await fks();
+
+      // ALT: namensbasiert auf den PostgreSQL-Default-Namen. Denselben
+      // Ausgangsstand sieht sie als „fehlt" — und legt den Zweitling an.
       await tx.execute(
         sql.raw(`
           DO $$
@@ -1840,32 +1858,21 @@ describe("Startup FK-Drift (audit_log.parent_deletion_id)", () => {
       );
       byName = await fks();
 
-      // NEU: spaltenbasiert — findet den vorhandenen FK und legt nichts an.
-      // Auf dem Stand NACH der alten Anlage geprueft: die Zahl darf nicht
-      // weiter steigen.
-      await tx.execute(
-        sql.raw(
-          AUDIT_PARENT_DELETION_FK_SQL.replace(/audit_log/g, probe).replace(
-            `${probe}_parent_deletion_id_${probe}_id_fk`,
-            `${probe}_fk3`,
-          ),
-        ),
-      );
-      byColumn = await fks();
-
       throw new Error("ROLLBACK_PROBE");
     }).catch((err: unknown) => {
       if ((err as Error).message !== "ROLLBACK_PROBE") throw err;
     });
 
     expect(
-      byName,
-      "Die alte namensbasierte Pruefung MUSS hier einen zweiten FK erzeugen — " +
-        "tut sie das nicht, misst dieser Test den Bug nicht mehr.",
-    ).toHaveLength(2);
-    expect(
       byColumn,
-      "Die spaltenbasierte Pruefung darf auf derselben Spalte nichts hinzufuegen.",
+      "Die spaltenbasierte Pruefung MUSS den vorhandenen FK erkennen und darf " +
+        "auf derselben Spalte nichts hinzufuegen — sonst legt sie den Zweitling " +
+        "selbst an.",
+    ).toHaveLength(1);
+    expect(
+      byName,
+      "Die alte namensbasierte Pruefung MUSS auf demselben Stand einen zweiten " +
+        "FK erzeugen — tut sie das nicht, misst dieser Test den Bug nicht mehr.",
     ).toHaveLength(2);
   });
 });
