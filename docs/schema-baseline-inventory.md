@@ -70,14 +70,46 @@ audit_log_parent_deletion_id_audit_log_id_fk | FOREIGN KEY (parent_deletion_id) 
 audit_log_parent_deletion_id_fkey            | FOREIGN KEY (parent_deletion_id) REFERENCES audit_log(id)
 ```
 
-Identische Definition, identische Aktionen (`NO ACTION` für UPDATE und DELETE),
-beide validiert und nicht deferrable. Funktional harmlos — Postgres prüft die
-Bedingung zweimal —, aber es ist genau eine Sorte Redundanz, die man beim
-Baselining nicht mitschleppen will.
+Identisch in **jedem** Attribut — Spalten (`conkey`/`confkey`), Zieltabelle,
+`ON UPDATE`/`ON DELETE` (beide `NO ACTION`), `MATCH SIMPLE`, nicht deferrable,
+validiert. Der Preis ist nicht nur eine doppelte Prüfung: Postgres hält je FK
+einen vollständigen Satz interner RI-Trigger, also einen zweiten auf der
+schreibintensivsten Tabelle der App.
 
 **Ihn dem Modell hinzuzufügen wäre falsch**: dann stünden zwei FKs in der
-Baseline. Die Auflösung ist ein Drop, und welcher der beiden weichen soll, ist
-eine Entscheidung (auf Prod: Gate 4). Siehe FINDING im A2-PR.
+Baseline, und die Redundanz wäre auf Dauer gestellt.
+
+### Es ist ein Deploy-Ping-Pong, kein Altbestand
+
+Gemessen: `drizzle-kit push --force` **droppt** den `_fkey` — er steht ja nicht
+im Modell. `ensure-audit-parent-deletion.ts` prüft seine Existenz aber über den
+**Namen** (`WHERE conname = 'audit_log_parent_deletion_id_fkey'`) und legt ihn
+beim nächsten Boot sofort wieder an.
+
+In Prod heißt das bei jedem Deploy: Pre-Deploy droppt einen Constraint auf
+`audit_log`, der Boot fügt ihn wieder ein. Das erklärt auch, warum die
+Laufzeit-DB beide trägt — die Reihenfolge push→boot ist der Grund, nicht ein
+historischer Zufall.
+
+**Konsequenz für die Auflösung:** Ein Drop in Prod hält genau bis zum nächsten
+Boot. Was weichen muss, ist der FK-Block im Startup-Skript — entweder ersatzlos
+(das Modell pflegt die Beziehung ohnehin) oder mit **spaltenbasierter** statt
+namensbasierter Existenzprüfung. Das Muster gibt es im Repo bereits:
+`ensure-reservation-captured-transaction-link.ts` begründet es ausdrücklich mit
+„unabhängig von einer eventuell von `drizzle-kit` abweichenden
+Constraint-Namens-Trunkierung". Als Zielname bietet sich der Drizzle-Name an —
+ihn pflegt `push`, er steht in der Baseline, und alle 129 anderen FKs des
+Schemas tragen dieselbe Konvention.
+
+Eigener Vorgang, nicht A2. Siehe FINDING im A2-PR.
+
+### Annahme, auf der der gemessene Delta beruht
+
+Der Wert 216 vs. 217 setzt voraus, dass der **Boot nach dem Push** lief. Ein
+Snapshot direkt nach `push` und vor dem Boot ergäbe Delta 0 — und der
+Inventar-Test ginge rot („Verschwundene bedeuten, dass die Liste veraltet ist").
+Im Orchestrator und in CI ist die Reihenfolge garantiert (der Server bootet vor
+den Tests), akut droht also kein Flake.
 
 ### Erledigt: `appointments_prospect_or_customer_check`
 

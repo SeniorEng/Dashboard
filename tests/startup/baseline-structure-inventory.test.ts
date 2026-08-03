@@ -28,12 +28,16 @@ const ADMIN_URL = process.env.DATABASE_URL;
 const BASE_DB = `cc_test_baseline_${process.pid.toString(36)}_${randomBytes(3).toString("hex")}`;
 
 /**
- * Objekte, die der Startup-Pfad anlegt, die aber NICHT im Drizzle-Modell stehen
- * und deshalb nicht in der Baseline landen.
+ * Constraints, die die Laufzeit-DB trägt, die Baseline aber nicht.
  *
- * Jeder Eintrag ist eine offene Aufgabe, kein Freibrief — entweder ins
- * Drizzle-Modell heben (dann verschwindet er hier) oder bewusst in die
- * handgeführte Migration aufnehmen. Siehe die FINDINGs im A2-PR.
+ * Jeder Eintrag ist eine offene Aufgabe, kein Freibrief. Die Ursache muss NICHT
+ * „fehlt im Modell" sein — der derzeit einzige Eintrag steht sehr wohl im
+ * Modell, nur unter einem anderen Namen, und ist damit ein Duplikat. Was zu tun
+ * ist, steht je Eintrag im `why`; siehe die FINDINGs im A2-PR.
+ *
+ * ANNAHME: Die Laufzeit-DB wurde nach `push` auch GEBOOTET. Ein Snapshot
+ * dazwischen hätte die startup-erzeugten Objekte nicht und liesse diesen Test
+ * rot laufen. Orchestrator und CI garantieren die Reihenfolge.
  */
 const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [
   {
