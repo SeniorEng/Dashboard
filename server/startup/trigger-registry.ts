@@ -392,6 +392,15 @@ export const LEGACY_RULE_TABLE = "audit_log";
  * Laufzeit-Verifier (`lingeringRules` → `/api/health`) und die versionierte
  * Migration. Vorher standen die Namen doppelt — hartkodiert in den beiden
  * `DROP RULE`-Statements und noch einmal in der Verifier-Liste.
+ *
+ * ACHTUNG, seit der Zusammenlegung geänderte Bedeutung: ein Eintrag hier wird
+ * nicht nur GEMELDET, sondern bei jedem Boot und von der Migration GEDROPPT.
+ * Wer eine Regel nur beobachten will, braucht dafür eine eigene Liste.
+ *
+ * Die Namen MÜSSEN Literale bleiben: sie werden per `sql.raw` in DDL
+ * interpoliert (Bezeichner lassen sich nicht parametrisieren). Käme die Liste
+ * jemals aus einer externen Quelle, muss der Aufruf auf `sql.identifier()`
+ * umgestellt werden.
  */
 export const FORBIDDEN_AUDIT_LOG_RULES = [
   "audit_log_no_update",
