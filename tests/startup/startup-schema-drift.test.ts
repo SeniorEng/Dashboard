@@ -1610,10 +1610,16 @@ describe("Startup Trigger-Drift (server/startup/**)", () => {
       JOIN pg_proc p ON p.oid = t.tgfoid
       WHERE NOT t.tgisinternal AND n.nspname = current_schema()
     `);
+    // Schluessel ist `tabelle.trigger`, NICHT nur der Triggername: Postgres
+    // verlangt Eindeutigkeit nur PRO TABELLE. Bei reiner Namens-Schluesselung
+    // waere ein roh angelegter Trigger, der zufaellig so heisst wie ein
+    // legitimer auf einer anderen Tabelle, komplett unsichtbar — die Map wuerde
+    // kollabieren, `extra` bliebe leer und die Untergrenze zaehlte weiter 16.
+    // Genau der Fall, fuer den dieser Test existiert.
     const inDb = new Map(
       (rows.rows as Array<Record<string, unknown>>).map((r) => [
-        r.tgname as string,
-        { table: r.table_name as string, func: r.proname as string },
+        `${r.table_name as string}.${r.tgname as string}`,
+        { table: r.table_name as string, name: r.tgname as string, func: r.proname as string },
       ]),
     );
 
@@ -1626,12 +1632,14 @@ describe("Startup Trigger-Drift (server/startup/**)", () => {
         `in beiden Faellen prueft dieser Test nichts mehr.`,
     ).toBeGreaterThanOrEqual(ALL_STARTUP_TRIGGER_SPECS.length);
 
-    const specByName = new Map(ALL_STARTUP_TRIGGER_SPECS.map((s) => [s.name, s]));
+    const specByKey = new Map(
+      ALL_STARTUP_TRIGGER_SPECS.map((s) => [`${s.table}.${s.name}`, s]),
+    );
 
     // (a) In der DB, aber in keiner Spec → roh angelegt, dem Waechter unbekannt.
     const extra = [...inDb.entries()]
-      .filter(([name]) => !specByName.has(name))
-      .map(([name, t]) => `${name} auf ${t.table} → ${t.func}()`);
+      .filter(([key]) => !specByKey.has(key))
+      .map(([, t]) => `${t.name} auf ${t.table} → ${t.func}()`);
     expect(
       extra,
       `Trigger in der DB ohne Spec: ${extra.join(", ")}. Als StartupTriggerSpec ` +
@@ -1640,7 +1648,7 @@ describe("Startup Trigger-Drift (server/startup/**)", () => {
     ).toEqual([]);
 
     // (b) In einer Spec, aber nicht in der DB → Spec behauptet etwas Unwahres.
-    const missing = [...specByName.keys()].filter((name) => !inDb.has(name));
+    const missing = [...specByKey.keys()].filter((key) => !inDb.has(key));
     expect(
       missing,
       `Spec ohne realen Trigger in der DB: ${missing.join(", ")}.`,
@@ -1700,6 +1708,20 @@ describe("Startup Trigger-Drift (server/startup/**)", () => {
     )) {
       found.set(m[1], file);
     }
+
+    // Positiv-Kontrolle: die Regex selbst pinnen. Ohne sie waere „leere Menge"
+    // wieder nicht unterscheidbar von „Regex kaputt" — exakt die Fehlerklasse,
+    // die dieser Commit repariert. Der Renderer `trigger-spec.ts` enthaelt
+    // garantiert ein `CREATE TRIGGER`, also muss ein Scan OHNE die Skip-Menge
+    // dort anschlagen. Die gescannte Nutzmenge darf trotzdem leer bleiben.
+    const selfCheck = scanStartupSources(
+      /CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+(\$\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)/gi,
+    );
+    expect(
+      selfCheck.length,
+      "Die CREATE-TRIGGER-Regex findet nicht einmal den Renderer trigger-spec.ts — " +
+        "sie greift nicht mehr, und eine leere Trefferliste unten waere bedeutungslos.",
+    ).toBeGreaterThanOrEqual(1);
 
     const uncovered = [...found.entries()].filter(([name]) => !covered.has(name));
     expect(
