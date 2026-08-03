@@ -75,6 +75,7 @@ import {
 import {
   CUSTOMERS_SETUP_COLUMNS_SQL,
   CUSTOMER_IDEMPOTENCY_CREATE_TABLE_SQL,
+  CUSTOMER_IDEMPOTENCY_CREATED_BY_COLUMN_SQL,
   CUSTOMER_IDEMPOTENCY_UNIQUE_INDEX_SQL,
   CUSTOMER_IDEMPOTENCY_EXPIRES_INDEX_SQL,
 } from "../../server/startup/ensure-customer-idempotency-schema";
@@ -83,12 +84,16 @@ import {
   AUDIT_PARENT_DELETION_COLUMN_SQL,
   AUDIT_PARENT_DELETION_INDEX_SQL,
 } from "../../server/startup/ensure-audit-parent-deletion";
-import { RESERVATION_CAPTURED_TX_INDEX_SQL } from "../../server/startup/ensure-reservation-captured-transaction-link";
+import {
+  RESERVATION_CAPTURED_TX_COLUMN_SQL,
+  RESERVATION_CAPTURED_TX_INDEX_SQL,
+} from "../../server/startup/ensure-reservation-captured-transaction-link";
 import {
   CBTS_UNIQUE_INDEX_SQL,
   BUDGET_ALLOCATIONS_AUTO_UNIQUE_INDEX_SQL,
 } from "../../server/startup/backfill-budget-historization";
 import {
+  ROLE_WAGE_RATES_CREATE_TABLE_SQL,
   ROLE_WAGE_RATES_ROLE_SERVICE_INDEX_SQL,
   ROLE_WAGE_RATES_ACTIVE_VALIDFROM_UNIQ_SQL,
 } from "../../server/startup/ensure-role-wage-rates";
@@ -99,8 +104,13 @@ import { INVOICE_LINE_ITEM_QUANTITY_COLUMNS_SQL } from "../../server/startup/ens
 import { INVOICE_RENDER_SNAPSHOT_COLUMN_SQL } from "../../server/startup/ensure-invoice-render-snapshot";
 import { INVOICE_STORNO_REFS_COLUMN_SQL } from "../../server/startup/migrate-invoice-storno-refs";
 import { INVOICE_ZUGFERD_XML_COLUMN_SQL } from "../../server/startup/migrate-invoice-zugferd-xml";
-import { APPOINTMENTS_CO_VISIT_GROUP_INDEX_SQL } from "../../server/startup/ensure-appointment-co-visit-group";
 import {
+  APPOINTMENTS_CO_VISIT_GROUP_COLUMN_SQL,
+  APPOINTMENTS_CO_VISIT_GROUP_INDEX_SQL,
+} from "../../server/startup/ensure-appointment-co-visit-group";
+import {
+  QONTO_MATCHED_ADVICE_ID_COLUMN_SQL,
+  QONTO_ADVICE_DISMISSED_AT_COLUMN_SQL,
   QONTO_MATCHED_ADVICE_UNIQUE_INDEX_SQL,
   QONTO_MATCHED_ADVICE_INDEX_SQL,
 } from "../../server/startup/ensure-qonto-advice-match-schema";
@@ -292,9 +302,21 @@ interface ProbeColumn {
   canon: Canon;
 }
 
-/** Entfernt `REFERENCES <tbl>(<col>)`, damit die TEMP-Tabelle ohne FK lebt. */
+/**
+ * Entfernt `REFERENCES <tbl>(<col>)` samt nachfolgender referentieller Aktionen,
+ * damit die TEMP-Tabelle ohne FK lebt.
+ *
+ * Die `ON DELETE`/`ON UPDATE`-Klausel MUSS mitgehen: bleibt sie stehen, ist das
+ * verbleibende DDL syntaktisch kaputt (`service_id integer NOT NULL ON DELETE
+ * CASCADE` → „syntax error at or near ON"). Das fiel erst auf, als mit
+ * `role_wage_rates` die erste Startup-Tabelle mit einer solchen Klausel in den
+ * Wächter kam.
+ */
 function stripReferences(ddl: string): string {
-  return ddl.replace(/\s+REFERENCES\s+"?\w+"?\s*\(\s*\w+\s*\)/gi, "");
+  return ddl.replace(
+    /\s+REFERENCES\s+"?\w+"?\s*\(\s*\w+\s*\)(\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|RESTRICT|NO\s+ACTION|SET\s+(?:NULL|DEFAULT)))*/gi,
+    "",
+  );
 }
 
 async function introspectProbe(
@@ -371,9 +393,26 @@ const CREATE_SOURCES: CreateSource[] = [
     rawSql: CUSTOMER_IDEMPOTENCY_CREATE_TABLE_SQL,
     realTable: "customer_creation_idempotency_keys",
     drizzleTable: customerCreationIdempotencyKeys,
+    // fullParity bleibt an: das CREATE-SQL legt `created_by_user_id` selbst an.
+    // Der zusätzliche ALTER_SOURCES-Eintrag prüft nur den Kompatibilitäts-Pfad
+    // für Bestands-DBs, die die Tabelle noch ohne die Spalte haben.
+    fullParity: true,
+  },
+  {
+    label: "ensure-role-wage-rates: role_wage_rates",
+    rawSql: ROLE_WAGE_RATES_CREATE_TABLE_SQL,
+    realTable: "role_wage_rates",
+    drizzleTable: roleWageRates,
     fullParity: true,
   },
 ];
+
+/** Tabellen, die woanders abgesichert sind und vom Coverage-Scan ignoriert werden. */
+const CREATE_COVERAGE_ALLOWLIST = new Set<string>([
+  // budget_migrations: dedizierter Geschwister-Test
+  // (tests/startup/migration-ledger-schema-drift.test.ts).
+  "budget_migrations",
+]);
 
 const ALTER_SOURCES: AlterSource[] = [
   {
@@ -468,7 +507,118 @@ const ALTER_SOURCES: AlterSource[] = [
     drizzleTable: invoices,
     columns: ["zugferd_xml"],
   },
+  {
+    label: "ensure-appointment-co-visit-group: appointments.co_visit_group_id",
+    rawSql: APPOINTMENTS_CO_VISIT_GROUP_COLUMN_SQL,
+    realTable: "appointments",
+    drizzleTable: appointments,
+    columns: ["co_visit_group_id"],
+  },
+  {
+    label:
+      "ensure-reservation-captured-transaction-link: budget_reservations.captured_transaction_id",
+    rawSql: RESERVATION_CAPTURED_TX_COLUMN_SQL,
+    realTable: "budget_reservations",
+    drizzleTable: budgetReservations,
+    columns: ["captured_transaction_id"],
+  },
+  {
+    label:
+      "ensure-customer-idempotency-schema: customer_creation_idempotency_keys.created_by_user_id",
+    rawSql: CUSTOMER_IDEMPOTENCY_CREATED_BY_COLUMN_SQL,
+    realTable: "customer_creation_idempotency_keys",
+    drizzleTable: customerCreationIdempotencyKeys,
+    columns: ["created_by_user_id"],
+  },
+  {
+    label: "ensure-qonto-advice-match-schema: qonto_transactions.matched_payment_advice_id",
+    rawSql: QONTO_MATCHED_ADVICE_ID_COLUMN_SQL,
+    realTable: "qonto_transactions",
+    drizzleTable: qontoTransactions,
+    columns: ["matched_payment_advice_id"],
+  },
+  {
+    label:
+      "ensure-qonto-advice-match-schema: qonto_transactions.advice_suggestion_dismissed_at",
+    rawSql: QONTO_ADVICE_DISMISSED_AT_COLUMN_SQL,
+    realTable: "qonto_transactions",
+    drizzleTable: qontoTransactions,
+    columns: ["advice_suggestion_dismissed_at"],
+  },
 ];
+
+/** Spalten, die der Coverage-Scan bewusst überspringt (`tabelle.spalte`). */
+const ALTER_COVERAGE_ALLOWLIST = new Set<string>([
+  // Wird als `real` angelegt und DANACH von migrate-km-geo-to-numeric auf
+  // numeric(10,3) gehoben. Ein Vergleich des CREATE-Typs gegen das
+  // Drizzle-Modell wäre hier zwangsläufig rot; geprüft wird der ZIEL-Typ im
+  // ALTER-TYPE-Block (KM_GEO_COLUMNS).
+  "invoice_line_items.quantity_raw",
+]);
+
+const RE_BLOCK_COMMENT = new RegExp(String.raw`/\*[\s\S]*?\*/`, "g");
+const RE_LINE_COMMENT = new RegExp(String.raw`//[^\n]*`, "g");
+
+/**
+ * Alle Regex-Treffer ueber die Quelltexte in `server/startup/**`.
+ *
+ * JS-Kommentare werden entfernt, damit erlaeuternde Prosa (z.B. ein im
+ * Fliesstext zitiertes `ADD COLUMN IF NOT EXISTS …`) keine Phantom-Treffer
+ * erzeugt — nur echte DDL in Template-Strings soll zaehlen.
+ *
+ * ERSETZT die vier wortgleichen Inline-Schleifen, die die Coverage-Scans fuer
+ * INDEX, CHECK und TRIGGER bisher jeweils selbst mitbrachten. Eine Haertung
+ * (z.B. die Rekursion in Unterverzeichnisse unten) erreicht damit alle Scans
+ * statt nur einen.
+ *
+ * `readdirSync` war in den Alt-Kopien NICHT rekursiv, obwohl alle Docstrings
+ * `server/startup/**` versprachen — eine Datei in einem Unterverzeichnis waere
+ * still unsichtbar gewesen. Hier wird wirklich abgestiegen.
+ */
+function scanStartupSources(
+  re: RegExp,
+  skipFiles: ReadonlySet<string> = new Set(),
+): Array<{ m: RegExpExecArray; file: string }> {
+  const out: Array<{ m: RegExpExecArray; file: string }> = [];
+
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entry.endsWith(".ts") || skipFiles.has(entry)) continue;
+      const sourceText = readFileSync(full, "utf8")
+        .replace(RE_BLOCK_COMMENT, "")
+        .replace(RE_LINE_COMMENT, "");
+      const rx = new RegExp(re.source, re.flags);
+      let m: RegExpExecArray | null;
+      while ((m = rx.exec(sourceText)) !== null) out.push({ m, file: entry });
+    }
+  };
+  walk(join(process.cwd(), "server", "startup"));
+  return out;
+}
+
+/**
+ * Ein Coverage-Scan, der NICHTS mehr findet, ist die gefährlichste Variante:
+ * er meldet „alles abgedeckt", weil seine Regex nicht mehr greift. Deshalb
+ * pinnen alle Scans eine Untergrenze — mindestens so viele Treffer, wie die
+ * zugehörige Registry Einträge hat.
+ */
+function expectScanFoundSomething(
+  found: ReadonlyMap<string, string>,
+  atLeast: number,
+  what: string,
+): void {
+  expect(
+    found.size,
+    `Der ${what}-Scan hat nur ${found.size} Treffer in server/startup/** gefunden, ` +
+      `erwartet mindestens ${atLeast}. Vermutlich greift die Regex nicht mehr — ` +
+      `ein leerer Scan meldet faelschlich "alles abgedeckt".`,
+  ).toBeGreaterThanOrEqual(atLeast);
+}
 
 describe("Startup Schema-Drift (server/startup/**)", () => {
   describe("CREATE TABLE — rohes SQL == Drizzle-Modell", () => {
@@ -551,6 +701,80 @@ describe("Startup Schema-Drift (server/startup/**)", () => {
         }
       });
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Coverage-Scans für CREATE TABLE / ADD COLUMN.
+  //
+  // Pendant zu den bereits vorhandenen Scans für INDEX, CHECK und TRIGGER. Ohne
+  // sie war die Registrierung in CREATE_SOURCES/ALTER_SOURCES reine Handarbeit:
+  // eine neu hinzugefügte Startup-Spalte fiel niemandem auf und wurde NIE gegen
+  // das Drizzle-Modell verglichen. Genau das ist die Lücke, durch die eine
+  // Spalte still zwischen rohem SQL und Modell driften kann — und beim
+  // Schema-Baselining würde die Baseline dann die Drizzle-Variante festschreiben,
+  // während die echte DB die Startup-Variante trägt.
+  //
+  // Beide Scans lesen den Quelltext (ohne Kommentare, damit zitierte DDL in
+  // Prosa keine Phantom-Treffer erzeugt) und vergleichen gegen die Registry.
+  // -------------------------------------------------------------------------
+  it("jedes CREATE TABLE in server/startup/** ist vom Drift-Wächter abgedeckt", () => {
+    const covered = new Set(CREATE_SOURCES.map((s) => s.realTable));
+    const found = new Map<string, string>();
+    for (const { m, file } of scanStartupSources(
+      /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi,
+    )) {
+      found.set(m[1], file);
+    }
+    expectScanFoundSomething(found, CREATE_SOURCES.length, "CREATE TABLE");
+
+    const uncovered = [...found.entries()].filter(
+      ([name]) => !covered.has(name) && !CREATE_COVERAGE_ALLOWLIST.has(name),
+    );
+    expect(
+      uncovered,
+      `Neue(s) Startup-CREATE-TABLE ohne Drift-Wächter-Eintrag: ${uncovered
+        .map(([name, file]) => `${name} (${file})`)
+        .join(", ")}. In CREATE_SOURCES aufnehmen oder allowlisten.`,
+    ).toEqual([]);
+  });
+
+  it("jedes ADD COLUMN in server/startup/** ist vom Drift-Wächter abgedeckt", () => {
+    const covered = new Set(
+      ALTER_SOURCES.flatMap((s) => s.columns.map((c) => `${s.realTable}.${c}`)),
+    );
+    // Auch die per CREATE TABLE angelegten Spalten zählen als abgedeckt: sie
+    // werden im CREATE-Block gegen das Modell geprüft. Sonst müsste jede Spalte
+    // einer Startup-Tabelle doppelt registriert werden.
+    for (const src of CREATE_SOURCES) {
+      for (const dbName of drizzleColumnsByDbName(src.drizzleTable).keys()) {
+        covered.add(`${src.realTable}.${dbName}`);
+      }
+    }
+
+    // `ALTER TABLE <t> … ADD COLUMN <c>` — ein ALTER darf mehrere Spalten
+    // hinzufügen, deshalb pro ALTER-Block alle ADD-COLUMN-Treffer einsammeln.
+    const found = new Map<string, string>();
+    // Der Lookahead begrenzt den Block auf das naechste Statement bzw. das
+    // Ende des Template-Strings, damit ein folgendes ALTER nicht mitgelesen wird.
+    for (const { m, file } of scanStartupSources(
+      /ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)([\s\S]*?)(?=ALTER\s+TABLE|CREATE\s+|DO\s+\$\$|`)/gi,
+    )) {
+      const table = m[1];
+      const re = /ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;
+      let c: RegExpExecArray | null;
+      while ((c = re.exec(m[2])) !== null) found.set(`${table}.${c[1]}`, file);
+    }
+    expectScanFoundSomething(found, ALTER_SOURCES.length, "ADD COLUMN");
+
+    const uncovered = [...found.entries()].filter(
+      ([name]) => !covered.has(name) && !ALTER_COVERAGE_ALLOWLIST.has(name),
+    );
+    expect(
+      uncovered,
+      `Neue(s) Startup-ADD-COLUMN ohne Drift-Wächter-Eintrag: ${uncovered
+        .map(([name, file]) => `${name} (${file})`)
+        .join(", ")}. In ALTER_SOURCES aufnehmen oder allowlisten.`,
+    ).toEqual([]);
   });
 
   describe("ALTER TYPE — Ziel-Typ-Registry == Drizzle-Modell", () => {
@@ -952,26 +1176,13 @@ describe("Startup Index-Drift (server/startup/**)", () => {
 
   it("jeder CREATE-INDEX in server/startup/** ist vom Drift-Wächter abgedeckt", () => {
     const covered = new Set(INDEX_SOURCES.map((s) => s.indexName));
-    const startupDir = join(process.cwd(), "server", "startup");
-
     const found = new Map<string, string>(); // indexName -> Datei
-    for (const entry of readdirSync(startupDir)) {
-      if (!entry.endsWith(".ts")) continue;
-      const full = join(startupDir, entry);
-      if (!statSync(full).isFile()) continue;
-      // JS-Kommentare entfernen, damit erläuternde Prosa (z.B. ein im Fließtext
-      // zitiertes `CREATE UNIQUE INDEX IF NOT EXISTS …`) keine Phantom-Treffer
-      // erzeugt — nur echte DDL in Template-Strings soll zählen.
-      const sourceText = readFileSync(full, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
-      const re =
-        /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(sourceText)) !== null) {
-        found.set(m[1], entry);
-      }
+    for (const { m, file } of scanStartupSources(
+      /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi,
+    )) {
+      found.set(m[1], file);
     }
+    expectScanFoundSomething(found, INDEX_SOURCES.length, "CREATE INDEX");
 
     const uncovered = [...found.entries()].filter(
       ([name]) => !covered.has(name) && !INDEX_COVERAGE_ALLOWLIST.has(name),
@@ -1182,23 +1393,13 @@ describe("Startup CHECK-Constraint-Drift (server/startup/**)", () => {
 
   it("jeder ADD CONSTRAINT … CHECK in server/startup/** ist abgedeckt", () => {
     const covered = new Set(CHECK_SOURCES.map((s) => s.constraintName));
-    const startupDir = join(process.cwd(), "server", "startup");
-
     const found = new Map<string, string>(); // constraintName -> Datei
-    for (const entry of readdirSync(startupDir)) {
-      if (!entry.endsWith(".ts")) continue;
-      const full = join(startupDir, entry);
-      if (!statSync(full).isFile()) continue;
-      const sourceText = readFileSync(full, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
-      const re =
-        /ADD\s+CONSTRAINT\s+([A-Za-z_][A-Za-z0-9_]*)\s+CHECK\b/gi;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(sourceText)) !== null) {
-        found.set(m[1], entry);
-      }
+    for (const { m, file } of scanStartupSources(
+      /ADD\s+CONSTRAINT\s+([A-Za-z_][A-Za-z0-9_]*)\s+CHECK\b/gi,
+    )) {
+      found.set(m[1], file);
     }
+    expectScanFoundSomething(found, CHECK_SOURCES.length, "ADD CONSTRAINT … CHECK");
 
     const uncovered = [...found.entries()].filter(
       ([name]) => !covered.has(name) && !CHECK_COVERAGE_ALLOWLIST.has(name),
@@ -1382,26 +1583,25 @@ describe("Startup Trigger-Drift (server/startup/**)", () => {
 
   it("jeder CREATE TRIGGER in server/startup/** ist über eine Spec abgedeckt", () => {
     const covered = new Set(ALL_STARTUP_TRIGGER_SPECS.map((s) => s.name));
-    const startupDir = join(process.cwd(), "server", "startup");
-
     const found = new Map<string, string>(); // triggerName -> Datei
-    for (const entry of readdirSync(startupDir)) {
-      if (!entry.endsWith(".ts")) continue;
+    for (const { m, file } of scanStartupSources(
+      /CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+([A-Za-z_][A-Za-z0-9_]*)/gi,
       // trigger-spec.ts ist der Renderer (enthält `CREATE TRIGGER ${...}`),
       // keine Migration → nicht scannen.
-      if (entry === "trigger-spec.ts") continue;
-      const full = join(startupDir, entry);
-      if (!statSync(full).isFile()) continue;
-      const sourceText = readFileSync(full, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
-      const re =
-        /CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+([A-Za-z_][A-Za-z0-9_]*)/gi;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(sourceText)) !== null) {
-        found.set(m[1], entry);
-      }
+      new Set(["trigger-spec.ts"]),
+    )) {
+      found.set(m[1], file);
     }
+    // BEWUSST 0 als Untergrenze — und das ist ein Befund, kein Schlendrian:
+    // Trigger werden ausschliesslich aus Specs gerendert
+    // (`trigger-spec.ts` → `renderCreateTriggerSql`), der einzige literale
+    // `CREATE TRIGGER` im Bestand steht in genau diesem Renderer, den der Scan
+    // ueberspringt. Dieser Coverage-Test findet daher IMMER die leere Menge und
+    // hat noch nie etwas geprueft. Er bleibt als Stolperdraht fuer den Fall,
+    // dass jemand kuenftig rohes Trigger-DDL in eine Startup-Datei schreibt —
+    // die eigentliche Spec-Vollstaendigkeit braucht einen anderen Mechanismus
+    // (siehe FINDING im PR).
+    expectScanFoundSomething(found, 0, "CREATE TRIGGER");
 
     const uncovered = [...found.entries()].filter(
       ([name]) => !covered.has(name),
