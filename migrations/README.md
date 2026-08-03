@@ -4,6 +4,13 @@ Die SQL-Dateien in diesem Ordner werden von `drizzle-kit` aus dem Drizzle-Schema
 
 Für Änderungen, die `db:push` als destruktiv einstuft (z. B. das Entfernen von Spalten mit Daten), sind die Migrations-Dateien hier die Anlaufstelle. Sie werden manuell ausgeführt — entweder per `psql`, über das Replit-Database-Tool oder die Drizzle-Konsole.
 
+## Nicht in diesem Ordner: `migrations/manual/`
+
+Objekte, die Drizzle nicht ausdrücken kann (Trigger, Funktionen), liegen in
+`migrations/manual/` — bewusst außerhalb dieses `out`-Verzeichnisses, damit ein
+`drizzle-kit generate` keine Index-Kollision erzeugt und ein Archivieren dieses
+Ordners sie nicht mitnimmt. Siehe `migrations/manual/README.md`.
+
 ## Reihenfolge
 
 `migrations/meta/_journal.json` ist die maßgebliche Liste. Neuere Migrationen am Ende anhängen, niemals Lücken in den Index-Nummern lassen.
