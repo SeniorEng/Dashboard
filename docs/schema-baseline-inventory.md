@@ -38,7 +38,7 @@ Absicht, nicht das Ergebnis.
 | Indizes | 260 | 260 | — |
 | Trigger | 16 | 16 | — |
 | Trigger-Funktionen | 11 | 11 | — |
-| **Constraints** | **215** | **217** | **2 startup-only** |
+| **Constraints** | **216** | **217** | **1 Duplikat** |
 
 Alle `ADD COLUMN`-, `ALTER COLUMN`- und `CREATE INDEX`-Effekte des Startup-Pfads
 landen in der Baseline — inklusive der Typ-Korrekturen aus
@@ -47,34 +47,45 @@ landen in der Baseline — inklusive der Typ-Korrekturen aus
 `DROP`-Effekte stimmen: keine gedroppte Spalte oder Tabelle taucht in der
 Baseline wieder auf.
 
-## Die zwei Lücken
+## Die eine verbleibende Abweichung
 
-### 1. `appointments_prospect_or_customer_check` (CHECK)
+### `audit_log_parent_deletion_id_fkey` — ein DUPLIKAT, kein fehlender Constraint
 
-Aus `server/startup/migrate-erstberatung-customers.ts`.
+Das war ursprünglich als „FK fehlt im Modell" notiert. Die Messung sagt etwas
+anderes: das Drizzle-Modell **hat** die Selbstreferenz längst —
 
-`CHECK (prospect_id IS NOT NULL OR customer_id IS NOT NULL)` — sichert ab, dass
-ein Termin entweder an einem Kunden oder an einem Interessenten hängt.
+```ts
+parentDeletionId: integer("parent_deletion_id").references((): AnyPgColumn => auditLog.id)
+```
 
-Vom Drift-Wächter **erfasst** (`CHECK_SOURCES`), aber gegen ein handgepflegtes
-Erwartungs-Prädikat im Test, **nicht** gegen das Drizzle-Modell. Das Modell kennt
-den Constraint gar nicht, deshalb fehlt er der Baseline.
+— nur unter dem von Drizzle vergebenen Namen
+`audit_log_parent_deletion_id_audit_log_id_fk`. Der steht in der Baseline.
+`server/startup/ensure-audit-parent-deletion.ts` legt daneben einen **zweiten**,
+funktional identischen FK unter dem Postgres-Default-Namen `..._fkey` an.
 
-### 2. `audit_log_parent_deletion_id_fkey` (FOREIGN KEY)
+In der laufenden DB liegen deshalb beide:
 
-Aus `server/startup/ensure-audit-parent-deletion.ts`.
+```
+audit_log_parent_deletion_id_audit_log_id_fk | FOREIGN KEY (parent_deletion_id) REFERENCES audit_log(id)
+audit_log_parent_deletion_id_fkey            | FOREIGN KEY (parent_deletion_id) REFERENCES audit_log(id)
+```
 
-`FOREIGN KEY (parent_deletion_id) REFERENCES audit_log(id)` — Selbstreferenz für
-die Kaskaden-Zuordnung im Audit-Log.
+Identische Definition, identische Aktionen (`NO ACTION` für UPDATE und DELETE),
+beide validiert und nicht deferrable. Funktional harmlos — Postgres prüft die
+Bedingung zweimal —, aber es ist genau eine Sorte Redundanz, die man beim
+Baselining nicht mitschleppen will.
 
-Von **keinem** Coverage-Scan erfasst. Der Drift-Wächter hat Scans für `INDEX`,
-`CHECK`, `CREATE TABLE`, `ADD COLUMN` und `TRIGGER` — aber keinen für
-`FOREIGN KEY`. Die Spalte `parent_deletion_id` selbst steht im Modell und ist in
-der Baseline; nur die Fremdschlüssel-Beziehung fehlt.
+**Ihn dem Modell hinzuzufügen wäre falsch**: dann stünden zwei FKs in der
+Baseline. Die Auflösung ist ein Drop, und welcher der beiden weichen soll, ist
+eine Entscheidung (auf Prod: Gate 4). Siehe FINDING im A2-PR.
 
-**Beide sind in Drizzle ausdrückbar** (`check()` bzw. `references()`/
-`foreignKey()`). Ob sie ins Modell gehoben oder in die handgeführte Migration
-aufgenommen werden, ist eine offene Entscheidung — siehe FINDINGs im A2-PR.
+### Erledigt: `appointments_prospect_or_customer_check`
+
+Der CHECK stand tatsächlich nur im Startup-Pfad. Er ist jetzt im Drizzle-Modell
+(`shared/schema/appointments.ts`), wortgleich zum gemessenen
+`pg_get_constraintdef`, unter unverändertem Namen — ein abweichender Name hätte
+beim nächsten `push` einen zweiten, gleichbedeutenden Constraint erzeugt statt
+den vorhandenen zu erkennen. Die neu erzeugte Baseline enthält ihn.
 
 ## Kein Befund, aber wissenswert
 
@@ -117,7 +128,7 @@ Prod-Schema. Der Diff MUSS 0 sein.
 normalisierten `pg_dump --schema-only`-Vergleich fahren — aus dem Grund im
 Abschnitt darüber.
 
-Die zwei hier gefundenen Constraints sind das Minimum, das A3 melden wird. Ob es
+Die hier gefundene Abweichung ist das Minimum, das A3 melden wird. Ob es
 dabei bleibt, ist eine **Erwartung, keine Messung**: dieses Inventar hat Prod nie
 gesehen. Meldet A3 mehr, ist das ein neuer Befund und ein Grund anzuhalten —
 nicht, die Migration passend zu biegen.

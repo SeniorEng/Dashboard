@@ -37,18 +37,16 @@ const BASE_DB = `cc_test_baseline_${process.pid.toString(36)}_${randomBytes(3).t
  */
 const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [
   {
-    name: "appointments_prospect_or_customer_check",
-    why:
-      "CHECK aus migrate-erstberatung-customers.ts. Vom Drift-Wächter erfasst " +
-      "(CHECK_SOURCES), aber gegen ein handgepflegtes Erwartungs-Prädikat, nicht " +
-      "gegen das Drizzle-Modell — das Modell kennt den Constraint gar nicht.",
-  },
-  {
     name: "audit_log_parent_deletion_id_fkey",
     why:
-      "FOREIGN KEY aus ensure-audit-parent-deletion.ts. Von KEINEM Coverage-Scan " +
-      "erfasst — der Drift-Wächter hat Scans für INDEX, CHECK, CREATE TABLE, " +
-      "ADD COLUMN und TRIGGER, aber keinen für FOREIGN KEY.",
+      "DUPLIKAT, kein fehlender Constraint. Das Drizzle-Modell hat die " +
+      "Selbstreferenz laengst (`parentDeletionId.references(() => auditLog.id)`), " +
+      "nur unter dem von Drizzle vergebenen Namen " +
+      "`audit_log_parent_deletion_id_audit_log_id_fk` — der steht in der Baseline. " +
+      "`ensure-audit-parent-deletion.ts` legt daneben einen zweiten, funktional " +
+      "identischen FK unter dem Postgres-Default-Namen `..._fkey` an. Die " +
+      "Laufzeit-DB traegt beide. Welcher weichen soll, ist eine offene " +
+      "Entscheidung (Drop in Prod = Gate 4) — siehe FINDING im A2-PR.",
   },
 ];
 
