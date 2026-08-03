@@ -61,8 +61,13 @@ const QUERIES: Record<string, string> = {
             FROM information_schema.columns WHERE table_schema='public'`,
   tables: `SELECT table_name AS k, '' AS v FROM information_schema.tables
            WHERE table_schema='public' AND table_type='BASE TABLE'`,
+  // NUR den Namen ersetzen — `UNIQUE` MUSS im Vergleichswert bleiben. Wird es
+  // mit weggeschnitten, ist ein verlorenes `uniqueIndex()` unsichtbar: der
+  // spalten- und praedikatsgleiche Nicht-Unique-Index sieht dann identisch aus,
+  // und ein Unique-Index erzeugt keinen `pg_constraint`-Eintrag, faellt also
+  // auch im Constraint-Vergleich nicht auf.
   indexes: `SELECT indexname AS k,
-                   regexp_replace(indexdef,'^CREATE( UNIQUE)? INDEX [^ ]+ ','') AS v
+                   regexp_replace(indexdef,'^CREATE (UNIQUE )?INDEX [^ ]+ ','CREATE \\1INDEX ') AS v
             FROM pg_indexes WHERE schemaname='public'`,
   constraints: `SELECT con.conname AS k, pg_get_constraintdef(con.oid) AS v
                 FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid
@@ -100,6 +105,7 @@ function baselineUrl(): string {
 }
 
 let available = false;
+let setupError = "";
 let fromBaseline: Snapshot;
 let fromRuntime: Snapshot;
 
@@ -109,8 +115,14 @@ beforeAll(async () => {
   try {
     await admin.connect();
     await admin.query(`CREATE DATABASE ${BASE_DB}`);
-  } catch {
+  } catch (err) {
     await admin.end().catch(() => {});
+    // In CI ist `DATABASE_URL` direkt-TCP auf einen Superuser — `CREATE
+    // DATABASE` MUSS dort gelingen. Ein stiller Skip waere dort besonders
+    // heimtueckisch, weil das PR-Verfahren Test-MENGEN vergleicht: ein leer
+    // laufender Test ist von einem echten Pass nicht zu unterscheiden.
+    if (process.env.CI === "true") throw err;
+    setupError = err instanceof Error ? err.message : String(err);
     return;
   }
   await admin.end();
@@ -118,13 +130,17 @@ beforeAll(async () => {
   const c = new pg.Client({ connectionString: baselineUrl() });
   await c.connect();
   try {
-    // drizzle trennt die Statements der Baseline mit `--> statement-breakpoint`.
-    const baseline = readFileSync(baselineFile(), "utf8");
-    for (const stmt of baseline.split("--> statement-breakpoint")) {
-      const t = stmt.trim();
-      if (t) await c.query(t);
+    // drizzle trennt die Statements der generierten Migrationen mit
+    // `--> statement-breakpoint`; die handgefuehrten laufen als Ganzes.
+    for (const file of generatedMigrationFiles()) {
+      for (const stmt of readFileSync(file, "utf8").split("--> statement-breakpoint")) {
+        const t = stmt.trim();
+        if (t) await c.query(t);
+      }
     }
-    await c.query(readFileSync("migrations/manual/0001_gobd_triggers.sql", "utf8"));
+    for (const file of manualMigrationFiles()) {
+      await c.query(readFileSync(file, "utf8"));
+    }
   } finally {
     await c.end();
   }
@@ -142,20 +158,34 @@ afterAll(async () => {
   await admin.end().catch(() => {});
 });
 
-/** Genau eine Baseline-Datei — der Name wird von `drizzle-kit generate` vergeben. */
-function baselineFile(): string {
-  const files = readdirSync("migrations").filter((f) => f.endsWith(".sql"));
-  if (files.length !== 1) {
-    throw new Error(
-      `Erwartet genau EINE Baseline in migrations/, gefunden: ${files.join(", ") || "(keine)"}`,
-    );
-  }
-  return `migrations/${files[0]}`;
+/**
+ * Alle generierten Migrationen in Journal-Reihenfolge.
+ *
+ * Bewusst NICHT „genau eine Datei": sobald eine zweite Migration entsteht,
+ * waere das ein harter Fehler mitten im `beforeAll` — und die Meldung saehe wie
+ * ein Konfigurationsfehler aus statt wie „Test muss nachziehen". Das Journal
+ * ist ohnehin die maßgebliche Reihenfolge.
+ */
+function generatedMigrationFiles(): string[] {
+  const journal = JSON.parse(
+    readFileSync("migrations/meta/_journal.json", "utf8"),
+  ) as { entries: Array<{ idx: number; tag: string }> };
+  return [...journal.entries]
+    .sort((a, b) => a.idx - b.idx)
+    .map((e) => `migrations/${e.tag}.sql`);
+}
+
+/** Alle handgefuehrten Migrationen (Trigger/Funktionen), alphabetisch. */
+function manualMigrationFiles(): string[] {
+  return readdirSync("migrations/manual")
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => `migrations/manual/${f}`);
 }
 
 describe("A2 — Baseline-Struktur-Inventar", () => {
-  it("Baseline + Trigger-Migration bauen Tabellen, Spalten, Indizes, Trigger und Funktionen vollständig", () => {
-    if (!available) return;
+  it("Baseline + Trigger-Migration bauen Tabellen, Spalten, Indizes, Trigger und Funktionen vollständig", (ctx) => {
+    if (!available) return ctx.skip(`keine zweite DB moeglich: ${setupError}`);
     for (const kind of ["tables", "columns", "indexes", "triggers", "triggerFunctions"]) {
       const b = fromBaseline[kind], r = fromRuntime[kind];
       const missing = [...r.keys()].filter((k) => !b.has(k));
@@ -170,8 +200,8 @@ describe("A2 — Baseline-Struktur-Inventar", () => {
     }
   });
 
-  it("Constraints: exakt die dokumentierten Ausnahmen fehlen der Baseline", () => {
-    if (!available) return;
+  it("Constraints: exakt die dokumentierten Ausnahmen fehlen der Baseline", (ctx) => {
+    if (!available) return ctx.skip(`keine zweite DB moeglich: ${setupError}`);
     const b = fromBaseline.constraints, r = fromRuntime.constraints;
 
     const missing = [...r.keys()].filter((k) => !b.has(k)).sort();
@@ -184,6 +214,15 @@ describe("A2 — Baseline-Struktur-Inventar", () => {
         "KNOWN_STARTUP_ONLY_CONSTRAINTS mit Begründung. Verschwundene bedeuten, " +
         "dass die Liste veraltet ist.",
     ).toEqual(known);
+
+    // Namensgleich ist nicht definitionsgleich: ein FK, der in der Baseline
+    // `ON DELETE RESTRICT` statt `CASCADE` traegt, hiesse gleich und waere ohne
+    // diesen Vergleich unsichtbar — bei `invoice_line_items` ein
+    // Verhaltensunterschied mit Rechnungsbezug.
+    const differing = [...r.entries()]
+      .filter(([k, v]) => b.has(k) && b.get(k) !== v)
+      .map(([k, v]) => `${k}: Laufzeit "${v}" vs. Baseline "${b.get(k)}"`);
+    expect(differing, "Constraints mit gleichem Namen, aber anderer Definition").toEqual([]);
 
     // Die Gegenrichtung darf es nicht geben: die Baseline erfindet nichts.
     expect(

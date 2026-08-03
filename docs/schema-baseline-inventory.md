@@ -8,7 +8,7 @@ abgeleitet. Der Befund ist als Test festgenagelt:
 
 | Teil | Datei | Herkunft |
 |---|---|---|
-| Struktur (Tabellen, Spalten, Indizes, die meisten Constraints) | `migrations/0000_*.sql` | generiert per `drizzle-kit generate` aus `shared/schema/**` |
+| Struktur (Tabellen, Spalten, Indizes, die meisten Constraints) | `migrations/0000_*.sql` | generiert per `drizzle-kit generate` aus `shared/schema.ts` (Barrel über `shared/schema/**`) |
 | Trigger + Trigger-Funktionen | `migrations/manual/0001_gobd_triggers.sql` | generiert aus `server/startup/trigger-registry.ts` (A1) |
 
 Die alte, kaputte Historie liegt inaktiv unter `migrations_legacy/`
@@ -90,9 +90,34 @@ Follow-up sie wieder scharf schaltet.
 Baseline/Migration. Sonst entsteht genau die Asymmetrie, die dieses Inventar
 aufdeckt.
 
+## Was dieses Inventar NICHT abdeckt
+
+Die „Laufzeit"-Seite des Vergleichs ist `drizzle-kit push` (= Modell) **plus**
+Startup-DDL. Jede Startup-Anweisung ist `IF NOT EXISTS`- bzw.
+`pg_constraint`-geguardet und damit auf einer frisch gepushten DB ein No-op. Der
+Vergleich kann strukturell also nur Startup-Objekte finden, die das Modell nicht
+kennt — genau die zwei oben.
+
+**Über Prod sagt er nichts.** Prod ist über Jahre gewachsener `push` plus 22 von
+Hand per `psql` gefahrene Migrationen. Unvermessen bleiben dort: Umbenennungen,
+alte Constraint-Namen, verwaiste Indizes aus der Push-Historie, und alles, was
+je manuell angefasst wurde.
+
+Nicht verglichen werden ausserdem — heute ohne Befund, aber latent:
+`column_default`, Array-Elementtypen, `ordinal_position`, Collation,
+Identity/Generated, Sequenzen, Enums/Domains, Extensions, Views, Kommentare,
+Policies/RLS, Storage-Parameter, `NOT VALID`/`DEFERRABLE`.
+
 ## Was A3 damit prüft
 
 A3 baut von Null (Baseline + Trigger-Migration) und diffed gegen das echte
-Prod-Schema. Der Diff MUSS 0 sein. Nach diesem Inventar ist zu erwarten, dass er
-**genau die zwei oben genannten Constraints** meldet — alles andere wäre ein
-neuer Befund und ein Grund, A3 anzuhalten statt die Migration passend zu biegen.
+Prod-Schema. Der Diff MUSS 0 sein.
+
+**A3 darf sich dafür NICHT auf diese Query-Liste stützen**, sondern muss einen
+normalisierten `pg_dump --schema-only`-Vergleich fahren — aus dem Grund im
+Abschnitt darüber.
+
+Die zwei hier gefundenen Constraints sind das Minimum, das A3 melden wird. Ob es
+dabei bleibt, ist eine **Erwartung, keine Messung**: dieses Inventar hat Prod nie
+gesehen. Meldet A3 mehr, ist das ein neuer Befund und ein Grund anzuhalten —
+nicht, die Migration passend zu biegen.
