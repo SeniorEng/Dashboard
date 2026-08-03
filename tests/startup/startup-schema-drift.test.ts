@@ -1582,34 +1582,129 @@ describe("Startup Trigger-Drift (server/startup/**)", () => {
     expect(decoded!.timing).toBe("AFTER");
   });
 
-  it("jeder CREATE TRIGGER in server/startup/** ist über eine Spec abgedeckt", () => {
+  // -------------------------------------------------------------------------
+  // Vollstaendigkeit der Trigger-Menge.
+  //
+  // ERSETZT den frueheren Quelltext-Scan nach literalem `CREATE TRIGGER`. Der
+  // war per Konstruktion wirkungslos: Trigger entstehen ausschliesslich aus
+  // Specs ueber `renderCreateTriggerSql`, der einzige literale `CREATE TRIGGER`
+  // im Bestand steht im Renderer `trigger-spec.ts` — den der Scan uebersprang.
+  // Er fand also IMMER die leere Menge und meldete "alles abgedeckt".
+  //
+  // Ein Scan, der stattdessen die Spec aufzaehlt, waere zirkulaer (Spec gegen
+  // sich selbst). Deshalb ist die Gegenmenge hier die REALITAET: was liegt nach
+  // dem Startup tatsaechlich in `pg_trigger` / `pg_proc`? Damit faellt auf, was
+  // ein Quelltext-Scan gar nicht sehen kann — ein Trigger aus einer Datei, die
+  // niemand als Migration erkennt, oder eine Funktion, die keine Spec mehr
+  // benutzt.
+  //
+  // Diese Menge ist zugleich der Bauplan, gegen den die versionierte
+  // Trigger-Migration (A1) entsteht — sie MUSS deshalb geschlossen sein.
+  // -------------------------------------------------------------------------
+  it("die Trigger in der DB und die Specs sind deckungsgleich (beide Richtungen)", async () => {
+    const rows = await db.execute(sql`
+      SELECT t.tgname, c.relname AS table_name, p.proname AS func
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_proc p ON p.oid = t.tgfoid
+      WHERE NOT t.tgisinternal AND n.nspname = current_schema()
+    `);
+    const inDb = new Map(
+      (rows.rows as Array<Record<string, unknown>>).map((r) => [
+        r.tgname as string,
+        { table: r.table_name as string, func: r.proname as string },
+      ]),
+    );
+
+    // Untergrenze: greift jetzt wirklich. Ein leeres `pg_trigger` (Startup nicht
+    // gelaufen, Query kaputt) darf NICHT als "alles abgedeckt" durchgehen.
+    expect(
+      inDb.size,
+      `Kein einziger Trigger in der DB gefunden — erwartet ${ALL_STARTUP_TRIGGER_SPECS.length}. ` +
+        `Entweder ist der Startup-Pfad nicht gelaufen oder die Abfrage greift nicht; ` +
+        `in beiden Faellen prueft dieser Test nichts mehr.`,
+    ).toBeGreaterThanOrEqual(ALL_STARTUP_TRIGGER_SPECS.length);
+
+    const specByName = new Map(ALL_STARTUP_TRIGGER_SPECS.map((s) => [s.name, s]));
+
+    // (a) In der DB, aber in keiner Spec → roh angelegt, dem Waechter unbekannt.
+    const extra = [...inDb.entries()]
+      .filter(([name]) => !specByName.has(name))
+      .map(([name, t]) => `${name} auf ${t.table} → ${t.func}()`);
+    expect(
+      extra,
+      `Trigger in der DB ohne Spec: ${extra.join(", ")}. Als StartupTriggerSpec ` +
+        `deklarieren (renderCreateTriggerSql), sonst faellt er aus der ` +
+        `versionierten Migration heraus.`,
+    ).toEqual([]);
+
+    // (b) In einer Spec, aber nicht in der DB → Spec behauptet etwas Unwahres.
+    const missing = [...specByName.keys()].filter((name) => !inDb.has(name));
+    expect(
+      missing,
+      `Spec ohne realen Trigger in der DB: ${missing.join(", ")}.`,
+    ).toEqual([]);
+  });
+
+  it("die Trigger-Funktionen in der DB und die Spec-Referenzen sind deckungsgleich", async () => {
+    const rows = await db.execute(sql`
+      SELECT p.proname
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      JOIN pg_type rt ON rt.oid = p.prorettype
+      WHERE n.nspname = current_schema() AND rt.typname = 'trigger'
+    `);
+    const inDb = new Set(
+      (rows.rows as Array<Record<string, unknown>>).map((r) => r.proname as string),
+    );
+    const specFns = new Set(ALL_STARTUP_TRIGGER_SPECS.map((s) => s.functionName));
+
+    expect(
+      inDb.size,
+      `Keine einzige Trigger-Funktion in der DB gefunden — erwartet ${specFns.size}.`,
+    ).toBeGreaterThanOrEqual(specFns.size);
+
+    // (a) Definiert, aber von keiner Spec benutzt → verwaiste Funktion. Sie
+    //     wuerde bei A1 uebersehen und beim Abschalten der Startup-DDL still
+    //     verschwinden.
+    const orphaned = [...inDb].filter((f) => !specFns.has(f));
+    expect(
+      orphaned,
+      `Trigger-Funktion ohne Spec-Referenz: ${orphaned.join(", ")}. Entweder von ` +
+        `einer Spec benutzen oder aus dem Startup-DDL entfernen.`,
+    ).toEqual([]);
+
+    // (b) Von einer Spec referenziert, aber nicht definiert → der Trigger haette
+    //     gar nicht angelegt werden koennen.
+    const undefinedFns = [...specFns].filter((f) => !inDb.has(f));
+    expect(
+      undefinedFns,
+      `Spec referenziert nicht existierende Trigger-Funktion: ${undefinedFns.join(", ")}.`,
+    ).toEqual([]);
+  });
+
+  it("kein roh geschriebenes CREATE TRIGGER in server/startup/** (Stolperdraht)", () => {
+    // Ergaenzung, kein Ersatz: die beiden DB-Tests oben fangen alles, was
+    // WIRKLICH angelegt wird. Dieser Scan faengt zusaetzlich rohes Trigger-DDL,
+    // das (noch) nicht laeuft — etwa in einer Datei, die beim Boot gar nicht
+    // aufgerufen wird. Untergrenze bewusst 0: der Bestand rendert alles aus
+    // Specs, die leere Menge ist hier also das ERWARTETE Ergebnis und keine
+    // stille Luecke mehr, weil die Vollstaendigkeit jetzt oben haengt.
     const covered = new Set(ALL_STARTUP_TRIGGER_SPECS.map((s) => s.name));
-    const found = new Map<string, string>(); // triggerName -> Datei
+    const found = new Map<string, string>();
     for (const { m, file } of scanStartupSources(
       /CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+([A-Za-z_][A-Za-z0-9_]*)/gi,
-      // trigger-spec.ts ist der Renderer (enthält `CREATE TRIGGER ${...}`),
-      // keine Migration → nicht scannen.
+      // `trigger-spec.ts` ist der Renderer, keine Migration.
       new Set(["trigger-spec.ts"]),
     )) {
       found.set(m[1], file);
     }
-    // BEWUSST 0 als Untergrenze — und das ist ein Befund, kein Schlendrian:
-    // Trigger werden ausschliesslich aus Specs gerendert
-    // (`trigger-spec.ts` → `renderCreateTriggerSql`), der einzige literale
-    // `CREATE TRIGGER` im Bestand steht in genau diesem Renderer, den der Scan
-    // ueberspringt. Dieser Coverage-Test findet daher IMMER die leere Menge und
-    // hat noch nie etwas geprueft. Er bleibt als Stolperdraht fuer den Fall,
-    // dass jemand kuenftig rohes Trigger-DDL in eine Startup-Datei schreibt —
-    // die eigentliche Spec-Vollstaendigkeit braucht einen anderen Mechanismus
-    // (siehe FINDING im PR).
-    expectScanFoundSomething(found, 0, "CREATE TRIGGER");
 
-    const uncovered = [...found.entries()].filter(
-      ([name]) => !covered.has(name),
-    );
+    const uncovered = [...found.entries()].filter(([name]) => !covered.has(name));
     expect(
       uncovered,
-      `Roh angelegter Startup-Trigger ohne Spec/Drift-Wächter-Eintrag: ${uncovered
+      `Roh angelegter Startup-Trigger ohne Spec: ${uncovered
         .map(([name, file]) => `${name} (${file})`)
         .join(", ")}. Als StartupTriggerSpec deklarieren (renderCreateTriggerSql).`,
     ).toEqual([]);
