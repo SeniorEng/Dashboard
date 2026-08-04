@@ -17,7 +17,7 @@ import {
   validateInsuranceWindows,
   type InsuranceWindow,
 } from "@shared/domain/insurance-period";
-import { db, type DbOrTx } from "../../lib/db";
+import { db, type DbOrTx, type Tx } from "../../lib/db";
 import { badRequest, notFound } from "../../lib/errors";
 
 const insuranceHistoryWithProviderSelect = {
@@ -300,11 +300,16 @@ async function loadInsuranceWindows(
  * synchronisiert nichts. Gleiches Muster wie `lockCustomerForBilling`
  * (`services/invoice-data.ts`).
  *
- * Der Lock hält bis zum Transaktionsende. Ohne `tx` (Executor = `db`) gibt
- * Postgres ihn direkt nach dem Statement wieder frei — die Aufrufer aus den
- * Routen laufen deshalb über `withAudit`, das eine Transaktion aufspannt.
+ * Der Parameter ist `Tx`, nicht `DbOrTx` — `server/lib/db.ts` schreibt das für
+ * jeden `pg_advisory_xact_lock`-Nutzer vor, und zwar aus einem harten Grund:
+ * ausserhalb einer Transaktion gibt Postgres den Lock direkt nach dem Statement
+ * wieder frei. Der Aufruf sähe erfolgreich aus, das check-then-write dahinter
+ * wäre aber ungeschützt — ohne Fehler, ohne Log, und ohne Unique-Constraint auf
+ * `(customer_id, valid_from)`, der es auffangen würde. Der Typ ist die einzige
+ * Stelle, an der das auffallen kann; deshalb erzwingen ihn beide Aufrufer weiter
+ * nach oben bis zur Route.
  */
-async function lockCustomerInsurance(executor: DbOrTx, customerId: number): Promise<void> {
+async function lockCustomerInsurance(executor: Tx, customerId: number): Promise<void> {
   await executor.execute(
     sql`SELECT pg_advisory_xact_lock(hashtext('customer_insurance_' || ${customerId}::text))`,
   );
@@ -335,11 +340,14 @@ export interface AddCustomerInsuranceOptions {
 
 export async function addCustomerInsurance(
   data: InsertCustomerInsurance,
-  userId?: number,
-  tx?: DbOrTx,
+  userId: number,
+  tx: Tx,
   options?: AddCustomerInsuranceOptions,
 ): Promise<CustomerInsuranceHistory> {
-  const executor = tx ?? db;
+  // `tx` ist Pflicht (siehe `lockCustomerInsurance`) — ohne Transaktion wäre
+  // der Advisory-Lock wirkungslos und die Erstzuordnungs-Erkennung wieder ein
+  // ungeschütztes check-then-write.
+  const executor = tx;
 
   await lockCustomerInsurance(executor, data.customerId);
 
@@ -431,9 +439,10 @@ export interface UpdateCustomerInsurancePatch {
 export async function updateCustomerInsurance(
   insuranceId: number,
   patch: UpdateCustomerInsurancePatch,
-  tx?: DbOrTx,
+  tx: Tx,
 ): Promise<CustomerInsuranceHistory> {
-  const executor = tx ?? db;
+  // `tx` ist Pflicht — siehe `lockCustomerInsurance`.
+  const executor = tx;
 
   // Der Lock hängt am Kunden, nicht an der Zeile — die Fenster-Kette ist die
   // gemeinsame Ressource. Dafür muss der Besitzer VOR dem Lock gelesen werden.

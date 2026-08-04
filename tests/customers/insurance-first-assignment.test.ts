@@ -14,6 +14,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { apiGet, apiPost, apiPatch, apiDelete, getAuthCookie, uniqueId } from "../test-utils";
+import { runInParallel } from "../helpers/race";
 import { isMonthStartISO } from "@shared/domain/insurance-period";
 import { todayISO } from "@shared/utils/datetime";
 
@@ -169,6 +170,72 @@ describe("Task #1898 — Erstzuordnung vs. Kassenwechsel", () => {
     );
     expect(list.data.length).toBe(1);
     expect(list.data[0].validFrom).toBe(`${requested.slice(0, 7)}-01`);
+  });
+
+  // Der Advisory-Lock ist — mangels Unique-Constraint auf
+  // `(customer_id, valid_from)` — der EINZIGE Schutz gegen zwei gleichzeitige
+  // Erstzuordnungen. Ohne ihn sehen beide Requests eine leere Fenstermenge,
+  // beide halten sich fuer die Erstzuordnung, beide normalisieren auf denselben
+  // Monatsersten und beide inserten: der Kunde haette zwei gleichzeitig
+  // gueltige Kassen, und `resolveCustomerInsuranceAt` entschiede per `.limit(1)`
+  // zufaellig, welche die Rechnung bekommt. Die Mengenpruefung faengt das nicht,
+  // weil unter READ COMMITTED keiner die uncommittete Zeile des anderen sieht.
+  it("RACE — parallele Erstzuordnungen: genau eine gewinnt, der Rest ist ein 400-Wechsel", async () => {
+    const customerId = await createCustomerWithoutInsurance();
+    const N = 4;
+    const requested = midMonthISO();
+
+    // Barriere: jeder Worker meldet sich erst als bereit und tritt dann
+    // gemeinsam mit allen anderen in den POST ein — sonst serialisiert die
+    // Vorbereitung den Wettlauf und der Test uebersieht Regressionen.
+    const results = await runInParallel(
+      Array.from({ length: N }, (_, i) => async (arrive: () => Promise<void>) => {
+        await arrive();
+        return apiPost<{ id?: number; validFrom?: string; message?: string }>(
+          `/api/admin/customers/${customerId}/insurance`,
+          {
+            insuranceProviderId: insuranceProviderIds[i % insuranceProviderIds.length],
+            versichertennummer: versNr("R"),
+            validFrom: requested,
+          },
+        );
+      }),
+    );
+
+    // Alle Requests muessen durchlaufen (kein Timeout, kein 500 durch einen
+    // haengenden Lock).
+    const settled = results.map((r) => {
+      expect(r.status, `Worker rejected: ${JSON.stringify(r)}`).toBe("fulfilled");
+      return (r as PromiseFulfilledResult<{ status: number; data: { message?: string } }>).value;
+    });
+
+    const created = settled.filter((r) => r.status === 201);
+    const rejected = settled.filter((r) => r.status === 400);
+
+    expect(
+      created.length,
+      `Genau eine Erstzuordnung darf gewinnen, war ${created.length}. Stati: ${settled.map((s) => s.status).join(",")}`,
+    ).toBe(1);
+    expect(
+      rejected.length,
+      `Die uebrigen ${N - 1} muessen als Wechsel mitten im Monat abgelehnt werden. Stati: ${settled.map((s) => s.status).join(",")}`,
+    ).toBe(N - 1);
+    for (const r of rejected) {
+      expect(JSON.stringify(r.data)).toContain("Monatsersten");
+    }
+
+    // Der eigentliche Schaden waere die zweite Zeile — direkt am Lesepfad
+    // gegengeprueft, nicht nur ueber die Antwort-Stati.
+    const list = await apiGet<Array<{ validFrom: string; validTo: string | null }>>(
+      `/api/admin/customers/${customerId}/insurance`,
+    );
+    expect(list.status).toBe(200);
+    expect(
+      list.data.length,
+      `Genau eine Zeile erwartet, war ${JSON.stringify(list.data)}`,
+    ).toBe(1);
+    expect(list.data[0].validFrom).toBe(`${requested.slice(0, 7)}-01`);
+    expect(list.data[0].validTo).toBeNull();
   });
 
   // Gegenprobe zur PATCH-Lücke: der Anker gilt NUR beim Anlegen. Eine
