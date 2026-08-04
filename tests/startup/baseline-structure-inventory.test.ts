@@ -30,28 +30,50 @@ const BASE_DB = `cc_test_baseline_${process.pid.toString(36)}_${randomBytes(3).t
 /**
  * Constraints, die die Laufzeit-DB trägt, die Baseline aber nicht.
  *
- * Jeder Eintrag waere eine offene Aufgabe, kein Freibrief. Die Liste ist
- * derzeit LEER — der frühere einzige Eintrag
- * (`audit_log_parent_deletion_id_fkey`) war kein fehlender Constraint, sondern
- * ein Duplikat aus einem Deploy-Ping-Pong: `push` droppte den FK, der Boot legte
- * ihn namensgleich wieder an. Der Startup-Pfad prüft jetzt SPALTEN-basiert und
- * erzeugt keinen Zweitling mehr (`server/startup/ensure-audit-parent-deletion.ts`,
- * gepinnt in `tests/startup/startup-schema-drift.test.ts`).
+ * Jeder Eintrag ist eine offene Aufgabe, kein Freibrief.
  *
- * Eine leere Liste ist hier die STRENGSTE Fassung, nicht die schwaechste: jeder
- * neue startup-only Constraint laesst den Test sofort rot laufen.
+ * Der frühere Eintrag `audit_log_parent_deletion_id_fkey` ist WEG: er war kein
+ * fehlender Constraint, sondern ein Duplikat aus einem Deploy-Ping-Pong. Der
+ * Startup-Pfad prüft jetzt SPALTEN-basiert und erzeugt keinen Zweitling mehr
+ * (`server/startup/ensure-audit-parent-deletion.ts`, gepinnt in
+ * `tests/startup/startup-schema-drift.test.ts`).
  *
  * ANNAHME: Die Laufzeit-DB wurde nach `push` auch GEBOOTET. Ein Snapshot
  * dazwischen hätte die startup-erzeugten Objekte nicht und liesse diesen Test
  * rot laufen. Orchestrator und CI garantieren die Reihenfolge.
  *
- * ZWEITE ANNAHME (neu): Die Laufzeit-DB wurde mit dem AKTUELLEN Code gebootet.
- * Eine DB, die noch ein Boot der namensbasierten Fassung gesehen hat, traegt den
+ * ZWEITE ANNAHME: Die Laufzeit-DB wurde mit dem AKTUELLEN Code gebootet. Eine DB,
+ * die noch ein Boot der namensbasierten FK-Fassung gesehen hat, traegt den
  * `..._fkey` weiterhin — dort meldet dieser Test zu Recht eine veraltete Liste.
- * Der Orchestrator baut pro Lauf frisch; eine langlebige lokale Test-DB muss
- * einmal neu gepusht werden.
+ * Abhilfe: neu pushen.
+ *
+ * DRITTE ANNAHME: Die Laufzeit-DB ist FRISCH. Fuer den CHECK unten gilt die
+ * Abhilfe von oben NICHT — sie ist dort die Ursache. `drizzle-kit push` droppt
+ * ihn (er steht nicht mehr im Modell), und `scripts/post-merge.sh` faehrt
+ * `npm run db:push` unbeaufsichtigt gegen die Dev-DB. Zurueck kommt er nicht:
+ * die Anlage ist ledger-gegated (`budget_migrations`) und dort laengst als
+ * gelaufen vermerkt. Auf so einer DB meldet dieser Test „Liste ist veraltet" —
+ * richtig ist dann eine frische DB oder das Loeschen des Ledger-Eintrags
+ * `migrate-erstberatung-customers`, nicht ein weiterer Push.
  */
-const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [];
+const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string }> = [
+  {
+    name: "appointments_prospect_or_customer_check",
+    why:
+      "ABSICHTLICH startup-only. GEMESSEN: in Prod existiert der CHECK nicht " +
+      "(Schema-Dump 03.08.2026). Im Drizzle-Modell waere er ein Constraint, den " +
+      "jede frisch gebaute DB haette und Prod nicht: genau die Asymmetrie, an " +
+      "der die A3-Gegenprobe (von Null == Prod, Diff 0) scheitern wuerde. " +
+      "WARUM er in Prod fehlt, ist OFFEN — `migrate-erstberatung-customers.ts` " +
+      "hat das ADD CONSTRAINT bei seinem EINMALIGEN, ledger-gegateten Lauf " +
+      "uebersprungen (`budget_migrations`; laeuft nicht bei jedem Boot). Ob das " +
+      "an verletzenden Bestandsdaten lag oder ob ein Replit-Publish-Diff den " +
+      "Constraint gedroppt hat, ist unbelegt; zwei read-only Queries in " +
+      "docs/schema-baseline-inventory.md entscheiden es. Ihn zu erzwingen ist " +
+      "eine fachliche Entscheidung und braucht wegen des Ledgers eine NEUE " +
+      "Migration, nicht nur den vorhandenen Startup-Pfad — siehe FINDING.",
+  },
+];
 
 type Snapshot = Record<string, Map<string, string>>;
 

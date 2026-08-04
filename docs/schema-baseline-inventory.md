@@ -38,11 +38,24 @@ Absicht, nicht das Ergebnis.
 | Indizes | 260 | 260 | — |
 | Trigger | 16 | 16 | — |
 | Trigger-Funktionen | 11 | 11 | — |
-| **Constraints** | **216** | **216** | **—** |
+| **Constraints** | **215** | **216** | **1 startup-only** |
 
-Die Constraint-Zeile stand bei der Ersterhebung auf 216 vs. 217. Das eine
-Duplikat ist inzwischen behoben (unten); erneut gemessen am 03.08.2026 gegen eine
-frisch gepushte und gebootete Wegwerf-DB.
+Die Constraint-Zeile stand bei der Ersterhebung auf 216 vs. 217. Von den beiden
+damaligen Abweichungen ist eine behoben (das FK-Duplikat) und eine als
+**bewusste Ausnahme** eingetragen (`appointments_prospect_or_customer_check`,
+unten). Erneut gemessen am 03.08.2026 gegen eine frisch gepushte und gebootete
+Wegwerf-DB.
+
+**„Laufzeit" heißt hier: frische Orchestrator-DB, nicht die Dev-Kopie.** Der
+Unterschied ist für die Ausnahme-Zeile real. `drizzle-kit push` droppt den
+startup-only CHECK, sobald er nicht mehr im Modell steht (gemessen), und
+`scripts/post-merge.sh` fährt `npm run db:push` unbeaufsichtigt gegen die
+Dev-DB. Zurück kommt er dort **nicht**: die Anlage ist ledger-gegated und in der
+Dev-DB längst als gelaufen vermerkt. Auf einer langlebigen Dev-/Test-DB steht
+also über kurz oder lang 215 vs. 215 — der Inventar-Test meldet dann „Liste ist
+veraltet". Abhilfe ist **nicht** erneutes Pushen (das ist die Ursache), sondern
+eine frische DB oder das Löschen des Ledger-Eintrags
+`migrate-erstberatung-customers`.
 
 Alle `ADD COLUMN`-, `ALTER COLUMN`- und `CREATE INDEX`-Effekte des Startup-Pfads
 landen in der Baseline — inklusive der Typ-Korrekturen aus
@@ -153,13 +166,97 @@ Eine langlebige lokale Test-DB, die noch einen Boot der namensbasierten Fassung
 gesehen hat, trägt den `..._fkey` weiterhin — dort meldet der Inventar-Test zu
 Recht eine veraltete Ausnahme-Liste. Einmal neu pushen genügt.
 
-### Erledigt: `appointments_prospect_or_customer_check`
+## Die eine verbleibende Abweichung
 
-Der CHECK stand tatsächlich nur im Startup-Pfad. Er ist jetzt im Drizzle-Modell
-(`shared/schema/appointments.ts`), wortgleich zum gemessenen
-`pg_get_constraintdef`, unter unverändertem Namen — ein abweichender Name hätte
-beim nächsten `push` einen zweiten, gleichbedeutenden Constraint erzeugt statt
-den vorhandenen zu erkennen. Die neu erzeugte Baseline enthält ihn.
+### `appointments_prospect_or_customer_check` — startup-only, und das bleibt so
+
+A2 hatte den CHECK ins Drizzle-Modell gehoben, weil die Dev-Kopie ihn trägt und
+er der Baseline fehlte. Das war ein Fehlschluss aus der falschen Referenz: der
+Prod-Schema-Dump vom 03.08.2026 zeigt, dass Prod ihn **nicht** hat. Der einzige
+CHECK im gesamten Prod-Schema ist `qonto_transactions_match_xor`.
+
+**Gemessen ist genau das — dass er fehlt. WARUM er fehlt, ist offen.**
+
+#### Die Anlage läuft einmal pro DB, nicht bei jedem Boot
+
+`ensureCheckConstraint` sitzt in `migrateErstberatungCustomers`, und die ist als
+`migrate-erstberatung-customers` über `runGuardedBudgetMigration` registriert
+(`server/startup/data-migration-runner.ts:222`). Der Runner prüft vorher das
+Ledger `budget_migrations` und steigt aus, wenn ein Eintrag da ist
+(`server/startup/budget-migration-runner.ts:137`).
+
+Der Constraint-Versuch läuft also **genau einmal pro Datenbank**. In Prod steht
+der Ledger-Eintrag seit dem ersten Boot nach #1428; seither wird der Block nie
+wieder ausgeführt — auch nicht nach einer Datenbereinigung.
+
+Beim damaligen einmaligen Lauf hat er übersprungen:
+
+```ts
+if (violatingCount > 0) {
+  log(`CHECK-Constraint übersprungen: ${violatingCount} Termine ohne prospect_id und customer_id gefunden`, "startup");
+  return;
+}
+```
+
+Kein stiller Fehlschlag — ein bewusstes Überspringen mit Log-Zeile.
+
+#### Zwei konkurrierende Erklärungen, beide unbelegt
+
+1. **Verletzende Bestandsdaten beim einmaligen Lauf.** Naheliegend, aber nirgends
+   mit einer Zeilenzahl aus Prod belegt.
+2. **Der Constraint war da und wurde gedroppt.**
+   `.agents/memory/additive-publish-diff-strategy.md:63-66` hält fest, dass der
+   Replit-Publish-Diff genau diesen Constraint aus Prod **droppen** wollte — was
+   voraussetzt, dass Prod ihn einmal hatte. Zusammen mit dem Ledger-Gate ergäbe
+   das: Constraint war da → ein Publish hat ihn gedroppt → das Ledger verhindert
+   seither jede Wiederherstellung, unabhängig von den Daten.
+
+Trifft (2) zu, verfestigt „aus dem Modell nehmen" einen Deploy-Unfall, statt die
+Realität abzubilden. Für die **Baseline** ändert das nichts (sie muss abbilden,
+was in Prod steht), wohl aber für den Folge-Task.
+
+#### Verdacht zur Datenlage: Grabsteine, nicht lebende Termine
+
+`migrate-erstberatung-customers.ts:32-35` zählt **ohne** `deleted_at`-Filter —
+für einen Tabellen-CHECK korrekt, er gilt auch für soft-gelöschte Zeilen. Das
+Aufräum-Skript zu genau diesen Waisen (`server/scripts/cleanup-orphan-appointments.ts`)
+filtert dagegen auf `deleted_at IS NULL` und **soft-deletet** die Funde
+(`.set({ deletedAt: now })`), ohne `prospect_id`/`customer_id` zu setzen. Das
+Aufräumen erzeugt also selbst Zeilen, die den CHECK weiter verletzen und ihn
+dauerhaft blockieren.
+
+Wenn es so gelaufen ist, hält Prod die Invariante für alle **lebenden** Termine
+längst ein, und die Maßnahme ist viel kleiner als „fachliche Entscheidung +
+Datenbereinigung": entweder Hard-Delete der Grabsteine oder ein Teilprädikat
+`CHECK (deleted_at IS NOT NULL OR prospect_id IS NOT NULL OR customer_id IS NOT NULL)`.
+
+**Das ist eine Vermutung.** Zwei read-only Queries auf Prod entscheiden sie:
+
+```sql
+SELECT count(*) FILTER (WHERE deleted_at IS NULL)     AS lebend,
+       count(*) FILTER (WHERE deleted_at IS NOT NULL) AS grabsteine
+FROM appointments WHERE prospect_id IS NULL AND customer_id IS NULL;
+
+SELECT name, applied_at, summary FROM budget_migrations
+WHERE name = 'migrate-erstberatung-customers';
+```
+
+#### Warum er trotzdem aus dem Modell muss
+
+Im Modell wäre er ein Constraint, den **jede frisch gebaute DB hätte und Prod
+nicht** — genau die Asymmetrie, an der die A3-Gegenprobe („von Null gebaut ==
+Prod, Diff 0") scheitern müsste. Er ist deshalb aus dem Modell entfernt und in
+`KNOWN_STARTUP_ONLY_CONSTRAINTS` eingetragen; die regenerierte Baseline ist zur
+vorigen byte-gleich bis auf genau diese Zeile.
+
+**Das ist keine Entscheidung gegen die Invariante.** Ob sie in Prod erzwungen
+werden soll, ist eine fachliche Frage und ausdrücklich kein Migrations-Thema.
+
+**Wichtig für den Folge-Task:** „Constraint einfach in beide Wege legen" reicht
+NICHT. Der vorhandene Startup-Pfad ist ledger-gegated und liefe in Prod als
+No-op — es bräuchte eine **neue** Migration unter neuem Namen (oder einen
+ungegateten `ensure`-Hook) plus den Eintrag in der Baseline. Wer das übersieht,
+bereinigt die Daten und wundert sich, dass der Constraint nicht kommt.
 
 ## Kein Befund, aber wissenswert
 
@@ -181,7 +278,7 @@ Die „Laufzeit"-Seite des Vergleichs ist `drizzle-kit push` (= Modell) **plus**
 Startup-DDL. Jede Startup-Anweisung ist `IF NOT EXISTS`- bzw.
 `pg_constraint`-geguardet und damit auf einer frisch gepushten DB ein No-op. Der
 Vergleich kann strukturell also nur Startup-Objekte finden, die das Modell nicht
-kennt — genau die zwei oben, beide inzwischen aufgelöst.
+kennt — genau die zwei oben: eine behoben, eine als bewusste Ausnahme geführt.
 
 **Über Prod sagt er nichts.** Prod ist über Jahre gewachsener `push` plus 22 von
 Hand per `psql` gefahrene Migrationen. Unvermessen bleiben dort: Umbenennungen,
@@ -211,8 +308,20 @@ Abschnitt darüber. Und er muss auf `--schema=public` einschränken: Prod trägt
 zusätzlich das Replit-Schema `_system` (`replit_database_migrations_v1` samt
 Sequenz und Index), das die Baseline zu Recht nicht baut.
 
+**Die Von-Null-DB darf für diesen Vergleich NICHT gebootet werden.** Sonst ist
+sie leer, das Ledger ist leer, `violatingCount` ist 0 — und der Startup-Pfad legt
+den CHECK an. Dann steht er auf der Von-Null-Seite und nicht auf der Prod-Seite:
+dasselbe Falsch-Delta wie vorher, nur mit umgekehrtem Vorzeichen. Diese Änderung
+beseitigt die Asymmetrie also nicht, sie verschiebt sie von „Baseline vs. Prod"
+nach „frisch gebootet vs. Prod" — für A3 handhabbar, aber nur mit dieser
+Vorbedingung.
+
 Bekanntes Restdelta, das A3 melden wird: das `..._fkey`-Duplikat in Prod (Drop =
-Gate 4, hält seit dieser Änderung). Ob es dabei bleibt, ist eine **Erwartung,
-keine Messung** — dieses Inventar vergleicht Testumgebung gegen Testumgebung.
+Gate 4, hält seit der FK-Korrektur). Der CHECK dagegen ist KEIN Restdelta mehr —
+er steht weder in der Baseline noch in Prod; A3 darf ihn auf beiden Seiten nicht
+sehen. Taucht er wieder auf, ist das Modell zurückgefallen.
+
+Ob es dabei bleibt, ist eine **Erwartung, keine Messung** — dieses Inventar
+vergleicht Testumgebung gegen Testumgebung.
 Meldet A3 mehr, ist das ein neuer Befund und ein Grund anzuhalten, nicht, die
 Migration passend zu biegen.

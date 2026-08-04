@@ -1,5 +1,5 @@
 {
-  "id": "065bde5f-febc-43c7-8284-9a101b4f81f5",
+  "id": "e932907a-dff8-4d50-abf7-4c146520ee70",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -3760,12 +3760,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "appointments_prospect_or_customer_check": {
-          "name": "appointments_prospect_or_customer_check",
-          "value": "prospect_id IS NOT NULL OR customer_id IS NOT NULL"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.budget_allocations": {

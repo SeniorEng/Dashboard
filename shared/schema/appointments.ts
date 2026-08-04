@@ -1,5 +1,5 @@
-import { pgTable, text, integer, serial, time, date, boolean, index, numeric, jsonb, check, type AnyPgColumn } from "drizzle-orm/pg-core";
-import { isNull, sql } from "drizzle-orm";
+import { pgTable, text, integer, serial, time, date, boolean, index, numeric, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { isNull } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp } from "./common";
@@ -179,16 +179,24 @@ export const appointments = pgTable("appointments", {
   index("appointments_prospect_id_idx").on(table.prospectId),
   index("appointments_series_id_idx").on(table.seriesId),
   index("appointments_co_visit_group_id_idx").on(table.coVisitGroupId),
-  // Task #1841 / A2 — bis hierhin legte NUR der Startup-Pfad diesen Constraint
-  // an (`server/startup/migrate-erstberatung-customers.ts`); das Modell kannte
-  // ihn nicht, also fehlte er der generierten Baseline. Prädikat wortgleich zur
-  // laufenden DB (`pg_get_constraintdef`), Name unverändert — ein abweichender
-  // Name würde beim nächsten `push` einen ZWEITEN, gleichbedeutenden Constraint
-  // anlegen statt den vorhandenen zu erkennen.
-  check(
-    "appointments_prospect_or_customer_check",
-    sql`prospect_id IS NOT NULL OR customer_id IS NOT NULL`,
-  ),
+  // KEIN `appointments_prospect_or_customer_check` hier — bewusst.
+  //
+  // A2 hatte ihn ins Modell gehoben, weil die Dev-Kopie ihn trägt. Der
+  // Prod-Schema-Dump vom 03.08.2026 zeigt: in Prod existiert er NICHT. Im Modell
+  // wäre er damit ein Constraint, den die Baseline auf jeder frischen DB anlegt,
+  // den Prod aber nicht hat — genau die Asymmetrie, die A3 ("von Null gebaut ==
+  // Prod, Diff 0") aufdecken müsste.
+  //
+  // WARUM er in Prod fehlt, ist offen: `migrate-erstberatung-customers.ts` hat
+  // das `ADD CONSTRAINT` bei seinem EINMALIGEN, ledger-gegateten Lauf
+  // übersprungen — ob wegen verletzender Bestandsdaten oder weil ein
+  // Replit-Publish-Diff den Constraint zuvor gedroppt hat, ist unbelegt.
+  // Details und die zwei entscheidenden Queries: docs/schema-baseline-inventory.md.
+  //
+  // Ihn zu ERZWINGEN ist eine fachliche Entscheidung und NICHT Teil dieser
+  // Änderung (FINDING im PR). Wegen des Ledgers bräuchte es dann eine NEUE
+  // Migration plus den Eintrag im Modell — der vorhandene Startup-Pfad allein
+  // wäre in Prod ein No-op.
 ]);
 
 // ============================================
