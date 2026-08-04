@@ -70,6 +70,7 @@ import {
   isCacheFresh,
 } from "./lib/template-cache.ts";
 import { runNonprodPdfSweep } from "./lib/object-storage-pdf-sweep.ts";
+import { testDbTimeoutStatements } from "./lib/test-db-timeouts.ts";
 import { buildServerBundle } from "../script/server-bundle";
 
 function fail(msg: string): never {
@@ -434,6 +435,23 @@ function seedTemplateInto(dbUrl: string): void {
   run("npx", ["tsx", "scripts/seed-test-reference-data.ts"], env);
 }
 
+// Setzt die Sicherheitsnetz-Timeouts auf einer frisch angelegten Wegwerf-DB.
+// `CREATE DATABASE ... TEMPLATE` kopiert Datenbank-Einstellungen NICHT mit —
+// jede geklonte DB braucht sie deshalb selbst. Begründung und Werte:
+// `scripts/lib/test-db-timeouts.ts`.
+function applyTestDbTimeouts(dbName: string): void {
+  for (const stmt of testDbTimeoutStatements(dbName)) {
+    const res = psql(adminUrl!, stmt);
+    if (!res.ok) {
+      // Kein `fail()`: die Timeouts sind ein Diagnose-Netz, kein Betriebsmittel.
+      // Fehlen sie, läuft der Test-Lauf wie bisher — nur ein Hänger bliebe
+      // wieder stumm. Das ist eine Warnung wert, aber kein Abbruchgrund.
+      console.warn(`[ephemeral-db] WARN Timeout-Setzen auf ${dbName} fehlgeschlagen: ${res.stdout}`);
+      return;
+    }
+  }
+}
+
 // Klont `target` aus der Vorlage `source`. Da zwei GLEICHZEITIGE Läufe (Auto-Run
 // + Validation) zeitgleich aus derselben Cache-Vorlage klonen können, retryt der
 // CREATE bei „source database ... is being accessed by other users".
@@ -441,7 +459,10 @@ function cloneDbFromTemplate(target: string, source: string): void {
   const maxAttempts = 8;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const res = psql(adminUrl!, `CREATE DATABASE "${target}" TEMPLATE "${source}"`);
-    if (res.ok) return;
+    if (res.ok) {
+      applyTestDbTimeouts(target);
+      return;
+    }
     const busy = /being accessed by other users|source database .* is being accessed/i.test(
       res.stdout,
     );

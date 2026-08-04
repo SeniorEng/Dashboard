@@ -1059,90 +1059,113 @@ async function runStartupTasks() {
     log(`Kritischer Fehler bei Startup-Aufgaben: ${err}`, "startup");
   }
 
-  const { authService } = await import("./services/auth");
-  const runSessionCleanup = async () => {
-    try {
-      const [sessionCount, tokenCount] = await Promise.all([
-        authService.cleanupExpiredSessions(),
-        authService.cleanupExpiredResetTokens(),
-      ]);
-      if (sessionCount > 0 || tokenCount > 0) {
-        log(`Bereinigt: ${sessionCount} abgelaufene Sessions, ${tokenCount} abgelaufene Tokens`);
+  // Task #1901 — Zeitgesteuerte Hintergrundläufe starten im TEST NICHT.
+  //
+  // Die Integrationstests laufen in CI seriell gegen EINE geteilte DB und EINEN
+  // langlebigen App-Server. Die Tests sind dadurch zwar untereinander
+  // serialisiert — dieser Server-Prozess ist es aber nicht: er setzt eigene
+  // Schreibvorgänge ab, während ein Test läuft. Gemessen im CI-`server.log`:
+  // `[call-scheduler] Poller started (every 60s)` feuerte über den kompletten
+  // ~17-Minuten-Lauf. `runBudgetRenewalCheck` (t+7 min) und
+  // `runInvoiceIntegrityCheck` (t+15 min) fallen ebenfalls MITTEN in den Lauf;
+  // letzterer re-rendert die Rechnungen der letzten 30 Tage — in der geteilten
+  // Test-DB sind das die von früheren Testdateien erzeugten.
+  //
+  // Das ist echte Nebenläufigkeit auf denselben Zeilen und Advisory-Locks, die
+  // kein Test anfordert und kein Test erwartet. Geguardet wird ausschliesslich
+  // die ZEITGESTEUERTE REGISTRIERUNG; die Arbeitsfunktionen selbst bleiben
+  // unberührt und exportiert — alle Scheduler-Tests importieren sie direkt
+  // (`autoCloseMonthForCutoff`, `sendMonthCloseReminders`,
+  // `calculateNextCallTime`, …) und rufen nie eine `start*`-Funktion auf.
+  //
+  // Prod und Dev sind ausdrücklich NICHT betroffen: der Guard prüft auf
+  // `NODE_ENV === "test"`, der Marker, den dieses Repo überall sonst nutzt.
+  if (process.env.NODE_ENV !== "test") {
+    const { authService } = await import("./services/auth");
+    const runSessionCleanup = async () => {
+      try {
+        const [sessionCount, tokenCount] = await Promise.all([
+          authService.cleanupExpiredSessions(),
+          authService.cleanupExpiredResetTokens(),
+        ]);
+        if (sessionCount > 0 || tokenCount > 0) {
+          log(`Bereinigt: ${sessionCount} abgelaufene Sessions, ${tokenCount} abgelaufene Tokens`);
+        }
+      } catch (e) {
+        console.error("Fehler bei Session-Bereinigung:", e);
       }
-    } catch (e) {
-      console.error("Fehler bei Session-Bereinigung:", e);
-    }
-  };
-  runSessionCleanup();
-  intervals.push(setInterval(runSessionCleanup, 60 * 60 * 1000));
+    };
+    runSessionCleanup();
+    intervals.push(setInterval(runSessionCleanup, 60 * 60 * 1000));
 
-  const { generateDocumentReviewTasks, shouldRunDocumentReview } = await import("./services/document-review");
-  const runDocumentReviewIfDue = async () => {
-    try {
-      if (await shouldRunDocumentReview()) {
-        const created = await generateDocumentReviewTasks();
-        if (created > 0) log(`${created} Dokumenten-Aufgaben erstellt`);
+    const { generateDocumentReviewTasks, shouldRunDocumentReview } = await import("./services/document-review");
+    const runDocumentReviewIfDue = async () => {
+      try {
+        if (await shouldRunDocumentReview()) {
+          const created = await generateDocumentReviewTasks();
+          if (created > 0) log(`${created} Dokumenten-Aufgaben erstellt`);
+        }
+      } catch (e) {
+        console.error("Fehler bei Dokumenten-Prüfung:", e);
       }
-    } catch (e) {
-      console.error("Fehler bei Dokumenten-Prüfung:", e);
-    }
-  };
-  runDocumentReviewIfDue();
-  intervals.push(setInterval(runDocumentReviewIfDue, 6 * 60 * 60 * 1000));
+    };
+    runDocumentReviewIfDue();
+    intervals.push(setInterval(runDocumentReviewIfDue, 6 * 60 * 60 * 1000));
 
-  const { checkUpcomingBirthdays } = await import("./services/birthday-notification-checker");
-  const runBirthdayCheck = async () => {
-    try {
-      const created = await checkUpcomingBirthdays();
-      if (created > 0) log(`${created} Geburtstags-Benachrichtigungen erstellt`);
-    } catch (e) {
-      console.error("Fehler bei Geburtstags-Prüfung:", e);
-    }
-  };
-  timeouts.push(setTimeout(runBirthdayCheck, 5 * 60 * 1000));
-  intervals.push(setInterval(runBirthdayCheck, 6 * 60 * 60 * 1000));
+    const { checkUpcomingBirthdays } = await import("./services/birthday-notification-checker");
+    const runBirthdayCheck = async () => {
+      try {
+        const created = await checkUpcomingBirthdays();
+        if (created > 0) log(`${created} Geburtstags-Benachrichtigungen erstellt`);
+      } catch (e) {
+        console.error("Fehler bei Geburtstags-Prüfung:", e);
+      }
+    };
+    timeouts.push(setTimeout(runBirthdayCheck, 5 * 60 * 1000));
+    intervals.push(setInterval(runBirthdayCheck, 6 * 60 * 60 * 1000));
 
-  const { checkBudgetRenewals } = await import("./services/budget-renewal-checker");
-  const runBudgetRenewalCheck = async () => {
-    try {
-      const created = await checkBudgetRenewals();
-      if (created > 0) log(`${created} §39/42a Budget-Verlängerungs-Aufgaben erstellt`);
-    } catch (e) {
-      console.error("Fehler bei Budget-Verlängerungs-Prüfung:", e);
-    }
-  };
-  timeouts.push(setTimeout(runBudgetRenewalCheck, 7 * 60 * 1000));
-  intervals.push(setInterval(runBudgetRenewalCheck, 24 * 60 * 60 * 1000));
+    const { checkBudgetRenewals } = await import("./services/budget-renewal-checker");
+    const runBudgetRenewalCheck = async () => {
+      try {
+        const created = await checkBudgetRenewals();
+        if (created > 0) log(`${created} §39/42a Budget-Verlängerungs-Aufgaben erstellt`);
+      } catch (e) {
+        console.error("Fehler bei Budget-Verlängerungs-Prüfung:", e);
+      }
+    };
+    timeouts.push(setTimeout(runBudgetRenewalCheck, 7 * 60 * 1000));
+    intervals.push(setInterval(runBudgetRenewalCheck, 24 * 60 * 60 * 1000));
 
-  const { startReminderScheduler } = await import("./services/whatsapp-reminder-scheduler");
-  const reminderScheduler = startReminderScheduler();
-  timeouts.push(reminderScheduler.timeout);
-  if (reminderScheduler.interval) intervals.push(reminderScheduler.interval);
+    const { startReminderScheduler } = await import("./services/whatsapp-reminder-scheduler");
+    const reminderScheduler = startReminderScheduler();
+    timeouts.push(reminderScheduler.timeout);
+    if (reminderScheduler.interval) intervals.push(reminderScheduler.interval);
 
-  const { startCallSchedulerPoller } = await import("./services/call-scheduler");
-  startCallSchedulerPoller();
+    const { startCallSchedulerPoller } = await import("./services/call-scheduler");
+    startCallSchedulerPoller();
 
-  const { startMonthCloseScheduler } = await import("./services/month-close-scheduler");
-  const monthCloseScheduler = startMonthCloseScheduler();
-  intervals.push(monthCloseScheduler.interval);
+    const { startMonthCloseScheduler } = await import("./services/month-close-scheduler");
+    const monthCloseScheduler = startMonthCloseScheduler();
+    intervals.push(monthCloseScheduler.interval);
 
-  // Task #894: Der periodische Test-Daten-Safety-Purge entfällt — seit jeder
-  // Integrationslauf seine eigene wegwerf-DB nutzt (scripts/with-ephemeral-db.ts)
-  // wächst kein Stale-Pool mehr an, der aufgeräumt werden müsste.
+    // Task #894: Der periodische Test-Daten-Safety-Purge entfällt — seit jeder
+    // Integrationslauf seine eigene wegwerf-DB nutzt (scripts/with-ephemeral-db.ts)
+    // wächst kein Stale-Pool mehr an, der aufgeräumt werden müsste.
 
-  // Tier-A3: Nächtlicher Integrity-Check der letzten 30 Tage Rechnungen.
-  // Re-rendert PDF + XML und gleicht gegen persistierten pdfHash/zugferdXml
-  // ab, dokumentiert Drift im Audit-Log.
-  const { verifyRecentInvoiceIntegrity } = await import("./services/invoice-integrity-verifier");
-  const runInvoiceIntegrityCheck = async () => {
-    try {
-      await verifyRecentInvoiceIntegrity(30);
-    } catch (e) {
-      console.error("Fehler bei Invoice-Integrity-Check:", e);
-    }
-  };
-  timeouts.push(setTimeout(runInvoiceIntegrityCheck, 15 * 60 * 1000));
-  intervals.push(setInterval(runInvoiceIntegrityCheck, 24 * 60 * 60 * 1000));
+    // Tier-A3: Nächtlicher Integrity-Check der letzten 30 Tage Rechnungen.
+    // Re-rendert PDF + XML und gleicht gegen persistierten pdfHash/zugferdXml
+    // ab, dokumentiert Drift im Audit-Log.
+    const { verifyRecentInvoiceIntegrity } = await import("./services/invoice-integrity-verifier");
+    const runInvoiceIntegrityCheck = async () => {
+      try {
+        await verifyRecentInvoiceIntegrity(30);
+      } catch (e) {
+        console.error("Fehler bei Invoice-Integrity-Check:", e);
+      }
+    };
+    timeouts.push(setTimeout(runInvoiceIntegrityCheck, 15 * 60 * 1000));
+    intervals.push(setInterval(runInvoiceIntegrityCheck, 24 * 60 * 60 * 1000));
+  }
 
   // Task #953: Budget-Hard-Block-Scharfschaltung in Produktion verriegeln.
   // Der Overdraft-Hard-Block (422 BUDGET_HARD_BLOCK) ist hinter dem Feature-Flag
