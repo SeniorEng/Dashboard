@@ -38,7 +38,11 @@ Absicht, nicht das Ergebnis.
 | Indizes | 260 | 260 | — |
 | Trigger | 16 | 16 | — |
 | Trigger-Funktionen | 11 | 11 | — |
-| **Constraints** | **216** | **217** | **1 Duplikat** |
+| **Constraints** | **216** | **216** | **—** |
+
+Die Constraint-Zeile stand bei der Ersterhebung auf 216 vs. 217. Das eine
+Duplikat ist inzwischen behoben (unten); erneut gemessen am 03.08.2026 gegen eine
+frisch gepushte und gebootete Wegwerf-DB.
 
 Alle `ADD COLUMN`-, `ALTER COLUMN`- und `CREATE INDEX`-Effekte des Startup-Pfads
 landen in der Baseline — inklusive der Typ-Korrekturen aus
@@ -47,9 +51,7 @@ landen in der Baseline — inklusive der Typ-Korrekturen aus
 `DROP`-Effekte stimmen: keine gedroppte Spalte oder Tabelle taucht in der
 Baseline wieder auf.
 
-## Die eine verbleibende Abweichung
-
-### `audit_log_parent_deletion_id_fkey` — ein DUPLIKAT, kein fehlender Constraint
+## Erledigt: `audit_log_parent_deletion_id_fkey` — ein DUPLIKAT, kein fehlender Constraint
 
 Das war ursprünglich als „FK fehlt im Modell" notiert. Die Messung sagt etwas
 anderes: das Drizzle-Modell **hat** die Selbstreferenz längst —
@@ -60,10 +62,13 @@ parentDeletionId: integer("parent_deletion_id").references((): AnyPgColumn => au
 
 — nur unter dem von Drizzle vergebenen Namen
 `audit_log_parent_deletion_id_audit_log_id_fk`. Der steht in der Baseline.
-`server/startup/ensure-audit-parent-deletion.ts` legt daneben einen **zweiten**,
+`server/startup/ensure-audit-parent-deletion.ts` legte daneben einen **zweiten**,
 funktional identischen FK unter dem Postgres-Default-Namen `..._fkey` an.
 
-In der laufenden DB liegen deshalb beide:
+Der folgende Abschnitt beschreibt den Befund im **Präsens des Zeitpunkts der
+Erhebung**; die Korrektur steht darunter.
+
+In der DB lagen deshalb beide:
 
 ```
 audit_log_parent_deletion_id_audit_log_id_fk | FOREIGN KEY (parent_deletion_id) REFERENCES audit_log(id)
@@ -79,37 +84,74 @@ schreibintensivsten Tabelle der App.
 **Ihn dem Modell hinzuzufügen wäre falsch**: dann stünden zwei FKs in der
 Baseline, und die Redundanz wäre auf Dauer gestellt.
 
-### Es ist ein Deploy-Ping-Pong, kein Altbestand
+### Es ist ein Ping-Pong — gemessen auf dem `--force`-Pfad
 
 Gemessen: `drizzle-kit push --force` **droppt** den `_fkey` — er steht ja nicht
-im Modell. `ensure-audit-parent-deletion.ts` prüft seine Existenz aber über den
-**Namen** (`WHERE conname = 'audit_log_parent_deletion_id_fkey'`) und legt ihn
-beim nächsten Boot sofort wieder an.
+im Modell. `ensure-audit-parent-deletion.ts` prüfte seine Existenz aber über den
+**Namen** (`WHERE conname = 'audit_log_parent_deletion_id_fkey'`) und legte ihn
+beim nächsten Boot sofort wieder an. Die Reihenfolge push→boot erklärt, warum die
+Laufzeit-DB beide trug — kein historischer Zufall.
 
-In Prod heißt das bei jedem Deploy: Pre-Deploy droppt einen Constraint auf
-`audit_log`, der Boot fügt ihn wieder ein. Das erklärt auch, warum die
-Laufzeit-DB beide trägt — die Reihenfolge push→boot ist der Grund, nicht ein
-historischer Zufall.
+**Für Prod ist das eine Vermutung, keine Messung.** Der Coolify-Pre-Deploy fährt
+`bash scripts/migrate.sh` **ohne** `--force` (`scripts/migrate.sh:43` reicht
+Argumente nur durch), und ohne `--force` ist `push` interaktiv — ob ein
+destruktives `DROP CONSTRAINT` dort überhaupt angewendet wird, ist hier nicht
+belegt. Gemessen ist nur: Prod trägt beide FKs (Schema-Dump 03.08.2026).
+**Wie** das Duplikat dort entstanden ist, weiß dieses Dokument nicht.
 
-**Konsequenz für die Auflösung:** Ein Drop in Prod hält genau bis zum nächsten
-Boot. Was weichen muss, ist der FK-Block im Startup-Skript — entweder ersatzlos
-(das Modell pflegt die Beziehung ohnehin) oder mit **spaltenbasierter** statt
-namensbasierter Existenzprüfung. Das Muster gibt es im Repo bereits:
-`ensure-reservation-captured-transaction-link.ts` begründet es ausdrücklich mit
-„unabhängig von einer eventuell von `drizzle-kit` abweichenden
-Constraint-Namens-Trunkierung". Als Zielname bietet sich der Drizzle-Name an —
-ihn pflegt `push`, er steht in der Baseline, und alle 129 anderen FKs des
-Schemas tragen dieselbe Konvention.
+Das entscheidet, was an Gate 4 zu tun ist:
 
-Eigener Vorgang, nicht A2. Siehe FINDING im A2-PR.
+- Droppt der Pre-Deploy den `_fkey` tatsächlich, erledigt der nächste reguläre
+  Deploy dieser Änderung ihn von selbst — dann ist Gate 4 nur eine Nachkontrolle.
+- Droppt er ihn nicht, bleibt der Constraint bis zu einem ausdrücklichen
+  manuellen Drop liegen.
 
-### Annahme, auf der der gemessene Delta beruht
+Klären lässt sich das ohne Prod-Schreibzugriff: über den tatsächlich in Coolify
+konfigurierten Pre-Deploy-Command, über das Pre-Deploy-Log des letzten Deploys
+(steht dort ein `DROP CONSTRAINT ..._fkey`?), oder über einen erneuten
+`pg_dump --schema-only` **nach** dem nächsten Deploy.
 
-Der Wert 216 vs. 217 setzt voraus, dass der **Boot nach dem Push** lief. Ein
-Snapshot direkt nach `push` und vor dem Boot ergäbe Delta 0 — und der
-Inventar-Test ginge rot („Verschwundene bedeuten, dass die Liste veraltet ist").
-Im Orchestrator und in CI ist die Reihenfolge garantiert (der Server bootet vor
-den Tests), akut droht also kein Flake.
+### Behoben: spaltenbasierte Prüfung statt namensbasierter
+
+Ein Drop in Prod allein hätte genau bis zum nächsten Boot gehalten — deshalb
+musste der FK-Block im Startup-Skript weichen, nicht der Constraint in der DB.
+`ensure-audit-parent-deletion.ts` prüft die Existenz jetzt **spaltenbasiert**
+(`conrelid='audit_log'::regclass AND contype='f' AND attname='parent_deletion_id'`)
+und legt unter dem **Drizzle-Namen** an, falls wirklich keiner da ist. Das Muster
+gab es im Repo bereits: `ensure-reservation-captured-transaction-link.ts`
+begründet es mit „unabhängig von einer eventuell von `drizzle-kit` abweichenden
+Constraint-Namens-Trunkierung".
+
+Nebenbefund derselben Zeile: die alte Prüfung schränkte nicht auf `conrelid` ein.
+`conname` ist in PostgreSQL nur pro Tabelle eindeutig — ein gleichnamiger
+Constraint auf einer fremden Tabelle hätte die Anlage hier stillgelegt.
+
+Gepinnt in `tests/startup/startup-schema-drift.test.ts` → „Startup FK-Drift":
+genau ein FK auf der Spalte, unter dem Drizzle-Namen; ein zweiter Boot ist ein
+No-Op; plus eine Negativ-Kontrolle auf einer TEMP-Tabelle, die das alte
+namensbasierte Verhalten reproduziert (dort entsteht der Zweitling wirklich).
+
+**Prod trägt das Duplikat weiterhin** (Schema-Dump 03.08.2026). Sicher ist nur:
+ab jetzt **hält** ein Drop dort, weil kein Boot ihn mehr nachlegt. Ob er von
+selbst durch den nächsten Pre-Deploy passiert oder ausdrücklich gefahren werden
+muss, ist die offene Frage aus dem Abschnitt oben — beides ist Gate 4 (Kontrolle
+bzw. Schreiboperation), nichts davon Teil dieser Änderung.
+
+Wird er manuell gefahren: **genau `audit_log_parent_deletion_id_fkey` droppen**
+und den Drizzle-Namen stehen lassen. Fielen beide, legt der nächste Boot den FK
+neu an — inklusive Validierungs-Scan unter `ACCESS EXCLUSIVE` auf der
+schreibintensivsten Tabelle, mitten im Start.
+
+### Annahmen, auf denen die Messung beruht
+
+Der Vergleich setzt voraus, dass der **Boot nach dem Push** lief — sonst fehlen
+der „Laufzeit"-Seite alle Startup-Effekte. Im Orchestrator und in CI ist die
+Reihenfolge garantiert (der Server bootet vor den Tests).
+
+Zweitens: die Laufzeit-DB muss mit dem **aktuellen** Code gebootet worden sein.
+Eine langlebige lokale Test-DB, die noch einen Boot der namensbasierten Fassung
+gesehen hat, trägt den `..._fkey` weiterhin — dort meldet der Inventar-Test zu
+Recht eine veraltete Ausnahme-Liste. Einmal neu pushen genügt.
 
 ### Erledigt: `appointments_prospect_or_customer_check`
 
@@ -139,12 +181,19 @@ Die „Laufzeit"-Seite des Vergleichs ist `drizzle-kit push` (= Modell) **plus**
 Startup-DDL. Jede Startup-Anweisung ist `IF NOT EXISTS`- bzw.
 `pg_constraint`-geguardet und damit auf einer frisch gepushten DB ein No-op. Der
 Vergleich kann strukturell also nur Startup-Objekte finden, die das Modell nicht
-kennt — genau die zwei oben.
+kennt — genau die zwei oben, beide inzwischen aufgelöst.
 
 **Über Prod sagt er nichts.** Prod ist über Jahre gewachsener `push` plus 22 von
 Hand per `psql` gefahrene Migrationen. Unvermessen bleiben dort: Umbenennungen,
 alte Constraint-Namen, verwaiste Indizes aus der Push-Historie, und alles, was
 je manuell angefasst wurde.
+
+Ein `pg_dump --schema-only` von Prod liegt seit dem 03.08.2026 vor und bestätigt
+punktuell: 68 Tabellen, 130 FKs (die 129 der Baseline **plus** das
+`..._fkey`-Duplikat), 16 Trigger, 14 Trigger-Funktionen (die 11 der Migration
+plus die 3 verwaisten `budget_ledger_*`, die `0001_gobd_triggers.sql` droppt),
+und genau **einen** CHECK: `qonto_transactions_match_xor`. Der systematische
+Abgleich bleibt A3 vorbehalten — das hier sind Stichproben, keine Gegenprobe.
 
 Nicht verglichen werden ausserdem — heute ohne Befund, aber latent:
 `column_default`, Array-Elementtypen, `ordinal_position`, Collation,
@@ -158,9 +207,12 @@ Prod-Schema. Der Diff MUSS 0 sein.
 
 **A3 darf sich dafür NICHT auf diese Query-Liste stützen**, sondern muss einen
 normalisierten `pg_dump --schema-only`-Vergleich fahren — aus dem Grund im
-Abschnitt darüber.
+Abschnitt darüber. Und er muss auf `--schema=public` einschränken: Prod trägt
+zusätzlich das Replit-Schema `_system` (`replit_database_migrations_v1` samt
+Sequenz und Index), das die Baseline zu Recht nicht baut.
 
-Die hier gefundene Abweichung ist das Minimum, das A3 melden wird. Ob es
-dabei bleibt, ist eine **Erwartung, keine Messung**: dieses Inventar hat Prod nie
-gesehen. Meldet A3 mehr, ist das ein neuer Befund und ein Grund anzuhalten —
-nicht, die Migration passend zu biegen.
+Bekanntes Restdelta, das A3 melden wird: das `..._fkey`-Duplikat in Prod (Drop =
+Gate 4, hält seit dieser Änderung). Ob es dabei bleibt, ist eine **Erwartung,
+keine Messung** — dieses Inventar vergleicht Testumgebung gegen Testumgebung.
+Meldet A3 mehr, ist das ein neuer Befund und ein Grund anzuhalten, nicht, die
+Migration passend zu biegen.
