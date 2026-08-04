@@ -183,12 +183,16 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
   // gültige Versicherungs-Historie entsteht.
   if (input.insurance) {
     maybeFail("insurance", testFaults);
+    // Task #1898 — Der Vertrag wird ERST WEITER UNTEN angelegt; ein Nachschlag
+    // in `addCustomerInsurance` fände hier noch nichts. Der Vertragsbeginn wird
+    // deshalb aus dem Request durchgereicht, damit der Erstzuordnungs-Anker
+    // (frühere von Vertragsbeginn/heute, abgerundet auf den 1.) stimmt.
     await customerManagementStorage.addCustomerInsurance({
       customerId,
       insuranceProviderId: input.insurance.providerId,
       versichertennummer: input.insurance.versichertennummer,
       validFrom: input.insurance.validFrom,
-    }, userId, tx);
+    }, userId, tx, { contractStartISO: input.contract?.contractStart ?? null });
   }
 
   // Soft: Kontakte. Eine sequentielle Schleife mit try/catch um den

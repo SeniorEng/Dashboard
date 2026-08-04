@@ -21,6 +21,7 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import {
+  firstInsuranceAnchorISO,
   isMonthStartISO,
   INSURANCE_WINDOW_MUST_START_ON_FIRST,
 } from "@shared/domain/insurance-period";
@@ -63,6 +64,11 @@ const VERSICHERTENNUMMER_REGEX = VERSICHERTENNUMMER_GKV_REGEX;
 // Task #1893 — Kassenwechsel sind nur zum Monatsersten zulässig. Vorbelegung ist
 // deshalb der 1. des FOLGENDEN Monats (der laufende Monat ist i.d.R. schon
 // abgerechnet bzw. läuft noch auf die bisherige Kasse).
+//
+// Task #1898 — Für die ERSTZUORDNUNG gilt das NICHT: dort gibt es keine
+// bisherige Kasse, auf die der laufende Monat noch liefe. Der Folgemonat würde
+// den laufenden Monat ohne Kostenträger zurücklassen. Vorbelegung ist deshalb
+// der 1. des LAUFENDEN Monats — derselbe Anker, den der Server berechnet.
 function firstOfNextMonthISO(): string {
   const now = new Date();
   const y = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
@@ -84,7 +90,11 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
 
   const [insuranceProviderId, setInsuranceProviderId] = useState("");
   const [versichertennummer, setVersichertennummer] = useState("");
-  const [validFrom, setValidFrom] = useState(firstOfNextMonthISO());
+  // Erstzuordnung = der Kunde hat noch keine laufende Kasse.
+  const isFirstAssignment = !currentInsurance;
+  const [validFrom, setValidFrom] = useState(
+    isFirstAssignment ? firstInsuranceAnchorISO(null, todayISO()) : firstOfNextMonthISO(),
+  );
   const [vnError, setVnError] = useState<string | null>(null);
 
   // Inline-Anlage einer neuen Pflegekasse direkt im Wechsel-Dialog, damit das
@@ -265,7 +275,10 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
       return;
     }
     // Spiegelt die serverseitige Erzwingung (Task #1893) — dieselbe SSoT-Prüfung.
-    if (!isMonthStartISO(validFrom)) {
+    // Bei der Erstzuordnung greift sie NICHT: dort normalisiert der Server auf
+    // den Anker (Task #1898), ein clientseitiger Abbruch wäre eine zweite,
+    // strengere Regel als die des Servers.
+    if (!isFirstAssignment && !isMonthStartISO(validFrom)) {
       toast({ title: "Nur Wechsel zum Monatsersten", description: INSURANCE_WINDOW_MUST_START_ON_FIRST, variant: "destructive" });
       return;
     }

@@ -55,6 +55,54 @@ export function isMonthStartISO(iso: string): boolean {
   return m !== null && m[3] === "01";
 }
 
+/** `YYYY-MM-DD` → `YYYY-MM-01`. */
+export function monthStartOfISO(iso: string): string {
+  return `${iso.slice(0, 7)}-01`;
+}
+
+/**
+ * Task #1898 — Anker für die ERSTZUORDNUNG eines Kostenträgers.
+ *
+ * Der Monatserste-Zwang aus #1893 ist fachlich für den WECHSEL gedacht: ein
+ * Abrechnungsmonat soll eindeutig unter genau eine Kasse fallen. Bei der
+ * ERSTEN Zuordnung gibt es aber nichts zu wechseln — vorher war der Kunde
+ * überhaupt keiner Kasse zugeordnet. Ein Kunde, der am 14. angelegt wird, ist
+ * für den ganzen Monat bei dieser Kasse; der 1. desselben Monats ist die
+ * korrekte, nicht die geschönte Angabe.
+ *
+ * Anker = der FRÜHERE von (Vertragsbeginn, heute), abgerundet auf den 1.
+ *
+ * Daraus folgt beides, was gelten muss:
+ *  - **nie in der Zukunft**: der Anker ist ≤ heute, weil `heute` die Obergrenze
+ *    des Minimums ist und das Abrunden nur nach hinten geht. Ein in der Zukunft
+ *    liegender Vertragsbeginn verschiebt den Anker also NICHT nach vorn.
+ *  - **nie später als der Vertragsbeginn**: liegt der Vertragsbeginn in der
+ *    Vergangenheit, gewinnt er das Minimum, und das Abrunden kann ihn nur noch
+ *    früher machen. Es entsteht keine Lücke, in der Leistungen ohne
+ *    zugeordnete Kasse dastünden.
+ *
+ * Bewusst KEINE Normalisierung eines Wechsels: die zweite und jede weitere
+ * Zuordnung bleibt hart auf den Monatsersten begrenzt
+ * ({@link INSURANCE_WINDOW_MUST_START_ON_FIRST}). Ein Wechseldatum still
+ * umzuschreiben würde einen Abrechnungsmonat rückwirkend der falschen Kasse
+ * zuordnen — genau der Fehler, den #1893 abgestellt hat.
+ *
+ * @param contractStartISO Vertragsbeginn, falls bekannt (sonst `null`).
+ * @param todayIso Heutiges Datum als `YYYY-MM-DD` (injiziert, nie intern
+ *   ermittelt — sonst wäre die Funktion nicht testbar und fiele unter die
+ *   `todayISO()`-vs-`asOf`-Falle).
+ */
+export function firstInsuranceAnchorISO(
+  contractStartISO: string | null | undefined,
+  todayIso: string,
+): string {
+  const earlier =
+    isIsoDate(contractStartISO) && contractStartISO < todayIso
+      ? contractStartISO
+      : todayIso;
+  return monthStartOfISO(earlier);
+}
+
 /**
  * Der Tag VOR `iso` — so schließt ein Vorgänger-Fenster lückenlos an ein neues
  * `validFrom` an. Für einen Monatsersten ist das exakt der letzte Tag des

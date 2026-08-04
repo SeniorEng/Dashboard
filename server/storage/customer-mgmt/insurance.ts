@@ -6,11 +6,14 @@ import {
   insuranceProviders,
   customerInsuranceHistory,
   customerBudgetRecipients,
+  customerContracts,
 } from "@shared/schema";
 import { eq, and, isNull, or, lte, gte, desc, count, notExists, sql } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
 import {
   dayBeforeISO,
+  firstInsuranceAnchorISO,
+  isMonthStartISO,
   validateInsuranceWindow,
   validateInsuranceWindows,
   type InsuranceWindow,
@@ -295,13 +298,64 @@ async function loadInsuranceWindows(
  *
  * @throws {AppError} 400 mit deutscher Meldung bei unzulässigem Fenster.
  */
-export async function addCustomerInsurance(data: InsertCustomerInsurance, userId?: number, tx?: DbOrTx): Promise<CustomerInsuranceHistory> {
+export interface AddCustomerInsuranceOptions {
+  /**
+   * Vertragsbeginn, falls dem Aufrufer bekannt. Der Wizard MUSS ihn mitgeben:
+   * dort wird die Versicherung VOR dem Vertrag geschrieben
+   * (`customer-creation-helpers.ts`), der Nachschlag unten fände also nichts.
+   */
+  contractStartISO?: string | null;
+}
+
+/**
+ * Erstzuordnung = der Kunde hat noch KEINE Zeile in `customer_insurance_history`.
+ *
+ * Eindeutig, weil die Tabelle keinen Soft-Delete kennt (kein `deleted_at`,
+ * `shared/schema/insurance.ts`) und es im Server keinen Lösch-Pfad auf sie gibt
+ * — geprüft. Eine „unsichtbare" Vorgängerzeile, die eine Erstzuordnung
+ * vortäuschen könnte, kann es damit nicht geben. Bekäme die Tabelle je einen
+ * Soft-Delete, MUSS diese Prüfung mitziehen, sonst normalisiert sie einen
+ * echten Wechsel still.
+ */
+async function loadContractStartISO(
+  customerId: number,
+  executor: DbOrTx,
+): Promise<string | null> {
+  const rows = await executor
+    .select({ contractStart: customerContracts.contractStart })
+    .from(customerContracts)
+    .where(eq(customerContracts.customerId, customerId))
+    .orderBy(customerContracts.contractStart)
+    .limit(1);
+  return rows[0]?.contractStart ?? null;
+}
+
+export async function addCustomerInsurance(
+  data: InsertCustomerInsurance,
+  userId?: number,
+  tx?: DbOrTx,
+  options?: AddCustomerInsuranceOptions,
+): Promise<CustomerInsuranceHistory> {
   const executor = tx ?? db;
 
-  const windowError = validateInsuranceWindow({ validFrom: data.validFrom, validTo: data.validTo ?? null });
+  // Task #1898 — Erstzuordnung VOR jeder Mutation feststellen. Nach dem
+  // Vorgänger-Update unten wäre die Menge nicht mehr aussagekräftig.
+  const existingBefore = await loadInsuranceWindows(data.customerId, executor);
+  const isFirstAssignment = existingBefore.length === 0;
+
+  let validFrom = data.validFrom;
+  if (isFirstAssignment && typeof validFrom === "string" && !isMonthStartISO(validFrom)) {
+    const contractStart =
+      options?.contractStartISO ?? (await loadContractStartISO(data.customerId, executor));
+    validFrom = firstInsuranceAnchorISO(contractStart, todayISO());
+  }
+  // Jede WEITERE Zuordnung ist ein Wechsel und bleibt hart auf den
+  // Monatsersten begrenzt — hier wird nichts umgeschrieben.
+
+  const windowError = validateInsuranceWindow({ validFrom, validTo: data.validTo ?? null });
   if (windowError) throw badRequest(windowError);
 
-  const closesAt = dayBeforeISO(data.validFrom);
+  const closesAt = dayBeforeISO(validFrom);
 
   // Vorgänger lückenlos am Tag vor dem neuen `validFrom` schließen. Nur offene
   // Fenster, die VOR dem neuen Start begonnen haben — ein bereits geschlossenes
@@ -318,12 +372,16 @@ export async function addCustomerInsurance(data: InsertCustomerInsurance, userId
   const existing = await loadInsuranceWindows(data.customerId, executor);
   const setError = validateInsuranceWindows([
     ...existing,
-    { validFrom: data.validFrom, validTo: data.validTo ?? null },
+    { validFrom, validTo: data.validTo ?? null },
   ]);
   if (setError) throw badRequest(setError);
 
+  // `validFrom` statt `data.validFrom`: die persistierte Zeile trägt das
+  // normalisierte Datum — und damit auch das Audit, das die zurückgegebene
+  // Zeile protokolliert (`routes/admin/customers/details.ts`).
   const result = await executor.insert(customerInsuranceHistory).values({
     ...data,
+    validFrom,
     createdByUserId: userId,
   }).returning();
 

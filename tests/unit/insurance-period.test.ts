@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   billingPeriodAsOfISO,
   dayBeforeISO,
+  firstInsuranceAnchorISO,
   isMonthStartISO,
   pickInsuranceWindowAt,
   validateInsuranceWindow,
@@ -151,5 +152,57 @@ describe("pickInsuranceWindowAt — spiegelt das SQL-Prädikat", () => {
       { id: 2, validFrom: "2026-06-01", validTo: null },
     ];
     expect(pickInsuranceWindowAt(dirty, "2026-07-15")?.id).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task #1898 — Erstzuordnung normalisieren, Wechsel NICHT.
+// ---------------------------------------------------------------------------
+describe("firstInsuranceAnchorISO — Anker der Erstzuordnung", () => {
+  it("rundet den frueheren von (Vertragsbeginn, heute) auf den Monatsersten ab", () => {
+    // Vertragsbeginn liegt zurueck -> er gewinnt das Minimum.
+    expect(firstInsuranceAnchorISO("2026-07-15", "2026-08-04")).toBe("2026-07-01");
+  });
+
+  it("nimmt heute, wenn der Vertragsbeginn spaeter liegt", () => {
+    expect(firstInsuranceAnchorISO("2026-09-20", "2026-08-14")).toBe("2026-08-01");
+  });
+
+  it("liegt NIE in der Zukunft — auch nicht bei zukuenftigem Vertragsbeginn", () => {
+    const anchor = firstInsuranceAnchorISO("2027-01-01", "2026-08-14");
+    expect(anchor <= "2026-08-14").toBe(true);
+    expect(anchor).toBe("2026-08-01");
+  });
+
+  it("liegt NIE nach dem Vertragsbeginn — sonst entstuende eine Kassen-Luecke", () => {
+    for (const [start, today] of [
+      ["2026-07-15", "2026-08-04"],
+      ["2026-08-01", "2026-08-31"],
+      ["2026-02-29", "2026-03-01"],
+    ] as const) {
+      expect(firstInsuranceAnchorISO(start, today) <= start).toBe(true);
+    }
+  });
+
+  it("kommt ohne Vertragsbeginn aus (Monatserster von heute)", () => {
+    expect(firstInsuranceAnchorISO(null, "2026-08-14")).toBe("2026-08-01");
+    expect(firstInsuranceAnchorISO(undefined, "2026-08-14")).toBe("2026-08-01");
+    expect(firstInsuranceAnchorISO("", "2026-08-14")).toBe("2026-08-01");
+  });
+
+  it("ist idempotent auf einem Monatsersten", () => {
+    expect(firstInsuranceAnchorISO("2026-08-01", "2026-08-20")).toBe("2026-08-01");
+  });
+
+  it("liefert immer einen Monatsersten — den der harte Wechsel-Check akzeptiert", () => {
+    for (const [start, today] of [
+      ["2026-07-15", "2026-08-04"],
+      [null, "2026-12-31"],
+      ["2024-02-29", "2026-08-04"],
+    ] as const) {
+      const anchor = firstInsuranceAnchorISO(start, today);
+      expect(isMonthStartISO(anchor)).toBe(true);
+      expect(validateInsuranceWindow({ validFrom: anchor, validTo: null })).toBeNull();
+    }
   });
 });
