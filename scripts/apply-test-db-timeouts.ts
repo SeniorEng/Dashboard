@@ -1,25 +1,28 @@
 /**
- * Setzt die Sicherheitsnetz-Timeouts auf der CI-Test-Datenbank.
+ * Setzt das Sicherheitsnetz (`idle_in_transaction_session_timeout`) auf der
+ * CI-Test-Datenbank. Werte und Begründung: `scripts/lib/test-db-timeouts.ts`.
  *
- * Gegenstück zu `applyTestDbTimeouts()` im Orchestrator (der die Per-Worker-DBs
- * versorgt) für den ANDEREN Testweg: den CI-`tests`-Job, der gegen EINE geteilte
- * DB fährt. Werte und Begründung stehen an einer Stelle:
- * `scripts/lib/test-db-timeouts.ts`.
+ * NUR FÜR DEN CI-`tests`-JOB. Gegenstück zu `applyTestDbTimeouts()` im
+ * Orchestrator, der die geklonten Per-Worker-DBs versorgt.
  *
- * Fail-closed gegen Fehlbedienung: bricht ab, wenn `DATABASE_URL` auf etwas
- * zeigt, das nicht wie eine Test-DB aussieht. `ALTER DATABASE ... SET` wirkt auf
- * JEDE künftige Session dieser Datenbank — auf einer echten DB wäre das eine
- * stille Verhaltensänderung des Billing-Pfads.
+ * WARUM STRIKT CI-ONLY — und nicht „jede DB mit `cc_test_`-Präfix":
+ *
+ * Der Orchestrator nutzt `DATABASE_URL` als ADMIN-Verbindung, und lokal ist das
+ * eine `cc_test_`-DB. Ein Präfix-Guard hätte dieses Skript also ausgerechnet auf
+ * die Datenbank losgelassen, auf der seine langlebigen psql-Sessions für den
+ * Cache-Build- und den Worker-Slot-Lock liegen. Deshalb: `CI=true` UND der
+ * DB-Name des CI-Postgres-Service. Beides muss zutreffen.
+ *
+ * NICHT in einen Job einbauen, der den ORCHESTRATOR fährt (z.B.
+ * `crash-recovery-smoke.yml`) — dort ist `DATABASE_URL` wieder die
+ * Admin-Verbindung, und der Guard unten bemerkt das nicht, weil dort ebenfalls
+ * `CI=true` und derselbe DB-Name gelten.
  */
 import pg from "pg";
 import { testDbTimeoutStatements } from "./lib/test-db-timeouts.ts";
 
-// `cc_test_` ist der Wegwerf-DB-Präfix des Orchestrators und für sich allein
-// aussagekräftig. Der nackte CI-Name `careconnect` ist es NICHT — er wäre auch
-// ein plausibler Name einer echten Datenbank. Er zählt deshalb nur, wenn
-// zusätzlich `CI=true` gesetzt ist (im `tests`-Job explizit gesetzt).
-const ALLOWED_PREFIX = "cc_test_";
-const CI_ONLY_DB_NAME = "careconnect";
+/** DB-Name des Postgres-Service im CI-`tests`-Job (`.github/workflows/ci.yml`). */
+const CI_SERVICE_DB_NAME = "careconnect";
 
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL;
@@ -34,15 +37,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const looksLikeTestDb =
-    dbName.startsWith(ALLOWED_PREFIX) ||
-    (dbName === CI_ONLY_DB_NAME && process.env.CI === "true");
-  if (!looksLikeTestDb) {
+  if (process.env.CI !== "true" || dbName !== CI_SERVICE_DB_NAME) {
     console.error(
-      `[test-db-timeouts] ABBRUCH: '${dbName}' sieht nicht nach einer Test-DB aus ` +
-        `(erwartet: Präfix '${ALLOWED_PREFIX}', oder '${CI_ONLY_DB_NAME}' mit CI=true). ` +
-        "Diese Timeouts gehören NICHT auf eine echte Datenbank — der Billing-Pfad " +
-        "serialisiert dort absichtlich über Advisory-Locks.",
+      `[test-db-timeouts] ABBRUCH: läuft nur im CI-tests-Job (CI=true UND ` +
+        `Datenbank '${CI_SERVICE_DB_NAME}'), hier: CI=${process.env.CI ?? "<unset>"}, ` +
+        `Datenbank='${dbName}'.\n` +
+        "  Lokal setzt der Orchestrator das Netz selbst auf den Per-Worker-DBs.\n" +
+        "  Es gehört NICHT auf seine Admin-DB (dort warten Cache-Build- und\n" +
+        "  Worker-Slot-Lock) und nicht auf eine echte Datenbank.",
     );
     process.exit(1);
   }
@@ -54,17 +56,9 @@ async function main(): Promise<void> {
       await client.query(stmt);
       console.log(`[test-db-timeouts] ${stmt}`);
     }
-    const check = await client.query<{ name: string; setting: string }>(
-      `SELECT name, setting FROM pg_settings
-       WHERE name IN ('lock_timeout', 'idle_in_transaction_session_timeout')
-       ORDER BY name`,
-    );
-    // Sitzungs-Werte der LAUFENDEN Verbindung — die ist vor dem ALTER entstanden
-    // und zeigt deshalb noch die alten Werte. Nur zur Information geloggt.
     console.log(
-      `[test-db-timeouts] gesetzt auf Datenbank '${dbName}'. ` +
-        `(diese Session: ${check.rows.map((r) => `${r.name}=${r.setting}`).join(", ")} — ` +
-        "greift erst für neue Verbindungen)",
+      `[test-db-timeouts] gesetzt auf '${dbName}' — greift erst für NEUE ` +
+        "Verbindungen, der App-Server muss danach starten.",
     );
   } finally {
     await client.end();

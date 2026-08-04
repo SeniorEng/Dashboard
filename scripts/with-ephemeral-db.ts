@@ -440,14 +440,17 @@ function seedTemplateInto(dbUrl: string): void {
 // jede geklonte DB braucht sie deshalb selbst. Begründung und Werte:
 // `scripts/lib/test-db-timeouts.ts`.
 function applyTestDbTimeouts(dbName: string): void {
+  // Nur auf der frisch GEKLONTEN Worker-DB, nie auf `adminUrl`s eigener
+  // Datenbank: dort liegen die langlebigen psql-Sessions für Cache-Build- und
+  // Worker-Slot-Lock.
   for (const stmt of testDbTimeoutStatements(dbName)) {
     const res = psql(adminUrl!, stmt);
     if (!res.ok) {
-      // Kein `fail()`: die Timeouts sind ein Diagnose-Netz, kein Betriebsmittel.
-      // Fehlen sie, läuft der Test-Lauf wie bisher — nur ein Hänger bliebe
-      // wieder stumm. Das ist eine Warnung wert, aber kein Abbruchgrund.
+      // Kein `fail()` und kein `return`: das Netz ist ein Diagnose-Mittel, kein
+      // Betriebsmittel. Fehlt es, läuft der Test-Lauf wie bisher — nur ein
+      // Hänger bliebe wieder stumm. Weitermachen, damit ein Fehlschlag beim
+      // ersten Parameter nicht still die übrigen mit ausfallen lässt.
       console.warn(`[ephemeral-db] WARN Timeout-Setzen auf ${dbName} fehlgeschlagen: ${res.stdout}`);
-      return;
     }
   }
 }
