@@ -21,6 +21,7 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import {
+  firstInsuranceAnchorISO,
   isMonthStartISO,
   INSURANCE_WINDOW_MUST_START_ON_FIRST,
 } from "@shared/domain/insurance-period";
@@ -63,6 +64,23 @@ const VERSICHERTENNUMMER_REGEX = VERSICHERTENNUMMER_GKV_REGEX;
 // Task #1893 — Kassenwechsel sind nur zum Monatsersten zulässig. Vorbelegung ist
 // deshalb der 1. des FOLGENDEN Monats (der laufende Monat ist i.d.R. schon
 // abgerechnet bzw. läuft noch auf die bisherige Kasse).
+//
+// Task #1898 — Für die ERSTZUORDNUNG gilt das NICHT: dort gibt es keine
+// bisherige Kasse, auf die der laufende Monat noch liefe. Der Folgemonat würde
+// den laufenden Monat ohne Kostenträger zurücklassen. Vorbelegung ist deshalb
+// der 1. des LAUFENDEN Monats — derselbe Anker, den der Server berechnet.
+/**
+ * Vorbelegung des „Gültig ab". Task #1898: bei der ERSTZUORDNUNG der 1. des
+ * LAUFENDEN Monats — der Folgemonat liesse den laufenden Monat ohne
+ * Kostenträger, und der Kunde erschiene direkt nach dem Speichern weiter als
+ * „Keine Pflegekasse". Beim WECHSEL bleibt es der 1. des Folgemonats.
+ */
+function defaultValidFrom(isFirstAssignment: boolean): string {
+  return isFirstAssignment
+    ? firstInsuranceAnchorISO(todayISO(), null, todayISO())
+    : firstOfNextMonthISO();
+}
+
 function firstOfNextMonthISO(): string {
   const now = new Date();
   const y = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
@@ -84,7 +102,9 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
 
   const [insuranceProviderId, setInsuranceProviderId] = useState("");
   const [versichertennummer, setVersichertennummer] = useState("");
-  const [validFrom, setValidFrom] = useState(firstOfNextMonthISO());
+  // Erstzuordnung = der Kunde hat noch keine laufende Kasse.
+  const isFirstAssignment = !currentInsurance;
+  const [validFrom, setValidFrom] = useState(defaultValidFrom(isFirstAssignment));
   const [vnError, setVnError] = useState<string | null>(null);
 
   // Inline-Anlage einer neuen Pflegekasse direkt im Wechsel-Dialog, damit das
@@ -177,7 +197,7 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
   const resetForm = () => {
     setInsuranceProviderId("");
     setVersichertennummer("");
-    setValidFrom(firstOfNextMonthISO());
+    setValidFrom(defaultValidFrom(isFirstAssignment));
     setVnError(null);
     setShowNewProvider(false);
     setNewName("");
@@ -265,7 +285,10 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
       return;
     }
     // Spiegelt die serverseitige Erzwingung (Task #1893) — dieselbe SSoT-Prüfung.
-    if (!isMonthStartISO(validFrom)) {
+    // Bei der Erstzuordnung greift sie NICHT: dort normalisiert der Server auf
+    // den Anker (Task #1898), ein clientseitiger Abbruch wäre eine zweite,
+    // strengere Regel als die des Servers.
+    if (!isFirstAssignment && !isMonthStartISO(validFrom)) {
       toast({ title: "Nur Wechsel zum Monatsersten", description: INSURANCE_WINDOW_MUST_START_ON_FIRST, variant: "destructive" });
       return;
     }
@@ -595,14 +618,22 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
 
             <div className="space-y-2">
               <Label>Gültig ab *</Label>
+              {/*
+                Task #1898 — Das „X" leert das Feld und fällt auf die Vorbelegung
+                zurück. Diese MUSS dieselbe sein wie beim Öffnen des Dialogs:
+                sonst sprang die Erstzuordnung nach einem Klick auf „X" still auf
+                den FOLGEMONAT und liess den laufenden Monat ohne Kostenträger.
+              */}
               <DatePicker
                 value={validFrom}
-                onChange={(date) => setValidFrom(date || firstOfNextMonthISO())}
+                onChange={(date) => setValidFrom(date || defaultValidFrom(isFirstAssignment))}
                 placeholder="Datum wählen"
                 data-testid="datepicker-valid-from"
               />
               <p className="text-xs text-gray-500">
-                Ein Kassenwechsel ist nur zum 1. eines Monats möglich.
+                {isFirstAssignment
+                  ? "Erste Zuordnung: Der Zeitraum beginnt am 1. des gewählten Monats."
+                  : "Ein Kassenwechsel ist nur zum 1. eines Monats möglich."}
                 {currentInsurance ? " Die bisherige Kasse endet automatisch am letzten Tag des Vormonats." : ""}
               </p>
             </div>

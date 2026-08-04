@@ -2,8 +2,7 @@ import { customerManagementStorage } from "../storage/customer-management";
 import { budgetStorage } from "../storage/budget-storage";
 import { todayISO } from "@shared/utils/datetime";
 import type { Customer, InsertCustomer, CustomerInsuranceHistory, InsuranceProvider } from "@shared/schema";
-import type { DbOrTx } from "./db";
-import type { DbClient } from "../storage/budget/types";
+import type { Tx } from "./db";
 import { maybeFail } from "./test-fault-injector";
 import { applyInitialBudget } from "../services/budget-initial-setup";
 import { generateAndStorePdf } from "../services/document-pdf";
@@ -146,14 +145,19 @@ interface CreateRelatedDataInput {
   /** Bereits ins Object-Storage hochgeladene Dokumente — Metadaten in die Tx. */
   documents?: DocumentInput[];
   /**
-   * Optionale äußere Transaktion. Wenn gesetzt, laufen alle Pflicht-Cascade-
-   * Schritte (Pflegegrad, Insurance, Budget-Type-Settings, Vertrag/Raten,
-   * Startbudgets, Unterschriften, Dokumente) darin und werfen bei Fehler hart,
-   * sodass die Transaktion zurückrollt.
+   * Äußere Transaktion — PFLICHT und strikt `Tx`, nicht `DbOrTx`. Alle
+   * Pflicht-Cascade-Schritte (Pflegegrad, Insurance, Budget-Type-Settings,
+   * Vertrag/Raten, Startbudgets, Unterschriften, Dokumente) laufen darin und
+   * werfen bei Fehler hart, sodass die Transaktion zurückrollt.
    * Soft-Schritte (Kontakte, syncCarryoverAndExpiry) werden weiter mit
    * try/catch eingefangen und tauchen nur als Warnings auf.
+   *
+   * Der strikte Typ ist nicht kosmetisch: `addCustomerInsurance` nimmt darin
+   * einen `pg_advisory_xact_lock`, der ohne Transaktion sofort wieder
+   * freigegeben würde (`server/lib/db.ts`). Ohne `tx` gäbe es ausserdem genau
+   * die „Halbleichen"-Kunden zurück, die Task #267 abgestellt hat.
    */
-  tx?: DbOrTx & DbClient;
+  tx: Tx;
   /**
    * Test-Fault-Set (siehe `server/lib/test-fault-injector.ts`). Routes lesen
    * den `x-test-inject-fault`-Header und reichen das Set hier durch. In
@@ -183,12 +187,16 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
   // gültige Versicherungs-Historie entsteht.
   if (input.insurance) {
     maybeFail("insurance", testFaults);
+    // Task #1898 — Der Vertrag wird ERST WEITER UNTEN angelegt; ein Nachschlag
+    // in `addCustomerInsurance` fände hier noch nichts. Der Vertragsbeginn wird
+    // deshalb aus dem Request durchgereicht, damit der Erstzuordnungs-Anker
+    // (frühere von Vertragsbeginn/heute, abgerundet auf den 1.) stimmt.
     await customerManagementStorage.addCustomerInsurance({
       customerId,
       insuranceProviderId: input.insurance.providerId,
       versichertennummer: input.insurance.versichertennummer,
       validFrom: input.insurance.validFrom,
-    }, userId, tx);
+    }, userId, tx, { contractStartISO: input.contract?.contractStart ?? null });
   }
 
   // Soft: Kontakte. Eine sequentielle Schleife mit try/catch um den

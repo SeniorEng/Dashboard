@@ -10,6 +10,7 @@ import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBi
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
 import { budgetsStepErrors } from "../components/wizard/budgets-step-validation";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
+import { firstInsuranceAnchorISO } from "@shared/domain/insurance-period";
 import { validateVersichertennummerFor } from "@shared/schema/common";
 import type { WizardUploadedDoc } from "../components/wizard/signatures-step";
 import type { DuplicateDialogEntry } from "../components/wizard/wizard-dialogs";
@@ -321,11 +322,16 @@ export function useCustomerWizard() {
       }
     }
 
+    // Task #1898 — ERSTZUORDNUNG, kein Wechsel: der Kunde wird hier gerade erst
+    // angelegt, vorher war er keiner Kasse zugeordnet. `today` (mitten im Monat)
+    // lief seit #1893 in den harten 400 „Kassenwechsel nur zum Monatsersten".
+    // Gesendet wird der Anker, den auch der Server berechnet — damit zeigt die
+    // Anfrage denselben Wert wie die gespeicherte Zeile.
     const insurance = formData.insuranceProviderId && versNr
       ? {
           providerId: parseInt(formData.insuranceProviderId),
           versichertennummer: versNr,
-          validFrom: today,
+          validFrom: firstInsuranceAnchorISO(today, formData.contractStart || null, today),
         } 
       : undefined;
 
