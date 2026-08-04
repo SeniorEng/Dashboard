@@ -443,6 +443,20 @@ function applyTestDbTimeouts(dbName: string): void {
   // Nur auf der frisch GEKLONTEN Worker-DB, nie auf `adminUrl`s eigener
   // Datenbank: dort liegen die langlebigen psql-Sessions für Cache-Build- und
   // Worker-Slot-Lock.
+  //
+  // Heute folgt das schon aus der einzigen Aufrufstelle (`cloneDbFromTemplate`
+  // übergibt immer ein generiertes Klon-Ziel). Das ist aber eine Eigenschaft
+  // des Aufrufers, keine Zusicherung dieser Funktion — ein zweites Call-Site
+  // könnte sie verletzen, ohne dass irgendetwas anschlägt. Deshalb hart hier:
+  const adminDbName = decodeURIComponent(new URL(adminUrl!).pathname.replace(/^\//, ""));
+  if (dbName === adminDbName) {
+    console.warn(
+      `[ephemeral-db] WARN Timeout-Setzen auf '${dbName}' uebersprungen: ` +
+        "das ist die Admin-DB des Orchestrators (Cache-Build-/Worker-Slot-Lock).",
+    );
+    return;
+  }
+
   for (const stmt of testDbTimeoutStatements(dbName)) {
     const res = psql(adminUrl!, stmt);
     if (!res.ok) {

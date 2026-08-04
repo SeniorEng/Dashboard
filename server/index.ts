@@ -996,28 +996,40 @@ async function runStartupTasks() {
       log(`Chromium-Pre-Flight Fehler: ${err}`, "startup");
     }
 
-    // Task #577: Storno-spezifischer Backfill MUSS vor dem generischen
-    // `backfillInvoicePdfs` laufen, damit pro betroffener Storno-ID der
-    // Audit-Eintrag `invoice_pdf_manually_regenerated` geschrieben wird
-    // (Akzeptanzkriterium). Liefe der generische Job zuerst, würde er die
-    // Storno-Rechnungen lautlos persistieren und der Storno-Job fände eine
-    // leere Ergebnismenge.
-    setTimeout(() => {
-      import("./startup/backfill-storno-invoice-pdfs")
-        .then(({ backfillStornoInvoicePdfs }) => backfillStornoInvoicePdfs())
-        .catch((err) => log(`Backfill-Storno-Invoice-PDFs-Fehler: ${err}`, "startup"));
-    }, 5_000);
+    // Task #1901 — auch diese beiden ZEITGESTEUERTEN Läufe bleiben im Test aus,
+    // aus demselben Grund wie die Scheduler weiter unten: sie feuern 5s bzw.
+    // 20s nach dem Start, also mitten in die ersten Testdateien, rendern über
+    // Puppeteer, nehmen dabei `pg_advisory_xact_lock('invoice_pdf_<id>')`,
+    // belegen beide Render-Slots und schreiben in `invoices` bzw. ins
+    // Audit-Log. Genau die Nebenläufigkeit, die kein Test anfordert.
+    //
+    // Dass sie im heutigen CI-Lauf ins Leere greifen, liegt an der Datenlage
+    // (frische DB, keine Rechnung ohne `pdf_path`) — nicht an der Konstruktion.
+    // Eine Testdatei, die in den ersten 20s Rechnungen anlegt, trifft sie.
+    if (process.env.NODE_ENV !== "test") {
+      // Task #577: Storno-spezifischer Backfill MUSS vor dem generischen
+      // `backfillInvoicePdfs` laufen, damit pro betroffener Storno-ID der
+      // Audit-Eintrag `invoice_pdf_manually_regenerated` geschrieben wird
+      // (Akzeptanzkriterium). Liefe der generische Job zuerst, würde er die
+      // Storno-Rechnungen lautlos persistieren und der Storno-Job fände eine
+      // leere Ergebnismenge.
+      setTimeout(() => {
+        import("./startup/backfill-storno-invoice-pdfs")
+          .then(({ backfillStornoInvoicePdfs }) => backfillStornoInvoicePdfs())
+          .catch((err) => log(`Backfill-Storno-Invoice-PDFs-Fehler: ${err}`, "startup"));
+      }, 5_000);
 
-    // Task #521: PDF-Backfill nicht blockierend, max. 20 Rechnungen pro Boot.
-    // Läuft async, nachdem der Server bereits Requests bedient. Storno-
-    // Rechnungen werden im generischen Job ausgeschlossen (siehe Task #577) —
-    // dafür ist `backfillStornoInvoicePdfs` zuständig, das zusätzlich Audit-
-    // Einträge schreibt.
-    setTimeout(() => {
-      import("./startup/backfill-invoice-pdfs")
-        .then(({ backfillInvoicePdfs }) => backfillInvoicePdfs())
-        .catch((err) => log(`Backfill-Invoice-PDFs-Fehler: ${err}`, "startup"));
-    }, 20_000);
+      // Task #521: PDF-Backfill nicht blockierend, max. 20 Rechnungen pro Boot.
+      // Läuft async, nachdem der Server bereits Requests bedient. Storno-
+      // Rechnungen werden im generischen Job ausgeschlossen (siehe Task #577) —
+      // dafür ist `backfillStornoInvoicePdfs` zuständig, das zusätzlich Audit-
+      // Einträge schreibt.
+      setTimeout(() => {
+        import("./startup/backfill-invoice-pdfs")
+          .then(({ backfillInvoicePdfs }) => backfillInvoicePdfs())
+          .catch((err) => log(`Backfill-Invoice-PDFs-Fehler: ${err}`, "startup"));
+      }, 20_000);
+    }
 
     try {
       const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
