@@ -43,19 +43,29 @@ router.post("/customers/:id/insurance", asyncHandler("Versicherung konnte nicht 
 
   const insurance = await withAudit(async (tx, audit) => {
     const created = await customerManagementStorage.addCustomerInsurance(data, req.user!.id, tx);
+    // Task #1898 — Bei einer ERSTZUORDNUNG kann der Server das angefragte
+    // „Gültig ab" auf den Monatsersten normalisieren. Das Audit hält deshalb
+    // BEIDE Werte fest: ohne den angefragten liesse sich später nicht mehr
+    // unterscheiden, ob der Sachbearbeiter den 1. eingegeben hat oder ob die
+    // Normalisierung gegriffen hat — bei einer Rückfrage zu einer Kassen-
+    // Rechnung ist genau das die Frage.
+    const wasNormalized = created.validFrom !== data.validFrom;
     audit.record({
       userId: req.user!.id,
       action: "customer_updated",
       entityType: "customer",
       entityId: customerId,
       metadata: {
-        changedFields: ["versicherung_hinzugefügt"],
+        changedFields: wasNormalized
+          ? ["versicherung_hinzugefügt", "gueltig_ab_normalisiert"]
+          : ["versicherung_hinzugefügt"],
         oldValues: {},
         newValues: {
           insuranceId: created.id,
           insuranceProviderId: created.insuranceProviderId,
           versichertennummer: created.versichertennummer,
           validFrom: created.validFrom,
+          validFromAngefragt: data.validFrom,
         },
       },
       ipAddress: req.ip,

@@ -13,7 +13,7 @@
  * Erstzuordnung öffnet oder den Wechsel-Schutz insgesamt aufgeweicht hat.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { apiGet, apiPost, apiDelete, getAuthCookie, uniqueId } from "../test-utils";
+import { apiGet, apiPost, apiPatch, apiDelete, getAuthCookie, uniqueId } from "../test-utils";
 import { isMonthStartISO } from "@shared/domain/insurance-period";
 import { todayISO } from "@shared/utils/datetime";
 
@@ -28,6 +28,15 @@ function versNr(prefix: string): string {
 /** Ein Tag mitten im Monat — der Fall, der den Prod-Blocker ausgelöst hat. */
 function midMonthISO(): string {
   return `${todayISO().slice(0, 7)}-14`;
+}
+
+/** Ein Tag mitten in einem Monat, der sicher IN DER ZUKUNFT liegt. */
+function futureMidMonthISO(): string {
+  const [y, m] = todayISO().split("-").map(Number);
+  const monthsAhead = m + 5;
+  const year = y + Math.floor((monthsAhead - 1) / 12);
+  const month = ((monthsAhead - 1) % 12) + 1;
+  return `${year}-${String(month).padStart(2, "0")}-15`;
 }
 
 beforeAll(async () => {
@@ -129,5 +138,69 @@ describe("Task #1898 — Erstzuordnung vs. Kassenwechsel", () => {
     // Und er darf auch nichts geschrieben haben.
     const list = await apiGet<Array<unknown>>(`/api/admin/customers/${customerId}/insurance`);
     expect(list.data.length).toBe(1);
+  });
+
+  // Fachliche Entscheidung Alrik, 04.08.2026. Die erste Fassung nahm `heute`
+  // als harten Startwert und zog ein zukuenftiges „Gültig ab" auf den
+  // laufenden Monat zurueck — die Kasse bekam damit Monate zugeordnet, in
+  // denen sie nicht zustaendig war.
+  it("Erstzuordnung mit Zukunftsdatum wird honoriert, nicht auf heute zurueckgezogen", async () => {
+    const customerId = await createCustomerWithoutInsurance();
+    const requested = futureMidMonthISO();
+
+    const res = await apiPost<{ validFrom: string }>(
+      `/api/admin/customers/${customerId}/insurance`,
+      {
+        insuranceProviderId: insuranceProviderIds[0],
+        versichertennummer: versNr("D"),
+        validFrom: requested,
+      },
+    );
+
+    expect(res.status, `Erstzuordnung Zukunft: ${JSON.stringify(res.data)}`).toBe(201);
+    // Monatserster des ANGEFRAGTEN Monats — nicht des laufenden.
+    expect(res.data.validFrom).toBe(`${requested.slice(0, 7)}-01`);
+    expect(res.data.validFrom > todayISO()).toBe(true);
+
+    // Bis dahin hat der Kunde bewusst keine AKTUELLE Kasse: das Fenster ist
+    // noch nicht gueltig, der Stichtags-Leser darf es heute nicht liefern.
+    const list = await apiGet<Array<{ validFrom: string }>>(
+      `/api/admin/customers/${customerId}/insurance`,
+    );
+    expect(list.data.length).toBe(1);
+    expect(list.data[0].validFrom).toBe(`${requested.slice(0, 7)}-01`);
+  });
+
+  // Gegenprobe zur PATCH-Lücke: der Anker gilt NUR beim Anlegen. Eine
+  // Korrektur normalisiert nie — auch nicht auf der einzigen Zeile des Kunden.
+  it("PATCH normalisiert nicht: Korrektur auf ein Nicht-Monatserstes bleibt 400", async () => {
+    const customerId = await createCustomerWithoutInsurance();
+
+    const first = await apiPost<{ id: number; validFrom: string }>(
+      `/api/admin/customers/${customerId}/insurance`,
+      {
+        insuranceProviderId: insuranceProviderIds[0],
+        versichertennummer: versNr("E"),
+        validFrom: midMonthISO(),
+      },
+    );
+    expect(first.status, `Erstzuordnung: ${JSON.stringify(first.data)}`).toBe(201);
+    const normalized = first.data.validFrom;
+
+    const patch = await apiPatch<{ message?: string }>(
+      `/api/admin/customers/${customerId}/insurance/${first.data.id}`,
+      { validFrom: midMonthISO() },
+    );
+    expect(
+      patch.status,
+      `PATCH auf Nicht-Monatserstes MUSS 400 sein, war ${patch.status}: ${JSON.stringify(patch.data)}`,
+    ).toBe(400);
+    expect(JSON.stringify(patch.data)).toContain("Monatsersten");
+
+    // Die Zeile steht unveraendert auf dem normalisierten Wert.
+    const list = await apiGet<Array<{ validFrom: string }>>(
+      `/api/admin/customers/${customerId}/insurance`,
+    );
+    expect(list.data[0].validFrom).toBe(normalized);
   });
 });

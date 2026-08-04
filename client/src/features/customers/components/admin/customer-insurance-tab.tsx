@@ -618,14 +618,22 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
 
             <div className="space-y-2">
               <Label>Gültig ab *</Label>
+              {/*
+                Task #1898 — Das „X" leert das Feld und fällt auf die Vorbelegung
+                zurück. Diese MUSS dieselbe sein wie beim Öffnen des Dialogs:
+                sonst sprang die Erstzuordnung nach einem Klick auf „X" still auf
+                den FOLGEMONAT und liess den laufenden Monat ohne Kostenträger.
+              */}
               <DatePicker
                 value={validFrom}
-                onChange={(date) => setValidFrom(date || firstOfNextMonthISO())}
+                onChange={(date) => setValidFrom(date || defaultValidFrom(isFirstAssignment))}
                 placeholder="Datum wählen"
                 data-testid="datepicker-valid-from"
               />
               <p className="text-xs text-gray-500">
-                Ein Kassenwechsel ist nur zum 1. eines Monats möglich.
+                {isFirstAssignment
+                  ? "Erste Zuordnung: Der Zeitraum beginnt am 1. des gewählten Monats."
+                  : "Ein Kassenwechsel ist nur zum 1. eines Monats möglich."}
                 {currentInsurance ? " Die bisherige Kasse endet automatisch am letzten Tag des Vormonats." : ""}
               </p>
             </div>

@@ -10,6 +10,7 @@ import {
   billingPeriodAsOfISO,
   dayBeforeISO,
   firstInsuranceAnchorISO,
+  isIsoDate,
   isMonthStartISO,
   pickInsuranceWindowAt,
   validateInsuranceWindow,
@@ -158,6 +159,29 @@ describe("pickInsuranceWindowAt — spiegelt das SQL-Prädikat", () => {
 // ---------------------------------------------------------------------------
 // Task #1898 — Erstzuordnung normalisieren, Wechsel NICHT.
 // ---------------------------------------------------------------------------
+describe("isIsoDate / isMonthStartISO — Form UND Kalender", () => {
+  it("weist form-korrekte, aber nicht existierende Daten ab", () => {
+    for (const bogus of ["2026-13-45", "2026-02-30", "2025-02-29", "2026-00-10", "2026-04-31"]) {
+      expect(isIsoDate(bogus), bogus).toBe(false);
+      expect(isMonthStartISO(bogus), bogus).toBe(false);
+    }
+  });
+
+  it("laesst echte Daten inkl. Schaltjahr durch", () => {
+    for (const good of ["2026-08-14", "2024-02-29", "2026-12-31", "2026-01-01"]) {
+      expect(isIsoDate(good), good).toBe(true);
+    }
+    expect(isMonthStartISO("2026-01-01")).toBe(true);
+    expect(isMonthStartISO("2026-01-02")).toBe(false);
+  });
+
+  it("verwirft Nicht-Strings und falsche Formate", () => {
+    for (const bad of [null, undefined, "", "14.08.2026", "2026-8-14", "2026-08-14T00:00:00Z"]) {
+      expect(isIsoDate(bad), String(bad)).toBe(false);
+    }
+  });
+});
+
 describe("firstInsuranceAnchorISO — Anker der Erstzuordnung", () => {
   const T = "2026-08-14"; // heute, mitten im Monat
 
@@ -181,8 +205,51 @@ describe("firstInsuranceAnchorISO — Anker der Erstzuordnung", () => {
     expect(firstInsuranceAnchorISO("2024-03-05", "2026-01-01", T)).toBe("2024-03-01");
   });
 
-  it("liegt NIE in der Zukunft — auch nicht bei zukuenftigem Vertragsbeginn oder Datum", () => {
-    expect(firstInsuranceAnchorISO("2027-05-09", "2027-01-01", T)).toBe("2026-08-01");
+  // Fachliche Entscheidung Alrik, 04.08.2026: ein angefragtes Zukunftsdatum
+  // wird HONORIERT. Die Vorgaengerfassung nahm `heute` als harten Startwert und
+  // zog ein Fenster ab 15.01.2027 auf den 01.08.2026 zurueck — die Kasse bekam
+  // fuenf Monate zugeordnet, in denen sie nicht zustaendig war (derselbe
+  // GoBD-Schaden wie die Rueckdatierung, nur aus der Gegenrichtung).
+  it("BLOCKER-Regression: honoriert ein angefragtes Zukunftsdatum, statt es auf heute zurueckzuziehen", () => {
+    expect(firstInsuranceAnchorISO("2027-01-15", null, T)).toBe("2027-01-01");
+  });
+
+  it("honoriert auch einen zukuenftigen Vertragsbeginn, wenn er frueher als das angefragte Datum liegt", () => {
+    // Beide in der Zukunft: das Minimum gewinnt, `heute` mischt sich nicht ein.
+    expect(firstInsuranceAnchorISO("2027-05-09", "2027-01-01", T)).toBe("2027-01-01");
+  });
+
+  it("laesst den Wizard-Fall unveraendert: validFrom=heute ergibt den Monatsersten von heute", () => {
+    // Der Pfad, der den Prod-Blocker ausgeloest hat. Ein zukuenftiger
+    // Vertragsbeginn darf ihn NICHT nach vorn schieben — `heute` ist frueher
+    // und gewinnt das Minimum.
+    expect(firstInsuranceAnchorISO(T, null, T)).toBe("2026-08-01");
+    expect(firstInsuranceAnchorISO(T, "2026-12-01", T)).toBe("2026-08-01");
+  });
+
+  // Die Gegenzusage zur Zukunfts-Honorierung: nach hinten bleibt es zu.
+  it("RUECKWAERTS-BOUND: greift nie in einen Monat vor Anfrage UND Vertrag", () => {
+    const cases = [
+      { req: T, start: null, floor: "2026-08-01" },
+      { req: T, start: "2026-07-15", floor: "2026-07-01" },
+      { req: "2024-03-05", start: "2026-01-01", floor: "2024-03-01" },
+      { req: "2027-01-15", start: null, floor: "2027-01-01" },
+    ] as const;
+    for (const { req, start, floor } of cases) {
+      // `floor` ist der Monatserste des FRUEHESTEN Kandidaten. Der Anker darf
+      // ihn nie unterschreiten — sonst reichte die Erstzuordnung in
+      // Zeitraeume, die niemand angefragt hat und die u.U. abgerechnet sind.
+      expect(firstInsuranceAnchorISO(req, start, T) >= floor).toBe(true);
+      expect(firstInsuranceAnchorISO(req, start, T)).toBe(floor);
+    }
+  });
+
+  it("RUECKWAERTS-BOUND: `heute` zieht den Anker nicht in bereits abgerechnete Monate", () => {
+    // Nacherfassung im August fuer einen Kunden ohne bekannten Vertragsbeginn:
+    // Juni und Juli sind laengst abgerechnet und muessen unberuehrt bleiben.
+    expect(firstInsuranceAnchorISO("2026-08-01", null, T)).toBe("2026-08-01");
+    // Auch ein spaeter Aufruf mit spaetem `heute` darf nicht zurueckgreifen.
+    expect(firstInsuranceAnchorISO("2026-08-20", undefined, "2026-12-31")).toBe("2026-08-01");
   });
 
   it("liegt NIE nach dem Vertragsbeginn", () => {
@@ -194,7 +261,12 @@ describe("firstInsuranceAnchorISO — Anker der Erstzuordnung", () => {
   it("kommt ohne Vertragsbeginn aus und vertraegt kaputte Eingaben", () => {
     expect(firstInsuranceAnchorISO(T, undefined, T)).toBe("2026-08-01");
     expect(firstInsuranceAnchorISO(T, "", T)).toBe("2026-08-01");
+    // Form stimmt, Datum gibt es nicht: KEIN Kandidat. Sonst entstuende hier
+    // der „Monatserste" 2026-13-01, den `validateInsuranceWindow` durchlaesst
+    // und erst Postgres mit einem 500 ablehnt.
     expect(firstInsuranceAnchorISO("2026-13-45", null, T)).toBe("2026-08-01");
+    expect(firstInsuranceAnchorISO("2026-02-30", null, T)).toBe("2026-08-01");
+    expect(firstInsuranceAnchorISO(T, "2026-02-30", T)).toBe("2026-08-01");
   });
 
   it("ist idempotent auf einem Monatsersten", () => {

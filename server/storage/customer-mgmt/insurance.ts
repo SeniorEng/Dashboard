@@ -13,7 +13,6 @@ import {
   dayBeforeISO,
   firstInsuranceAnchorISO,
   isIsoDate,
-  isMonthStartISO,
   validateInsuranceWindow,
   validateInsuranceWindows,
   type InsuranceWindow,
@@ -288,6 +287,30 @@ async function loadInsuranceWindows(
 }
 
 /**
+ * Task #1898 — Serialisiert ALLE schreibenden Zugriffe auf die Fenster-Kette
+ * EINES Kunden. ERSETZT das check-then-write, das sowohl
+ * {@link addCustomerInsurance} als auch {@link updateCustomerInsurance} vorher
+ * ungeschützt fuhren: beide lesen die Fenstermenge, validieren sie und schreiben
+ * danach — zwei überlappende Requests sehen denselben Vorher-Zustand und
+ * schreiben ein Ergebnis, das die Menge als Ganzes nie durchgelassen hätte
+ * (in `add` zusätzlich: ein echter WECHSEL würde als Erstzuordnung
+ * normalisiert statt abgelehnt).
+ *
+ * Beide Pfade nehmen DENSELBEN Schlüssel — ein Lock, den nur eine Seite nimmt,
+ * synchronisiert nichts. Gleiches Muster wie `lockCustomerForBilling`
+ * (`services/invoice-data.ts`).
+ *
+ * Der Lock hält bis zum Transaktionsende. Ohne `tx` (Executor = `db`) gibt
+ * Postgres ihn direkt nach dem Statement wieder frei — die Aufrufer aus den
+ * Routen laufen deshalb über `withAudit`, das eine Transaktion aufspannt.
+ */
+async function lockCustomerInsurance(executor: DbOrTx, customerId: number): Promise<void> {
+  await executor.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext('customer_insurance_' || ${customerId}::text))`,
+  );
+}
+
+/**
  * Task #1893 — Kassenwechsel NUR zum Monatsersten.
  *
  * `validFrom` MUSS der 1. eines Monats sein; die Vorgängerzeile wird lückenlos
@@ -318,16 +341,7 @@ export async function addCustomerInsurance(
 ): Promise<CustomerInsuranceHistory> {
   const executor = tx ?? db;
 
-  // Task #1898 — Erstzuordnung VOR jeder Mutation feststellen. Nach dem
-  // Vorgänger-Update unten wäre die Menge nicht mehr aussagekräftig.
-  // Serialisiert konkurrierende Zuordnungen desselben Kunden. Ohne den Lock ist
-  // die Erstzuordnungs-Erkennung ein check-then-write: zwei ueberlappende
-  // Requests saehen beide eine leere Fenstermenge, und ein echter WECHSEL wuerde
-  // als Erstzuordnung normalisiert statt abgelehnt. Gleiches Muster wie
-  // `lockCustomerForBilling` (`services/invoice-data.ts`).
-  await executor.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtext('customer_insurance_' || ${data.customerId}::text))`,
-  );
+  await lockCustomerInsurance(executor, data.customerId);
 
   // Task #1898 — Erstzuordnung VOR jeder Mutation feststellen. Nach dem
   // Vorgaenger-Update unten waere die Menge nicht mehr aussagekraeftig.
@@ -341,11 +355,19 @@ export async function addCustomerInsurance(
   const isFirstAssignment = existingBefore.length === 0;
 
   let validFrom = data.validFrom;
-  // Nur ein WOHLGEFORMTES, nicht-monatserstes Datum wird normalisiert. Ein
-  // leeres oder kaputtes `validFrom` faellt weiterhin in die 400-Meldung von
+  // Der Anker laeuft bei JEDER Erstzuordnung mit wohlgeformtem Datum — auch
+  // wenn das angefragte `validFrom` schon ein Monatserster ist. Sonst waere der
+  // Vertragsbeginn nur in dem Zufallsfall wirksam, dass der Aufrufer mitten im
+  // Monat anfragt: ein Wizard-Kunde mit Vertragsbeginn 15.06. und angefragtem
+  // 01.08. bekaeme den 01.08. statt des 01.06. — Juni/Juli stuenden ohne
+  // Kostentraeger da, genau die Luecke, die der Anker verhindern soll. Auf
+  // einem bereits korrekten Wert ist der Aufruf idempotent.
+  //
+  // Nur ein WOHLGEFORMTES Datum wird normalisiert. Ein leeres oder kaputtes
+  // `validFrom` faellt weiterhin in die 400-Meldung von
   // `validateInsuranceWindow` — es darf nicht durch ein erfundenes Datum
   // ersetzt werden.
-  if (isFirstAssignment && isIsoDate(validFrom) && !isMonthStartISO(validFrom)) {
+  if (isFirstAssignment && isIsoDate(validFrom)) {
     validFrom = firstInsuranceAnchorISO(validFrom, options?.contractStartISO, todayISO());
   }
   // Jede WEITERE Zuordnung ist ein Wechsel und bleibt hart auf den
@@ -398,6 +420,12 @@ export interface UpdateCustomerInsurancePatch {
  * Versichertennummer). Validiert die resultierende Fenster-Menge des Kunden
  * als Ganzes: 01.-Erzwingung, keine Überlappung, keine Lücke, kein Rückwärts.
  *
+ * Hier wird NICHTS normalisiert — auch nicht, wenn die korrigierte Zeile
+ * zufällig die einzige des Kunden ist. Der Anker aus #1898 gilt ausschließlich
+ * für das ANLEGEN einer ersten Zuordnung; eine Korrektur, die den
+ * Monatsersten-Zwang verletzt, bleibt ein 400. Der Lock unten schützt deshalb
+ * nicht die Normalisierung, sondern die Fenster-Menge als Ganzes.
+ *
  * @throws {AppError} 404 wenn die Zeile nicht existiert, 400 bei unzulässigem Fenster.
  */
 export async function updateCustomerInsurance(
@@ -406,6 +434,21 @@ export async function updateCustomerInsurance(
   tx?: DbOrTx,
 ): Promise<CustomerInsuranceHistory> {
   const executor = tx ?? db;
+
+  // Der Lock hängt am Kunden, nicht an der Zeile — die Fenster-Kette ist die
+  // gemeinsame Ressource. Dafür muss der Besitzer VOR dem Lock gelesen werden.
+  // Das ist unkritisch: `customer_id` einer Zuordnung ist unveränderlich (die
+  // Route lässt weder Kunde noch Kasse korrigieren, ein Wechsel ist eine neue
+  // Zeile). Alles, was die Entscheidung trägt — die Zeile selbst und die
+  // Fenstermenge — wird UNTER dem Lock gelesen.
+  const owner = await executor
+    .select({ customerId: customerInsuranceHistory.customerId })
+    .from(customerInsuranceHistory)
+    .where(eq(customerInsuranceHistory.id, insuranceId))
+    .limit(1);
+  if (!owner[0]) throw notFound("Versicherungs-Zuordnung nicht gefunden");
+
+  await lockCustomerInsurance(executor, owner[0].customerId);
 
   const currentRows = await executor
     .select()

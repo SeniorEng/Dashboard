@@ -44,15 +44,37 @@ export interface InsuranceWindow {
   validTo: string | null;
 }
 
-/** True, wenn `iso` ein wohlgeformtes ISO-Datum ist. */
+/**
+ * True, wenn `iso` ein ISO-Datum ist, das es im Kalender WIRKLICH gibt.
+ *
+ * ERSETZT die frühere reine Form-Prüfung (nur `ISO_DATE_RE`). Die ließ
+ * `2026-13-45` oder `2026-02-30` durch — Zeichenketten in korrekter Form, die
+ * kein Datum bezeichnen. Da `validFrom` als nacktes `z.string()` hereinkommt
+ * (`shared/schema/insurance.ts`), war das der einzige Filter davor: der
+ * Erstzuordnungs-Anker nahm `2026-13-45` als Kandidaten und machte daraus den
+ * „Monatsersten" `2026-13-01`, den `validateInsuranceWindow` anstandslos
+ * akzeptierte (Form stimmt, Tag ist der 01.). Postgres hätte den INSERT dann mit
+ * einem 500 quittiert statt mit der deutschen 400-Meldung.
+ *
+ * Jahre < 100 werden bewusst mit abgelehnt (`Date.UTC` bildet sie auf 19xx ab) —
+ * fail-closed, in dieser Domäne gibt es sie nicht.
+ */
 export function isIsoDate(iso: string | null | undefined): iso is string {
-  return typeof iso === "string" && ISO_DATE_RE.test(iso);
+  if (typeof iso !== "string") return false;
+  const m = ISO_DATE_RE.exec(iso);
+  if (m === null) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  return (
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day
+  );
 }
 
-/** True, wenn `iso` auf den 1. eines Monats fällt. */
+/** True, wenn `iso` ein echtes Datum ist UND auf den 1. eines Monats fällt. */
 export function isMonthStartISO(iso: string): boolean {
-  const m = ISO_DATE_RE.exec(iso);
-  return m !== null && m[3] === "01";
+  return isIsoDate(iso) && iso.slice(8, 10) === "01";
 }
 
 /** `YYYY-MM-DD` → `YYYY-MM-01`. */
@@ -70,17 +92,23 @@ export function monthStartOfISO(iso: string): string {
  * für den ganzen Monat bei dieser Kasse; der 1. desselben Monats ist die
  * korrekte, nicht die geschönte Angabe.
  *
- * Anker = der FRÜHESTE von (angefragtes Datum, Vertragsbeginn, heute),
- * abgerundet auf den 1.
+ * Anker = der FRÜHERE von (angefragtes Datum, Vertragsbeginn), abgerundet auf
+ * den 1. `heute` nur als Rückfalloption, wenn beide fehlen.
  *
  * Daraus folgt beides, was gelten muss:
- *  - **nie in der Zukunft**: der Anker ist ≤ heute, weil `heute` die Obergrenze
- *    des Minimums ist und das Abrunden nur nach hinten geht. Ein in der Zukunft
- *    liegender Vertragsbeginn verschiebt den Anker also NICHT nach vorn.
- *  - **nie später als der Vertragsbeginn**: liegt der Vertragsbeginn in der
- *    Vergangenheit, gewinnt er das Minimum, und das Abrunden kann ihn nur noch
- *    früher machen. Es entsteht keine Lücke, in der Leistungen ohne
+ *  - **Rückwärts-Bound**: der Anker greift nur so weit zurück, wie das
+ *    angefragte Datum ODER der Vertragsbeginn es hergeben — nie weiter. `heute`
+ *    kann ihn NICHT zurückziehen (es ist kein Kandidat, solange einer der
+ *    beiden brauchbar ist). Damit reicht eine Erstzuordnung nie ungefragt in
+ *    bereits abgerechnete Zeiträume hinein.
+ *  - **nie später als der Vertragsbeginn**: liegt der Vertragsbeginn früher als
+ *    das angefragte Datum, gewinnt er das Minimum, und das Abrunden kann ihn nur
+ *    noch früher machen. Es entsteht keine Lücke, in der Leistungen ohne
  *    zugeordnete Kasse dastünden.
+ *
+ * Ein angefragtes ZUKUNFTSDATUM wird dagegen honoriert (fachliche Entscheidung
+ * Alrik, 04.08.2026) — siehe die Begründung im Rumpf. Der Anker ist also
+ * ausdrücklich NICHT auf „≤ heute" gedeckelt.
  *
  * Bewusst KEINE Normalisierung eines Wechsels: die zweite und jede weitere
  * Zuordnung bleibt hart auf den Monatsersten begrenzt
@@ -99,27 +127,34 @@ export function firstInsuranceAnchorISO(
   contractStartISO: string | null | undefined,
   todayIso: string,
 ): string {
-  // Kandidaten: das ANGEFRAGTE Datum, der Vertragsbeginn (falls bekannt) und
-  // heute. Das Minimum gewinnt, abgerundet auf den 1.
+  // Kandidaten sind das ANGEFRAGTE Datum und der Vertragsbeginn. Das Minimum
+  // gewinnt, abgerundet auf den 1. `heute` ist NUR Rueckfalloption, wenn keiner
+  // von beiden brauchbar ist — ausdruecklich KEINE Obergrenze.
   //
-  // Das angefragte Datum MUSS mitzaehlen. Ohne es haengt der gespeicherte Wert
-  // allein an (Vertragsbeginn, heute) — ein Bestandskunde mit altem Vertrag,
-  // der heute erstmals eine Kasse bekommt, wuerde auf dessen Vertragsbeginn
-  // zurueckdatiert und damit rueckwirkend fuer JEDEN vergangenen Monat dieser
-  // Kasse zugeordnet. Bereits erstellte Rechnungen wuerden beim Versand an
-  // einen Kostentraeger adressiert, der zum Erstellzeitpunkt nicht galt.
+  // Zwei Zusagen, beide tragend:
   //
-  // `heute` als Kandidat garantiert „nie in der Zukunft"; das Minimum
-  // garantiert „nie spaeter als der Vertragsbeginn" und zugleich „nie spaeter
-  // als angefragt". Rueckwaerts geht es nur so weit, wie Anfrage ODER Vertrag
-  // es hergeben — nie weiter.
-  let earliest = todayIso;
-  for (const candidate of [requestedISO, contractStartISO]) {
-    if (isIsoDate(candidate) && candidate < earliest) earliest = candidate;
-  }
+  // 1. RUECKWAERTS nur so weit, wie Anfrage ODER Vertrag es hergeben — nie
+  //    weiter. Ohne das angefragte Datum als Kandidat haenge der gespeicherte
+  //    Wert allein am Vertragsbeginn: ein Bestandskunde mit altem Vertrag, der
+  //    heute erstmals eine Kasse bekommt, wuerde dorthin zurueckdatiert und
+  //    damit rueckwirkend fuer JEDEN vergangenen Monat dieser Kasse zugeordnet.
+  //    Bereits erstellte Rechnungen wuerden beim Versand an einen
+  //    Kostentraeger adressiert, der zum Erstellzeitpunkt nicht galt.
+  //
+  // 2. VORWAERTS wird ein angefragtes Zukunftsdatum HONORIERT (fachliche
+  //    Entscheidung Alrik, 04.08.2026). `heute` war frueher der Startwert und
+  //    zog ein Fenster ab 15.01.2027 auf den 01.08.2026 zurueck — die Kasse
+  //    bekam damit fuenf Monate zugeordnet, in denen sie nicht zustaendig war.
+  //    Derselbe Schaden wie (1), nur aus der Gegenrichtung. Ein Fenster, das
+  //    erst kuenftig beginnt, ist bis dahin schlicht nicht gueltig;
+  //    `resolveCustomerInsuranceAt` liefert dann korrekt nichts, und der Kunde
+  //    hat bewusst voruebergehend keine aktuelle Kasse.
+  const candidates = [requestedISO, contractStartISO].filter(isIsoDate);
+  const earliest = candidates.length
+    ? candidates.reduce((a, b) => (b < a ? b : a))
+    : todayIso;
   return monthStartOfISO(earliest);
 }
-
 
 /**
  * Der Tag VOR `iso` — so schließt ein Vorgänger-Fenster lückenlos an ein neues
