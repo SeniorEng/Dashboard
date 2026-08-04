@@ -15,7 +15,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { apiGet, apiPost, apiPatch, apiDelete, getAuthCookie, uniqueId } from "../test-utils";
 import { runInParallel } from "../helpers/race";
-import { isMonthStartISO } from "@shared/domain/insurance-period";
+import {
+  isMonthStartISO,
+  INSURANCE_WINDOW_MUST_START_ON_FIRST,
+} from "@shared/domain/insurance-period";
 import { todayISO } from "@shared/utils/datetime";
 
 let insuranceProviderIds: number[] = [];
@@ -134,7 +137,7 @@ describe("Task #1898 — Erstzuordnung vs. Kassenwechsel", () => {
       change.status,
       `Wechsel mitten im Monat MUSS 400 sein, war ${change.status}: ${JSON.stringify(change.data)}`,
     ).toBe(400);
-    expect(JSON.stringify(change.data)).toContain("Monatsersten");
+    expect(JSON.stringify(change.data)).toContain(INSURANCE_WINDOW_MUST_START_ON_FIRST);
 
     // Und er darf auch nichts geschrieben haben.
     const list = await apiGet<Array<unknown>>(`/api/admin/customers/${customerId}/insurance`);
@@ -180,62 +183,84 @@ describe("Task #1898 — Erstzuordnung vs. Kassenwechsel", () => {
   // gueltige Kassen, und `resolveCustomerInsuranceAt` entschiede per `.limit(1)`
   // zufaellig, welche die Rechnung bekommt. Die Mengenpruefung faengt das nicht,
   // weil unter READ COMMITTED keiner die uncommittete Zeile des anderen sieht.
+  //
+  // MEHRERE RUNDEN, mit Absicht: ein einzelner 4er-Wettlauf ist nur zu rund
+  // zwei Dritteln ein Detektor. Gemessen mit deaktiviertem Lock fingen 6 von 9
+  // Einzelläufen den Fehler — treffen die POSTs gestaffelt genug ein, hat der
+  // Gewinner schon committet, bevor der zweite seine Fenstermenge liest, und
+  // der Lauf sieht grün aus. Als Regressionswächter hiesse das: jeder dritte
+  // CI-Lauf laesst einen wieder eingebauten Fehler durch. Drei Runden heben die
+  // Erkennungsrate auf ~96% und kosten nichts (der Test braucht in CI ~72 ms).
   it("RACE — parallele Erstzuordnungen: genau eine gewinnt, der Rest ist ein 400-Wechsel", async () => {
-    const customerId = await createCustomerWithoutInsurance();
     const N = 4;
+    const ROUNDS = 3;
     const requested = midMonthISO();
 
-    // Barriere: jeder Worker meldet sich erst als bereit und tritt dann
-    // gemeinsam mit allen anderen in den POST ein — sonst serialisiert die
-    // Vorbereitung den Wettlauf und der Test uebersieht Regressionen.
-    const results = await runInParallel(
-      Array.from({ length: N }, (_, i) => async (arrive: () => Promise<void>) => {
-        await arrive();
-        return apiPost<{ id?: number; validFrom?: string; message?: string }>(
-          `/api/admin/customers/${customerId}/insurance`,
-          {
-            insuranceProviderId: insuranceProviderIds[i % insuranceProviderIds.length],
-            versichertennummer: versNr("R"),
-            validFrom: requested,
-          },
-        );
-      }),
-    );
+    for (let round = 1; round <= ROUNDS; round++) {
+      // Frischer Kunde je Runde — sonst waere ab Runde 2 bereits eine Zuordnung
+      // vorhanden und es gaebe gar keine Erstzuordnung mehr zu gewinnen.
+      const customerId = await createCustomerWithoutInsurance();
 
-    // Alle Requests muessen durchlaufen (kein Timeout, kein 500 durch einen
-    // haengenden Lock).
-    const settled = results.map((r) => {
-      expect(r.status, `Worker rejected: ${JSON.stringify(r)}`).toBe("fulfilled");
-      return (r as PromiseFulfilledResult<{ status: number; data: { message?: string } }>).value;
-    });
+      // Barriere: jeder Worker meldet sich erst als bereit und tritt dann
+      // gemeinsam mit allen anderen in den POST ein — sonst serialisiert die
+      // Vorbereitung den Wettlauf und der Test uebersieht Regressionen.
+      const results = await runInParallel(
+        Array.from({ length: N }, (_, i) => async (arrive: () => Promise<void>) => {
+          await arrive();
+          return apiPost<{ id?: number; validFrom?: string; message?: string }>(
+            `/api/admin/customers/${customerId}/insurance`,
+            {
+              insuranceProviderId: insuranceProviderIds[i % insuranceProviderIds.length],
+              versichertennummer: versNr("R"),
+              validFrom: requested,
+            },
+          );
+        }),
+      );
 
-    const created = settled.filter((r) => r.status === 201);
-    const rejected = settled.filter((r) => r.status === 400);
+      // Alle Requests muessen durchlaufen (kein Timeout, kein 500 durch einen
+      // haengenden Lock).
+      const settled = results.map((r) => {
+        expect(r.status, `Runde ${round}: Worker rejected: ${JSON.stringify(r)}`).toBe("fulfilled");
+        return (r as PromiseFulfilledResult<{ status: number; data: { message?: string } }>).value;
+      });
+      const stati = settled.map((s) => s.status).join(",");
 
-    expect(
-      created.length,
-      `Genau eine Erstzuordnung darf gewinnen, war ${created.length}. Stati: ${settled.map((s) => s.status).join(",")}`,
-    ).toBe(1);
-    expect(
-      rejected.length,
-      `Die uebrigen ${N - 1} muessen als Wechsel mitten im Monat abgelehnt werden. Stati: ${settled.map((s) => s.status).join(",")}`,
-    ).toBe(N - 1);
-    for (const r of rejected) {
-      expect(JSON.stringify(r.data)).toContain("Monatsersten");
+      const created = settled.filter((r) => r.status === 201);
+      const rejected = settled.filter((r) => r.status === 400);
+
+      expect(
+        created.length,
+        `Runde ${round}: Genau eine Erstzuordnung darf gewinnen, war ${created.length}. Stati: ${stati}`,
+      ).toBe(1);
+      expect(
+        rejected.length,
+        `Runde ${round}: Die uebrigen ${N - 1} muessen als Wechsel mitten im Monat abgelehnt werden. Stati: ${stati}`,
+      ).toBe(N - 1);
+      for (const r of rejected) {
+        // Gegen die SSoT-Konstante statt gegen ein Textfragment — und diese
+        // Assertion traegt: in einem der Mutations-Laeufe war die Zaehlung
+        // korrekt (1x201, 3x400) und NUR die Meldung verriet den kaputten
+        // Zustand („Zwei Zuordnungen beginnen am selben Tag").
+        expect(
+          JSON.stringify(r.data),
+          `Runde ${round}: Verlierer muss der Monatsersten-400 sein, war: ${JSON.stringify(r.data)}`,
+        ).toContain(INSURANCE_WINDOW_MUST_START_ON_FIRST);
+      }
+
+      // Der eigentliche Schaden waere die zweite Zeile — direkt am Lesepfad
+      // gegengeprueft, nicht nur ueber die Antwort-Stati.
+      const list = await apiGet<Array<{ validFrom: string; validTo: string | null }>>(
+        `/api/admin/customers/${customerId}/insurance`,
+      );
+      expect(list.status).toBe(200);
+      expect(
+        list.data.length,
+        `Runde ${round}: Genau eine Zeile erwartet, war ${JSON.stringify(list.data)}`,
+      ).toBe(1);
+      expect(list.data[0].validFrom).toBe(`${requested.slice(0, 7)}-01`);
+      expect(list.data[0].validTo).toBeNull();
     }
-
-    // Der eigentliche Schaden waere die zweite Zeile — direkt am Lesepfad
-    // gegengeprueft, nicht nur ueber die Antwort-Stati.
-    const list = await apiGet<Array<{ validFrom: string; validTo: string | null }>>(
-      `/api/admin/customers/${customerId}/insurance`,
-    );
-    expect(list.status).toBe(200);
-    expect(
-      list.data.length,
-      `Genau eine Zeile erwartet, war ${JSON.stringify(list.data)}`,
-    ).toBe(1);
-    expect(list.data[0].validFrom).toBe(`${requested.slice(0, 7)}-01`);
-    expect(list.data[0].validTo).toBeNull();
   });
 
   // Gegenprobe zur PATCH-Lücke: der Anker gilt NUR beim Anlegen. Eine
@@ -262,7 +287,7 @@ describe("Task #1898 — Erstzuordnung vs. Kassenwechsel", () => {
       patch.status,
       `PATCH auf Nicht-Monatserstes MUSS 400 sein, war ${patch.status}: ${JSON.stringify(patch.data)}`,
     ).toBe(400);
-    expect(JSON.stringify(patch.data)).toContain("Monatsersten");
+    expect(JSON.stringify(patch.data)).toContain(INSURANCE_WINDOW_MUST_START_ON_FIRST);
 
     // Die Zeile steht unveraendert auf dem normalisierten Wert.
     const list = await apiGet<Array<{ validFrom: string }>>(
