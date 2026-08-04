@@ -159,48 +159,51 @@ describe("pickInsuranceWindowAt — spiegelt das SQL-Prädikat", () => {
 // Task #1898 — Erstzuordnung normalisieren, Wechsel NICHT.
 // ---------------------------------------------------------------------------
 describe("firstInsuranceAnchorISO — Anker der Erstzuordnung", () => {
-  it("rundet den frueheren von (Vertragsbeginn, heute) auf den Monatsersten ab", () => {
-    // Vertragsbeginn liegt zurueck -> er gewinnt das Minimum.
-    expect(firstInsuranceAnchorISO("2026-07-15", "2026-08-04")).toBe("2026-07-01");
+  const T = "2026-08-14"; // heute, mitten im Monat
+
+  it("rundet ein angefragtes Datum mitten im Monat auf den 1. ab", () => {
+    expect(firstInsuranceAnchorISO(T, null, T)).toBe("2026-08-01");
   });
 
-  it("nimmt heute, wenn der Vertragsbeginn spaeter liegt", () => {
-    expect(firstInsuranceAnchorISO("2026-09-20", "2026-08-14")).toBe("2026-08-01");
+  it("zieht auf den Vertragsbeginn zurueck, wenn der frueher liegt", () => {
+    expect(firstInsuranceAnchorISO(T, "2026-07-15", T)).toBe("2026-07-01");
   });
 
-  it("liegt NIE in der Zukunft — auch nicht bei zukuenftigem Vertragsbeginn", () => {
-    const anchor = firstInsuranceAnchorISO("2027-01-01", "2026-08-14");
-    expect(anchor <= "2026-08-14").toBe(true);
-    expect(anchor).toBe("2026-08-01");
+  it("BLOCKER-Regression: datiert NICHT auf einen alten Vertrag zurueck, den der Aufrufer nicht mitgibt", () => {
+    // Bestandskunde seit 2019, erste Kassenzuordnung heute. Ohne den
+    // angefragten Wert im Anker landete hier `2019-03-01` — und ordnete damit
+    // JEDEN vergangenen Abrechnungsmonat rueckwirkend dieser Kasse zu.
+    expect(firstInsuranceAnchorISO(T, null, T)).toBe("2026-08-01");
   });
 
-  it("liegt NIE nach dem Vertragsbeginn — sonst entstuende eine Kassen-Luecke", () => {
-    for (const [start, today] of [
-      ["2026-07-15", "2026-08-04"],
-      ["2026-08-01", "2026-08-31"],
-      ["2026-02-29", "2026-03-01"],
-    ] as const) {
-      expect(firstInsuranceAnchorISO(start, today) <= start).toBe(true);
+  it("verschiebt ein frueher angefragtes Datum NICHT nach vorn (kein Deckungsverlust)", () => {
+    // Nacherfassung: angefragt 2024-03-05, Vertrag erst 2026-01-01.
+    expect(firstInsuranceAnchorISO("2024-03-05", "2026-01-01", T)).toBe("2024-03-01");
+  });
+
+  it("liegt NIE in der Zukunft — auch nicht bei zukuenftigem Vertragsbeginn oder Datum", () => {
+    expect(firstInsuranceAnchorISO("2027-05-09", "2027-01-01", T)).toBe("2026-08-01");
+  });
+
+  it("liegt NIE nach dem Vertragsbeginn", () => {
+    for (const start of ["2026-07-15", "2026-08-01", "2020-02-29"] as const) {
+      expect(firstInsuranceAnchorISO(T, start, T) <= start).toBe(true);
     }
   });
 
-  it("kommt ohne Vertragsbeginn aus (Monatserster von heute)", () => {
-    expect(firstInsuranceAnchorISO(null, "2026-08-14")).toBe("2026-08-01");
-    expect(firstInsuranceAnchorISO(undefined, "2026-08-14")).toBe("2026-08-01");
-    expect(firstInsuranceAnchorISO("", "2026-08-14")).toBe("2026-08-01");
+  it("kommt ohne Vertragsbeginn aus und vertraegt kaputte Eingaben", () => {
+    expect(firstInsuranceAnchorISO(T, undefined, T)).toBe("2026-08-01");
+    expect(firstInsuranceAnchorISO(T, "", T)).toBe("2026-08-01");
+    expect(firstInsuranceAnchorISO("2026-13-45", null, T)).toBe("2026-08-01");
   });
 
   it("ist idempotent auf einem Monatsersten", () => {
-    expect(firstInsuranceAnchorISO("2026-08-01", "2026-08-20")).toBe("2026-08-01");
+    expect(firstInsuranceAnchorISO("2026-08-01", null, T)).toBe("2026-08-01");
   });
 
   it("liefert immer einen Monatsersten — den der harte Wechsel-Check akzeptiert", () => {
-    for (const [start, today] of [
-      ["2026-07-15", "2026-08-04"],
-      [null, "2026-12-31"],
-      ["2024-02-29", "2026-08-04"],
-    ] as const) {
-      const anchor = firstInsuranceAnchorISO(start, today);
+    for (const [req, start] of [[T, null], ["2024-03-05", "2026-01-01"], [T, "2019-03-05"]] as const) {
+      const anchor = firstInsuranceAnchorISO(req, start, T);
       expect(isMonthStartISO(anchor)).toBe(true);
       expect(validateInsuranceWindow({ validFrom: anchor, validTo: null })).toBeNull();
     }

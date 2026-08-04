@@ -69,6 +69,18 @@ const VERSICHERTENNUMMER_REGEX = VERSICHERTENNUMMER_GKV_REGEX;
 // bisherige Kasse, auf die der laufende Monat noch liefe. Der Folgemonat würde
 // den laufenden Monat ohne Kostenträger zurücklassen. Vorbelegung ist deshalb
 // der 1. des LAUFENDEN Monats — derselbe Anker, den der Server berechnet.
+/**
+ * Vorbelegung des „Gültig ab". Task #1898: bei der ERSTZUORDNUNG der 1. des
+ * LAUFENDEN Monats — der Folgemonat liesse den laufenden Monat ohne
+ * Kostenträger, und der Kunde erschiene direkt nach dem Speichern weiter als
+ * „Keine Pflegekasse". Beim WECHSEL bleibt es der 1. des Folgemonats.
+ */
+function defaultValidFrom(isFirstAssignment: boolean): string {
+  return isFirstAssignment
+    ? firstInsuranceAnchorISO(todayISO(), null, todayISO())
+    : firstOfNextMonthISO();
+}
+
 function firstOfNextMonthISO(): string {
   const now = new Date();
   const y = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
@@ -92,9 +104,7 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
   const [versichertennummer, setVersichertennummer] = useState("");
   // Erstzuordnung = der Kunde hat noch keine laufende Kasse.
   const isFirstAssignment = !currentInsurance;
-  const [validFrom, setValidFrom] = useState(
-    isFirstAssignment ? firstInsuranceAnchorISO(null, todayISO()) : firstOfNextMonthISO(),
-  );
+  const [validFrom, setValidFrom] = useState(defaultValidFrom(isFirstAssignment));
   const [vnError, setVnError] = useState<string | null>(null);
 
   // Inline-Anlage einer neuen Pflegekasse direkt im Wechsel-Dialog, damit das
@@ -187,7 +197,7 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
   const resetForm = () => {
     setInsuranceProviderId("");
     setVersichertennummer("");
-    setValidFrom(firstOfNextMonthISO());
+    setValidFrom(defaultValidFrom(isFirstAssignment));
     setVnError(null);
     setShowNewProvider(false);
     setNewName("");

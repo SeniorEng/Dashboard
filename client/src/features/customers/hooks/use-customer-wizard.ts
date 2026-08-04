@@ -331,7 +331,7 @@ export function useCustomerWizard() {
       ? {
           providerId: parseInt(formData.insuranceProviderId),
           versichertennummer: versNr,
-          validFrom: firstInsuranceAnchorISO(formData.contractStart || null, today),
+          validFrom: firstInsuranceAnchorISO(today, formData.contractStart || null, today),
         } 
       : undefined;
 

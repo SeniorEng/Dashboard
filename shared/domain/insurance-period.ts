@@ -70,7 +70,8 @@ export function monthStartOfISO(iso: string): string {
  * für den ganzen Monat bei dieser Kasse; der 1. desselben Monats ist die
  * korrekte, nicht die geschönte Angabe.
  *
- * Anker = der FRÜHERE von (Vertragsbeginn, heute), abgerundet auf den 1.
+ * Anker = der FRÜHESTE von (angefragtes Datum, Vertragsbeginn, heute),
+ * abgerundet auf den 1.
  *
  * Daraus folgt beides, was gelten muss:
  *  - **nie in der Zukunft**: der Anker ist ≤ heute, weil `heute` die Obergrenze
@@ -87,21 +88,38 @@ export function monthStartOfISO(iso: string): string {
  * umzuschreiben würde einen Abrechnungsmonat rückwirkend der falschen Kasse
  * zuordnen — genau der Fehler, den #1893 abgestellt hat.
  *
+ * @param requestedISO Das vom Aufrufer angefragte `validFrom`.
  * @param contractStartISO Vertragsbeginn, falls bekannt (sonst `null`).
  * @param todayIso Heutiges Datum als `YYYY-MM-DD` (injiziert, nie intern
  *   ermittelt — sonst wäre die Funktion nicht testbar und fiele unter die
  *   `todayISO()`-vs-`asOf`-Falle).
  */
 export function firstInsuranceAnchorISO(
+  requestedISO: string | null | undefined,
   contractStartISO: string | null | undefined,
   todayIso: string,
 ): string {
-  const earlier =
-    isIsoDate(contractStartISO) && contractStartISO < todayIso
-      ? contractStartISO
-      : todayIso;
-  return monthStartOfISO(earlier);
+  // Kandidaten: das ANGEFRAGTE Datum, der Vertragsbeginn (falls bekannt) und
+  // heute. Das Minimum gewinnt, abgerundet auf den 1.
+  //
+  // Das angefragte Datum MUSS mitzaehlen. Ohne es haengt der gespeicherte Wert
+  // allein an (Vertragsbeginn, heute) — ein Bestandskunde mit altem Vertrag,
+  // der heute erstmals eine Kasse bekommt, wuerde auf dessen Vertragsbeginn
+  // zurueckdatiert und damit rueckwirkend fuer JEDEN vergangenen Monat dieser
+  // Kasse zugeordnet. Bereits erstellte Rechnungen wuerden beim Versand an
+  // einen Kostentraeger adressiert, der zum Erstellzeitpunkt nicht galt.
+  //
+  // `heute` als Kandidat garantiert „nie in der Zukunft"; das Minimum
+  // garantiert „nie spaeter als der Vertragsbeginn" und zugleich „nie spaeter
+  // als angefragt". Rueckwaerts geht es nur so weit, wie Anfrage ODER Vertrag
+  // es hergeben — nie weiter.
+  let earliest = todayIso;
+  for (const candidate of [requestedISO, contractStartISO]) {
+    if (isIsoDate(candidate) && candidate < earliest) earliest = candidate;
+  }
+  return monthStartOfISO(earliest);
 }
+
 
 /**
  * Der Tag VOR `iso` — so schließt ein Vorgänger-Fenster lückenlos an ein neues

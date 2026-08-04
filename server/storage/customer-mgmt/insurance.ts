@@ -6,13 +6,13 @@ import {
   insuranceProviders,
   customerInsuranceHistory,
   customerBudgetRecipients,
-  customerContracts,
 } from "@shared/schema";
 import { eq, and, isNull, or, lte, gte, desc, count, notExists, sql } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
 import {
   dayBeforeISO,
   firstInsuranceAnchorISO,
+  isIsoDate,
   isMonthStartISO,
   validateInsuranceWindow,
   validateInsuranceWindows,
@@ -300,34 +300,14 @@ async function loadInsuranceWindows(
  */
 export interface AddCustomerInsuranceOptions {
   /**
-   * Vertragsbeginn, falls dem Aufrufer bekannt. Der Wizard MUSS ihn mitgeben:
-   * dort wird die Versicherung VOR dem Vertrag geschrieben
-   * (`customer-creation-helpers.ts`), der Nachschlag unten fände also nichts.
+   * Vertragsbeginn, falls dem Aufrufer bekannt — NUR vom Aufrufer, bewusst kein
+   * DB-Nachschlag. Ein Nachschlag nähme den frühesten Vertrag des Kunden (auch
+   * einen beendeten) und datierte eine Erstzuordnung damit ungefragt um Jahre
+   * zurück. Der Wizard gibt ihn mit, weil er die Versicherung VOR dem Vertrag
+   * schreibt; der Versicherungs-Reiter kennt ihn nicht und bekommt dann den
+   * Monatsersten des angefragten Datums.
    */
   contractStartISO?: string | null;
-}
-
-/**
- * Erstzuordnung = der Kunde hat noch KEINE Zeile in `customer_insurance_history`.
- *
- * Eindeutig, weil die Tabelle keinen Soft-Delete kennt (kein `deleted_at`,
- * `shared/schema/insurance.ts`) und es im Server keinen Lösch-Pfad auf sie gibt
- * — geprüft. Eine „unsichtbare" Vorgängerzeile, die eine Erstzuordnung
- * vortäuschen könnte, kann es damit nicht geben. Bekäme die Tabelle je einen
- * Soft-Delete, MUSS diese Prüfung mitziehen, sonst normalisiert sie einen
- * echten Wechsel still.
- */
-async function loadContractStartISO(
-  customerId: number,
-  executor: DbOrTx,
-): Promise<string | null> {
-  const rows = await executor
-    .select({ contractStart: customerContracts.contractStart })
-    .from(customerContracts)
-    .where(eq(customerContracts.customerId, customerId))
-    .orderBy(customerContracts.contractStart)
-    .limit(1);
-  return rows[0]?.contractStart ?? null;
 }
 
 export async function addCustomerInsurance(
@@ -340,14 +320,33 @@ export async function addCustomerInsurance(
 
   // Task #1898 — Erstzuordnung VOR jeder Mutation feststellen. Nach dem
   // Vorgänger-Update unten wäre die Menge nicht mehr aussagekräftig.
+  // Serialisiert konkurrierende Zuordnungen desselben Kunden. Ohne den Lock ist
+  // die Erstzuordnungs-Erkennung ein check-then-write: zwei ueberlappende
+  // Requests saehen beide eine leere Fenstermenge, und ein echter WECHSEL wuerde
+  // als Erstzuordnung normalisiert statt abgelehnt. Gleiches Muster wie
+  // `lockCustomerForBilling` (`services/invoice-data.ts`).
+  await executor.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext('customer_insurance_' || ${data.customerId}::text))`,
+  );
+
+  // Task #1898 — Erstzuordnung VOR jeder Mutation feststellen. Nach dem
+  // Vorgaenger-Update unten waere die Menge nicht mehr aussagekraeftig.
+  //
+  // "Keine Zeile" ist eindeutig: `customer_insurance_history` hat kein
+  // `deleted_at` (`shared/schema/insurance.ts`) und es gibt serverseitig keinen
+  // Lösch-Pfad; Anonymisierung und Kunden-Soft-Delete lassen die Zeilen stehen.
+  // Bekaeme die Tabelle je einen Soft-Delete, MUSS diese Pruefung mitziehen —
+  // sonst normalisiert sie einen echten Wechsel still.
   const existingBefore = await loadInsuranceWindows(data.customerId, executor);
   const isFirstAssignment = existingBefore.length === 0;
 
   let validFrom = data.validFrom;
-  if (isFirstAssignment && typeof validFrom === "string" && !isMonthStartISO(validFrom)) {
-    const contractStart =
-      options?.contractStartISO ?? (await loadContractStartISO(data.customerId, executor));
-    validFrom = firstInsuranceAnchorISO(contractStart, todayISO());
+  // Nur ein WOHLGEFORMTES, nicht-monatserstes Datum wird normalisiert. Ein
+  // leeres oder kaputtes `validFrom` faellt weiterhin in die 400-Meldung von
+  // `validateInsuranceWindow` — es darf nicht durch ein erfundenes Datum
+  // ersetzt werden.
+  if (isFirstAssignment && isIsoDate(validFrom) && !isMonthStartISO(validFrom)) {
+    validFrom = firstInsuranceAnchorISO(validFrom, options?.contractStartISO, todayISO());
   }
   // Jede WEITERE Zuordnung ist ein Wechsel und bleibt hart auf den
   // Monatsersten begrenzt — hier wird nichts umgeschrieben.
