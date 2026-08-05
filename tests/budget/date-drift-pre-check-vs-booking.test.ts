@@ -18,16 +18,27 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { db } from "../../server/lib/db";
-import { appointments, appointmentServices, budgetAllocations } from "@shared/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { appointments, appointmentServices, budgetAllocations, budgetTransactions } from "@shared/schema";
+import { and, eq, isNull } from "drizzle-orm";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 import { getAvailableForDate } from "../../server/storage/budget/import-availability";
+import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { apiGet, getAuthCookie, runCleanup } from "../test-utils";
-import { billingReferenceMonth, pastWeekdayInBillingMonth } from "../helpers/billing-month";
+import {
+  billingReferenceMonth,
+  carryoverAnchor,
+  pastWeekdayInBillingMonth,
+  snapToWeekday,
+} from "../helpers/billing-month";
 
 beforeAll(async () => { await getAuthCookie(); });
 afterAll(async () => { await runCleanup(); });
+
+/** Kalenderjahr des Abrechnungs-Ankers — ERSETZT die hartkodierte `2026`. */
+const ANCHOR_YEAR = billingReferenceMonth().year;
+/** Jahresanfang des Ankerjahrs (Pflegegrad-Beginn / Startwert-`validFrom`). */
+const ANCHOR_YEAR_START = `${ANCHOR_YEAR}-01-01`;
 
 let hwServiceId: number;
 
@@ -58,21 +69,39 @@ async function makeAppt(customerId: number, employeeId: number, date: string) {
   return appt.id;
 }
 
-function weekdayInPrevMonth(): string {
-  const d = new Date();
-  d.setDate(15);
-  d.setMonth(d.getMonth() - 1);
-  // 15. ist immer Mo-Fr oder Sa/So → ggf. korrigieren
-  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
-function weekdayInNextMonth(): string {
-  const d = new Date();
-  d.setDate(15);
-  d.setMonth(d.getMonth() + 1);
-  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+/**
+ * Der 15. des Monats mit `monthOffset` Abstand zum Abrechnungs-Anker, auf einen
+ * Werktag gezogen.
+ *
+ * ERSETZT die beiden lokalen `weekdayInPrevMonth`/`weekdayInNextMonth`-Kopien
+ * mit ihren eigenen Wochenend-Schleifen. Die trugen zwei Fehler:
+ *  - `new Date()` behielt die aktuelle UHRZEIT, `toISOString()` rechnete danach
+ *    nach UTC um. In der Nacht (lokal 00:00–02:00 MESZ) fiel das ISO-Datum damit
+ *    auf den VORTAG zurück — die Wochenend-Korrektur hatte aber gegen den
+ *    lokalen Tag gerechnet, sodass am Ende doch ein Samstag/Sonntag heraus-
+ *    kommen konnte. Die Termin-Anlage lehnt Wochenenden mit 400 ab.
+ *  - Der Bezugspunkt war „heute" statt des Abrechnungs-Ankers, sodass Termin
+ *    und Abrechnungsmonat am Monatsanfang auseinanderlaufen konnten.
+ *
+ * `snapToWeekday` (aus #50) rechnet rein auf lokalen Kalenderdaten und ist damit
+ * zeitzonen-neutral. Richtung bewusst gegenläufig: der Vormonats-Termin wird
+ * rückwärts gezogen, der Folgemonats-Termin vorwärts — beide bleiben so sicher
+ * im gemeinten Monat.
+ *
+ * Der Offset zählt ab dem ANKER, nicht ab „heute": fällt der Anker am
+ * Monatsanfang in den Vormonat zurück, meint `-1` den Vor-Vormonat und `+1`
+ * den laufenden Monat — der Describe-Titel „(b) Vormonat" ist dann streng
+ * genommen einen Monat zu optimistisch. Die Richtungs-Garantie bleibt in beiden
+ * Lagen erhalten (`-1` immer Vergangenheit, `+1` immer Zukunft), weil der
+ * Rückfall nur greift, solange der laufende Monat < 5 vergangene Werktage hat —
+ * also längstens bis zum 6.; der 15. des laufenden Monats liegt dann sicher
+ * voraus.
+ */
+function weekdayNearMonthMiddle(monthOffset: number): string {
+  const ref = billingReferenceMonth().reference;
+  const target = new Date(ref.getFullYear(), ref.getMonth() + monthOffset, 15);
+  const iso = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-15`;
+  return snapToWeekday(iso, monthOffset < 0 ? "backward" : "forward");
 }
 
 describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
@@ -85,19 +114,19 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         pflegegrad: 2,
         billingType: "pflegekasse_gesetzlich",
         acceptsPrivatePayment: false,
-        pflegegradSeit: "2026-01-01",
+        pflegegradSeit: ANCHOR_YEAR_START,
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
           { type: "umwandlung_45a", priority: 2, enabled: false },
           { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
         ],
         initialBalance: {
-          // Task #959 — §45b-Startwert ≤ Obergrenze: Anker 2024-01 (pflegegradSeit
-          // im Helper), Startmonat 2026-01 → genau 1 berechtigter Monat = 131 €.
-          // Das laufende §45b-Budget kommt ohnehin aus der Monats-Akkumulation.
+          // Task #959 — §45b-Startwert ≤ Obergrenze: Pflegegrad-Beginn = Startmonat
+          // → genau 1 berechtigter Monat = 131 €. Das laufende §45b-Budget kommt
+          // ohnehin aus der Monats-Akkumulation.
           type: "entlastungsbetrag_45b",
           amountCents: 13_100,
-          validFrom: "2026-01-01",
+          validFrom: ANCHOR_YEAR_START,
         },
         appointments: [
           {
@@ -114,7 +143,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
     afterAll(async () => { await scenario.cleanup(); });
 
     it("Cost-Estimate für zukünftigen Termin == getAvailableForDate(zukünftig)", async () => {
-      const futureDate = weekdayInNextMonth();
+      const futureDate = weekdayNearMonthMiddle(+1);
       const expected = await getAvailableForDate(scenario.customerId, futureDate);
       const res = await apiGet<any>(
         `/api/budget/${scenario.customerId}/cost-estimate?date=${futureDate}` +
@@ -126,7 +155,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
     });
 
     it("Buchung zum Termindatum nutzt dieselbe Verfügbarkeit (kein Drift)", async () => {
-      const futureDate = weekdayInNextMonth();
+      const futureDate = weekdayNearMonthMiddle(+1);
       const availBefore = (await getAvailableForDate(scenario.customerId, futureDate)).totalCents;
       expect(availBefore).toBeGreaterThan(0);
 
@@ -159,7 +188,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         pflegegrad: 2,
         billingType: "pflegekasse_gesetzlich",
         acceptsPrivatePayment: false,
-        pflegegradSeit: "2026-01-01",
+        pflegegradSeit: ANCHOR_YEAR_START,
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
           { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -169,7 +198,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
           // Task #959 — §45b-Startwert ≤ Obergrenze (1 berechtigter Monat = 131 €).
           type: "entlastungsbetrag_45b",
           amountCents: 13_100,
-          validFrom: "2026-01-01",
+          validFrom: ANCHOR_YEAR_START,
         },
         appointments: [],
       });
@@ -178,7 +207,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
     afterAll(async () => { await scenario.cleanup(); });
 
     it("Pre-Check für Vormonat schließt heutige Buchungen aus dem netConsumed aus", async () => {
-      const pastDate = weekdayInPrevMonth();
+      const pastDate = weekdayNearMonthMiddle(-1);
       const availPastBefore = (await getAvailableForDate(scenario.customerId, pastDate)).totalCents;
 
       // Eine heutige Buchung darf die Verfügbarkeit für ein VERGANGENES
@@ -202,7 +231,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
     });
 
     it("Buchung zum Vormonat nutzt dieselbe Stichtags-Verfügbarkeit wie der Pre-Check", async () => {
-      const pastDate = weekdayInPrevMonth();
+      const pastDate = weekdayNearMonthMiddle(-1);
       const availBefore = (await getAvailableForDate(scenario.customerId, pastDate)).totalCents;
 
       const apptId = await makeAppt(scenario.customerId, scenario.employeeId, pastDate);
@@ -225,8 +254,25 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
 
   describe("(c) Carryover-Verfallsgrenze zwischen Pre-Check und Buchung", () => {
     let scenario: BudgetScenarioHandle;
-    const beforeExpiry = "2026-06-15";  // vor 2026-06-30
-    const afterExpiry = "2026-07-15";   // nach 2026-06-30
+
+    // §45b-Übertrag kalender-relativ verankern (Helfer aus #51). Die FRIST bleibt
+    // unangetastet — `expiresAt` ist weiterhin exakt der 30.06. des Zieljahres,
+    // nur nicht mehr als Literal `2026-06-30`.
+    const { sourceYear, targetYear, expiresAt } = carryoverAnchor();
+    const CARRYOVER_CENTS = 50_000;
+    // SSoT statt Literal: an dieser Zahl hängt unten eine Modulo-Assertion.
+    // Der Szenario-Topf hat `monthlyLimitCents: null` → die Monatsaufstockung
+    // ist `DEFAULT_MONTHLY_BUDGET_CENTS`, und das IST diese Konstante
+    // (`allocation-storage.ts` aliast sie).
+    const MONTHLY_45B_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
+    // Die beiden Stichtage liegen bewusst GENAU EINEN Monat auseinander und
+    // klammern den 30.06. ein. Nur dadurch trennt sie höchstens EINE
+    // Monatsaufstockung — die Untergrenze unten (`Übertrag − 1 Monatsrate`)
+    // rechnet exakt damit. Ein Stichtag „irgendwo im H1" (z.B. `anchor.asOf`)
+    // wäre je nach Lauftag mehrere Monatsraten entfernt und würde die
+    // Untergrenze verwässern.
+    const beforeExpiry = `${targetYear}-06-15`;  // vor dem 30.06.
+    const afterExpiry = `${targetYear}-07-15`;   // nach dem 30.06.
 
     beforeAll(async () => {
       // Nur Carryover, kein initial_balance → Carryover wird NICHT durch
@@ -236,7 +282,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         pflegegrad: 2,
         billingType: "pflegekasse_gesetzlich",
         acceptsPrivatePayment: false,
-        pflegegradSeit: "2026-01-01",
+        pflegegradSeit: `${targetYear}-01-01`,
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
           { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -244,58 +290,107 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         ],
         carryover: {
           type: "entlastungsbetrag_45b",
-          amountCents: 50000,
-          year: 2025,
+          amountCents: CARRYOVER_CENTS,
+          year: sourceYear,
         },
         appointments: [],
       });
-
-      // `syncCarryoverAndExpiry` läuft beim ersten Allocation-Read und würde
-      // alle Carryovers mit `expiresAt < heute` als 'expiry'-Buchung
-      // abschreiben. Heute ist > 2026-06-30 → der Carryover wäre weg. Für die
-      // Tests stellen wir `expiresAt` deshalb gezielt zurück auf 2026-06-30
-      // und löschen ggf. die Auto-Expiry-Buchung, um das Verhalten zu prüfen.
-      await db.update(budgetAllocations)
-        .set({ expiresAt: "2026-06-30" })
-        .where(and(
-          eq(budgetAllocations.customerId, scenario.customerId),
-          eq(budgetAllocations.source, "carryover"),
-        ));
     });
 
     afterAll(async () => { await scenario.cleanup(); });
 
-    it("Pre-Check VOR Verfall sieht Carryover, Pre-Check NACH Verfall nicht mehr", async () => {
-      // Vorab: alle automatischen Expiry-Buchungen entfernen, damit nur die
-      // Allocation-Seite gemessen wird.
-      await db.execute(sql`
-        DELETE FROM budget_transactions
-        WHERE customer_id = ${scenario.customerId}
-          AND transaction_type = 'write_off'
-          AND notes LIKE 'Verfallenes Guthaben%'
-      `);
+    it("Der geseedete Übertrag verfällt exakt zum 30.06. des Zieljahres", async () => {
+      // ERSETZT das frühere `UPDATE budget_allocations SET expires_at =
+      // '2026-06-30'` im Setup. Das war ein hartkodiertes Zurechtbiegen der
+      // Frist — und ab dem Folgejahr ein aktiver Fehler, weil es einen Übertrag
+      // des Zieljahres Y auf die Frist des Jahres 2026 gezogen hätte. Die Frist
+      // kommt aus der Produktivlogik (`carryoverWindowFor`); der Test PRÜFT sie
+      // jetzt, statt sie zu setzen.
+      // `isNull(deletedAt)` wie der Produktivpfad (`budgetAllocationsRepo`):
+      // `upsertCarryoverAllocation` kann Zeilen soft-löschen und wiederbeleben,
+      // ein Grabstein würde `toHaveLength(1)` sonst mitzählen.
+      const rows = await db.select()
+        .from(budgetAllocations)
+        .where(and(
+          eq(budgetAllocations.customerId, scenario.customerId),
+          eq(budgetAllocations.source, "carryover"),
+          isNull(budgetAllocations.deletedAt),
+        ));
+      expect(rows).toHaveLength(1);
+      expect(rows[0].expiresAt).toBe(expiresAt);
+      expect(expiresAt).toBe(`${targetYear}-06-30`);
+      expect(rows[0].amountCents).toBe(CARRYOVER_CENTS);
+    });
 
+    it("Pre-Check VOR Verfall sieht Carryover, Pre-Check NACH Verfall nicht mehr", async () => {
       const availBefore = (await getAvailableForDate(scenario.customerId, beforeExpiry)).total45b;
       const availAfter = (await getAvailableForDate(scenario.customerId, afterExpiry)).total45b;
 
-      // Vor Verfall: Monats-Aufstockungen Jan–Jun + Carryover 50000 ct
-      // Nach Verfall: dieselben Monats-Aufstockungen + Juli-Aufstockung, ABER
-      // KEIN Carryover mehr.
+      // Vor Verfall: Monats-Aufstockungen + Carryover
+      // Nach Verfall: dieselben Monats-Aufstockungen (+ höchstens die Juli-
+      // Aufstockung), ABER KEIN Carryover mehr.
       // → Differenz muss MINDESTENS die Carryover-Höhe minus eine Monatsrate
       //   sein. (Wir prüfen das robust über "vorher > nachher" plus eine
       //   absolute Untergrenze der Carryover-Beträge.)
+      //
+      // ACHTUNG bei künftigen Aufräumarbeiten: Diese Untergrenze fängt eine
+      // DOPPEL-Abbuchung des Übertrags NICHT (die Differenz wäre dann noch
+      // größer und die Assertion weiterhin grün). Dafür ist ausschließlich der
+      // Test darunter zuständig — er ist NICHT redundant.
       expect(availBefore).toBeGreaterThan(availAfter);
-      expect(availBefore - availAfter).toBeGreaterThanOrEqual(50000 - 13100);
+      expect(availBefore - availAfter).toBeGreaterThanOrEqual(CARRYOVER_CENTS - MONTHLY_45B_CENTS);
+    });
+
+    it("Die Verfalls-Abschreibung belastet den laufenden Topf NICHT zusätzlich", async () => {
+      // ERSETZT das frühere `DELETE FROM budget_transactions … write_off` in den
+      // beiden Tests unten. Das war ein Hard-Delete auf dem append-only
+      // Finanz-Ledger und lief seit der GoBD-Sperre
+      // (`budget_transactions_prevent_delete`) in eine Exception.
+      //
+      // Es war auch fachlich überholt: Seit #1306/#1340 rechnet
+      // `getExcluded45bConsumption` den Verbrauch gegen eine aus `Allocated`
+      // herausgefallene Allocation SYMMETRISCH heraus. Die auf den 01.07.
+      // datierte Verfalls-Buchung darf den laufenden Topf also gar nicht mehr
+      // belasten — genau das prüfen wir hier, statt die Zeile wegzuräumen.
+      const afterSum = (await getAvailableForDate(scenario.customerId, afterExpiry)).total45b;
+
+      const writeOffs = await db.select()
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.customerId, scenario.customerId),
+          eq(budgetTransactions.transactionType, "write_off"),
+        ));
+
+      // REICHWEITE — bewusst benannt, damit die Lücke nicht als abgedeckt gilt:
+      // Der Verfall wird erst materialisiert, wenn die Frist REAL abgelaufen ist
+      // (`processExpiredCarryover` liest `todayISO()`, nicht den Stichtag).
+      // Läuft der Test im H1 des Zieljahres, existiert noch gar keine
+      // Write-Off-Zeile — dann ist hier nichts zu entlasten und die Assertion
+      // unten ist trivial erfüllt. Der Test greift also nur bei Läufen ab dem
+      // 01.07.; siehe `FINDING` im PR-Body. Deterministisch schließen lässt sich
+      // das hier nicht: ein Übertrag aus einem FRÜHEREN Jahr würde durch
+      // `floorAutoAnchor45bToCurrentYear` die Monats-Aufstockungen auf 0 boden
+      // und die Assertion damit genauso trivial machen.
+      if (writeOffs.length === 0) return;
+
+      expect(writeOffs).toHaveLength(1);
+      expect(writeOffs[0].amountCents).toBe(-CARRYOVER_CENTS);
+      // Die Zeile liegt im Fenster (`transactionDate <= afterExpiry`) und
+      // würde ohne die symmetrische Exklusion ein zweites Mal abgezogen.
+      expect(writeOffs[0].transactionDate <= afterExpiry).toBe(true);
+
+      // Der Übertrag ist GENAU EINMAL weg — die Verfügbarkeit nach dem Verfall
+      // besteht nur noch aus ganzen Monats-Aufstockungen, ohne einen zweiten
+      // Abzug in Höhe des Übertrags. Trägt nur, solange überhaupt Monats-
+      // Aufstockungen angefallen sind (`afterSum > 0`); am 01.01. bodet der
+      // Anker sie auf 0 und der Rest-Test wäre wieder aussagelos.
+      expect(afterSum).toBeGreaterThanOrEqual(0);
+      if (afterSum > 0) {
+        expect(afterSum % MONTHLY_45B_CENTS).toBe(0);
+      }
     });
 
     it("Cost-Estimate respektiert das übergebene `?date=` (selbe Quelle wie Buchung)", async () => {
-      await db.execute(sql`
-        DELETE FROM budget_transactions
-        WHERE customer_id = ${scenario.customerId}
-          AND transaction_type = 'write_off'
-          AND notes LIKE 'Verfallenes Guthaben%'
-      `);
-
       const beforeRes = await apiGet<any>(
         `/api/budget/${scenario.customerId}/cost-estimate?date=${beforeExpiry}` +
         `&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`,
