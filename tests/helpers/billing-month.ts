@@ -141,3 +141,59 @@ export function snapToWeekday(iso: string, direction: "forward" | "backward" = "
   }
   throw new Error(`snapToWeekday: kein Werktag in Reichweite von ${iso}`);
 }
+
+/**
+ * Anker für §45b-CARRYOVER-Szenarien.
+ *
+ * ERSETZT die hartkodierten Jahreszahlen in den Übertrags-Fixtures
+ * (`carryover: { year: 2025 }`, `expiresAt === "2026-06-30"`) und das implizite
+ * „heute" als Stichtag.
+ *
+ * Das Problem: Ein §45b-Übertrag aus Jahr Y gilt im Folgejahr und verfällt
+ * strikt am 30.06. (SGB XI §45b Abs. 3, siehe CLAUDE.md). Fixtures, die einen
+ * Vorjahres-Übertrag seeden und ihn dann gegen „heute" lesen, unterstellen
+ * damit stillschweigend das ERSTE HALBJAHR. Ab dem 01.07. ist der Übertrag
+ * korrekt verfallen, die Tests kippen auf rot — ohne dass sich eine Zeile
+ * Produktivcode geändert hätte.
+ *
+ * DIE FRIST SELBST WIRD NICHT ANGEFASST. Dieser Helfer verschiebt weder den
+ * 30.06. noch weicht er eine Assertion auf: er liefert das Jahrespaar relativ
+ * zum Lauf und einen Stichtag, an dem der Übertrag nachweislich noch gilt.
+ * `expiresAt` bleibt exakt der 30.06. des Zieljahres und gehört weiter
+ * assertiert — nur eben relativ statt als Literal.
+ *
+ * Der Stichtag ist immer VERGANGEN (damit Termine dokumentierbar sind) und
+ * liegt immer im H1 des Zieljahres. Läuft der Test in den ersten Januartagen,
+ * gibt es kein solches Datum im laufenden Jahr — dann rückt das Zieljahr um
+ * eins zurück, analog zu {@link billingReferenceDate}.
+ */
+export function carryoverAnchor(now: Date = new Date()): {
+  /** Jahr, AUS dem der Übertrag stammt (Seed: `carryover.year`). */
+  sourceYear: number;
+  /** Jahr, IN dem der Übertrag gilt. */
+  targetYear: number;
+  /** Verfallsdatum des Übertrags — der 30.06. des Zieljahres. */
+  expiresAt: string;
+  /** Stichtag im H1 des Zieljahres, garantiert in der Vergangenheit. */
+  asOf: string;
+} {
+  // Spätester unbedenklicher Punkt im H1: Mitte Juni, klar vor der Grenze.
+  const preferred = (y: number) => new Date(y, 5, 15);
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+
+  let targetYear = now.getFullYear();
+  let asOfDate = preferred(targetYear) <= yesterday ? preferred(targetYear) : yesterday;
+
+  // Zu früh im Jahr: kein vergangener Tag im H1 des laufenden Jahres.
+  if (asOfDate < new Date(targetYear, 0, 1)) {
+    targetYear -= 1;
+    asOfDate = preferred(targetYear);
+  }
+
+  return {
+    sourceYear: targetYear - 1,
+    targetYear,
+    expiresAt: `${targetYear}-06-30`,
+    asOf: snapToWeekday(ymd(asOfDate), "backward"),
+  };
+}
