@@ -19,9 +19,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { db } from "../../server/lib/db";
 import { appointments, appointmentServices, budgetAllocations, budgetTransactions } from "@shared/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 import { getAvailableForDate } from "../../server/storage/budget/import-availability";
+import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { apiGet, getAuthCookie, runCleanup } from "../test-utils";
 import {
@@ -86,6 +87,15 @@ async function makeAppt(customerId: number, employeeId: number, date: string) {
  * zeitzonen-neutral. Richtung bewusst gegenläufig: der Vormonats-Termin wird
  * rückwärts gezogen, der Folgemonats-Termin vorwärts — beide bleiben so sicher
  * im gemeinten Monat.
+ *
+ * Der Offset zählt ab dem ANKER, nicht ab „heute": fällt der Anker am
+ * Monatsanfang in den Vormonat zurück, meint `-1` den Vor-Vormonat und `+1`
+ * den laufenden Monat — der Describe-Titel „(b) Vormonat" ist dann streng
+ * genommen einen Monat zu optimistisch. Die Richtungs-Garantie bleibt in beiden
+ * Lagen erhalten (`-1` immer Vergangenheit, `+1` immer Zukunft), weil der
+ * Rückfall nur greift, solange der laufende Monat < 5 vergangene Werktage hat —
+ * also längstens bis zum 6.; der 15. des laufenden Monats liegt dann sicher
+ * voraus.
  */
 function weekdayNearMonthMiddle(monthOffset: number): string {
   const ref = billingReferenceMonth().reference;
@@ -250,7 +260,11 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
     // nur nicht mehr als Literal `2026-06-30`.
     const { sourceYear, targetYear, expiresAt } = carryoverAnchor();
     const CARRYOVER_CENTS = 50_000;
-    const MONTHLY_45B_CENTS = 13_100;
+    // SSoT statt Literal: an dieser Zahl hängt unten eine Modulo-Assertion.
+    // Der Szenario-Topf hat `monthlyLimitCents: null` → die Monatsaufstockung
+    // ist `DEFAULT_MONTHLY_BUDGET_CENTS`, und das IST diese Konstante
+    // (`allocation-storage.ts` aliast sie).
+    const MONTHLY_45B_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
     // Die beiden Stichtage liegen bewusst GENAU EINEN Monat auseinander und
     // klammern den 30.06. ein. Nur dadurch trennt sie höchstens EINE
     // Monatsaufstockung — die Untergrenze unten (`Übertrag − 1 Monatsrate`)
@@ -292,11 +306,15 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
       // des Zieljahres Y auf die Frist des Jahres 2026 gezogen hätte. Die Frist
       // kommt aus der Produktivlogik (`carryoverWindowFor`); der Test PRÜFT sie
       // jetzt, statt sie zu setzen.
+      // `isNull(deletedAt)` wie der Produktivpfad (`budgetAllocationsRepo`):
+      // `upsertCarryoverAllocation` kann Zeilen soft-löschen und wiederbeleben,
+      // ein Grabstein würde `toHaveLength(1)` sonst mitzählen.
       const rows = await db.select()
         .from(budgetAllocations)
         .where(and(
           eq(budgetAllocations.customerId, scenario.customerId),
           eq(budgetAllocations.source, "carryover"),
+          isNull(budgetAllocations.deletedAt),
         ));
       expect(rows).toHaveLength(1);
       expect(rows[0].expiresAt).toBe(expiresAt);
@@ -314,6 +332,11 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
       // → Differenz muss MINDESTENS die Carryover-Höhe minus eine Monatsrate
       //   sein. (Wir prüfen das robust über "vorher > nachher" plus eine
       //   absolute Untergrenze der Carryover-Beträge.)
+      //
+      // ACHTUNG bei künftigen Aufräumarbeiten: Diese Untergrenze fängt eine
+      // DOPPEL-Abbuchung des Übertrags NICHT (die Differenz wäre dann noch
+      // größer und die Assertion weiterhin grün). Dafür ist ausschließlich der
+      // Test darunter zuständig — er ist NICHT redundant.
       expect(availBefore).toBeGreaterThan(availAfter);
       expect(availBefore - availAfter).toBeGreaterThanOrEqual(CARRYOVER_CENTS - MONTHLY_45B_CENTS);
     });
@@ -338,22 +361,33 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
           eq(budgetTransactions.transactionType, "write_off"),
         ));
 
-      // Der Verfall wird erst materialisiert, wenn die Frist real abgelaufen ist
-      // (`processExpiredCarryover` liest `todayISO()`). Läuft der Test im H1,
-      // gibt es noch keine Zeile — dann ist nichts zu entlasten.
-      if (writeOffs.length > 0) {
-        expect(writeOffs).toHaveLength(1);
-        expect(writeOffs[0].amountCents).toBe(-CARRYOVER_CENTS);
-        // Die Zeile liegt im Fenster (`transactionDate <= afterExpiry`) und
-        // würde ohne die symmetrische Exklusion ein zweites Mal abgezogen.
-        expect(writeOffs[0].transactionDate <= afterExpiry).toBe(true);
-      }
+      // REICHWEITE — bewusst benannt, damit die Lücke nicht als abgedeckt gilt:
+      // Der Verfall wird erst materialisiert, wenn die Frist REAL abgelaufen ist
+      // (`processExpiredCarryover` liest `todayISO()`, nicht den Stichtag).
+      // Läuft der Test im H1 des Zieljahres, existiert noch gar keine
+      // Write-Off-Zeile — dann ist hier nichts zu entlasten und die Assertion
+      // unten ist trivial erfüllt. Der Test greift also nur bei Läufen ab dem
+      // 01.07.; siehe `FINDING` im PR-Body. Deterministisch schließen lässt sich
+      // das hier nicht: ein Übertrag aus einem FRÜHEREN Jahr würde durch
+      // `floorAutoAnchor45bToCurrentYear` die Monats-Aufstockungen auf 0 boden
+      // und die Assertion damit genauso trivial machen.
+      if (writeOffs.length === 0) return;
 
-      // Kern-Assertion: Der Übertrag ist GENAU EINMAL weg — die Verfügbarkeit
-      // nach dem Verfall besteht nur noch aus den Monats-Aufstockungen, ohne
-      // einen zweiten Abzug in Höhe des Übertrags.
+      expect(writeOffs).toHaveLength(1);
+      expect(writeOffs[0].amountCents).toBe(-CARRYOVER_CENTS);
+      // Die Zeile liegt im Fenster (`transactionDate <= afterExpiry`) und
+      // würde ohne die symmetrische Exklusion ein zweites Mal abgezogen.
+      expect(writeOffs[0].transactionDate <= afterExpiry).toBe(true);
+
+      // Der Übertrag ist GENAU EINMAL weg — die Verfügbarkeit nach dem Verfall
+      // besteht nur noch aus ganzen Monats-Aufstockungen, ohne einen zweiten
+      // Abzug in Höhe des Übertrags. Trägt nur, solange überhaupt Monats-
+      // Aufstockungen angefallen sind (`afterSum > 0`); am 01.01. bodet der
+      // Anker sie auf 0 und der Rest-Test wäre wieder aussagelos.
       expect(afterSum).toBeGreaterThanOrEqual(0);
-      expect(afterSum % MONTHLY_45B_CENTS).toBe(0);
+      if (afterSum > 0) {
+        expect(afterSum % MONTHLY_45B_CENTS).toBe(0);
+      }
     });
 
     it("Cost-Estimate respektiert das übergebene `?date=` (selbe Quelle wie Buchung)", async () => {
