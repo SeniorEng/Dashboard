@@ -464,7 +464,11 @@ describe("Task #1372 — Leistungsnachweis-Layout (Single + Multi vereinheitlich
     expect(countOccurrences(html, "LEISTUNGSNACHWEIS")).toBe(2);
     // Beide LN-Typen als Untertitel.
     expect(html).toContain("Einzeltermin-Leistungsnachweis");
-    expect(html).toContain("Monatlicher Leistungsnachweis");
+    // Task #1542 hat den Auto-Monats-LN durch den On-Demand-Sammel-LN
+    // ersetzt; das Label heisst seither „Sammel-Leistungsnachweis" (der
+    // `record_type` bleibt aus GoBD-Gruenden `monthly`). Der Renderer wurde in
+    // `80ae2cce` umbenannt, dieser Test nicht mitgezogen.
+    expect(html).toContain("Sammel-Leistungsnachweis");
   });
 
   it("Einheitlicher Kopf: Untertitel (LN-Typ) + Versicherung inkl. Kassen-IK in BEIDEN Branches", () => {
@@ -474,7 +478,7 @@ describe("Task #1372 — Leistungsnachweis-Layout (Single + Multi vereinheitlich
       insuranceIkNummer: "107299005",
     }));
     expect(single).toContain("AOK PLUS (IK: 107299005)");
-    expect(single).toContain("Monatlicher Leistungsnachweis");
+    expect(single).toContain("Sammel-Leistungsnachweis");
 
     const multi = generateLeistungsnachweisHtml(buildPdfData({
       billingType: "pflegekasse_privat",
