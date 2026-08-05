@@ -358,12 +358,30 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
       // Hält die beiden Negativfälle unten ehrlich. Ohne diese Gegenprobe wären
       // sie auch dann grün, wenn `requireCustomerAccess` regulären Mitarbeitern
       // pauschal ALLES verböte — die 403 sagte dann nichts mehr über „fremd"
-      // aus. employeeA ist customerA primär zugeordnet (siehe `beforeAll`).
+      // aus. employeeA ist customerA primär zugeordnet (`beforeAll`) UND bleibt
+      // es: der Zuordnungs-Test oben setzt `primaryEmployeeId: employeeA`. Wer
+      // ihn auf employeeB umstellt, bricht diese Gegenprobe.
       const res = await apiPatchAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerA}`, {
         telefon: "+4917677777777",
       });
       expect(res.status).toBe(200);
       expect(res.data.telefon).toBe("+4917677777777");
+    });
+
+    it("Gegenprobe: regulärer Mitarbeiter DARF einen Kontakt bei seinem eigenen Kunden anlegen", async () => {
+      // Dasselbe Argument wie oben, aber für den Kontakt-Pfad: ohne diese
+      // Positivprobe bliebe der Kontakt-Negativfall unten auch dann grün, wenn
+      // `POST /contacts` für reguläre Mitarbeiter komplett bräche (z.B. durch
+      // ein verschärftes `insertCustomerContactSchema`) — die 403 wäre dann
+      // keine Aussage über „fremd" mehr.
+      const res = await apiPostAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerA}/contacts`, {
+        vorname: "Test",
+        nachname: "EigenerKunde",
+        contactType: "kind",
+        mobilnummer: "+4917600000001",
+      });
+      expect(res.status).toBe(201);
+      expect(res.data.nachname).toBe("EigenerKunde");
     });
 
     it("regulärer Mitarbeiter darf KEINE Stammdaten eines fremden Kunden ändern", async () => {
@@ -390,6 +408,28 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
         mobilnummer: "+4917600000000",
       });
       expect(res.status).toBe(403);
+    });
+
+    it("Charakterisierung: ein Termin ERZEUGT Schreibrecht auf den Kunden (aktueller Stand, siehe FINDING P2)", async () => {
+      // Diese Probe hält fest, was die Entkopplung auf `customerC` sonst
+      // unbewacht ließe — die fachlich interessantere Hälfte des Befunds.
+      //
+      // `getAssignedCustomerIds` (`server/storage/customers-storage.ts:191-202`)
+      // zählt Termin-Zugriff als Zuordnung, und dieselbe Menge speist BEIDE
+      // Gates: `requireCustomerAccess` (Schreiben) und
+      // `requireCustomerReadAccess` (Lesen, `server/lib/params.ts:54-80`). Ein
+      // einziger Termin verschafft employeeA damit Schreibrecht auf die
+      // Stammdaten von `customerB` — den er sonst nicht anfassen dürfte.
+      //
+      // KEINE Billigung, sondern eine Fixierung des Ist-Standes: Ohne sie würde
+      // eine spätere Verschärfung von `getAssignedCustomerIds` (genau das legt
+      // der FINDING nahe) still durchgehen, weil kein Test mehr hinsieht.
+      // Schlägt dieser Test fehl, wurde das Berechtigungsmodell geändert — dann
+      // gehört die Entscheidung dokumentiert, nicht der Test angepasst.
+      const res = await apiPatchAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerB}`, {
+        telefon: "+4917655555555",
+      });
+      expect(res.status).toBe(200);
     });
   });
 });
