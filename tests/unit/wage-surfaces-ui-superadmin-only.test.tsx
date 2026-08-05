@@ -198,7 +198,22 @@ vi.mock("@/components/layout", () => ({
   Layout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("@/features/billing", () => ({
+// Der Mock ERSETZT das ganze Barrel `@/features/billing`. Jeder Laufzeit-Export,
+// den `pages/admin/billing.tsx` importiert, muss deshalb hier auftauchen —
+// fehlt einer, bricht der Test mit „No <name> export is defined on the mock".
+// Genau so ist er hinter dem Modul hergehinkt: `useSelection` (#1888),
+// `useMissingSignaturesByCustomer` und `Reduce45bDialog` kamen dazu, der Mock
+// nicht. Reine `type`-Importe (`BillingStatusFilter`, `PipelineStageSelection`)
+// brauchen keinen Eintrag, die sind zur Laufzeit weg.
+vi.mock("@/features/billing", async () => ({
+  // `useSelection` ist reine Auswahl-State-Logik ohne I/O (`hooks/use-selection.ts`).
+  // Deshalb der ECHTE Hook statt eines Nachbaus: ein nachgebauter Mock müsste bei
+  // jeder Änderung der Selection-API mitgezogen werden — und würde es wieder nicht.
+  ...(await vi.importActual<typeof import("@/features/billing/hooks/use-selection")>(
+    "@/features/billing/hooks/use-selection",
+  )),
+  useMissingSignaturesByCustomer: emptyList,
+  Reduce45bDialog: stub,
   useBillingInvoices: emptyList,
   useEligibleCustomers: emptyList,
   useInvoicePreview: noop,
@@ -235,7 +250,6 @@ vi.mock("@/features/billing", () => ({
   EconomicsOverviewCard: () => <div data-testid="stub-economics-card">Wirtschaftlicher Überblick</div>,
   StatusPipelineCard: stub,
   TermineTab: stub,
-  MissingSignaturesCard: stub,
   InvoiceList: stub,
   PendingInvoicesCard: stub,
   BulkSendDialog: stub,
