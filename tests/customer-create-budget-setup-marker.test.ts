@@ -160,12 +160,22 @@ describe("Task #724 — Customer-Create Budget-Setup-Marker", () => {
   // `false`, und `REQUIRED_STATUTORY_BUDGET_TYPES` wäre serverseitig ungetestet.
   //
   // Warum über den REPLAY und nicht über die Anlage: seit #1828 ist §45b für
-  // jeden Nicht-Selbstzahler default-aktiv, und der Anlage-Pfad schreibt
-  // ausschliesslich `enabled:true`-Zeilen. Ein frisch angelegter Kunde HAT
-  // damit immer einen aktiven Topf — `true` ist auf dem 201-Pfad per
-  // Konstruktion unerreichbar. Erreichbar ist der Zustand nur, indem §45b
-  // ausdrücklich abgeschaltet wird (offene `enabled=false`-Zeile), und der
-  // Replay liest den IST-Zustand.
+  // jeden Nicht-Selbstzahler default-aktiv. Der Anlage-Pfad schreibt entweder
+  // `enabled:true`-Zeilen (nur bei Betrag > 0) ODER — wie hier — gar keine;
+  // eine `enabled=false`-Zeile kann dort nicht entstehen. Ein frisch angelegter
+  // Kunde HAT damit immer einen aktiven Topf, hier über den DEFAULT und nicht
+  // über eine geschriebene Zeile — `true` ist auf dem 201-Pfad per Konstruktion
+  // unerreichbar. Erreichbar ist der Zustand nur durch ausdrückliches
+  // Abschalten, und der Replay liest den IST-Zustand.
+  //
+  // BEWUSST NICHT ABGEDECKT: der Transitions-Schreibpfad. Weil dieser Kunde
+  // Sekunden alt ist und noch keine persistierte Zeile hat, nimmt
+  // `upsertBudgetTypeSettings` den Erstanlage-Zweig (`validFrom = NULL`). Bei
+  // einem BESTANDSKUNDEN greift stattdessen der Transitions-Zweig: die alte
+  // Zeile wird auf `validTo = heute` geschlossen, die neue deaktivierte bekommt
+  // `validFrom = morgen`. `hasActiveBudgetPot` wertet `validFrom` nicht aus und
+  // meldet dann schon heute `true`, obwohl der Topf heute fensterlogisch noch
+  // wirksam ist. Das ist als FINDING [P3] am PR vermerkt, nicht hier gefixt.
   it("Replay NACH Abschalten aller Töpfe → budgetSetupRequired=true (der true-Zweig)", async () => {
     const auth = await getAuthCookie();
     const idempotencyKey = "task1828-truebranch-" + uniqueId();

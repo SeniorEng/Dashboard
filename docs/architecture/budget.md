@@ -138,7 +138,7 @@ In Phase 1.1 wird diese Regel in einen Shared-Validator (`shared/domain/budget/s
 
 `POST /api/admin/customers` legt KEINE Budget-Töpfe automatisch an, wenn der Anlage-Payload keinen `budgets`-Block enthält — auch nicht für Pflegekasse-Kunden ab Pflegegrad 2. Die Initialisierung von §45b / §45a / §39-§42a bleibt Aufgabe der nachgelagerten Endpunkte `POST /api/budget/:customerId/initial-budget` und `PUT /api/budget/:customerId/type-settings`.
 
-Damit API-Konsumenten (Wizard, Import-Skripte, Drittsysteme) das nicht lautlos übersehen, beantwortet der Server jede erfolgreiche Anlage mit zwei strukturierten Marker-Feldern (`CreateCustomerResponse` in `shared/api/customers.ts`):
+Damit API-Konsumenten (Wizard, Import-Skripte, Drittsysteme) das nicht lautlos übersehen, beantwortet der Server jede erfolgreiche Anlage mit zwei strukturierten Marker-Feldern. Sie werden im Route-Handler zusammengesetzt (`computeBudgetSetupMarkers`, `server/routes/admin/customers.ts`) und sind **nicht** in `shared/api/` typisiert — ein `CreateCustomerResponse`-Typ existiert nicht, und `shared/api/customers.ts` kennt nur das davon verschiedene Listen-Feld `budgetSetupMissing`:
 
 | Feld | Bedeutung |
 |---|---|
@@ -156,11 +156,14 @@ angelegter Pflegekassen-Kunde hat damit immer einen aktiven Topf — auf dem
 Anlage-Pfad (201) ist `budgetSetupRequired` deshalb **konstant `false`**. Es gibt
 beim Anlegen schlicht nichts einzurichten.
 
-`true` ist damit nicht tot, aber nur noch über genau einen Zustand erreichbar:
-ein Pflegekassen-Kunde mit einer **offenen `enabled=false`-Zeile für §45b**, also
-einem bewusst per `PUT /api/budget/:customerId/type-settings` abgeschalteten
-Topf. Sichtbar wird das über den Replay-Pfad (unten) oder die Kundenakte, nicht
-über die Erstanlage.
+`true` ist damit nicht tot, aber nur noch erreichbar, wenn **kein einziger** Topf
+aktiv ist: `hasActiveBudgetPot` ist ein ODER über alle drei. Praktisch heißt das
+ein Pflegekassen-Kunde mit einer **offenen `enabled=false`-Zeile für §45b** —
+*und* ohne aktivierten §45a/§39-§42a. Ist etwa §45a per offener
+`enabled=true`-Zeile aktiv, bleibt der Marker `false`, auch wenn §45b
+abgeschaltet ist. Erzeugt wird dieser Zustand nur über
+`PUT /api/budget/:customerId/type-settings`; sichtbar wird er über den
+Replay-Pfad (unten) oder die Kundenakte, nicht über die Erstanlage.
 
 Beispiel-Responses (gekürzt):
 
@@ -182,13 +185,15 @@ Beispiel-Responses (gekürzt):
   "requiredBudgetTypes": ["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"] }
 ```
 
-**Warum Option B und nicht Auto-Init?** Wizard-Pfad und API-Pfad teilen sich bereits dieselbe Persistenz (`createCustomerRelatedData`), und der Wizard ruft die Init-Endpunkte explizit als Folgeschritt auf. Eine zusätzliche Auto-Init im Route-Handler hätte zwei Schreibpfade in dieselbe statutorische Konfiguration erzeugt (Wizard schreibt mit individuellen Startwerten/Carryover, API mit Defaults), die später in Edge-Cases gegeneinander gelaufen wären. Der Marker hält die Verantwortung bei genau einer Stelle — den expliziten Budget-Init-Endpunkten — und macht die Vertragslücke trotzdem unübersehbar.
+**Warum Option B und nicht Auto-Init?** Wizard-Pfad und API-Pfad teilen sich bereits dieselbe Persistenz (`createCustomerRelatedData`), und der Wizard ruft die Init-Endpunkte explizit als Folgeschritt auf. Eine zusätzliche Auto-Init im Route-Handler hätte zwei Schreibpfade in dieselbe statutorische Konfiguration erzeugt (Wizard schreibt mit individuellen Startwerten/Carryover, API mit Defaults), die später in Edge-Cases gegeneinander gelaufen wären. Der Marker hält die Verantwortung bei genau einer Stelle — den expliziten Budget-Init-Endpunkten.
 
-**Reproducer / Regressionsschutz**: `tests/customer-create-budget-setup-marker.test.ts` deckt alle vier `billingType` × `pflegegrad`-Kombinationen ab (Pflegekasse PG4 mit/ohne `budgets`, Pflegekasse PG1, Selbstzahler), den Idempotency-Replay sowie den **`true`-Zweig** (§45b per `PUT type-settings` abschalten → Replay meldet `budgetSetupRequired: true`).
+> **Diese Begründung ist seit #1828 nur noch halb gültig.** „Macht die Vertragslücke unübersehbar" stimmte, solange der Marker beim Anlegen `true` werden konnte. Seit §45b default-aktiv ist, ist er dort konstant `false` — auf dem Anlage-Pfad zeigt er **nichts** mehr an. Ein Import-Skript, das ihn als Signal „Folge-Calls nötig" liest, wartet auf einen Wert, der nie kommt. Wer dieses Signal braucht, braucht dafür eine eigene, ausdrücklich benannte Frage (etwa „wurde ein `budgets`-Block mitgeschickt?"); der Setup-Marker beantwortet sie nicht mehr.
+
+**Reproducer / Regressionsschutz**: `tests/customer-create-budget-setup-marker.test.ts` deckt fünf Anlage-Fälle ab (Pflegekasse gesetzlich PG4 mit/ohne `budgets`, Pflegekasse privat PG4, Pflegekasse PG1, Selbstzahler), den Idempotency-Replay sowie den **`true`-Zweig** (§45b per `PUT type-settings` abschalten → Replay meldet `budgetSetupRequired: true`).
 
 **Idempotency-Replay**: Ein Retry mit gleichem `Idempotency-Key` liefert `200` mit `{...existing, idempotent: true, budgetSetupRequired, requiredBudgetTypes}`. Erst- und Replay-Antwort nutzen **dieselbe** Funktion `computeBudgetSetupMarkers` und damit dieselbe Grundlage: den aktuellen DB-Zustand (`customer_budget_type_settings` mit `validTo IS NULL`), nicht den ursprünglichen Payload. Ändert ein Caller die Topf-Konfiguration zwischen Erstrequest und Retry, kippt der Marker entsprechend mit.
 
-> Bis dahin rechnete der Anlage-Pfad die Regel **inline und in der Vor-#1828-Fassung** nach, während der Replay-Pfad bereits die SSoT nutzte. Derselbe Kunde bekam beim Anlegen `true` und beim unmittelbaren Replay `false` — ein selbstwidersprüchlicher Vertrag. Die Inline-Kopie ist entfernt; beide Pfade rufen jetzt dieselbe Funktion.
+> Vor der #1828-Nachziehung rechnete der Anlage-Pfad die Regel **inline und in der Vor-#1828-Fassung** nach, während der Replay-Pfad bereits die SSoT nutzte. Derselbe Kunde bekam beim Anlegen `true` und beim unmittelbaren Replay `false` — ein selbstwidersprüchlicher Vertrag. Die Inline-Kopie ist entfernt; beide Pfade rufen jetzt dieselbe Funktion.
 
 **Bestandskunden**: `scripts/audit-customers-without-budget-init.ts` (read-only) listet bestehende Pflegekasse-Kunden ab PG 2 ohne aktive Budget-Settings; ein automatischer Backfill ist explizit nicht Teil von #724.
 
