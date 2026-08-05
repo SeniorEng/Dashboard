@@ -11,11 +11,13 @@ import { eq, and, isNull, or, lte, gte, desc, count, notExists, sql } from "driz
 import { todayISO } from "@shared/utils/datetime";
 import {
   dayBeforeISO,
+  firstInsuranceAnchorISO,
+  isIsoDate,
   validateInsuranceWindow,
   validateInsuranceWindows,
   type InsuranceWindow,
 } from "@shared/domain/insurance-period";
-import { db, type DbOrTx } from "../../lib/db";
+import { db, type DbOrTx, type Tx } from "../../lib/db";
 import { badRequest, notFound } from "../../lib/errors";
 
 const insuranceHistoryWithProviderSelect = {
@@ -285,6 +287,35 @@ async function loadInsuranceWindows(
 }
 
 /**
+ * Task #1898 — Serialisiert ALLE schreibenden Zugriffe auf die Fenster-Kette
+ * EINES Kunden. ERSETZT das check-then-write, das sowohl
+ * {@link addCustomerInsurance} als auch {@link updateCustomerInsurance} vorher
+ * ungeschützt fuhren: beide lesen die Fenstermenge, validieren sie und schreiben
+ * danach — zwei überlappende Requests sehen denselben Vorher-Zustand und
+ * schreiben ein Ergebnis, das die Menge als Ganzes nie durchgelassen hätte
+ * (in `add` zusätzlich: ein echter WECHSEL würde als Erstzuordnung
+ * normalisiert statt abgelehnt).
+ *
+ * Beide Pfade nehmen DENSELBEN Schlüssel — ein Lock, den nur eine Seite nimmt,
+ * synchronisiert nichts. Gleiches Muster wie `lockCustomerForBilling`
+ * (`services/invoice-data.ts`).
+ *
+ * Der Parameter ist `Tx`, nicht `DbOrTx` — `server/lib/db.ts` schreibt das für
+ * jeden `pg_advisory_xact_lock`-Nutzer vor, und zwar aus einem harten Grund:
+ * ausserhalb einer Transaktion gibt Postgres den Lock direkt nach dem Statement
+ * wieder frei. Der Aufruf sähe erfolgreich aus, das check-then-write dahinter
+ * wäre aber ungeschützt — ohne Fehler, ohne Log, und ohne Unique-Constraint auf
+ * `(customer_id, valid_from)`, der es auffangen würde. Der Typ ist die einzige
+ * Stelle, an der das auffallen kann; deshalb erzwingen ihn beide Aufrufer weiter
+ * nach oben bis zur Route.
+ */
+async function lockCustomerInsurance(executor: Tx, customerId: number): Promise<void> {
+  await executor.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext('customer_insurance_' || ${customerId}::text))`,
+  );
+}
+
+/**
  * Task #1893 — Kassenwechsel NUR zum Monatsersten.
  *
  * `validFrom` MUSS der 1. eines Monats sein; die Vorgängerzeile wird lückenlos
@@ -295,13 +326,65 @@ async function loadInsuranceWindows(
  *
  * @throws {AppError} 400 mit deutscher Meldung bei unzulässigem Fenster.
  */
-export async function addCustomerInsurance(data: InsertCustomerInsurance, userId?: number, tx?: DbOrTx): Promise<CustomerInsuranceHistory> {
-  const executor = tx ?? db;
+export interface AddCustomerInsuranceOptions {
+  /**
+   * Vertragsbeginn, falls dem Aufrufer bekannt — NUR vom Aufrufer, bewusst kein
+   * DB-Nachschlag. Ein Nachschlag nähme den frühesten Vertrag des Kunden (auch
+   * einen beendeten) und datierte eine Erstzuordnung damit ungefragt um Jahre
+   * zurück. Der Wizard gibt ihn mit, weil er die Versicherung VOR dem Vertrag
+   * schreibt; der Versicherungs-Reiter kennt ihn nicht und bekommt dann den
+   * Monatsersten des angefragten Datums.
+   */
+  contractStartISO?: string | null;
+}
 
-  const windowError = validateInsuranceWindow({ validFrom: data.validFrom, validTo: data.validTo ?? null });
+export async function addCustomerInsurance(
+  data: InsertCustomerInsurance,
+  userId: number,
+  tx: Tx,
+  options?: AddCustomerInsuranceOptions,
+): Promise<CustomerInsuranceHistory> {
+  // `tx` ist Pflicht (siehe `lockCustomerInsurance`) — ohne Transaktion wäre
+  // der Advisory-Lock wirkungslos und die Erstzuordnungs-Erkennung wieder ein
+  // ungeschütztes check-then-write.
+  const executor = tx;
+
+  await lockCustomerInsurance(executor, data.customerId);
+
+  // Task #1898 — Erstzuordnung VOR jeder Mutation feststellen. Nach dem
+  // Vorgaenger-Update unten waere die Menge nicht mehr aussagekraeftig.
+  //
+  // "Keine Zeile" ist eindeutig: `customer_insurance_history` hat kein
+  // `deleted_at` (`shared/schema/insurance.ts`) und es gibt serverseitig keinen
+  // Lösch-Pfad; Anonymisierung und Kunden-Soft-Delete lassen die Zeilen stehen.
+  // Bekaeme die Tabelle je einen Soft-Delete, MUSS diese Pruefung mitziehen —
+  // sonst normalisiert sie einen echten Wechsel still.
+  const existingBefore = await loadInsuranceWindows(data.customerId, executor);
+  const isFirstAssignment = existingBefore.length === 0;
+
+  let validFrom = data.validFrom;
+  // Der Anker laeuft bei JEDER Erstzuordnung mit wohlgeformtem Datum — auch
+  // wenn das angefragte `validFrom` schon ein Monatserster ist. Sonst waere der
+  // Vertragsbeginn nur in dem Zufallsfall wirksam, dass der Aufrufer mitten im
+  // Monat anfragt: ein Wizard-Kunde mit Vertragsbeginn 15.06. und angefragtem
+  // 01.08. bekaeme den 01.08. statt des 01.06. — Juni/Juli stuenden ohne
+  // Kostentraeger da, genau die Luecke, die der Anker verhindern soll. Auf
+  // einem bereits korrekten Wert ist der Aufruf idempotent.
+  //
+  // Nur ein WOHLGEFORMTES Datum wird normalisiert. Ein leeres oder kaputtes
+  // `validFrom` faellt weiterhin in die 400-Meldung von
+  // `validateInsuranceWindow` — es darf nicht durch ein erfundenes Datum
+  // ersetzt werden.
+  if (isFirstAssignment && isIsoDate(validFrom)) {
+    validFrom = firstInsuranceAnchorISO(validFrom, options?.contractStartISO, todayISO());
+  }
+  // Jede WEITERE Zuordnung ist ein Wechsel und bleibt hart auf den
+  // Monatsersten begrenzt — hier wird nichts umgeschrieben.
+
+  const windowError = validateInsuranceWindow({ validFrom, validTo: data.validTo ?? null });
   if (windowError) throw badRequest(windowError);
 
-  const closesAt = dayBeforeISO(data.validFrom);
+  const closesAt = dayBeforeISO(validFrom);
 
   // Vorgänger lückenlos am Tag vor dem neuen `validFrom` schließen. Nur offene
   // Fenster, die VOR dem neuen Start begonnen haben — ein bereits geschlossenes
@@ -318,12 +401,16 @@ export async function addCustomerInsurance(data: InsertCustomerInsurance, userId
   const existing = await loadInsuranceWindows(data.customerId, executor);
   const setError = validateInsuranceWindows([
     ...existing,
-    { validFrom: data.validFrom, validTo: data.validTo ?? null },
+    { validFrom, validTo: data.validTo ?? null },
   ]);
   if (setError) throw badRequest(setError);
 
+  // `validFrom` statt `data.validFrom`: die persistierte Zeile trägt das
+  // normalisierte Datum — und damit auch das Audit, das die zurückgegebene
+  // Zeile protokolliert (`routes/admin/customers/details.ts`).
   const result = await executor.insert(customerInsuranceHistory).values({
     ...data,
+    validFrom,
     createdByUserId: userId,
   }).returning();
 
@@ -341,14 +428,36 @@ export interface UpdateCustomerInsurancePatch {
  * Versichertennummer). Validiert die resultierende Fenster-Menge des Kunden
  * als Ganzes: 01.-Erzwingung, keine Überlappung, keine Lücke, kein Rückwärts.
  *
+ * Hier wird NICHTS normalisiert — auch nicht, wenn die korrigierte Zeile
+ * zufällig die einzige des Kunden ist. Der Anker aus #1898 gilt ausschließlich
+ * für das ANLEGEN einer ersten Zuordnung; eine Korrektur, die den
+ * Monatsersten-Zwang verletzt, bleibt ein 400. Der Lock unten schützt deshalb
+ * nicht die Normalisierung, sondern die Fenster-Menge als Ganzes.
+ *
  * @throws {AppError} 404 wenn die Zeile nicht existiert, 400 bei unzulässigem Fenster.
  */
 export async function updateCustomerInsurance(
   insuranceId: number,
   patch: UpdateCustomerInsurancePatch,
-  tx?: DbOrTx,
+  tx: Tx,
 ): Promise<CustomerInsuranceHistory> {
-  const executor = tx ?? db;
+  // `tx` ist Pflicht — siehe `lockCustomerInsurance`.
+  const executor = tx;
+
+  // Der Lock hängt am Kunden, nicht an der Zeile — die Fenster-Kette ist die
+  // gemeinsame Ressource. Dafür muss der Besitzer VOR dem Lock gelesen werden.
+  // Das ist unkritisch: `customer_id` einer Zuordnung ist unveränderlich (die
+  // Route lässt weder Kunde noch Kasse korrigieren, ein Wechsel ist eine neue
+  // Zeile). Alles, was die Entscheidung trägt — die Zeile selbst und die
+  // Fenstermenge — wird UNTER dem Lock gelesen.
+  const owner = await executor
+    .select({ customerId: customerInsuranceHistory.customerId })
+    .from(customerInsuranceHistory)
+    .where(eq(customerInsuranceHistory.id, insuranceId))
+    .limit(1);
+  if (!owner[0]) throw notFound("Versicherungs-Zuordnung nicht gefunden");
+
+  await lockCustomerInsurance(executor, owner[0].customerId);
 
   const currentRows = await executor
     .select()
