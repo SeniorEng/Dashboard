@@ -31,13 +31,41 @@ function extractInvoiceLineTotals(html: string): number[] {
 }
 
 /**
- * Liest den im „Gesamtbetrag"-Total ausgewiesenen Betrag. Funktioniert für
- * beide Renderer (Rechnung + Leistungsnachweis), da beide das Muster
- * `Gesamtbetrag…:</td><td …>BETRAG €` rendern.
+ * Liest den im „Gesamtbetrag"-Total ausgewiesenen Betrag — **nur aus dem
+ * RECHNUNGS-Renderer**.
+ *
+ * Der Doc-Kommentar behauptete früher, das funktioniere „für beide Renderer".
+ * Das stimmt seit Task #1372 nicht mehr: der Leistungsnachweis hat KEINEN
+ * Gesamtbetrag. Er weist je Abschnitt eine „Summe"-Zeile aus, und die
+ * zusätzliche Gesamtbetrag-Box (Rechnungssumme) ist dort ausdrücklich
+ * entfallen — ein LN ist keine Rechnung. `tests/billing/invoice-pdf-margins`
+ * pinnt dieselbe Zusage von der anderen Seite (`not.toContain("Gesamtbetrag")`).
+ *
+ * Für den LN gibt es deshalb {@link extractLnSectionTotal}.
  */
 function extractGrossTotal(html: string): number {
   const m = html.match(/Gesamtbetrag[^<]*:<\/td>\s*<td[^>]*>\s*([\d.]*\d,\d{2})\s*€/);
-  if (!m) throw new Error("Gesamtbetrag-Zeile nicht gefunden");
+  if (!m) throw new Error("Gesamtbetrag-Zeile nicht gefunden (Rechnungs-Renderer erwartet)");
+  return parseDeEuroToCents(m[1]);
+}
+
+/**
+ * Liest den ausgewiesenen Betrag aus der „Summe"-Zeile des
+ * LEISTUNGSNACHWEIS-Renderers (Task #1372: genau EINE Summenzeile je
+ * LN-Abschnitt, Label „Summe", bei Standard-USt mit Zusatz „(inkl. MwSt.)").
+ *
+ * Anders als im Rechnungs-Renderer steht hier KEIN Doppelpunkt hinter dem
+ * Label, und die Betragszelle trägt ein `style`-Attribut — deshalb ein eigener
+ * Ausdruck statt einer aufgeweichten Variante von {@link extractGrossTotal}.
+ * Ein Muster, das auf beide passt, würde genau den Unterschied verschlucken,
+ * den die beiden Renderer bewusst haben.
+ *
+ * Bei mehreren Abschnitten (Sammel-LN) gibt es mehrere Summenzeilen; diese
+ * Funktion ist für den EINZEL-Abschnitt gedacht und nimmt die erste.
+ */
+function extractLnSectionTotal(html: string): number {
+  const m = html.match(/Summe[^<]*<\/td>\s*<td[^>]*>\s*([\d.]*\d,\d{2})\s*€/);
+  if (!m) throw new Error("Summe-Zeile des Leistungsnachweises nicht gefunden");
   return parseDeEuroToCents(m[1]);
 }
 
@@ -170,9 +198,12 @@ describe("Renderer #1 — Σ(Zeilen) === Gesamtbetrag bei 19 % (Task #997)", () 
     expect(html).not.toContain("Umsatzsteuerbefreit");
   });
 
-  it("Leistungsnachweis: ausgewiesener Gesamtbetrag === 11 ct (single-LN Pfad)", () => {
+  it("Leistungsnachweis: ausgewiesene Summe === 11 ct (single-LN Pfad)", () => {
     const html = generateLeistungsnachweisHtml(standardData);
-    expect(extractGrossTotal(html)).toBe(11);
+    // Der LN weist eine „Summe" aus, keinen „Gesamtbetrag" (Task #1372) —
+    // geprüft wird unverändert derselbe Betrag, nur an der richtigen Zeile.
+    expect(html).not.toContain("Gesamtbetrag");
+    expect(extractLnSectionTotal(html)).toBe(11);
   });
 });
 
@@ -182,6 +213,9 @@ describe("Renderer — Leistungsnachweis steuerbefreit (Task #997)", () => {
     const html = generateLeistungsnachweisHtml(exemptData);
     expect(html).not.toContain("(brutto)");
     expect(html).not.toContain("(inkl. MwSt.)");
-    expect(extractGrossTotal(html)).toBe(100);
+    // Kern der Zusage bleibt: netto === brutto, kein USt-Krümel. Nur die
+    // abgelesene Zeile wechselt vom (im LN nicht existierenden) Gesamtbetrag
+    // auf die Abschnitts-Summe.
+    expect(extractLnSectionTotal(html)).toBe(100);
   });
 });
