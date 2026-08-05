@@ -96,17 +96,28 @@ describe("GenerateAllDialog — „werden erstellt“-Zähler (Task #1780)", () 
     expect(screen.getByTestId("text-generate-all-count").textContent).toBe("4");
   });
 
-  it("readyOnly=false: erstellt alle berechtigten Kunden, überspringt keine", () => {
+  // Task #1783 hat das Verhalten bewusst geändert (Komponente: `a48bb91a`,
+  // nach dem #1780-Test `0f3171dd`): signatur-blockierte Kunden werden
+  // SERVERSEITIG auch dann übersprungen, wenn `readyOnly` aus ist. Der
+  // Vorab-Zähler wurde daran angeglichen, damit Schätzung und Ergebnis
+  // übereinstimmen — vorher versprach der Dialog mehr, als er lieferte.
+  //
+  // Der frühere Titel „überspringt keine" und die Erwartung 4/0 stammen aus der
+  // Zeit davor. `readyOnly` steuert nur noch die OFFENEN TERMINE, nicht mehr
+  // das Unterschrifts-Gate.
+  it("readyOnly=false: nimmt Kunden mit offenen Terminen dazu, blockierte NICHT", () => {
     render(<Harness customers={MIXED} />);
 
     fireEvent.click(screen.getByTestId("checkbox-ready-only"));
 
+    // 3 = die zwei „ready" + der eligible mit offenen Terminen (id 4).
+    // Der signatur-blockierte (id 3) bleibt aussen vor.
     expect(
       screen.getByTestId("text-generate-all-will-create").textContent,
-    ).toBe("4");
+    ).toBe("3");
     expect(
       screen.getByTestId("text-generate-all-will-skip").textContent,
-    ).toBe("0");
+    ).toBe("1");
   });
 
   it("blockierte Kunden ohne offene Termine blähen den Zähler nicht auf", () => {
