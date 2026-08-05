@@ -43,6 +43,21 @@ interface PersonaSetup {
   employeeB: { id: number; email: string; password: string };
   customerA: number;
   customerB: number;
+  /**
+   * Kunde AUSSCHLIESSLICH für die Negativfälle („employeeA darf hier nichts").
+   *
+   * ERSETZT die Doppelnutzung von `customerB` in den beiden
+   * „regulärer Mitarbeiter"-Tests. `customerB` ist dort untauglich geworden:
+   * der grüne Test „Teamleiter darf Termin auch mit nicht-zugeordnetem aktivem
+   * Mitarbeiter anlegen" legt auf `customerB` einen Termin mit employeeA an,
+   * und `getAssignedCustomerIds` (`server/storage/customers-storage.ts:191-202`)
+   * zählt Termin-Zugriff als Zuordnung mit. Ab diesem Punkt ist employeeA für
+   * `customerB` LEGITIM berechtigt — die 200 war korrekt, der Test war es nicht.
+   *
+   * `customerC` ist employeeB zugeordnet und wird von KEINEM Test mit einem
+   * Termin belegt; damit bleibt er für employeeA dauerhaft fremd.
+   */
+  customerC: number;
   serviceId: number;
   testDate: string;
 }
@@ -76,9 +91,11 @@ beforeAll(async () => {
 
   const customerARaw = await createTestCustomer({ nachname: `TLS252_CA_${Date.now()}` });
   const customerBRaw = await createTestCustomer({ nachname: `TLS252_CB_${Date.now()}` });
+  const customerCRaw = await createTestCustomer({ nachname: `TLS252_CC_${Date.now()}` });
   const customerA = customerARaw.id;
   const customerB = customerBRaw.id;
-  createdCustomerIds.push(customerA, customerB);
+  const customerC = customerCRaw.id;
+  createdCustomerIds.push(customerA, customerB, customerC);
 
   await apiPatch(`/api/admin/customers/${customerA}/assign`, {
     primaryEmployeeId: employeeA.id,
@@ -90,6 +107,32 @@ beforeAll(async () => {
     backupEmployeeId: null,
     backupEmployeeId2: null,
   });
+  // customerC gehört employeeB und bleibt termin-frei — siehe `customerC` im
+  // PersonaSetup. Wer hier einen Termin mit employeeA anlegt, hebelt die
+  // beiden Negativfälle still aus.
+  await apiPatch(`/api/admin/customers/${customerC}/assign`, {
+    primaryEmployeeId: employeeB.id,
+    backupEmployeeId: null,
+    backupEmployeeId2: null,
+  });
+
+  // Der Vertrags-Test patcht einen BESTEHENDEN Vertrag; ohne diesen Schritt
+  // antwortet die Route mit 404 („Kein aktiver Vertrag gefunden",
+  // `server/routes/customers.ts:189-190`) — und zwar NACH dem Schreib-Gate,
+  // der Test lief also am Prüfgegenstand vorbei. Vertragsanlage ist Admin-
+  // Sache, läuft daher über die Admin-Route. 409 = es gibt bereits einen
+  // aktiven Vertrag; die Vorbedingung ist dann ebenso erfüllt.
+  const contractRes = await apiPost<any>(`/api/admin/customers/${customerB}/contract`, {
+    contractStart: "2025-01-01",
+    hoursPerPeriod: 4,
+    periodType: "week",
+  });
+  if (![201, 409].includes(contractRes.status)) {
+    throw new Error(
+      `TLS252-Setup: Vertrag für customerB konnte nicht angelegt werden ` +
+        `(status=${contractRes.status}, body=${JSON.stringify(contractRes.data)})`,
+    );
+  }
 
   const services = await apiGet<any[]>("/api/services");
   if (services.status !== 200 || !Array.isArray(services.data) || services.data.length === 0) {
@@ -106,6 +149,7 @@ beforeAll(async () => {
     employeeB,
     customerA,
     customerB,
+    customerC,
     serviceId,
     testDate: nextWeekday(2),
   };
@@ -273,11 +317,15 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
     });
 
     it("Teamleiter darf einen Kontakt eines fremden Kunden anlegen", async () => {
+      // Payload auf `insertCustomerContactSchema` (shared/schema/customers.ts:238):
+      // `contactType` ist Pflicht, Telefon heisst `festnetz`/`mobilnummer`.
+      // `telefon`/`beziehung` gibt es dort nicht — der alte Payload scheiterte
+      // mit 400, also NACH dem Schreib-Gate und damit am Prüfgegenstand vorbei.
       const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/contacts`, {
         vorname: "Test",
         nachname: "Erlaubt",
-        telefon: "+4917600000000",
-        beziehung: "Sohn/Tochter",
+        contactType: "kind",
+        mobilnummer: "+4917600000000",
       });
       expect(res.status).toBe(201);
       expect(res.data.nachname).toBe("Erlaubt");
@@ -306,19 +354,40 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
   });
 
   describe("Reguläre Mitarbeiter bleiben auf zugeordnete Kunden beschränkt", () => {
+    it("Gegenprobe: regulärer Mitarbeiter DARF Stammdaten seines eigenen Kunden ändern", async () => {
+      // Hält die beiden Negativfälle unten ehrlich. Ohne diese Gegenprobe wären
+      // sie auch dann grün, wenn `requireCustomerAccess` regulären Mitarbeitern
+      // pauschal ALLES verböte — die 403 sagte dann nichts mehr über „fremd"
+      // aus. employeeA ist customerA primär zugeordnet (siehe `beforeAll`).
+      const res = await apiPatchAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerA}`, {
+        telefon: "+4917677777777",
+      });
+      expect(res.status).toBe(200);
+      expect(res.data.telefon).toBe("+4917677777777");
+    });
+
     it("regulärer Mitarbeiter darf KEINE Stammdaten eines fremden Kunden ändern", async () => {
-      const res = await apiPatchAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerB}`, {
+      // `customerC` statt `customerB`: siehe `customerC` im PersonaSetup —
+      // auf `customerB` ist employeeA über einen Termin legitim berechtigt.
+      const res = await apiPatchAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerC}`, {
         telefon: "+4917688888888",
       });
       expect(res.status).toBe(403);
     });
 
     it("regulärer Mitarbeiter darf KEINEN Kontakt eines fremden Kunden anlegen", async () => {
-      const res = await apiPostAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerB}/contacts`, {
+      // Payload bewusst GÜLTIG (Schema wie oben) und Kunde bewusst `customerC`.
+      // Vorher deckten sich hier zwei Fehler zu: employeeA war über einen
+      // Termin auf `customerB` berechtigt, und der veraltete Payload lieferte
+      // 400. Die Route prüft `requireCustomerAccess` VOR dem Parsen
+      // (`server/routes/customers/contacts.ts:28-30`) — ein 400 beweist also,
+      // dass das Gate durchgelassen hat. Nur mit gültigem Payload ist die 403
+      // eine echte Aussage über die Berechtigung.
+      const res = await apiPostAs<any>(setup.employeeAAuth, `/api/customers/${setup.customerC}/contacts`, {
         vorname: "Test",
         nachname: "Forbidden",
-        telefon: "+4917600000000",
-        beziehung: "Sohn/Tochter",
+        contactType: "kind",
+        mobilnummer: "+4917600000000",
       });
       expect(res.status).toBe(403);
     });
