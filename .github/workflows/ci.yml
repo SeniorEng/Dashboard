@@ -320,6 +320,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Playwright Chromium
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx playwright install --with-deps chromium
+      - name: Resolve CHROMIUM_PATH for the PDF engine
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: |
+          echo "CHROMIUM_PATH=$(node -e 'console.log(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+          
       - name: Push DB schema (drizzle-kit push)
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx drizzle-kit push --force
