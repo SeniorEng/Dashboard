@@ -17,6 +17,28 @@ import {
 import { validSignatureDataUrl } from "../helpers/valid-signature";
 
 /**
+ * KALENDER-INVARIANTE DIESER DATEI: jeder Test, der einen Termin ANLEGT, nutzt
+ * eine EIGENE Uhrzeit — nicht einen eigenen Tag.
+ *
+ * `getFutureDate` rollt Sa/So auf Montag. Je nach Wochentag des Laufs fallen
+ * dadurch mehrere Offsets auf DENSELBEN Kalendertag. Die Mitarbeiter `empA`/
+ * `empB` sind modulweite Fixtures, ihre Termine sehen sich also gegenseitig.
+ * Am 05.08.2026 kollabierten die Offsets 24, 25 und 26 auf den 31.08.: CV-2.1
+ * bucht `empB` real ein, CV-2.2 wollte dieselbe Kraft zur selben Zeit — 409
+ * statt 201, ohne dass sich am Produktivcode etwas geändert hätte.
+ *
+ * Einen kollisionsfreien Tag zu suchen ist aussichtslos, weil die Gruppierung
+ * mit dem Wochentag wandert. Eine eigene Uhrzeit macht die Datums-Kollision
+ * dagegen folgenlos. Belegte Slots (Zukunft, `getFutureDate`):
+ *
+ *   08:00 CV-1.1 (20) · 09:00 CV-1.2 (21) · 18:00 CV-1.3 (22) · 19:00 CV-1.4 (23)
+ *   11:00 CV-2.1 (24) · 13:00/13:15 CV-2.2 (25) · 14:00 (26) · 15:00+17:00 (27)
+ *   10:00 CV-4 (40) · 12:00 CV-4 (41) · 16:00 (42)
+ *
+ * Wer einen Test ergänzt, nimmt einen FREIEN Slot — nicht einen freien Tag.
+ * (`getPastWeekday`-Termine liegen in der Vergangenheit und kollidieren mit
+ * keinem der obigen.)
+ *
  * Task #1613 — Zwei-Kräfte-Einsatz (Co-Visit).
  *
  * Ein Kundentermin kann mit einem ZWEITEN Mitarbeiter gebucht werden. Es
@@ -66,7 +88,7 @@ describe("CV-1: Zwei-Kräfte-Einsatz Anlage", () => {
     const res = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: customer.id,
       date,
-      scheduledStart: "09:00",
+      scheduledStart: "08:00",
       services: [{ serviceId: service.id, durationMinutes: 60 }],
       assignedEmployeeId: empA!.id,
       secondAssignedEmployeeId: empB!.id,
@@ -115,7 +137,7 @@ describe("CV-1: Zwei-Kräfte-Einsatz Anlage", () => {
     const res = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: customer.id,
       date,
-      scheduledStart: "09:00",
+      scheduledStart: "18:00",
       services: [{ serviceId: service.id, durationMinutes: 60 }],
       assignedEmployeeId: empA!.id,
       secondAssignedEmployeeId: empA!.id,
@@ -135,7 +157,7 @@ describe("CV-1: Zwei-Kräfte-Einsatz Anlage", () => {
     const res = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: customer.id,
       date,
-      scheduledStart: "09:00",
+      scheduledStart: "19:00",
       services: [{ serviceId: service.id, durationMinutes: 60 }],
       assignedEmployeeId: empA!.id,
       secondAssignedEmployeeId: empInactive!.id,
@@ -153,11 +175,11 @@ describe("CV-2: Overlap-Regeln", () => {
     const service = await getAnyService();
     const date = getFutureDate(24);
 
-    // empB hat bereits einen eigenen Termin um 09:00.
+    // empB hat bereits einen eigenen Termin um 11:00.
     const pre = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: otherCustomer.id,
       date,
-      scheduledStart: "09:00",
+      scheduledStart: "11:00",
       services: [{ serviceId: service.id, durationMinutes: 60 }],
       assignedEmployeeId: empB!.id,
     });
@@ -172,7 +194,7 @@ describe("CV-2: Overlap-Regeln", () => {
     const res = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: customer.id,
       date,
-      scheduledStart: "09:00",
+      scheduledStart: "11:00",
       services: [{ serviceId: service.id, durationMinutes: 60 }],
       assignedEmployeeId: empA!.id,
       secondAssignedEmployeeId: empB!.id,
@@ -191,7 +213,7 @@ describe("CV-2: Overlap-Regeln", () => {
     const create = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: customer.id,
       date,
-      scheduledStart: "09:00",
+      scheduledStart: "13:00",
       services: [{ serviceId: service.id, durationMinutes: 60 }],
       assignedEmployeeId: empA!.id,
       secondAssignedEmployeeId: empB!.id,
@@ -202,17 +224,20 @@ describe("CV-2: Overlap-Regeln", () => {
     const legA = list.data.find((a: any) => a.coVisitGroupId === create.data.coVisitGroupId && a.assignedEmployeeId === empA!.id);
     expect(legA).toBeTruthy();
 
-    // Leg A auf 09:15 verschieben — überschneidet weiterhin Leg B (09:00) für
+    // Leg A auf 13:15 verschieben — überschneidet weiterhin Leg B (13:00) für
     // denselben Kunden. Die Co-Visit-Kunden-Ausnahme muss auch hier greifen.
     const patch = await apiPatch<any>(`/api/appointments/${legA.id}`, {
-      scheduledStart: "09:15",
+      scheduledStart: "13:15",
     });
     expect(patch.status).toBe(200);
   });
 });
 
 describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
-  async function createCoVisit(dayOffset: number): Promise<{ customerId: number; groupId: string; legA: any; legB: any; date: string }> {
+  async function createCoVisit(
+    dayOffset: number,
+    scheduledStart: string,
+  ): Promise<{ customerId: number; groupId: string; legA: any; legB: any; date: string }> {
     const customer = await createTestCustomer();
     customerIds.push(customer.id as number);
     await assignEmployeeToCustomer(customer.id as number, empA!.id);
@@ -223,7 +248,7 @@ describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
     const create = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: customer.id,
       date,
-      scheduledStart: "10:00",
+      scheduledStart,
       services: [{ serviceId: service.id, durationMinutes: 60 }],
       assignedEmployeeId: empA!.id,
       secondAssignedEmployeeId: empB!.id,
@@ -240,7 +265,7 @@ describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
   }
 
   it("CV-4.1 – Absage eines Legs sagt den Partner-Leg mit ab (kein halb-abgesagter Einsatz)", async () => {
-    const { groupId, legA, legB, date, customerId } = await createCoVisit(40);
+    const { groupId, legA, legB, date, customerId } = await createCoVisit(40, "10:00");
 
     const patch = await apiPatch<any>(`/api/appointments/${legA.id}`, { status: "cancelled" });
     expect(patch.status).toBe(200);
@@ -259,7 +284,7 @@ describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
   });
 
   it("CV-4.2 – Löschen eines Legs löscht den Partner-Leg mit", async () => {
-    const { legA, legB } = await createCoVisit(41);
+    const { legA, legB } = await createCoVisit(41, "12:00");
 
     const del = await apiDelete(`/api/appointments/${legA.id}`);
     expect(del.status).toBe(200);
@@ -284,7 +309,7 @@ describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
     const create = await apiPost<any>("/api/appointments/kundentermin", {
       customerId: customer.id,
       date,
-      scheduledStart: "10:00",
+      scheduledStart: "16:00",
       services: [{ serviceId: service.id, durationMinutes: 60 }],
       assignedEmployeeId: empA!.id,
     });

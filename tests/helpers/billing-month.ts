@@ -110,3 +110,34 @@ export function pastWeekdayInBillingMonth(now: Date = new Date()): string {
       `Ankertag-Invariante verletzt (siehe billing-month.test.ts)`,
   );
 }
+
+/**
+ * Zieht ein KONKRETES Datum auf den nächsten Werktag (Default vorwärts).
+ *
+ * ERSETZT die hartkodierten Tagesangaben in Budget-Fixtures (`…-01`, `…-15`),
+ * die je nach Monat auf ein Wochenende fallen. Die Termin-Anlage lehnt das
+ * bewusst ab — `server/routes/appointments.ts` antwortet auf Samstag/Sonntag mit
+ * 400 („Termine können nicht auf Samstage oder Sonntage gelegt werden") —, und
+ * die Fixture stirbt dann an einer Produktregel statt an ihrem Prüfgegenstand.
+ * Gesehen im August 2026: der 01. UND der 15. waren beide Samstage.
+ *
+ * Bewusst KEIN „nimm irgendeinen Werktag": das Datum bleibt so nah wie möglich
+ * am gemeinten Tag (max. +2 Tage), damit „Monatsanfang" auch Monatsanfang
+ * bleibt und der Termin im selben Monat wie die Allokation liegt.
+ *
+ * Unterschied zu {@link pastWeekdayInBillingMonth}: die dortige Funktion SUCHT
+ * einen vergangenen Werktag im Abrechnungsmonat; diese hier KORRIGIERT ein
+ * bereits gewähltes Datum. Zwei verschiedene Fragen, deshalb zwei Funktionen.
+ */
+export function snapToWeekday(iso: string, direction: "forward" | "backward" = "forward"): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const cand = new Date(y, m - 1, d);
+  const step = direction === "forward" ? 1 : -1;
+  // Höchstens zwei Schritte nötig: Sa→Mo bzw. So→Fr.
+  for (let i = 0; i < 3; i++) {
+    const dow = cand.getDay();
+    if (dow !== 0 && dow !== 6) return ymd(cand);
+    cand.setDate(cand.getDate() + step);
+  }
+  throw new Error(`snapToWeekday: kein Werktag in Reichweite von ${iso}`);
+}
