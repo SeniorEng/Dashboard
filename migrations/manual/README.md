@@ -23,8 +23,14 @@ handgeführte Hälfte des Schema-Bauplans neben der generierten Baseline.
 | Datei | Quelle | Neu erzeugen |
 |---|---|---|
 | `0001_gobd_triggers.sql` | `server/startup/trigger-registry.ts` | `npx tsx scripts/generate-trigger-migration.ts` |
+| `0002_cutover_cleanup.sql` | handgeschrieben (A3) | — |
 
-**Nicht von Hand bearbeiten.** Die Datei ist eine Projektion der SSoT;
+`0002` entfernt Objekte, die in Prod existieren, aber in keiner Quelle des
+Repos stehen, und gleicht zwei Indizes an `main` an. Was darin steht, ist am
+Prod-Dump gemessen, nicht aus dem Code geschlossen — Begründung im Datei-Kopf
+und in `docs/schema-cutover.md`.
+
+**`0001` nicht von Hand bearbeiten.** Die Datei ist eine Projektion der SSoT;
 `tests/startup/trigger-migration.test.ts` pinnt die Übereinstimmung und prüft
 zusätzlich, dass die Migration objektweise dasselbe baut wie der
 Laufzeit-Renderer.
@@ -41,6 +47,13 @@ Ohne `-1`/`ON_ERROR_STOP` läuft `psql` nach einem Fehler weiter und endet mit
 Exit 0 — die Fail-fast-Zusage der Drop-Blöcke wäre dann wirkungslos. Der
 programmatische Migrator (A3) fährt jede Migration ohnehin in einer Transaktion.
 
-**Stand heute wird diese Datei von nichts automatisch angewendet** — es gibt
-keinen Migrations-Runner (`scripts/migrate.sh` fährt `drizzle-kit push`). Der
-Weg entsteht erst mit A3.
+**Seit A3 gibt es den Runner**: `scripts/migrate-schema.ts` wendet diesen Ordner
+explizit an — nach der journaled Baseline, in lexikalischer Reihenfolge, je in
+einer Transaktion, mit Buchführung in `drizzle.__manual_migrations`.
+
+Das ist kein Detail: `migrations/meta/_journal.json` kennt **nur `0000`**.
+Ein Runner, der bloss drizzles `migrate()` aufruft, überspränge diesen Ordner
+**still** — ohne Fehler, ohne Hinweis. Deshalb der zweite, eigene Schritt.
+
+Noch NICHT umgestellt ist der Deploy: `scripts/migrate.sh` fährt weiter
+`drizzle-kit push`. Ablauf und Stand: `docs/schema-cutover.md`.
