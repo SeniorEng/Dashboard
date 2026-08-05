@@ -398,11 +398,16 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
       if (existing) {
         // Task #724 (Option B) — Markierung auch im Idempotency-Replay
         // konsistent ausliefern. Statt den ursprünglichen Payload neu zu
-        // bewerten, lesen wir den IST-Zustand: wenn der wiederhergestellte
-        // Kunde pflegekassenberechtigt ist (PG ≥ 2) und KEINE aktive
-        // budget_type_settings-Zeile hat, muss der Caller die Töpfe noch
-        // einrichten. Hat er die Einrichtung zwischen Erstrequest und Retry
-        // bereits abgeschlossen, kippt der Marker korrekterweise auf false.
+        // bewerten, lesen wir den IST-Zustand: hat der wiederhergestellte Kunde
+        // keinen aktiven Topf, muss der Caller die Töpfe noch einrichten. Hat
+        // er die Einrichtung zwischen Erstrequest und Retry abgeschlossen,
+        // kippt der Marker korrekterweise auf false.
+        //
+        // Der Kommentar sagte bis eben „pflegekassenberechtigt (PG ≥ 2) und
+        // KEINE aktive Zeile" — die Regel VOR #1828. Die Funktion entscheidet
+        // seither über `hasActiveBudgetPot` und kennt kein Pflegegrad-Gate mehr
+        // (§45b gilt ab PG 1). Für einen PR, der genau diese Drift beseitigt,
+        // darf die letzte Beschreibung davon nicht stehenbleiben.
         const existingMarkers = await computeBudgetSetupMarkers(existing);
         res.status(200).json({ ...existing, idempotent: true, ...existingMarkers });
         return;
@@ -610,24 +615,23 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     throw err;
   }
 
-  // Task #724 (Option B) — Strukturierte Markierung im Response, wenn ein
-  // pflegekassenberechtigter Kunde (Pflegegrad ≥ 2) ohne Budget-Daten
-  // angelegt wird. API-Konsumenten (Imports, Skripte, Drittsysteme) sehen
-  // damit eindeutig, dass die statutorischen Töpfe (§45b/§45a/§39-§42a)
-  // noch über `POST /api/budget/:customerId/initial-budget` + `PUT
-  // /api/budget/:customerId/type-settings` konfiguriert werden müssen.
-  // Der Wizard-Pfad triggert diese Folge-Calls bereits selbst — die
-  // Markierung schadet ihm nicht (Frontend nutzt sie nicht).
-  let budgetSetupRequired = false;
-  let requiredBudgetTypes: string[] = [];
-  if (
-    (data.billingType === "pflegekasse_gesetzlich" || data.billingType === "pflegekasse_privat") &&
-    (data.pflegegrad ?? 0) >= 2 &&
-    !data.budgets
-  ) {
-    budgetSetupRequired = true;
-    requiredBudgetTypes = [...REQUIRED_STATUTORY_BUDGET_TYPES];
-  }
+  // Task #724 (Option B) — Strukturierte Markierung im Response: müssen die
+  // statutorischen Töpfe (§45b/§45a/§39-§42a) noch über
+  // `POST /api/budget/:customerId/initial-budget` + `PUT .../type-settings`
+  // eingerichtet werden? API-Konsumenten (Imports, Skripte, Drittsysteme)
+  // sehen das damit eindeutig. Der Wizard triggert die Folge-Calls selbst —
+  // die Markierung schadet ihm nicht (Frontend nutzt sie nicht).
+  //
+  // ERSETZT die frühere Inline-Regel an dieser Stelle
+  // (`pflegekasse && pflegegrad >= 2 && !data.budgets`). Sie war eine zweite
+  // Antwort auf dieselbe Frage: Task #1828 hat `computeBudgetSetupMarkers` auf
+  // die Aktivierungs-SSoT `hasActiveBudgetPot` umgestellt und dabei das
+  // Pflegegrad-Gate ausdrücklich entfernt (§45b gilt ab PG 1) — diese Kopie
+  // führte es weiter. Folge: derselbe Kunde bekam beim Anlegen (201)
+  // `true` und beim idempotenten Replay (200, `:406`) `false`.
+  //
+  // Der Aufruf steht weiter unten, NACH `finalizeIdempotencyReservation` —
+  // Begründung dort.
 
   birthdaysCache.invalidateAll();
 
@@ -674,6 +678,21 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     _idemFinalized = true;
     _idemReservationToRelease = null;
   }
+
+  // Marker erst HIER — nach dem Commit (liest den IST-Zustand, wie der
+  // Replay-Pfad) UND nach dem Idempotency-Finalize.
+  //
+  // Die Reihenfolge ist nicht kosmetisch: Anders als die frühere Inline-Regel
+  // ist das hier eine DB-Abfrage, also etwas, das werfen kann. Stünde sie vor
+  // dem Finalize und schlüge fehl (DB-Hiccup, Pool erschöpft), gäbe es den
+  // Kunden bereits, der Client sähe 500 — und das `finally` würde die
+  // Idempotency-Reservierung FREIGEBEN. Ein Retry mit demselben Key wäre dann
+  // kein Replay mehr, sondern eine Neuanlage: Doppelkunde.
+  //
+  // Hinter dem Finalize ist derselbe Fehlerfall harmlos: die Reservierung
+  // steht, ein Retry landet im 200-Replay-Pfad (`:406`) und bekommt dort
+  // dieselben Marker aus derselben Funktion.
+  const { budgetSetupRequired, requiredBudgetTypes } = await computeBudgetSetupMarkers(customer);
 
   res.status(201).json({
     ...customer,
