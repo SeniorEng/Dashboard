@@ -338,6 +338,16 @@ jobs:
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx tsx scripts/seed-test-reference-data.ts
 
+      # Task #1901 — Sicherheitsnetz gegen stumme Hänger: beendet eine
+      # Transaktion, die 180s offen ist und NICHTS tut. Sonst hält sie ihren
+      # Advisory-Lock bis zum Job-Timeout. Warum bewusst KEIN lock_timeout:
+      # siehe scripts/lib/test-db-timeouts.ts.
+      # MUSS VOR "Start app server" laufen: ALTER DATABASE ... SET wirkt erst
+      # auf NEUE Verbindungen. Strikt CI-only (bricht sonst mit Exit 1 ab).
+      - name: Apply test-DB timeouts
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx tsx scripts/apply-test-db-timeouts.ts
+
       - name: Start app server
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: |
