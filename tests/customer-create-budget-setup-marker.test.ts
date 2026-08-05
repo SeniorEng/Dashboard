@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { inArray } from "drizzle-orm";
 import { db } from "../server/lib/db";
 import { customers } from "../shared/schema";
-import { apiGet, apiPost, uniqueId, getAuthCookie } from "./test-utils";
+import { apiGet, apiPost, apiPut, uniqueId, getAuthCookie } from "./test-utils";
 
 // Task #724 (BUG-4) / Task #1828 — Vertrag für den Setup-Marker.
 //
@@ -153,6 +153,68 @@ describe("Task #724 — Customer-Create Budget-Setup-Marker", () => {
     expect(replay.data.id).toBe(first.data.id);
     expect(replay.data.budgetSetupRequired).toBe(false);
     expect(replay.data.requiredBudgetTypes).toEqual([]);
+  });
+
+  // Der `true`-ZWEIG. Ohne diesen Test pinnt keine Zeile mehr, dass der Marker
+  // überhaupt jemals anschlägt — alle übrigen Assertions der Datei lauten
+  // `false`, und `REQUIRED_STATUTORY_BUDGET_TYPES` wäre serverseitig ungetestet.
+  //
+  // Warum über den REPLAY und nicht über die Anlage: seit #1828 ist §45b für
+  // jeden Nicht-Selbstzahler default-aktiv, und der Anlage-Pfad schreibt
+  // ausschliesslich `enabled:true`-Zeilen. Ein frisch angelegter Kunde HAT
+  // damit immer einen aktiven Topf — `true` ist auf dem 201-Pfad per
+  // Konstruktion unerreichbar. Erreichbar ist der Zustand nur, indem §45b
+  // ausdrücklich abgeschaltet wird (offene `enabled=false`-Zeile), und der
+  // Replay liest den IST-Zustand.
+  it("Replay NACH Abschalten aller Töpfe → budgetSetupRequired=true (der true-Zweig)", async () => {
+    const auth = await getAuthCookie();
+    const idempotencyKey = "task1828-truebranch-" + uniqueId();
+    const payload = pflegekassePayload(4);
+
+    const post = async () => {
+      const r = await fetch(`${BASE_URL}/api/admin/customers`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`,
+          "x-csrf-token": auth.csrfToken,
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify(payload),
+      });
+      return { status: r.status, data: (await r.json().catch(() => null)) as any };
+    };
+
+    const first = await post();
+    expect(first.status).toBe(201);
+    createdCustomerIds.push(first.data.id);
+    // Ausgangslage: default-aktiver §45b ⇒ kein Setup nötig.
+    expect(first.data.budgetSetupRequired).toBe(false);
+
+    // §45b (und die beiden anderen) ausdrücklich abschalten. Ein reiner
+    // Deaktivier-Payload ist erlaubt — `PUT type-settings` gated nur das
+    // AKTIVIEREN gegen Selbstzahler/Pflegegrad.
+    const disable = await apiPut(`/api/budget/${first.data.id}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: false, monthlyLimitCents: null },
+        { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+    expect(disable.status, `Abschalten: ${JSON.stringify(disable.data)}`).toBe(200);
+
+    // Jetzt hat der Kunde KEINEN aktiven Topf mehr — der Marker muss anschlagen,
+    // und zwar mit der vollständigen Liste der einzurichtenden Typen.
+    const replay = await post();
+    expect(replay.status).toBe(200);
+    expect(replay.data.idempotent).toBe(true);
+    expect(replay.data.id).toBe(first.data.id);
+    expect(replay.data.budgetSetupRequired).toBe(true);
+    expect(replay.data.requiredBudgetTypes).toEqual([
+      "entlastungsbetrag_45b",
+      "umwandlung_45a",
+      "ersatzpflege_39_42a",
+    ]);
   });
 
   it("Selbstzahler ohne budgets → budgetSetupRequired=false (kein Anspruch)", async () => {
