@@ -8,6 +8,7 @@ import {
   type BudgetScenarioHandle,
 } from "../helpers/budget-scenarios";
 import { runInParallel } from "../helpers/race";
+import { snapToWeekday } from "../helpers/billing-month";
 import { createCascadeConsumption } from "../../server/storage/budget/consumption-engine";
 import type { CascadeResult } from "../../server/storage/budget/types";
 
@@ -30,7 +31,11 @@ describe("Race — paralleler Cascade-Consume (Task #494)", () => {
     const today = new Date();
     const monthStr = String(today.getMonth() + 1).padStart(2, "0");
     const budgetStartDate = `${today.getFullYear()}-${monthStr}-01`;
-    const txDate = `${today.getFullYear()}-${monthStr}-15`;
+    // Der 15. kann auf ein Wochenende fallen (im August 2026 ein Samstag) — die
+    // Termin-Anlage lehnt das mit 400 ab, und die Fixture stirbt an einer
+    // Produktregel statt am Prüfgegenstand (dem Advisory-Lock). Auf den nächsten
+    // Werktag ziehen; das bleibt im selben Monat und damit in der Allokation.
+    const txDate = snapToWeekday(`${today.getFullYear()}-${monthStr}-15`);
 
     const ALLOCATION_CENTS = 10_000;
     const N = 50;

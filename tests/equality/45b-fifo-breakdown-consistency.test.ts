@@ -27,6 +27,7 @@
  * Reversal-Zeile), Storno einer Reversal → 400 REVERSAL_NOT_REVERSIBLE.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { snapToWeekday } from "../helpers/billing-month";
 import { getAuthCookie, apiGet, apiPost, runCleanup } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import type { BudgetFifo45bBreakdownDTO } from "@shared/api/budget";
@@ -89,7 +90,13 @@ describe("Task #1129 — §45b FIFO-Aufschlüsselung rekonziliert exakt mit der 
     // Termin-Anker: 1. des laufenden Monats (immer in der Vergangenheit/Gegenwart
     // gegenüber „heute", damit der Konsum den asOfDate-Filter passiert).
     const apptMonth = String(now.getMonth() + 1).padStart(2, "0");
-    const apptDate = `${year}-${apptMonth}-01`;
+    // Der Monatserste kann ein Wochenende sein (im August 2026 ein Samstag) —
+    // die Termin-Anlage antwortet dann mit 400. Auf den nächsten Werktag ziehen
+    // (max. +2 Tage, bleibt im Monat). Rest-Kante: läuft der Test am 1./2. eines
+    // Monats, der am Wochenende beginnt, liegt der Anker nach „heute" — dann
+    // greift der asOfDate-Filter nicht mehr und der Test wird sichtbar rot,
+    // statt still zu driften.
+    const apptDate = snapToWeekday(`${year}-${apptMonth}-01`);
     const asOfDate = apptDate;
 
     handle = await setupBudgetScenario({
@@ -159,7 +166,13 @@ describe("Task #1129 — §45b FIFO-Aufschlüsselung rekonziliert exakt mit der 
     const now = new Date();
     const year = now.getFullYear();
     const apptMonth = String(now.getMonth() + 1).padStart(2, "0");
-    const apptDate = `${year}-${apptMonth}-01`;
+    // Der Monatserste kann ein Wochenende sein (im August 2026 ein Samstag) —
+    // die Termin-Anlage antwortet dann mit 400. Auf den nächsten Werktag ziehen
+    // (max. +2 Tage, bleibt im Monat). Rest-Kante: läuft der Test am 1./2. eines
+    // Monats, der am Wochenende beginnt, liegt der Anker nach „heute" — dann
+    // greift der asOfDate-Filter nicht mehr und der Test wird sichtbar rot,
+    // statt still zu driften.
+    const apptDate = snapToWeekday(`${year}-${apptMonth}-01`);
     const asOfDate = apptDate;
 
     const local = await setupBudgetScenario({
