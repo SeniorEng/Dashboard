@@ -3,6 +3,19 @@
 --
 -- HANDGESCHRIEBEN (anders als `0001_gobd_triggers.sql`, das generiert ist).
 --
+-- +++ DIESE DATEI HAT EIN VERFALLSDATUM +++
+-- Sie beschreibt den Abstand zwischen Prod und `main` am 03.08.2026. NACH dem
+-- vollzogenen Cutover ist sie erledigt und gehört gelöscht — dann hat jede
+-- Datenbank den Zustand, den Baseline + `0001` beschreiben, und diese Datei
+-- beantwortet keine offene Frage mehr.
+--
+-- Bleibt sie liegen, wird aus der Momentaufnahme ein Zweitbegriff: Abschnitt 2
+-- definiert einen Index, der auch im Drizzle-Modell steht. Manual-Dateien
+-- laufen IMMER nach allen journaled Migrationen — eine künftige Folge-Migration,
+-- die denselben Index umdefiniert, würde auf einer frischen DB von dieser Datei
+-- still zurückgedreht, auf einer bestehenden nicht. Genau die Divergenz, die
+-- A3 ausschliessen soll.
+--
 -- WAS HIER STEHT, IST AM PROD-DUMP GEMESSEN, nicht aus dem Code geschlossen:
 -- `~/prod-schema.sql` (03.08.2026, schema-only, `pg_dump --schema=public`).
 -- Read-only geprüft am 05.08.2026:

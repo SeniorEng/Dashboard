@@ -145,6 +145,32 @@ async function ensureDrizzleBookkeeping(client: pg.Client): Promise<void> {
 
 async function stampBaseline(client: pg.Client, dryRun: boolean): Promise<void> {
   const journaled = readMigrationFiles({ migrationsFolder: MIGRATIONS_FOLDER });
+
+  // Der Stempel ist die einzige unumkehrbare Handlung dieses Skripts: er sagt
+  // „diese DB hat den Zustand, den 0000 beschreibt", und legt die Baseline
+  // damit dauerhaft stumm. Auf einer LEEREN DB ist das eine Fehlbedienung mit
+  // üblem Ausgang — die Baseline liefe nie mehr, ein anschliessender
+  // Standard-Lauf meldete Erfolg und baute nichts, und geradeziehen ginge nur
+  // per Hand-DELETE in der Buchführung. Auf Prod wäre das genau der Eingriff,
+  // den CLAUDE.md ausschliesst. Deshalb vorher hinsehen statt unterstellen.
+  const built = await client.query<{ present: string | null }>(
+    `SELECT to_regclass('public.audit_log')::text AS present`,
+  );
+  if (!built.rows[0]?.present) {
+    throw new Error(
+      "--stamp-baseline auf einer Datenbank ohne Schema (public.audit_log fehlt).\n" +
+        "  Stempeln behauptet, die Baseline sei bereits angewendet — hier ist sie es nicht.\n" +
+        "  Für eine leere DB ist der Standard-Modus richtig (ohne --stamp-baseline).",
+    );
+  }
+
+  if (dryRun) {
+    for (const m of journaled) {
+      console.log(`[migrate-schema] DRY-RUN würde stempeln: created_at=${m.folderMillis}`);
+    }
+    return;
+  }
+
   await ensureDrizzleBookkeeping(client);
 
   for (const m of journaled) {
@@ -154,10 +180,6 @@ async function stampBaseline(client: pg.Client, dryRun: boolean): Promise<void> 
     );
     if ((existing.rowCount ?? 0) > 0) {
       console.log(`[migrate-schema] journaled ${m.folderMillis}: bereits gestempelt — übersprungen`);
-      continue;
-    }
-    if (dryRun) {
-      console.log(`[migrate-schema] DRY-RUN würde stempeln: created_at=${m.folderMillis}`);
       continue;
     }
     await client.query(
@@ -171,8 +193,21 @@ async function stampBaseline(client: pg.Client, dryRun: boolean): Promise<void> 
 }
 
 async function applyManual(client: pg.Client, dryRun: boolean): Promise<void> {
-  await ensureBookkeeping(client);
   const manual = readManualMigrations();
+
+  // Im Dry-Run wird NICHTS angelegt — auch keine Buchführung. Vorher lief
+  // `ensureBookkeeping()` bedingungslos: der Probelauf legte Schema und Tabelle
+  // an, während er „es wird nichts geschrieben" meldete. Das ist genau der
+  // Lauf, den CLAUDE.md Gate 4 vor einer Prod-Schreiboperation verlangt — er
+  // darf die Datenbank nicht anfassen.
+  if (dryRun) {
+    for (const m of manual) {
+      console.log(`[migrate-schema] DRY-RUN würde anwenden: manual ${m.name}`);
+    }
+    return;
+  }
+
+  await ensureBookkeeping(client);
 
   for (const m of manual) {
     const prev = await client.query<{ hash: string }>(
@@ -199,11 +234,6 @@ async function applyManual(client: pg.Client, dryRun: boolean): Promise<void> {
           `${BOOKKEEPING_SCHEMA}.${MANUAL_TABLE} löschen und Migrator erneut fahren\n` +
           `  - unbeabsichtigt editiert -> Datei zurücksetzen`,
       );
-    }
-
-    if (dryRun) {
-      console.log(`[migrate-schema] DRY-RUN würde anwenden: manual ${m.name}`);
-      continue;
     }
 
     // Eine Transaktion pro Datei: entweder die Migration ist ganz da oder gar

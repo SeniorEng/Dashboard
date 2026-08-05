@@ -76,11 +76,22 @@ frisch aus der Baseline gebauten Datenbank — ein Textvergleich wäre damit wer
 `--no-owner --no-acl` schneidet Eigentümer und Rechte weg; auf Neon kommen sonst
 `neondb_owner`/`cloud_admin`/`neon_superuser` als Rauschen mit.
 
-Für einen Vergleich müssen beide Seiten zusätzlich normalisiert werden
-(Spaltenreihenfolge in `CREATE TABLE`, Statement-Reihenfolge, `_system`-Schema,
-`COMMENT ON SCHEMA public`, zwei gleichwertige DEFAULT-Schreibweisen). Das
-Normalisierungs-Skript des Konvergenz-Beweises liegt nicht im Repo — es ist
-Beweismittel, kein Betriebsmittel; das Ergebnis steht unten.
+Für einen Vergleich müssen beide Seiten zusätzlich normalisiert werden:
+Spaltenreihenfolge in `CREATE TABLE`, Statement-Reihenfolge, `_system`-Schema,
+`COMMENT ON SCHEMA public`, `CREATE SCHEMA public` (gibt pg_dump 18 aus, 16
+nicht), Rechte (`GRANT`/`REVOKE`/`ALTER DEFAULT PRIVILEGES`) — und **genau zwei**
+DEFAULT-Schreibweisen, die PostgreSQL je nach Entstehungsweg unterschiedlich
+zurückgibt:
+
+| Frisch aus der Baseline | Historisch gewachsen (Prod) | Gleichheit |
+|---|---|---|
+| `qonto_additional_ibans … DEFAULT ARRAY[]::text[]` | `… DEFAULT '{}'::text[]` | `SELECT ARRAY[]::text[] = '{}'::text[]` → `true` |
+| `kilometers numeric(10,3) DEFAULT 0` | `… DEFAULT '0'::numeric` | `SELECT 0::numeric = '0'::numeric` → `true` |
+
+Diese beiden sind der **vollständige** Rest-Unterschied zwischen A und B vor der
+Normalisierung — sie sind hier namentlich genannt, damit „Diff 0" nachrechenbar
+ist statt geglaubt werden zu müssen. Das Normalisierungs-Skript selbst liegt
+nicht im Repo: es ist Beweismittel, kein Betriebsmittel.
 
 ## Konvergenz-Beweis (05.08.2026)
 
