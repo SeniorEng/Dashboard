@@ -29,6 +29,7 @@ import {
   runCleanup,
 } from "../test-utils";
 import { getTotalCarryoverCents } from "../../server/storage/budget/summary-queries";
+import { carryoverAnchor } from "../helpers/billing-month";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -58,8 +59,17 @@ describe("Task #601 — §45b-Carryover wird nicht doppelt gezählt", () => {
     const customerId = customer.id as number;
 
     const carryoverCents = 157_200; // 1.572 € — Wert aus dem Bug-Report
-    const today = new Date();
-    const year = today.getFullYear();
+
+    // Frist-STÖRFAKTOR: Prüfgegenstand ist die Doppelzählung, nicht der Verfall.
+    // Ein §45b-Übertrag für Zieljahr Y gilt aber nur vom 01.01. bis zum 30.06.
+    // dieses Jahres — ab Juli trägt er per Gesetz 0 bei, und BEIDE Pfade unten
+    // lieferten 0 statt 157200 (gemessen). Statt die Erwartungen aufzuweichen,
+    // bekommen sie einen STICHTAG im H1 des Zieljahres.
+    //
+    // Zieljahr kommt aus dem Anker, nicht aus `new Date()`: läuft der Test am
+    // 01.01., rollt `carryoverAnchor` das Zieljahr um eins zurück, und ein aus
+    // „heute" abgeleitetes Jahr würde nicht mehr zum Stichtag passen.
+    const { targetYear: year, asOf } = carryoverAnchor();
     const budgetStartDate = `${year}-01-01`;
 
     // 1) Wizard-Schritt 1: initial-budget mit Carryover
@@ -100,13 +110,16 @@ describe("Task #601 — §45b-Carryover wird nicht doppelt gezählt", () => {
     // 4) Interner Pfad: getTotalCarryoverCents (Lifecycle-Engine-Anker, summiert
     //    alle aktiven Carryover-Allokationen; da hier nur §45b aktiv ist, muss
     //    der Wert exakt dem eingegebenen Betrag entsprechen).
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const internalTotal = await getTotalCarryoverCents(customerId, todayIso);
+    const internalTotal = await getTotalCarryoverCents(customerId, asOf);
     expect(internalTotal).toBe(carryoverCents);
 
-    // 5) Anzeige-Pfad: budget-overview API muss denselben Wert zeigen.
+    // 5) Anzeige-Pfad: budget-overview API muss denselben Wert zeigen — zum
+    //    SELBEN Stichtag wie der interne Pfad oben. `/overview` unterstützt
+    //    `?date=` (Task #911, `parseAsOfDateQuery`); der Test bleibt damit ein
+    //    echter API-Test und muss nicht auf einen In-Process-Reader ausweichen.
+    //    Wichtig ist gerade die Gleichheit BEIDER Pfade — das war der Bug.
     const overviewRes = await apiGet<BudgetOverviewResponse>(
-      `/api/budget/${customerId}/overview`,
+      `/api/budget/${customerId}/overview?date=${asOf}`,
     );
     expect(overviewRes.status).toBe(200);
     expect(overviewRes.data.entlastungsbetrag45b.carryoverCents).toBe(carryoverCents);
