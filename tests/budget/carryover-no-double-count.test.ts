@@ -29,7 +29,6 @@ import {
   runCleanup,
 } from "../test-utils";
 import { getTotalCarryoverCents } from "../../server/storage/budget/summary-queries";
-import { carryoverAnchor } from "../helpers/billing-month";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -64,12 +63,26 @@ describe("Task #601 — §45b-Carryover wird nicht doppelt gezählt", () => {
     // Ein §45b-Übertrag für Zieljahr Y gilt aber nur vom 01.01. bis zum 30.06.
     // dieses Jahres — ab Juli trägt er per Gesetz 0 bei, und BEIDE Pfade unten
     // lieferten 0 statt 157200 (gemessen). Statt die Erwartungen aufzuweichen,
-    // bekommen sie einen STICHTAG im H1 des Zieljahres.
+    // bekommt der Test einen STICHTAG im Gültigkeitsfenster.
     //
-    // Zieljahr kommt aus dem Anker, nicht aus `new Date()`: läuft der Test am
-    // 01.01., rollt `carryoverAnchor` das Zieljahr um eins zurück, und ein aus
-    // „heute" abgeleitetes Jahr würde nicht mehr zum Stichtag passen.
-    const { targetYear: year, asOf } = carryoverAnchor();
+    // Das JAHR muss dabei aus der ECHT-Uhr kommen, NICHT aus `carryoverAnchor()`:
+    // `POST /initial-budget` bodet den §45b-Anker serverseitig auf das laufende
+    // Jahr der Echt-Uhr (`server/services/budget-initial-setup.ts:86-92`,
+    // `floorAutoAnchor45bToCurrentYear`) und leitet daraus `year`, `validFrom`
+    // und `expiresAt` der Carryover-Zeile ab — was der Test als
+    // `budgetStartDate` schickt, ist dafür unerheblich. Ein Anker-Jahr, das am
+    // 01.01. um eins zurückrollt, liefe deshalb gegen die Server-Wahrheit und
+    // machte den Test an genau diesem Tag rot.
+    //
+    // Bewusst auch NICHT `toISOString()`: das rechnet nach UTC um und lieferte
+    // in den frühen Stunden des 01.01. den 31.12. des Vorjahres — dieselbe
+    // Null-Falle, nur von der anderen Seite.
+    const now = new Date();
+    const year = now.getFullYear();
+    const todayLocal = `${year}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    // Im H1 ist „heute" selbst der ehrlichste Stichtag; ab dem 01.07. weichen
+    // wir auf Mitte Juni aus, den spätesten unbedenklichen Punkt im Fenster.
+    const asOf = todayLocal <= `${year}-06-30` ? todayLocal : `${year}-06-15`;
     const budgetStartDate = `${year}-01-01`;
 
     // 1) Wizard-Schritt 1: initial-budget mit Carryover
