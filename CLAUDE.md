@@ -126,8 +126,8 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   entgleisen lassen.
 - **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
   kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
-  Der `tests`-CI-Job ist **bekannt rot** (Stand 06.08.2026, `75e9ba69`:
-  15 Tests / 9 Dateien Altbestand); PRs gegen diese Baseline diffen, nicht
+  Der `tests`-CI-Job ist **bekannt rot** (Stand 06.08.2026, `4166b30a`:
+  12 Tests / 8 Dateien Altbestand); PRs gegen diese Baseline diffen, nicht
   gegen „grün".
 
 ## Arbeitsmodus: autonom bis zur PR, Mensch an 4 Gates
@@ -347,8 +347,8 @@ sudo docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist w
   `npm run test:unblock` oder ein Orchestrator-Start droppen sie, sobald keine
   Verbindung dranhängt — Schema und Seeds des Fallback-Ablaufs sind dann weg.
 - **Lokale Baseline ≠ CI-Baseline, und sie ist datums-fragil.** Voller Lauf am
-  06.08.2026 auf `main` (`75e9ba69`, nach #58): **28 rote Tests / 11 Dateien**
-  von 3837, ~5 min. Aufgeschlüsselt:
+  06.08.2026 auf `main` (`4166b30a`, nach #60): **25 rote Tests / 10 Dateien**
+  von 3838, ~5 min. Aufgeschlüsselt:
   - **Host-Ausstattung — 14 Tests / 2 Dateien**, alle mit
     `ChromiumUnavailableError` (`pdf-generator-resilience` 8,
     `invoice-pdf-margins` 6). Einzeln nachgeprüft; das ist die EINZIGE
@@ -361,16 +361,23 @@ sudo docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist w
     `expirySubjectAnchor` (Frist als Prüfgegenstand), `expiredCarryoverAnchor`
     (bereits verfallen); alle drei per Tages-Sweep über 12–15 Jahre abgesichert.
     Wer eine §45b-Fixture datiert, greift dort zu statt neu zu rechnen.
-  - **Rest — 14 Tests / 9 Dateien**: `billing/billing-flow` 4, `budget-e2e` 3
-    (durch #59 erledigt, dort noch offen), die vier `architecture/*`-Wächter je
-    1, `query-invalidation-discipline` 1,
-    `equality/appointment-series-bulk-rebook` 1, `billing/zugferd-send-failure` 1.
-  Derselbe Commit in **CI: 15 rote Tests / 9 Dateien**. Die Differenz geht in
+  - **Rest — 11 Tests / 8 Dateien**: `billing/billing-flow` 4 (dieser PR
+    entfernt sie), die vier `architecture/*`-Wächter je 1,
+    `query-invalidation-discipline` 1, `equality/appointment-series-bulk-rebook`
+    1, `billing/zugferd-send-failure` 1.
+  Derselbe Commit in **CI: 12 rote Tests / 8 Dateien**. Die Differenz geht in
   BEIDE Richtungen und ist strukturell, nicht zufällig: lokal fehlt Chromium
   (+14 Tests), dafür sind in CI `architecture/bash-gate` (2) und
   `startup/dedupe-pending-monthly-service-records` (1) rot, die lokal grün
   laufen — letzteres ein Kontaminations-Flake, der mit der Worker-Verteilung
   kippt.
+  **Zwei Läufe, zwei Zahlen — auch ohne Kalenderwechsel.** Derselbe Commit lieferte
+  lokal erst 27/12, dann 25/10; die Differenz waren
+  `tests/budget-transactions-immutability.test.ts` (1) und
+  `tests/startup/cleanup-legacy-auto-allocations-migration.test.ts` (2), beide
+  Kontaminations-Flakes der geteilten DB. Eine einzelne Messung reicht für eine
+  Baseline also NICHT — bei Abweichung ein zweites Mal fahren und die stabile
+  Schnittmenge nehmen.
   **Die Zahl gilt für diesen Tag.** Sie steigt und fällt mit der Kalenderlage —
   am 02.08.2026 waren es 37 Dateien / 78 Tests. Bei Zweifel neu auf `main`
   erheben statt fortschreiben, und PRs immer per **same-day-A/B** gegen einen

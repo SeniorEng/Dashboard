@@ -41,7 +41,7 @@ import {
 } from "../test-utils";
 import { db } from "../../server/lib/db";
 import { auditLog } from "@shared/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray } from "drizzle-orm";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testEmployeeId: number;
@@ -1482,8 +1482,44 @@ async function finalizeInvoice(invoiceId: number, target: "versendet" | "bezahlt
   }
 }
 
-/** Zählt Audit-Einträge einer Aktion für eine Menge an Rechnungs-IDs. */
-async function countAuditFor(action: string, invoiceIds: number[]): Promise<number> {
+/**
+ * Höchste vergebene Audit-ID — Marke für „ab hier zählen".
+ *
+ * Direkt VOR der geprüften Aktion aufrufen und an {@link countAuditFor}
+ * durchreichen. Siehe dort, warum das nötig ist.
+ */
+async function latestAuditId(): Promise<number> {
+  const [row] = await db
+    .select({ id: auditLog.id })
+    .from(auditLog)
+    .orderBy(desc(auditLog.id))
+    .limit(1);
+  return row?.id ?? 0;
+}
+
+/**
+ * Zählt Audit-Einträge einer Aktion für eine Menge an Rechnungs-IDs — optional
+ * erst ab der Marke `sinceAuditId`.
+ *
+ * DIE MARKE IST DER PUNKT. Ohne sie zählt die Funktion auch die Audit-Einträge,
+ * die das TEST-SETUP selbst erzeugt hat: `finalizeInvoice` fährt die Rechnung
+ * über `PATCH /api/billing/:id/status`, und dieser Einzelpfad schreibt dieselbe
+ * Aktion `invoice_status_changed` wie der Sammel-Endpunkt
+ * (`server/routes/billing.ts:1687` bzw. `:903`). Eine Erwartung wie „für die
+ * übersprungenen Rechnungen darf es KEIN Audit geben" ist damit nie erfüllbar —
+ * die Rechnung musste ja erst per Statuswechsel in ihren Ausgangszustand
+ * gebracht werden, und genau der ist auditiert.
+ *
+ * Die Aussage, die die Tests treffen wollen, lautet: „DIESE Aktion hat pro
+ * betroffener Zeile genau einen Eintrag geschrieben". Die Marke drückt exakt das
+ * aus, ohne die Erwartung aufzuweichen — und sie hält auch dann, wenn ein
+ * künftiges Setup zusätzliche Statuswechsel fährt.
+ */
+async function countAuditFor(
+  action: string,
+  invoiceIds: number[],
+  sinceAuditId = 0,
+): Promise<number> {
   if (invoiceIds.length === 0) return 0;
   const rows = await db
     .select({ id: auditLog.id })
@@ -1492,6 +1528,7 @@ async function countAuditFor(action: string, invoiceIds: number[]): Promise<numb
       eq(auditLog.action, action),
       eq(auditLog.entityType, "invoice"),
       inArray(auditLog.entityId, invoiceIds),
+      gt(auditLog.id, sinceAuditId),
     ));
   return rows.length;
 }
@@ -1561,6 +1598,10 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     const paid = await createDraftSzInvoice("BULKST-PAID");
     await finalizeInvoice(paid.id, "bezahlt");
 
+    // Marke VOR der geprüften Aktion: die Statuswechsel oben (`finalizeInvoice`)
+    // sind selbst auditiert und dürfen nicht mitgezählt werden.
+    const sinceAudit = await latestAuditId();
+
     const res = await apiPost<any>("/api/billing/bulk-status", {
       invoiceIds: [draft.id, alreadySent.id, paid.id],
       status: "versendet",
@@ -1586,8 +1627,8 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
 
     // Audit: genau ein invoice_status_changed für die einzige geänderte Zeile,
     // KEINER für die beiden übersprungenen Rechnungen.
-    expect(await countAuditFor("invoice_status_changed", [draft.id])).toBe(1);
-    expect(await countAuditFor("invoice_status_changed", [alreadySent.id, paid.id])).toBe(0);
+    expect(await countAuditFor("invoice_status_changed", [draft.id], sinceAudit)).toBe(1);
+    expect(await countAuditFor("invoice_status_changed", [alreadySent.id, paid.id], sinceAudit)).toBe(0);
   });
 
   it("BF-10.4 — bulk-status führt eine gültige Kette versendet → bezahlt aus", async () => {
@@ -1595,6 +1636,8 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     const b = await createDraftSzInvoice("BULKST-CHAIN-B");
     await finalizeInvoice(a.id, "versendet");
     await finalizeInvoice(b.id, "versendet");
+
+    const sinceAudit = await latestAuditId();
 
     const res = await apiPost<any>("/api/billing/bulk-status", {
       invoiceIds: [a.id, b.id],
@@ -1609,7 +1652,7 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
       const after = await apiGet<any>(`/api/billing/${inv.id}`);
       expect(after.data.status).toBe("bezahlt");
     }
-    expect(await countAuditFor("invoice_status_changed", [a.id, b.id])).toBe(2);
+    expect(await countAuditFor("invoice_status_changed", [a.id, b.id], sinceAudit)).toBe(2);
   });
 
   // BF-10.7 — Task #1434: „versendet" → „entwurf" zurücksetzen (Korrektur eines
@@ -1623,6 +1666,8 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(sentBefore.data.status).toBe("versendet");
     expect(sentBefore.data.sentAt, "versendete Rechnung muss ein Versanddatum tragen").toBeTruthy();
 
+    const sinceAudit = await latestAuditId();
+
     const res = await apiPatch<any>(`/api/billing/${inv.id}/status`, { status: "entwurf" });
     expect(res.status, `Rücksetzen muss erfolgreich sein: ${JSON.stringify(res.data)}`).toBe(200);
 
@@ -1630,7 +1675,7 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(after.data.status).toBe("entwurf");
     expect(after.data.sentAt, "Rücksetzen muss das Versanddatum leeren").toBeFalsy();
 
-    expect(await countAuditFor("invoice_status_changed", [inv.id])).toBe(1);
+    expect(await countAuditFor("invoice_status_changed", [inv.id], sinceAudit)).toBe(1);
   });
 
   // BF-10.8 — Task #1434: Aus „bezahlt"/„avis_erhalten" gibt es laut SSoT KEIN
@@ -1654,6 +1699,8 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     const paid = await createDraftSzInvoice("RESET-BULK-PAID");
     await finalizeInvoice(paid.id, "bezahlt");
 
+    const sinceAudit = await latestAuditId();
+
     const res = await apiPost<any>("/api/billing/bulk-status", {
       invoiceIds: [sent.id, paid.id],
       status: "entwurf",
@@ -1674,8 +1721,8 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     const paidAfter = await apiGet<any>(`/api/billing/${paid.id}`);
     expect(paidAfter.data.status).toBe("bezahlt");
 
-    expect(await countAuditFor("invoice_status_changed", [sent.id])).toBe(1);
-    expect(await countAuditFor("invoice_status_changed", [paid.id])).toBe(0);
+    expect(await countAuditFor("invoice_status_changed", [sent.id], sinceAudit)).toBe(1);
+    expect(await countAuditFor("invoice_status_changed", [paid.id], sinceAudit)).toBe(0);
   });
 
   it("BF-10.5 — bulk-status meldet unbekannte Rechnungen als 'nicht gefunden'", async () => {
