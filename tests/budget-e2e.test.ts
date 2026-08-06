@@ -20,6 +20,7 @@ import { sql } from "drizzle-orm";
 import {
   billingReferenceMonth,
   carryoverAnchor,
+  expiredCarryoverAnchor,
   expirySubjectAnchor,
   pastWeekdayInBillingMonth,
 } from "./helpers/billing-month";
@@ -842,8 +843,10 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
   // Beide Übertragsjahre sind deshalb relativ verankert; die FRIST bleibt in
   // jedem Fall exakt der 30.06. des jeweiligen Zieljahres und wird weiterhin
   // wörtlich assertiert.
-  const expiredTargetYear = new Date().getFullYear() - 1;
-  const expiredSourceYear = expiredTargetYear - 1;
+  const {
+    sourceYear: expiredSourceYear,
+    targetYear: expiredTargetYear,
+  } = expiredCarryoverAnchor();
   const {
     sourceYear: futureSourceYear,
     targetYear: futureTargetYear,
@@ -972,8 +975,11 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
 
   it("INT-13.4 – Noch nicht verfallener Uebertrag wird NICHT abgeschrieben", async () => {
     // Gegenstueck zu INT-13.3: dort wird der abgelaufene Uebertrag abgeschrieben,
-    // hier bleibt der noch nicht verfallene unangetastet. Zusammen nageln die
-    // beiden Tests die 30.06.-Grenze von beiden Seiten fest.
+    // hier bleibt der noch nicht verfallene unangetastet. Zusammen sichern die
+    // beiden Tests BEIDE RICHTUNGEN der Verfalls-Auswahl ab — nicht die Grenze
+    // selbst: beide Fristen liegen rund ein Jahr vom 30.06. entfernt, ein
+    // Off-by-one (`<=` statt `<`) faellt hier also NICHT auf. Dafuer zustaendig
+    // sind `tests/budget/45b-july-boundary-symmetry.test.ts` und INT-20.
     //
     // Die frueheren Assertions „`carryoverCents > 0` in der Uebersicht" sind
     // ERSETZT: ein Uebertrag fuer Zieljahr Y traegt per Gesetz nur zwischen dem
