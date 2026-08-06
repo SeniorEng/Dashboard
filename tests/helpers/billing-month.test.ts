@@ -4,6 +4,7 @@ import {
   billingReferenceDate,
   billingReferenceMonth,
   countPastWeekdaysInMonth,
+  expirySubjectAnchor,
   pastWeekdayInBillingMonth,
 } from "./billing-month";
 
@@ -111,5 +112,51 @@ describe("pastWeekdayInBillingMonth — nie leer, nie in der Zukunft", () => {
       const iso = pastWeekdayInBillingMonth(now);
       expect(iso.slice(0, 7)).toBe(`${year}-${String(month).padStart(2, "0")}`);
     }
+  });
+});
+
+/**
+ * Nagelt die Zusage fest, wegen der es `expirySubjectAnchor` gibt: Die
+ * §45b-Frist muss an JEDEM Lauftag in der REALEN Zukunft liegen. Nur dann kann
+ * der App-Server (eigener Prozess, reale Uhr) den Übertrag nicht vorzeitig
+ * abschreiben, bevor der Test selbst einfriert. Läuft ohne DB und ohne Server.
+ */
+describe("expirySubjectAnchor — Frist immer real in der Zukunft", () => {
+  it("liefert an jedem Tag eines Schaltjahres eine Frist nach dem Lauftag", () => {
+    for (let day = 0; day < 366; day++) {
+      const now = new Date(2028, 0, 1 + day, 12, 0, 0);
+      const { sourceYear, targetYear, expiresAt } = expirySubjectAnchor(now);
+
+      expect(sourceYear).toBe(now.getFullYear());
+      expect(targetYear).toBe(now.getFullYear() + 1);
+      // Die Frist ist exakt der 30.06. des Zieljahres (§45b Abs. 3) …
+      expect(expiresAt).toBe(`${targetYear}-06-30`);
+      // … und liegt strikt nach dem Lauftag.
+      const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      expect(expiresAt > todayIso).toBe(true);
+    }
+  });
+
+  it("überlebt den Jahreswechsel (31.12. → 01.01.)", () => {
+    const silvester = expirySubjectAnchor(new Date(2026, 11, 31, 23, 59, 0));
+    const neujahr = expirySubjectAnchor(new Date(2027, 0, 1, 0, 1, 0));
+    expect(silvester.expiresAt).toBe("2027-06-30");
+    expect(neujahr.expiresAt).toBe("2028-06-30");
+    // In beiden Lagen bleibt die Frist nach dem jeweiligen Lauftag.
+    expect(silvester.expiresAt > "2026-12-31").toBe(true);
+    expect(neujahr.expiresAt > "2027-01-01").toBe(true);
+  });
+
+  it("friert auf den ersten Tag NACH der Frist ein, in ORTSZEIT (kein fixer UTC-Offset)", () => {
+    const { targetYear, expiresAt, frozenJustAfterExpiry } = expirySubjectAnchor(
+      new Date(2026, 7, 6, 12, 0, 0),
+    );
+    expect(frozenJustAfterExpiry).toBe(`${targetYear}-07-01T00:01:00`);
+    // Ohne Offset geparst = Ortszeit; der lokale Kalendertag muss der Tag NACH
+    // der Frist sein, sonst greift der Verfall im Test nicht.
+    const frozen = new Date(frozenJustAfterExpiry);
+    const localIso = `${frozen.getFullYear()}-${String(frozen.getMonth() + 1).padStart(2, "0")}-${String(frozen.getDate()).padStart(2, "0")}`;
+    expect(localIso).toBe(`${targetYear}-07-01`);
+    expect(localIso > expiresAt).toBe(true);
   });
 });
