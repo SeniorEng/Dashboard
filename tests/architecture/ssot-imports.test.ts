@@ -238,6 +238,49 @@ export function detectDocumentedPredicateViolations(files: ScanFile[]): GuardVio
   return out;
 }
 
+/**
+ * Import-Rand des PRIMITIVS `hasDirectSignatureSqlRaw`.
+ *
+ * Das Primitiv beantwortet nur die Tatsachen-Teilfrage `signature_data IS NOT
+ * NULL` — ohne `status`-Gate und ohne den Leistungsnachweis-Zweig. Es ist damit
+ * genau das, was die meisten Aufrufer NICHT wollen: wer „dokumentiert &
+ * unterschrieben?" fragt, braucht `documentedAndSignedSqlRaw`.
+ *
+ * Warum dieser zweite Rand nötig ist: Vor der Einführung des Primitivs fing der
+ * A3-Query-Rand oben JEDE eigene Unterschrifts-Prüfung ab — eine rohe Bedingung
+ * war die einzige Möglichkeit, und die war gesperrt. Seit es das Primitiv gibt,
+ * genügt ein `import { hasDirectSignatureSqlRaw }`, um dieselbe zu enge Prüfung
+ * an beliebiger Stelle zu bauen, ohne dass A3 sich meldet. Der Import-Rand
+ * stellt die Abdeckung wieder her, die das Primitiv sonst aufgeweicht hätte.
+ *
+ * Gleiche Bauart wie `CAP_SLOT_IMPORT_ALLOWLIST` (A1) und
+ * `CASCADE_CALL_ALLOWLIST` (A4).
+ */
+const DIRECT_SIGNATURE_IMPORT_ALLOWLIST = new Set<string>([
+  // Abrechnungs-Pipeline: braucht die drei Teilflags EINZELN und komponiert sie
+  // in `assignAppointmentStage` (shared/domain/billing-pipeline.ts).
+  "server/storage/billing/pipeline-reader.ts",
+]);
+
+export function detectDirectSignatureImportViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  const re = namedImportFromRe("hasDirectSignatureSqlRaw");
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (DIRECT_SIGNATURE_IMPORT_ALLOWLIST.has(rel)) continue;
+    if (re.test(stripComments(content))) {
+      out.push({
+        file: rel,
+        detail:
+          "importiert das Primitiv `hasDirectSignatureSqlRaw` außerhalb der Allowlist — " +
+          "es beantwortet NUR `signature_data IS NOT NULL`, ohne status-Gate und ohne " +
+          "Leistungsnachweis-Zweig",
+      });
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // A4 — Cascade-/Verteilungs-SSoT (Aufruf-Rand)
 // ---------------------------------------------------------------------------
@@ -551,6 +594,40 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
           "exportierten Bedingungen statt einer eigenen signature_data-Prüfung.",
       );
     }
+  });
+
+  it("A3b: `hasDirectSignatureSqlRaw` wird nur aus der Allowlist importiert", () => {
+    const v = detectDirectSignatureImportViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Primitiv-Import außerhalb der Allowlist gefunden:\n" +
+          formatViolations(v) +
+          "\n\n`hasDirectSignatureSqlRaw` ist das PRIMITIV (nur die Tatsache " +
+          "„liegt eine direkte Unterschrift vor?\u201c). Wer „dokumentiert & " +
+          "unterschrieben?\u201c meint, nimmt `documentedAndSignedSqlRaw`. Ist der " +
+          "neue Aufrufer wirklich ein Komponist, der die Teilflags EINZELN braucht, " +
+          "ergänze DIRECT_SIGNATURE_IMPORT_ALLOWLIST in dieser Datei.",
+      );
+    }
+  });
+
+  it("A3b (Negativ): ein Primitiv-Import außerhalb der Allowlist wird erkannt", () => {
+    const synthetic: ScanFile[] = [
+      {
+        rel: "server/routes/fake-primitive-import.ts",
+        content: 'import { hasDirectSignatureSqlRaw } from "../lib/appointment-signed";',
+      },
+    ];
+    expect(detectDirectSignatureImportViolations(synthetic)).toHaveLength(1);
+    // Die Allowlist-Datei selbst darf ihn importieren.
+    expect(
+      detectDirectSignatureImportViolations([
+        {
+          rel: "server/storage/billing/pipeline-reader.ts",
+          content: 'import { hasDirectSignatureSqlRaw } from "../../lib/appointment-signed";',
+        },
+      ]),
+    ).toHaveLength(0);
   });
 
   it("A3 (Negativ): eine bewusst gebaute completed-/signature-Bedingung wird erkannt", () => {

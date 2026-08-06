@@ -1514,11 +1514,16 @@ async function latestAuditId(): Promise<number> {
  * betroffener Zeile genau einen Eintrag geschrieben". Die Marke drückt exakt das
  * aus, ohne die Erwartung aufzuweichen — und sie hält auch dann, wenn ein
  * künftiges Setup zusätzliche Statuswechsel fährt.
+ *
+ * `sinceAuditId` ist PFLICHT und hat bewusst keinen Default: die alte, zu weite
+ * Zählweise soll ERSETZT werden, nicht als bequemer Default danebenstehen. Wo
+ * heute nachweislich kein Setup-Schritt dieselbe Aktion schreibt, steht ein
+ * explizites `0` — sichtbar und im Zweifel leicht zu verschärfen.
  */
 async function countAuditFor(
   action: string,
   invoiceIds: number[],
-  sinceAuditId = 0,
+  sinceAuditId: number,
 ): Promise<number> {
   if (invoiceIds.length === 0) return 0;
   const rows = await db
@@ -1569,8 +1574,8 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
 
     // Audit: genau ein invoice_draft_discarded pro tatsächlich gelöschter Zeile,
     // KEINER für die übersprungene finalisierte Rechnung.
-    expect(await countAuditFor("invoice_draft_discarded", [draftA.id, draftB.id])).toBe(2);
-    expect(await countAuditFor("invoice_draft_discarded", [finalized.id])).toBe(0);
+    expect(await countAuditFor("invoice_draft_discarded", [draftA.id, draftB.id], 0)).toBe(2);
+    expect(await countAuditFor("invoice_draft_discarded", [finalized.id], 0)).toBe(0);
   });
 
   it("BF-10.2 — bulk-delete: doppelte und unbekannte IDs werden sauber als skipped gezählt", async () => {
@@ -1723,6 +1728,26 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
 
     expect(await countAuditFor("invoice_status_changed", [sent.id], sinceAudit)).toBe(1);
     expect(await countAuditFor("invoice_status_changed", [paid.id], sinceAudit)).toBe(0);
+
+    // Der Zaehler allein prueft nur die EXISTENZ des Eintrags. Ohne eine
+    // Inhalts-Assertion rutscht eine Mutation durch, die zwar auditiert, aber
+    // Unsinn hineinschreibt — und der Audit-Trail ist GoBD-relevant. Wir nageln
+    // deshalb die Metadaten des Sammel-Pfads fest, die die Audit-Log-Ansicht
+    // tatsaechlich rendert (`Vorher: …` aus `previousStatus`, `Grund: …` aus
+    // `reason`; siehe client/src/pages/admin/audit-log.tsx).
+    const [sentAudit] = await db
+      .select({ metadata: auditLog.metadata })
+      .from(auditLog)
+      .where(and(
+        eq(auditLog.action, "invoice_status_changed"),
+        eq(auditLog.entityType, "invoice"),
+        eq(auditLog.entityId, sent.id),
+        gt(auditLog.id, sinceAudit),
+      ));
+    const meta = (sentAudit?.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.previousStatus, "Audit muss den Vorher-Status tragen").toBe("versendet");
+    expect(meta.newStatus).toBe("entwurf");
+    expect(meta.reason, "Sammel-Pfad muss sich als solcher ausweisen").toBe("bulk_status");
   });
 
   it("BF-10.5 — bulk-status meldet unbekannte Rechnungen als 'nicht gefunden'", async () => {
@@ -1775,8 +1800,8 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(sentAfter.data.status, "Status darf vom Nicht-Admin NICHT geändert worden sein").toBe("versendet");
 
     // Kein Audit-Eintrag durch den verweigerten Zugriff.
-    expect(await countAuditFor("invoice_draft_discarded", [draft.id])).toBe(0);
-    expect(await countAuditFor("invoice_status_changed", [draft.id])).toBe(0);
+    expect(await countAuditFor("invoice_draft_discarded", [draft.id], 0)).toBe(0);
+    expect(await countAuditFor("invoice_status_changed", [draft.id], 0)).toBe(0);
 
     // Regression-Guard: Der Admin-Pfad funktioniert weiterhin und löscht den
     // Entwurf jetzt tatsächlich.
@@ -1917,7 +1942,7 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(after.data.sentAt, "sentAt muss gesetzt sein").toBeTruthy();
 
     // Audit: einheitliche Aktion (kein Selbstzahler-Spezial-Status mehr).
-    expect(await countAuditFor("invoice_marked_sent_manually", [draft.id])).toBe(1);
+    expect(await countAuditFor("invoice_marked_sent_manually", [draft.id], 0)).toBe(1);
   });
 
   it("BF-10.15c — send-bulk meldet einen Selbstzahler-Entwurf als marked_sent", async () => {

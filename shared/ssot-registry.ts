@@ -181,6 +181,11 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     canonical: [
       { symbol: "isAppointmentDocumentedAndSigned", module: "shared/domain/appointments.ts" },
       { symbol: "documentedSqlRaw", module: "server/lib/appointment-signed.ts" },
+      // Primitiv für Leser, die die Teilflags EINZELN brauchen und selbst
+      // komponieren (Abrechnungs-Pipeline → `assignAppointmentStage`). Ohne es
+      // gab es keinen kanonischen Weg an `signature_data`, und Task #1874 hat
+      // deshalb eine rohe Bedingung eingeführt, die den Wächter brach.
+      { symbol: "hasDirectSignatureSqlRaw", module: "server/lib/appointment-signed.ts" },
     ],
     ownedLiterals: [],
     guards: [
@@ -193,6 +198,15 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
           "server/lib/appointment-signed.ts",
           "server/startup/migrate-expired-unsigned-appointments.ts",
         ],
+      },
+      {
+        // Import-Rand des PRIMITIVS: `hasDirectSignatureSqlRaw` beantwortet nur
+        // die Tatsachen-Teilfrage und ist damit KEIN Ersatz für das
+        // zusammengesetzte Prädikat. Ohne diesen Rand waere das Primitiv ein
+        // ungeguardeter Weg zu genau der zu engen Pruefung, die A3 sperrt.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "DIRECT_SIGNATURE_IMPORT_ALLOWLIST",
+        allowlist: ["server/storage/billing/pipeline-reader.ts"],
       },
     ],
     eslintRules: [],
