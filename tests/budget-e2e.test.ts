@@ -17,7 +17,12 @@ import { processExpiredCarryover, upsertCarryoverAllocation } from "../server/st
 import { getBudgetSummary } from "../server/storage/budget/summary-queries";
 import { db } from "../server/lib/db";
 import { sql } from "drizzle-orm";
-import { billingReferenceMonth, pastWeekdayInBillingMonth } from "./helpers/billing-month";
+import {
+  billingReferenceMonth,
+  carryoverAnchor,
+  expirySubjectAnchor,
+  pastWeekdayInBillingMonth,
+} from "./helpers/billing-month";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -833,6 +838,18 @@ describe("INT-12: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
 describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => {
   let scenario: BudgetScenarioHandle;
 
+  // Frist-SUBJEKT: dieser Block prüft die 30.06.-Verfallsmechanik selbst.
+  // Beide Übertragsjahre sind deshalb relativ verankert; die FRIST bleibt in
+  // jedem Fall exakt der 30.06. des jeweiligen Zieljahres und wird weiterhin
+  // wörtlich assertiert.
+  const expiredTargetYear = new Date().getFullYear() - 1;
+  const expiredSourceYear = expiredTargetYear - 1;
+  const {
+    sourceYear: futureSourceYear,
+    targetYear: futureTargetYear,
+    expiresAt: futureExpiresAt,
+  } = expirySubjectAnchor();
+
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-13",
@@ -847,21 +864,24 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
     // Task #1204: Ein Vorjahres-Anker erzeugt KEINEN automatischen §45b-Carryover
     // mehr (der Anker wird zur Laufzeit aufs laufende Jahr gebodet). Der Übertrag
     // entsteht jetzt durch bewusste Operator-/Storage-Eingabe. Wir seeden beide
-    // Carryover-Zeilen direkt: sourceYear 2024 → Zieljahr 2025 (abgelaufen, wird
-    // unten abgeschrieben) und sourceYear 2025 → Zieljahr 2026 (noch gültig).
+    // Carryover-Zeilen direkt — relativ zum Lauftag statt mit festen Jahreszahlen:
+    //   - ABGELAUFEN: Zieljahr = Vorjahr, Frist damit garantiert real vergangen.
+    //   - NOCH NICHT VERFALLEN: Zieljahr = Folgejahr (`expirySubjectAnchor`),
+    //     Frist damit garantiert real in der Zukunft. Kein server-seitiger Pfad
+    //     kann ihn vorzeitig abschreiben — genau das prüft INT-13.4.
     await upsertCarryoverAllocation({
       customerId: scenario.customerId,
       budgetType: "entlastungsbetrag_45b",
-      sourceYear: 2024,
+      sourceYear: expiredSourceYear,
       amountCents: 13100,
     });
     await upsertCarryoverAllocation({
       customerId: scenario.customerId,
       budgetType: "entlastungsbetrag_45b",
-      sourceYear: 2025,
+      sourceYear: futureSourceYear,
       amountCents: 13100,
     });
-    // Abgelaufenen 2025er-Übertrag (expiresAt 2025-06-30) abschreiben.
+    // Abgelaufenen Übertrag (Frist `${expiredTargetYear}-06-30`) abschreiben.
     await processExpiredCarryover(scenario.customerId);
     await apiGet<any>(`/api/budget/${scenario.customerId}/overview`); // Sync triggern
   });
@@ -878,41 +898,41 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
     expect(prefRes.status).toBe(200);
   });
 
-  it("INT-13.2 – Budget-Start auf 2024 setzen, Carryover pruefen", async () => {
+  it("INT-13.2 – Abgelaufener Uebertrag existiert mit Frist 30.06. des Zieljahres", async () => {
     const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overviewRes.status).toBe(200);
 
-    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2025`);
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=${expiredTargetYear}`);
     expect(allocRes.status).toBe(200);
 
-    const carryover2025 = allocRes.data.filter(
-      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025
+    const expiredCarryovers = allocRes.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === expiredTargetYear
     );
-    expect(carryover2025.length).toBeGreaterThan(0);
-    const co2025 = carryover2025[0];
-    expect(co2025.expiresAt).toBe("2025-06-30");
-    expect(co2025.amountCents).toBeGreaterThan(0);
+    expect(expiredCarryovers.length).toBeGreaterThan(0);
+    const expiredCo = expiredCarryovers[0];
+    expect(expiredCo.expiresAt).toBe(`${expiredTargetYear}-06-30`);
+    expect(expiredCo.amountCents).toBeGreaterThan(0);
   });
 
-  it("INT-13.3 – Abgelaufener Vorjahres-Uebertrag 2025 wurde abgeschrieben", async () => {
-    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2025`);
-    const carryover2025 = allocRes.data?.find(
-      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025
+  it("INT-13.3 – Abgelaufener Vorjahres-Uebertrag wurde abgeschrieben", async () => {
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=${expiredTargetYear}`);
+    const expiredCo = allocRes.data?.find(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === expiredTargetYear
     );
-    expect(carryover2025).toBeDefined();
-    expect(carryover2025.expiresAt).toBe("2025-06-30");
+    expect(expiredCo).toBeDefined();
+    expect(expiredCo.expiresAt).toBe(`${expiredTargetYear}-06-30`);
 
     const txRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5000`);
     expect(txRes.status).toBe(200);
 
     const consumptionsForCarryover = txRes.data.filter(
-      (t: any) => t.allocationId === carryover2025.id && t.transactionType === "consumption"
+      (t: any) => t.allocationId === expiredCo.id && t.transactionType === "consumption"
     );
     const reversalsForCarryover = txRes.data.filter(
-      (t: any) => t.allocationId === carryover2025.id && t.transactionType === "reversal"
+      (t: any) => t.allocationId === expiredCo.id && t.transactionType === "reversal"
     );
     const writeOffs = txRes.data.filter(
-      (t: any) => t.transactionType === "write_off" && t.allocationId === carryover2025.id
+      (t: any) => t.transactionType === "write_off" && t.allocationId === expiredCo.id
     );
     expect(writeOffs.length).toBeGreaterThan(0);
     const writeOff = writeOffs[0];
@@ -923,18 +943,18 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
     const reversed = reversalsForCarryover.reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
     const writeOffTotal = writeOffs.reduce((s: number, t: any) => s + Math.abs(t.amountCents), 0);
     const netConsumed = Math.max(0, consumed - reversed);
-    expect(writeOffTotal + netConsumed).toBe(carryover2025.amountCents);
+    expect(writeOffTotal + netConsumed).toBe(expiredCo.amountCents);
 
     const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overviewRes.status).toBe(200);
     const overview = overviewRes.data.entlastungsbetrag45b;
     expect(overview).toBeDefined();
 
-    const alloc2025 = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2025`);
-    const activeCarryover2025 = alloc2025.data?.filter(
-      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025 && !a.deletedAt
+    const allocExpired = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=${expiredTargetYear}`);
+    const activeExpiredCarryovers = allocExpired.data?.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === expiredTargetYear && !a.deletedAt
     ) ?? [];
-    for (const co of activeCarryover2025) {
+    for (const co of activeExpiredCarryovers) {
       const coWriteOffs = txRes.data.filter(
         (t: any) => t.transactionType === "write_off" && t.allocationId === co.id
       );
@@ -950,21 +970,43 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
     }
   });
 
-  it("INT-13.4 – Aktueller Uebertrag 2026 ist noch gueltig", async () => {
-    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2026`);
+  it("INT-13.4 – Noch nicht verfallener Uebertrag wird NICHT abgeschrieben", async () => {
+    // Gegenstueck zu INT-13.3: dort wird der abgelaufene Uebertrag abgeschrieben,
+    // hier bleibt der noch nicht verfallene unangetastet. Zusammen nageln die
+    // beiden Tests die 30.06.-Grenze von beiden Seiten fest.
+    //
+    // Die frueheren Assertions „`carryoverCents > 0` in der Uebersicht" sind
+    // ERSETZT: ein Uebertrag fuer Zieljahr Y traegt per Gesetz nur zwischen dem
+    // 01.01. und dem 30.06. dieses Jahres zum verfuegbaren Budget bei. Ein
+    // Uebertrag, dessen Frist garantiert in der Zukunft liegt — und nur so ist
+    // „noch nicht verfallen" an jedem Lauftag herstellbar —, ist folglich noch
+    // NICHT wirksam. Die alte Erwartung war nur deshalb gruen, weil sie das
+    // erste Halbjahr 2026 unterstellte. Geprueft wird jetzt die Mechanik, die
+    // der Test benennt, statt einer Nebenwirkung, die nur im H1 gilt.
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=${futureTargetYear}`);
     expect(allocRes.status).toBe(200);
 
-    const carryover2026 = allocRes.data.filter(
-      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2026
+    const futureCarryovers = allocRes.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === futureTargetYear
     );
-    expect(carryover2026.length).toBeGreaterThan(0);
-    expect(carryover2026[0].expiresAt).toBe("2026-06-30");
-    expect(carryover2026[0].amountCents).toBeGreaterThan(0);
+    expect(futureCarryovers.length).toBe(1);
+    const futureCo = futureCarryovers[0];
 
-    const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
-    expect(overviewRes.status).toBe(200);
-    expect(overviewRes.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThan(0);
-    expect(overviewRes.data.entlastungsbetrag45b.carryoverExpiresAt).toBe("2026-06-30");
+    // Die FRIST bleibt exakt der 30.06. des Zieljahres (§45b Abs. 3).
+    expect(futureCo.expiresAt).toBe(futureExpiresAt);
+    expect(futureExpiresAt).toBe(`${futureTargetYear}-06-30`);
+    expect(futureCo.amountCents).toBeGreaterThan(0);
+    expect(futureCo.validFrom).toBe(`${futureTargetYear}-01-01`);
+
+    // Kern: `processExpiredCarryover` (im beforeAll gelaufen) darf ihn NICHT
+    // angefasst haben — kein write_off, Betrag unveraendert.
+    const txRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5000`);
+    expect(txRes.status).toBe(200);
+    const writeOffsForFuture = txRes.data.filter(
+      (t: any) => t.transactionType === "write_off" && t.allocationId === futureCo.id
+    );
+    expect(writeOffsForFuture).toHaveLength(0);
+    expect(futureCo.deletedAt ?? null).toBeNull();
   });
 });
 
@@ -974,6 +1016,22 @@ describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
   let fifoTransactionId: number | null = null;
   let fifoAppointmentId: number | null = null;
   let carryoverAllocationId: number | null = null;
+
+  // Frist-STÖRFAKTOR: Prüfgegenstand ist die FIFO-Reihenfolge, nicht der Verfall.
+  // Der Übertrag muss dafür aber zum Buchungszeitpunkt GÜLTIG sein — ein §45b-
+  // Übertrag für Zieljahr Y gilt nur vom 01.01. bis zum 30.06. dieses Jahres.
+  // Der Termin lag bisher auf `pastWeekday()` („vor einer Woche"); ab Juli fällt
+  // er damit hinter die Frist, der Verbrauch findet kein Carryover-Geld mehr und
+  // bekommt gar keine `allocationId` — INT-14.3 scheiterte an `undefined`.
+  //
+  // `carryoverAnchor` liefert Quell-/Zieljahr und einen vergangenen Werktag im
+  // H1 des Zieljahres. Dieser Tag ist Termindatum UND Lese-Stichtag: gebucht und
+  // gelesen wird damit im selben, gültigen Fenster.
+  //
+  // Der Seed läuft über `upsertCarryoverAllocation` (Storage, direkt), nicht über
+  // `POST /initial-budget` — der Anker-Boden auf die Echt-Uhr, der andere
+  // Fixtures dieser Serie eingefangen hat, greift hier also nicht.
+  const { sourceYear: fifoSourceYear, targetYear: fifoTargetYear, asOf: fifoAsOf } = carryoverAnchor();
 
   beforeAll(async () => {
     // Task #1204: Der §45b-Anker wird zur Laufzeit aus pflegegradSeit abgeleitet.
@@ -990,10 +1048,10 @@ describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
-      carryover: { type: "entlastungsbetrag_45b", year: 2025, amountCents: 13100 },
+      carryover: { type: "entlastungsbetrag_45b", year: fifoSourceYear, amountCents: 13100 },
       appointments: [
         {
-          date: pastWeekday(),
+          date: fifoAsOf,
           scheduledStart: "07:00",
           services: [{ code: "hauswirtschaft", durationMinutes: 60 }],
           document: true,
@@ -1006,7 +1064,7 @@ describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
     fifoTransactionId = tx.id;
     fifoAppointmentId = tx.appointmentId;
 
-    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2026`);
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=${fifoTargetYear}`);
     const carryoverAlloc = allocRes.data.find(
       (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover"
     );
@@ -1017,8 +1075,14 @@ describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
     await scenario.cleanup();
   });
 
-  it("INT-14.1 – Setup: Budget-Start 2025, nur §45b aktiv, Carryover vorhanden", async () => {
-    const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+  it("INT-14.1 – Setup: nur §45b aktiv, Carryover zum Buchungsstichtag vorhanden", async () => {
+    // Stichtag = Termindatum. `/overview` unterstützt `?date=` seit Task #911
+    // (`parseAsOfDateQuery`), der Test bleibt damit ein echter API-Test und
+    // muss nicht auf einen In-Process-Reader ausweichen. Die Aussage ist
+    // unverändert: zum Zeitpunkt der Buchung war Carryover-Geld da.
+    const overviewRes = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/overview?date=${fifoAsOf}`,
+    );
     expect(overviewRes.status).toBe(200);
     expect(overviewRes.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThan(0);
 
