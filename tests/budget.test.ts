@@ -41,7 +41,6 @@ import {
   createTestCustomer,
   cleanupCustomer,
 } from "./test-utils";
-import { carryoverAnchor } from "./helpers/billing-month";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let hwServiceId: number;
@@ -451,11 +450,22 @@ describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover",
   // laufende Jahr, der Vorjahres-Startwert fällt heraus — gemessen 104800
   // (= 8 × 13100, nur Monatsaufstockungen) statt 262000.
   //
-  // Wir verankern deshalb Jahrespaar UND Stichtag, statt eine Erwartung
-  // aufzuweichen. Das Jahrespaar kommt aus dem Anker und nicht aus `new Date()`,
-  // damit Startwert-Jahr und Stichtag auch am 01.01. zusammenpassen (dort rollt
-  // `carryoverAnchor` das Zieljahr um eins zurück).
-  const { targetYear: dedupYear, asOf: dedupAsOf } = carryoverAnchor();
+  // Wir geben dem Lesepfad deshalb einen STICHTAG im ersten Halbjahr, statt eine
+  // Erwartung aufzuweichen.
+  //
+  // Das JAHR kommt dabei aus der ECHT-Uhr und NICHT aus `carryoverAnchor()`:
+  // der §45b-Anker wird serverseitig auf das laufende Jahr der Echt-Uhr gebodet
+  // (`floorAutoAnchor45bToCurrentYear`, gespeist aus `currentYearAndMonth()`),
+  // während `?date=` nur den Lese-Stichtag verschiebt. Ein Anker-Jahr, das am
+  // 01.01. um eins zurückrollt, liefe gegen diese Server-Wahrheit und machte den
+  // Test an genau diesem Tag rot — dort, wo er heute grün ist.
+  const dedupNow = new Date();
+  const dedupYear = dedupNow.getFullYear();
+  const dedupToday = `${dedupYear}-${String(dedupNow.getMonth() + 1).padStart(2, "0")}-${String(dedupNow.getDate()).padStart(2, "0")}`;
+  // Im H1 ist „heute" selbst der ehrlichste Stichtag; ab dem 01.07. weichen wir
+  // auf Mitte Juni aus — den spätesten Punkt, an dem der Verfalls-Boden noch das
+  // Vorjahr ist und der Vorjahres-Startwert damit zählt.
+  const dedupAsOf = dedupToday <= `${dedupYear}-06-30` ? dedupToday : `${dedupYear}-06-15`;
   const previousYear = dedupYear - 1;
   const startMonth = 12;
   const ibAmountCents = 157200; // 1.572 €
