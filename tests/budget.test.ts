@@ -41,6 +41,7 @@ import {
   createTestCustomer,
   cleanupCustomer,
 } from "./test-utils";
+import { carryoverAnchor } from "./helpers/billing-month";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let hwServiceId: number;
@@ -441,7 +442,21 @@ describe("BUD-EDGE: Budget-Grenzfälle", () => {
 describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover", () => {
   let dedupCustomerId: number | null = null;
   let coCustomerId: number | null = null;
-  const previousYear = new Date().getFullYear() - 1;
+
+  // Frist-STÖRFAKTOR: Prüfgegenstand ist die Doppelzählung Startwert↔Carryover,
+  // nicht der Verfall. Der §45b-VERFALLS-BODEN (Task #959) macht die Rechnung
+  // in BUD-IB-DEDUP-3 trotzdem halbjahres-abhängig:
+  // `expiryFloorAnchorYear = horizonMonth <= 6 ? horizonYear - 1 : horizonYear`
+  // (`server/storage/budget/allocation-storage.ts`). Ab Juli zählt nur noch das
+  // laufende Jahr, der Vorjahres-Startwert fällt heraus — gemessen 104800
+  // (= 8 × 13100, nur Monatsaufstockungen) statt 262000.
+  //
+  // Wir verankern deshalb Jahrespaar UND Stichtag, statt eine Erwartung
+  // aufzuweichen. Das Jahrespaar kommt aus dem Anker und nicht aus `new Date()`,
+  // damit Startwert-Jahr und Stichtag auch am 01.01. zusammenpassen (dort rollt
+  // `carryoverAnchor` das Zieljahr um eins zurück).
+  const { targetYear: dedupYear, asOf: dedupAsOf } = carryoverAnchor();
+  const previousYear = dedupYear - 1;
   const startMonth = 12;
   const ibAmountCents = 157200; // 1.572 €
 
@@ -517,13 +532,18 @@ describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover",
   });
 
   it("BUD-IB-DEDUP-3 – totalAllocatedCents = Startwert + Auto-Allokationen ab Folgemonat", async () => {
-    const overviewRes = await apiGet<any>(`/api/budget/${dedupCustomerId}/overview`);
+    // Stichtag im H1 des Anker-Jahres: dort ist der Verfalls-Boden noch das
+    // Vorjahr, der Vorjahres-Startwert zählt also mit. `/overview` unterstützt
+    // `?date=` seit Task #911 (`parseAsOfDateQuery`) — der Test bleibt damit ein
+    // echter API-Test. Die Formel selbst ist unverändert.
+    const overviewRes = await apiGet<any>(
+      `/api/budget/${dedupCustomerId}/overview?date=${dedupAsOf}`,
+    );
     expect(overviewRes.status).toBe(200);
     const s45b = overviewRes.data.entlastungsbetrag45b;
 
-    const now = new Date();
-    const curYear = now.getFullYear();
-    const curMonth = now.getMonth() + 1;
+    const curYear = dedupYear;
+    const curMonth = Number(dedupAsOf.slice(5, 7));
     const monthsSinceIB = (curYear - previousYear) * 12 + (curMonth - startMonth);
     const expected = ibAmountCents + Math.max(0, monthsSinceIB) * 13100;
 
