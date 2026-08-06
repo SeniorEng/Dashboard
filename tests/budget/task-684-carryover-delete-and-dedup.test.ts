@@ -16,7 +16,7 @@
  *      `totalAllocatedCents` exakt `elapsedMonths × monthlyAmount + carryover`
  *      (kein 131 €-Drift mehr).
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { budgetAllocations } from "@shared/schema";
@@ -32,9 +32,18 @@ import {
   runCleanup,
   apiPut,
 } from "../test-utils";
+import { carryoverAnchor } from "../helpers/billing-month";
+import { freezeTime, thawTime } from "../helpers/frozen-clock";
 
 beforeAll(async () => {
   await getAuthCookie();
+});
+
+// Die Uhr IMMER auftauen — sonst erben die nachfolgenden Tests dieser Datei die
+// eingefrorene Zeit. (Der globale Hook in `tests/setup.ts` täte es auch; hier
+// explizit, weil in dieser Datei mehrere Tests hintereinander laufen.)
+afterEach(() => {
+  thawTime();
 });
 
 afterAll(async () => {
@@ -134,16 +143,36 @@ describe("T684 — §45b-Carryover Delete-Stickiness & Anti-Dedup", () => {
   });
 
   it("Summary zählt nicht doppelt: totalAllocated = elapsedMonths × monthly + carryover", async () => {
+    // Frist-STÖRFAKTOR: Prüfgegenstand ist die Doppelzählung, nicht der Verfall.
+    // Ein §45b-Übertrag für Zieljahr Y gilt aber nur vom 01.01. bis zum 30.06.
+    // dieses Jahres — ab Juli trägt er per Gesetz 0 bei, und die Formel
+    // `elapsedMonths × monthly + carryover` ginge nicht mehr auf (gemessen:
+    // 104800 statt 139250). Wir verankern den Stichtag deshalb im H1 des
+    // Zieljahres, statt die Erwartung aufzuweichen.
+    //
+    // Der Freeze wirkt hier, weil ALLE wertrelevanten Aufrufe unten in-process
+    // laufen (`upsertCarryoverAllocation`, `syncCarryoverAndExpiry`,
+    // `getBudgetSummary`). Für Aussagen über die API wäre er wirkungslos — der
+    // App-Server ist ein eigener Prozess mit realer Uhr.
+    const { sourceYear, targetYear, asOf } = carryoverAnchor();
+    freezeTime(`${asOf}T12:00:00`);
+
     const userId = await getActorUserId();
     const customerId = await fresh45bCustomer("T684-MATH");
-    const sourceYear = new Date().getFullYear() - 1;
     const carryoverCents = 34_450; // 344,50 €
 
-    // §45b läuft ab Anfang AKTUELLES Jahr (nicht Vorjahr) → die monatliche
-    // Aufstockung umfasst genau die elapsten Monate des laufenden Jahres,
-    // unabhängig vom Test-Datum.
-    const curYear = new Date().getFullYear();
-    const curMonth = new Date().getMonth() + 1;
+    // Beide Werte kommen aus dem STICHTAG, nicht aus `new Date()`. Letzteres
+    // wäre zwar korrekt, solange der Freeze zwei Zeilen weiter oben steht — aber
+    // genau dieses Muster ersetzt dieser PR sonst überall, und beim Verschieben
+    // des Freeze driftete es lautlos auf die reale Uhr zurück.
+    const curYear = targetYear;
+    const curMonth = Number(asOf.slice(5, 7));
+    // Dieser PUT ist faktisch wirkungslos: `fresh45bCustomer` hat die
+    // §45b-Settings-Zeile bereits mit `validFrom = ${targetYear - 1}-01-01`
+    // angelegt, und der PUT ändert sie nicht. Dass die Aufstockung im Januar des
+    // ZIELJAHRES startet, macht der Produktions-Anker
+    // (`floorAutoAnchor45bToCurrentYear`) unter der eingefrorenen Uhr — nicht
+    // dieser Aufruf. Er bleibt als Teil des nachgestellten Wizard-Flows stehen.
     await apiPut(`/api/budget/${customerId}/type-settings`, {
       settings: [
         { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: `${curYear}-01-01`, validTo: null },

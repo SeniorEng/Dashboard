@@ -9,6 +9,8 @@ import {
 } from "../helpers/budget-scenarios";
 import { runInParallel } from "../helpers/race";
 import { freezeTime, thawTime } from "../helpers/frozen-clock";
+import { expirySubjectAnchor } from "../helpers/billing-month";
+import { addDays } from "@shared/utils/datetime";
 import { processExpiredCarryover } from "../../server/storage/budget/allocation-storage";
 
 const ORIGINAL_TZ = process.env.TZ;
@@ -38,6 +40,13 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
 
   it("RACE-K7 — Zwei parallele processExpiredCarryover-Aufrufe erzeugen genau einen write_off mit korrektem Betrag", async () => {
     const carryoverAmountCents = 5000;
+    // Frist-SUBJEKT: Der Test prüft die Verfallsmechanik selbst, der Anker muss
+    // deshalb zur eingefrorenen Zeit passen — nicht umgekehrt. Zieljahr liegt im
+    // nächsten Kalenderjahr, die Frist also real in der Zukunft; sonst schreibt
+    // der App-Server (eigener Prozess, reale Uhr) den Übertrag schon während
+    // `setupBudgetScenario` ab und die Vorab-Sanity unten fällt. Details im
+    // Docstring von `expirySubjectAnchor`.
+    const { sourceYear, targetYear, expiresAt, frozenJustAfterExpiry } = expirySubjectAnchor();
 
     scenario = await setupBudgetScenario({
       customerNamePrefix: "RACE-K7",
@@ -49,10 +58,11 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
-      carryover: { type: "entlastungsbetrag_45b", amountCents: carryoverAmountCents, year: 2025 },
+      carryover: { type: "entlastungsbetrag_45b", amountCents: carryoverAmountCents, year: sourceYear },
     });
 
-    // Genau eine §45b-carryover-Allokation existiert mit expiresAt 2026-06-30.
+    // Genau eine §45b-carryover-Allokation existiert, Frist exakt der 30.06.
+    // des Zieljahres (§45b Abs. 3 — die Frist selbst bleibt unangetastet).
     const allocations = await db
       .select()
       .from(budgetAllocations)
@@ -66,7 +76,8 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
     expect(allocations).toHaveLength(1);
     const carryAlloc = allocations[0];
     expect(carryAlloc.amountCents).toBe(carryoverAmountCents);
-    expect(carryAlloc.expiresAt).toBe("2026-06-30");
+    expect(carryAlloc.expiresAt).toBe(expiresAt);
+    expect(expiresAt).toBe(`${targetYear}-06-30`);
 
     // Vorab-Sanity: Es darf noch keinerlei write_off für die Allokation geben.
     const preWriteOffs = await db
@@ -80,13 +91,27 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
       );
     expect(Number(preWriteOffs[0]?.c ?? 0)).toBe(0);
 
-    // Frist 30.06.2026 abgelaufen → 01.07.2026 00:01 MESZ.
-    freezeTime("2026-07-01T00:01:00+02:00");
+    // Frist 30.06. abgelaufen → 01.07. 00:01 MESZ des Zieljahres. Ab hier ist
+    // die Uhr des TESTPROZESSES maßgeblich; `processExpiredCarryover` wird
+    // unten in-process gerufen, dort wirkt der Freeze.
+    freezeTime(frozenJustAfterExpiry);
+
+    // Pool vorwärmen, BEVOR die Barriere aufgeht. Ohne das zog der erste Call
+    // seine Queries auf einer warmen Verbindung durch, während der zweite noch
+    // auf einen kalten Connect wartete — er traf dann bereits den committeten
+    // Stand und wurde vom App-Level-Check (`writtenOffAllocationIds`)
+    // abgefangen, statt in die DB-Constraint zu laufen. Die Barriere
+    // synchronisiert den Funktions-Eintritt, nicht den DB-Roundtrip.
+    await Promise.all([
+      db.execute(sql`SELECT 1`),
+      db.execute(sql`SELECT 1`),
+      db.execute(sql`SELECT 1`),
+    ]);
 
     // Echte Race: zwei parallele Storage-Aufrufe in derselben Mikrotask.
     // Ohne die partielle UNIQUE auf (customer_id, allocation_id) WHERE
-    // transaction_type='write_off' würde jeder Lauf den existsCheck umgehen
-    // und einen eigenen write_off einfügen — Doppel-Buchung.
+    // transaction_type='write_off' können beide Läufe den App-Level-Check
+    // passieren und je einen write_off einfügen — Doppel-Buchung.
     const results = await runInParallel([
       async (arrive) => {
         await arrive();
@@ -119,9 +144,34 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
           eq(budgetTransactions.transactionType, "write_off"),
         ),
       );
+    // Beide Calls zusammen dürfen GENAU EINE Zeile erzeugt haben. Das ist der
+    // eigentliche Constraint-Nachweis: `toHaveLength(1)` allein ist auch dann
+    // grün, wenn der zweite Call gar nicht bis zum INSERT kommt — die Summe der
+    // Rückgaben deckt diesen Fall auf.
+    const createdTotal = results
+      .filter(
+        (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof processExpiredCarryover>>> =>
+          r.status === "fulfilled",
+      )
+      .reduce((sum, r) => sum + r.value.length, 0);
+    expect(createdTotal).toBe(1);
+
     expect(writeOffs).toHaveLength(1);
     expect(writeOffs[0].amountCents).toBe(-carryoverAmountCents);
     expect(writeOffs[0].budgetType).toBe("entlastungsbetrag_45b");
-    expect(writeOffs[0].transactionDate).toBe("2026-06-30");
+    // Die Verfallsbuchung ist auf den ERSTEN Tag NACH der Frist datiert
+    // (30.06. → 01.07.), NICHT auf die Frist selbst — siehe die ausführliche
+    // Begründung an `writeOffDate` in `allocation-storage.ts`: der 30.06.
+    // gehört noch zum nutzbaren Fenster, ein auf ihn datierter Write-Off
+    // leerte den Topf an seinem letzten gültigen Tag und blockierte eine
+    // legitime 30.06.-Buchung.
+    //
+    // Die bisherige Erwartung stand als Literal `"2026-06-30"` hier und
+    // beschrieb den Stand VOR dieser bewussten Korrektur. Sie war nie
+    // gescheitert, weil der Test schon an der Vorab-Sanity oben abbrach. Statt
+    // eines neuen Literals wird jetzt die REGEL geprüft (`Frist + 1 Tag`),
+    // damit die Erwartung nicht erneut von der Produktivlogik wegdriften kann.
+    expect(writeOffs[0].transactionDate).toBe(addDays(expiresAt, 1));
+    expect(writeOffs[0].transactionDate).toBe(`${targetYear}-07-01`);
   });
 });
