@@ -197,3 +197,55 @@ export function carryoverAnchor(now: Date = new Date()): {
     asOf: snapToWeekday(ymd(asOfDate), "backward"),
   };
 }
+
+/**
+ * Anker für Tests, die den §45b-VERFALL SELBST prüfen (Frist-SUBJEKT).
+ *
+ * ERGÄNZT {@link carryoverAnchor} um den gegenläufigen Fall und ERSETZT das
+ * Muster „Übertrag mit einem Quelljahr in der VERGANGENHEIT seeden und die Uhr
+ * auf den Tag nach der Frist einfrieren" (`race-writeoff`: `year: 2025` +
+ * `freezeTime("2026-07-01")`).
+ *
+ * Warum dieses Muster nicht trägt: `freezeTime` benutzt `vi.useFakeTimers` und
+ * wirkt damit NUR im Testprozess. `setupBudgetScenario` läuft aber über die
+ * API, und der App-Server ist ein EIGENER Prozess mit realer Uhr
+ * (`shared/utils/datetime.ts#todayISO` liest die Systemzeit; einen
+ * Clock-Override kennt der Server nicht). Liegt die Frist real in der
+ * Vergangenheit, schreibt der Server den Übertrag also schon WÄHREND des Seeds
+ * ab — die Vorbedingung „noch kein write_off" ist verletzt, bevor der Test
+ * überhaupt einfriert. Empirisch belegt: Uhr auf 2026-06-15 eingefroren, dann
+ * geseedet → trotzdem ein write_off mit Datum 2026-07-01.
+ *
+ * Die Lösung dreht die Richtung um: das Zieljahr liegt IMMER im nächsten
+ * Kalenderjahr, die Frist damit garantiert in der REALEN Zukunft. Kein
+ * server-seitiger Pfad kann den Übertrag vorzeitig abschreiben; der Test friert
+ * anschließend selbst auf den ersten Tag NACH der Frist ein und ruft die
+ * Verfallslogik in-process auf, wo der Freeze wirkt.
+ *
+ * DIE FRIST WIRD NICHT ANGEFASST: `expiresAt` ist weiterhin exakt der 30.06.
+ * des Zieljahres und gehört weiter assertiert — nur relativ statt als Literal.
+ */
+export function expirySubjectAnchor(now: Date = new Date()): {
+  /** Jahr, AUS dem der Übertrag stammt (Seed: `carryover.year`). */
+  sourceYear: number;
+  /** Jahr, IN dem der Übertrag gilt — immer das nächste Kalenderjahr. */
+  targetYear: number;
+  /** Verfallsdatum: der 30.06. des Zieljahres, garantiert real in der Zukunft. */
+  expiresAt: string;
+  /**
+   * Erster Zeitpunkt NACH Ablauf der Frist (01.07., 00:01 Ortszeit Berlin), als
+   * Argument für `freezeTime`. Deckungsgleich mit dem `writeOffDate` der
+   * Produktivlogik (`expiresAt + 1 Tag`).
+   */
+  frozenJustAfterExpiry: string;
+} {
+  const sourceYear = now.getFullYear();
+  const targetYear = sourceYear + 1;
+  return {
+    sourceYear,
+    targetYear,
+    expiresAt: `${targetYear}-06-30`,
+    // +02:00 = MESZ; der 01.07. liegt immer in der Sommerzeit.
+    frozenJustAfterExpiry: `${targetYear}-07-01T00:01:00+02:00`,
+  };
+}
