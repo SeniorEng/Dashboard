@@ -365,12 +365,15 @@ sudo docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist w
     entfernt sie), die vier `architecture/*`-Wächter je 1,
     `query-invalidation-discipline` 1, `equality/appointment-series-bulk-rebook`
     1, `billing/zugferd-send-failure` 1.
-  Derselbe Commit in **CI: 12 rote Tests / 8 Dateien**. Die Differenz geht in
-  BEIDE Richtungen und ist strukturell, nicht zufällig: lokal fehlt Chromium
-  (+14 Tests), dafür sind in CI `architecture/bash-gate` (2) und
-  `startup/dedupe-pending-monthly-service-records` (1) rot, die lokal grün
-  laufen — letzteres ein Kontaminations-Flake, der mit der Worker-Verteilung
-  kippt.
+  Derselbe Commit in **CI: 12 rote Tests / 8 Dateien** (Run `31107615718`, der
+  `push`-Lauf auf `main` — nicht der PR-Lauf; Run-ID mit notieren, sonst ist die
+  Zahl später nicht zuzuordnen). Die Differenz geht in BEIDE Richtungen und
+  rechnet sich vollständig auf:
+  `25 − 14 (Chromium fehlt lokal) − 2 (`equality/appointment-series-bulk-rebook`
+  und `billing/zugferd-send-failure`: lokal rot, in CI grün)
+  + 2 (`architecture/bash-gate`) + 1 (`startup/dedupe-pending-…`) = 12`;
+  Dateien `10 − 2 − 2 + 2 = 8`. Wer nur die Chromium-Richtung abzieht, landet
+  bei 14/10 und meldet zwei Phantom-Regressionen.
   **Zwei Läufe, zwei Zahlen — auch ohne Kalenderwechsel.** Derselbe Commit lieferte
   lokal erst 27/12, dann 25/10; die Differenz waren
   `tests/budget-transactions-immutability.test.ts` (1) und
