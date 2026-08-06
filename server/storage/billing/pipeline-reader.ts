@@ -28,7 +28,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
-import { serviceRecordWithStatusExistsSqlRaw } from "../../lib/appointment-signed";
+import { hasDirectSignatureSqlRaw, serviceRecordWithStatusExistsSqlRaw } from "../../lib/appointment-signed";
 import { activeInvoiceForAppointmentExistsSqlRaw } from "../../lib/appointment-invoiced";
 import { getInvoices } from "../billing-storage";
 import {
@@ -133,7 +133,7 @@ export async function readBillingPipeline(
       a.status AS status,
       c.name AS customer_name,
       c.billing_type AS billing_type,
-      (a.signature_data IS NOT NULL) AS has_direct_signature,
+      ${hasDirectSignatureSqlRaw("a")} AS has_direct_signature,
       ${serviceRecordWithStatusExistsSqlRaw("a", "completed")} AS has_completed_ln,
       ${serviceRecordWithStatusExistsSqlRaw("a", "employee_signed")} AS has_employee_signed_ln,
       ${activeInvoiceForAppointmentExistsSqlRaw("a.id")} AS is_invoiced

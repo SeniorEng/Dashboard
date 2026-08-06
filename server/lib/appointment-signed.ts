@@ -84,6 +84,34 @@ export function documentedAndSignedSqlRaw(alias: string): SQL {
 }
 
 /**
+ * Roh-SQL-Fragment „hat eine DIREKTE Unterschrift?" für `db.execute`-Queries mit
+ * Tabellen-Alias (z.B. `FROM appointments a`).
+ *
+ * Das PRIMITIV, nicht das zusammengesetzte Prädikat: Es beantwortet nur die
+ * Teilfrage `signature_data IS NOT NULL` — ohne `status`-Gate und ohne den
+ * Leistungsnachweis-Zweig. Wer „dokumentiert & unterschrieben?" braucht, nimmt
+ * `documentedAndSignedSqlRaw`; dieses Fragment ist ausschließlich für Leser
+ * gedacht, die die drei Teilflags EINZELN brauchen und selbst komponieren —
+ * heute die Abrechnungs-Pipeline (`assignAppointmentStage` in
+ * `shared/domain/billing-pipeline.ts` setzt sie zur Stufen-Zuordnung zusammen).
+ *
+ * ERSETZT die rohe Inline-Bedingung `(a.signature_data IS NOT NULL)` in
+ * `server/storage/billing/pipeline-reader.ts`. Sie war die letzte
+ * `signature_data`-Prüfung außerhalb dieser Datei und brach den A3-Wächter
+ * (`tests/architecture/ssot-imports.test.ts`) — die Spalte wurde nach Task #1874
+ * eingeführt, ohne dass es ein Primitiv gab, das man hätte nutzen können.
+ *
+ * MUSS mit dem `signature_data`-Zweig in `documentedAndSignedSqlRaw` und dem
+ * reinen TS-Prädikat in `shared/domain/appointments.ts` in lockstep bleiben:
+ * bekommt „direkte Unterschrift" je einen Zusatz (etwa den Erstberatungs-
+ * Carve-out aus Task #1586), gehört er hierher UND dorthin.
+ */
+export function hasDirectSignatureSqlRaw(alias: string): SQL {
+  const a = sql.raw(alias);
+  return sql`(${a}.signature_data IS NOT NULL)`;
+}
+
+/**
  * Roh-SQL-Fragment „dokumentiert" (Task #1496) für `db.execute`-Queries mit
  * Tabellen-Alias (z.B. `FROM appointments a`). Spiegelt `appointmentDocumentedCondition()`
  * bzw. das reine TS-Prädikat `isAppointmentDocumented` und MUSS mit ihm in lockstep

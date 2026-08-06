@@ -181,6 +181,11 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     canonical: [
       { symbol: "isAppointmentDocumentedAndSigned", module: "shared/domain/appointments.ts" },
       { symbol: "documentedSqlRaw", module: "server/lib/appointment-signed.ts" },
+      // Primitiv für Leser, die die Teilflags EINZELN brauchen und selbst
+      // komponieren (Abrechnungs-Pipeline → `assignAppointmentStage`). Ohne es
+      // gab es keinen kanonischen Weg an `signature_data`, und Task #1874 hat
+      // deshalb eine rohe Bedingung eingeführt, die den Wächter brach.
+      { symbol: "hasDirectSignatureSqlRaw", module: "server/lib/appointment-signed.ts" },
     ],
     ownedLiterals: [],
     guards: [
