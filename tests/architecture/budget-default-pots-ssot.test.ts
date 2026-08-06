@@ -25,9 +25,17 @@ import { readFileSync, statSync } from "fs";
 import { join, relative, sep } from "path";
 import { ROOT, walkTsFiles } from "./ast-grep-helpers";
 
-// Einzige Datei, die die Konstante nennen darf — ihre Definition + der Resolver.
+// Dateien, die die Konstante nennen dürfen.
 const ALLOWED_FILES = new Set<string>([
+  // Definition + Resolver.
   "shared/domain/budgets.ts",
+  // Die SSoT-Registry MUSS den Namen nennen — sie dokumentiert unter
+  // `ownedLiterals`, zu welcher fachlichen Frage das Literal gehört, und
+  // verweist im Kommentar auf genau diesen Wächter. Das ist keine Nutzung der
+  // Konstante, sondern ihre Buchführung: ein String-Literal und ein Kommentar,
+  // kein Import und kein Zugriff. Ohne diese Ausnahme steht das Werkzeug, das
+  // SSoT dokumentiert, im Konflikt mit dem Wächter, der SSoT erzwingt.
+  "shared/ssot-registry.ts",
 ]);
 
 // Trifft den Bezeichner als Wort (Import ODER Verwendung). Bewusst eng auf den
