@@ -63,6 +63,57 @@ const LATEST_INTENT_ALLOWLIST = new Set<string>([
 ]);
 
 /**
+ * ZEILENGENAUE Ausnahmen — bewusst NICHT über {@link LATEST_INTENT_ALLOWLIST}.
+ *
+ * Der Wächter fragt eigentlich: „liest ein WERTRELEVANTER Pfad den jüngsten
+ * Intent statt stichtagsbezogen?". Er misst das aber datei-weit. Eine Datei, die
+ * ihre wertrelevanten Reads korrekt mit `forDate` macht und daneben EINEN
+ * bewusst zeitraum-übergreifenden Read hat, ist damit nicht unterscheidbar von
+ * einer, die den Stichtag schlicht vergisst.
+ *
+ * Ein Eintrag in `LATEST_INTENT_ALLOWLIST` wäre hier das falsche Werkzeug: er
+ * nimmt die GANZE Datei aus. Für `consumption-engine.ts` — DEN Buchungspfad —
+ * hiesse das, dass ein künftiger, echt vergessener `forDate` dort nie wieder
+ * auffiele. Diese Liste nimmt stattdessen genau die eine Stelle aus; jeder
+ * andere Latest-Intent-Read in derselben Datei bricht den Wächter weiterhin.
+ *
+ * `marker` muss auf der Fundzeile selbst oder in den {@link MARKER_LOOKBEHIND}
+ * Zeilen davor stehen (Roh-Text, damit auch Kommentare zählen).
+ */
+const LATEST_INTENT_LINE_ALLOWLIST: ReadonlyArray<{
+  file: string;
+  marker: RegExp;
+  why: string;
+}> = [
+  {
+    file: "server/storage/budget/consumption-engine.ts",
+    marker: /configuredEverTypes/,
+    why:
+      "Task #1838 — Existenz-Gate „wurde dieser Topf JE konfiguriert?“. Die Frage " +
+      "ist bewusst zeitraum-übergreifend: ein Topf, dessen Gültigkeitsfenster den " +
+      "Buchungstag nicht abdeckt, soll NICHT still über den Default zurückfallen, " +
+      "sondern wie ein deaktivierter Topf behandelt werden. Ein `forDate`-Read " +
+      "würde genau das kaputt machen, was #1838 hergestellt hat. Der wertrelevante " +
+      "Read derselben Funktion liest korrekt `forDate` (asOfDate = transactionDate).",
+  },
+];
+
+/** Wie viele Zeilen oberhalb der Fundstelle nach dem `marker` gesucht wird. */
+const MARKER_LOOKBEHIND = 4;
+
+/**
+ * Kommentare entfernen, aber die ZEILENSTRUKTUR erhalten — nötig, damit die
+ * Fundstelle einer Zeilennummer zugeordnet werden kann. Der geteilte
+ * `stripComments`-Helfer löscht Blockkommentare samt Zeilenumbrüchen und
+ * verschiebt damit alle Folgezeilen.
+ */
+function stripCommentsKeepLines(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+    .replace(/(^|[^:])\/\/.*$/gm, (_m, p1: string) => p1);
+}
+
+/**
  * Nicht-Request-Pfade: Tests, manuelle Einmal-Skripte und Startup-Migrationen
  * sind dokumentierte Sonderwerkzeuge (kein Produktions-Request-Pfad) und werden
  * vom Scope ausgenommen.
@@ -92,30 +143,43 @@ export function detectLatestIntentReadViolations(
   files: ScanFile[],
 ): GuardViolation[] {
   const out: GuardViolation[] = [];
+  const checks: ReadonlyArray<{ re: RegExp; detail: string }> = [
+    {
+      re: FOR_EDIT_RE,
+      detail:
+        'liest Budget-Type-Settings mit `{ kind: "forEdit" }` (jüngster Intent) statt stichtagsbezogen `{ kind: "forDate", asOfDate }`',
+    },
+    {
+      re: WITH_TRANSITION_RE,
+      detail:
+        'liest Budget-Type-Settings mit `{ kind: "withTransition" }` (Edit-Snapshot) statt stichtagsbezogen `{ kind: "forDate", asOfDate }`',
+    },
+    {
+      re: LATEST_WRAPPER_RE,
+      detail:
+        "ruft einen `@deprecated`-Latest-Intent-Wrapper (`getLatestBudgetTypeSettings[WithTransition]`) direkt auf statt `readBudgetTypeSettings({ kind: \"forDate\", asOfDate })`",
+    },
+  ];
+
   for (const { rel, content } of files) {
     if (EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
     if (LATEST_INTENT_ALLOWLIST.has(rel)) continue;
-    const code = stripComments(content);
-    if (FOR_EDIT_RE.test(code)) {
-      out.push({
-        file: rel,
-        detail:
-          'liest Budget-Type-Settings mit `{ kind: "forEdit" }` (jüngster Intent) statt stichtagsbezogen `{ kind: "forDate", asOfDate }`',
-      });
-    }
-    if (WITH_TRANSITION_RE.test(code)) {
-      out.push({
-        file: rel,
-        detail:
-          'liest Budget-Type-Settings mit `{ kind: "withTransition" }` (Edit-Snapshot) statt stichtagsbezogen `{ kind: "forDate", asOfDate }`',
-      });
-    }
-    if (LATEST_WRAPPER_RE.test(code)) {
-      out.push({
-        file: rel,
-        detail:
-          "ruft einen `@deprecated`-Latest-Intent-Wrapper (`getLatestBudgetTypeSettings[WithTransition]`) direkt auf statt `readBudgetTypeSettings({ kind: \"forDate\", asOfDate })`",
-      });
+
+    const rawLines = content.split("\n");
+    const codeLines = stripCommentsKeepLines(content).split("\n");
+    const lineExemptions = LATEST_INTENT_LINE_ALLOWLIST.filter((e) => e.file === rel);
+
+    for (const { re, detail } of checks) {
+      for (let i = 0; i < codeLines.length; i++) {
+        if (!re.test(codeLines[i])) continue;
+        // Fundstelle + Kontext darüber (Roh-Text, damit der Marker auch in einem
+        // erklärenden Kommentar stehen darf).
+        const window = rawLines
+          .slice(Math.max(0, i - MARKER_LOOKBEHIND), i + 1)
+          .join("\n");
+        if (lineExemptions.some((e) => e.marker.test(window))) continue;
+        out.push({ file: rel, detail: `${detail} (Zeile ${i + 1})` });
+      }
     }
   }
   return out;
