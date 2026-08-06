@@ -84,6 +84,48 @@ export function documentedAndSignedSqlRaw(alias: string): SQL {
 }
 
 /**
+ * Roh-SQL-Fragment „hat eine DIREKTE Unterschrift?" für `db.execute`-Queries mit
+ * Tabellen-Alias (z.B. `FROM appointments a`).
+ *
+ * Das PRIMITIV, nicht das zusammengesetzte Prädikat: Es beantwortet nur die
+ * Teilfrage `signature_data IS NOT NULL` — ohne `status`-Gate und ohne den
+ * Leistungsnachweis-Zweig. Wer „dokumentiert & unterschrieben?" braucht, nimmt
+ * `documentedAndSignedSqlRaw`; dieses Fragment ist ausschließlich für Leser
+ * gedacht, die die drei Teilflags EINZELN brauchen und selbst komponieren —
+ * heute die Abrechnungs-Pipeline (`assignAppointmentStage` in
+ * `shared/domain/billing-pipeline.ts` setzt sie zur Stufen-Zuordnung zusammen).
+ *
+ * ERSETZT die rohe Inline-Bedingung `(a.signature_data IS NOT NULL)` in
+ * `server/storage/billing/pipeline-reader.ts`, die den A3-Wächter
+ * (`tests/architecture/ssot-imports.test.ts`) brach — die Spalte wurde mit
+ * Task #1874 eingeführt, ohne dass es ein Primitiv gab, das man hätte nutzen
+ * können.
+ *
+ * KEIN kundenseitiger Carve-out hier — das ist Absicht, keine Lücke.
+ * Insbesondere gehört der Erstberatungs-Ausschluss (Task #1586) NICHT hierher:
+ * Er lebt in `completedButUnsignedSqlRaw` / `appointmentCompletedButUnsignedCondition`
+ * und sagt dort „eine Erstberatung darf nie als *Unterschrift fehlt* erscheinen".
+ * Das ist eine Aussage über ein AUDIT-KOMPOSITUM, nicht über diese Tatsache.
+ * `documentedAndSignedSqlRaw` trägt ihn ebenfalls nicht.
+ *
+ * Würde man ihn hier einbauen, meldete ein Erstberatungs-Termin, der tatsächlich
+ * `signature_data` trägt, `false` — das Primitiv löge über eine Tatsache und
+ * schöbe den Termin über `assignAppointmentStage` aus „Unterschrieben" heraus.
+ * CLAUDE.md sagt dazu: kundenseitige Ausschlüsse eng fassen. Sie gehören ans
+ * Kompositum, nicht ans Primitiv.
+ *
+ * Was hier sehr wohl in lockstep bleiben MUSS: die reine Tatsachen-Frage selbst.
+ * Ändert sich, WIE eine direkte Unterschrift gespeichert wird (anderes Feld,
+ * zusätzliche Spalte), ist das hier UND im `signature_data`-Zweig von
+ * `documentedAndSignedSqlRaw` UND im reinen TS-Prädikat in
+ * `shared/domain/appointments.ts` nachzuziehen.
+ */
+export function hasDirectSignatureSqlRaw(alias: string): SQL {
+  const a = sql.raw(alias);
+  return sql`(${a}.signature_data IS NOT NULL)`;
+}
+
+/**
  * Roh-SQL-Fragment „dokumentiert" (Task #1496) für `db.execute`-Queries mit
  * Tabellen-Alias (z.B. `FROM appointments a`). Spiegelt `appointmentDocumentedCondition()`
  * bzw. das reine TS-Prädikat `isAppointmentDocumented` und MUSS mit ihm in lockstep
