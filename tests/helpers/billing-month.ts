@@ -1,6 +1,14 @@
 /**
  * Referenz-„heute" für Abrechnungs-Fixtures.
  *
+ * WEGWEISER für die beiden §45b-Jahres-Anker in dieser Datei — wer den falschen
+ * greift, bekommt einen Test, der nichts misst:
+ *   - Frist ist KONTEXT, der Übertrag soll zum Stichtag noch GELTEN
+ *     → {@link carryoverAnchor} (Zieljahr = laufendes Jahr, Stichtag im H1).
+ *   - Frist ist PRÜFGEGENSTAND, der Übertrag soll kontrolliert VERFALLEN
+ *     → {@link expirySubjectAnchor} (Zieljahr = Folgejahr, Frist real in der
+ *       Zukunft, Test friert selbst auf den Tag danach ein).
+ *
  * ERSETZT das direkte `new Date()` in den Billing-Fixtures, die einen
  * VERGANGENEN Werktags-Slot im laufenden Monat suchen (`createAppt`, 13 Dateien).
  *
@@ -245,7 +253,12 @@ export function expirySubjectAnchor(now: Date = new Date()): {
     sourceYear,
     targetYear,
     expiresAt: `${targetYear}-06-30`,
-    // +02:00 = MESZ; der 01.07. liegt immer in der Sommerzeit.
-    frozenJustAfterExpiry: `${targetYear}-07-01T00:01:00+02:00`,
+    // Bewusst OHNE UTC-Offset: ein ISO-Zeitstempel ohne Offset wird als
+    // ORTSZEIT geparst. Ein fixes `+02:00` unterstellte, dass der 01.07. in
+    // Berlin immer MESZ ist — fiele die Sommerzeit weg, waere `00:01+02:00`
+    // lokal der 30.06. 23:01, `todayISO()` damit der 30.06., der Uebertrag
+    // nicht abgelaufen und der Test mit irrefuehrender Meldung rot. Gleiches
+    // Muster wie `budget-e2e.test.ts` (`${curYear}-07-01T12:00:00`).
+    frozenJustAfterExpiry: `${targetYear}-07-01T00:01:00`,
   };
 }

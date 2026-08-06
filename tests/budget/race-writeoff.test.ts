@@ -96,10 +96,22 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
     // unten in-process gerufen, dort wirkt der Freeze.
     freezeTime(frozenJustAfterExpiry);
 
+    // Pool vorwärmen, BEVOR die Barriere aufgeht. Ohne das zog der erste Call
+    // seine Queries auf einer warmen Verbindung durch, während der zweite noch
+    // auf einen kalten Connect wartete — er traf dann bereits den committeten
+    // Stand und wurde vom App-Level-Check (`writtenOffAllocationIds`)
+    // abgefangen, statt in die DB-Constraint zu laufen. Die Barriere
+    // synchronisiert den Funktions-Eintritt, nicht den DB-Roundtrip.
+    await Promise.all([
+      db.execute(sql`SELECT 1`),
+      db.execute(sql`SELECT 1`),
+      db.execute(sql`SELECT 1`),
+    ]);
+
     // Echte Race: zwei parallele Storage-Aufrufe in derselben Mikrotask.
     // Ohne die partielle UNIQUE auf (customer_id, allocation_id) WHERE
-    // transaction_type='write_off' würde jeder Lauf den existsCheck umgehen
-    // und einen eigenen write_off einfügen — Doppel-Buchung.
+    // transaction_type='write_off' können beide Läufe den App-Level-Check
+    // passieren und je einen write_off einfügen — Doppel-Buchung.
     const results = await runInParallel([
       async (arrive) => {
         await arrive();
@@ -132,6 +144,18 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
           eq(budgetTransactions.transactionType, "write_off"),
         ),
       );
+    // Beide Calls zusammen dürfen GENAU EINE Zeile erzeugt haben. Das ist der
+    // eigentliche Constraint-Nachweis: `toHaveLength(1)` allein ist auch dann
+    // grün, wenn der zweite Call gar nicht bis zum INSERT kommt — die Summe der
+    // Rückgaben deckt diesen Fall auf.
+    const createdTotal = results
+      .filter(
+        (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof processExpiredCarryover>>> =>
+          r.status === "fulfilled",
+      )
+      .reduce((sum, r) => sum + r.value.length, 0);
+    expect(createdTotal).toBe(1);
+
     expect(writeOffs).toHaveLength(1);
     expect(writeOffs[0].amountCents).toBe(-carryoverAmountCents);
     expect(writeOffs[0].budgetType).toBe("entlastungsbetrag_45b");
