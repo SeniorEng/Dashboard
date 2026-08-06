@@ -199,6 +199,15 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
           "server/startup/migrate-expired-unsigned-appointments.ts",
         ],
       },
+      {
+        // Import-Rand des PRIMITIVS: `hasDirectSignatureSqlRaw` beantwortet nur
+        // die Tatsachen-Teilfrage und ist damit KEIN Ersatz für das
+        // zusammengesetzte Prädikat. Ohne diesen Rand waere das Primitiv ein
+        // ungeguardeter Weg zu genau der zu engen Pruefung, die A3 sperrt.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "DIRECT_SIGNATURE_IMPORT_ALLOWLIST",
+        allowlist: ["server/storage/billing/pipeline-reader.ts"],
+      },
     ],
     eslintRules: [],
   },
