@@ -5,6 +5,7 @@ import {
   billingReferenceMonth,
   carryoverAnchor,
   countPastWeekdaysInMonth,
+  expiredCarryoverAnchor,
   expirySubjectAnchor,
   pastWeekdayInBillingMonth,
 } from "./billing-month";
@@ -219,5 +220,44 @@ describe("expirySubjectAnchor — Frist immer real in der Zukunft", () => {
     const localIso = `${frozen.getFullYear()}-${String(frozen.getMonth() + 1).padStart(2, "0")}-${String(frozen.getDate()).padStart(2, "0")}`;
     expect(localIso).toBe(`${targetYear}-07-01`);
     expect(localIso > expiresAt).toBe(true);
+  });
+});
+
+/**
+ * Gegenstück zum `expirySubjectAnchor`-Sweep: die Frist muss an JEDEM Lauftag
+ * real VERGANGEN sein, sonst schreibt der Server den Übertrag beim Seed nicht ab
+ * und die Fixture prüft etwas anderes, als sie behauptet.
+ */
+describe("expiredCarryoverAnchor — Frist immer real vergangen", () => {
+  it("hält die Invarianten an jedem Tag von 2026 bis 2040", () => {
+    const verletzungen: string[] = [];
+
+    for (let year = 2026; year <= 2040; year++) {
+      for (let month = 0; month < 12; month++) {
+        const tage = new Date(year, month + 1, 0).getDate();
+        for (let day = 1; day <= tage; day++) {
+          const now = new Date(year, month, day, 12, 0, 0);
+          const { sourceYear, targetYear, expiresAt } = expiredCarryoverAnchor(now);
+          const heute = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+          if (expiresAt >= heute) {
+            verletzungen.push(`${heute}: expiresAt=${expiresAt} nicht vergangen`);
+          }
+          if (expiresAt !== `${targetYear}-06-30`) {
+            verletzungen.push(`${heute}: expiresAt=${expiresAt} != ${targetYear}-06-30`);
+          }
+          if (sourceYear !== targetYear - 1) {
+            verletzungen.push(`${heute}: sourceYear=${sourceYear} != ${targetYear - 1}`);
+          }
+          // Darf NIE mit dem Zukunfts-Anker kollidieren — sonst würden die
+          // beiden Seeds in `budget-e2e` INT-13 dieselbe Zeile treffen.
+          if (targetYear === expirySubjectAnchor(now).targetYear) {
+            verletzungen.push(`${heute}: Zieljahr kollidiert mit expirySubjectAnchor`);
+          }
+        }
+      }
+    }
+
+    expect(verletzungen.slice(0, 10)).toEqual([]);
   });
 });
