@@ -126,8 +126,9 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   entgleisen lassen.
 - **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
   kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
-  Der `tests`-CI-Job ist **bekannt rot** (~28 Dateien Altbestand); PRs gegen
-  diese Baseline diffen, nicht gegen „grün".
+  Der `tests`-CI-Job ist **bekannt rot** (Stand 06.08.2026, `75e9ba69`:
+  15 Tests / 9 Dateien Altbestand); PRs gegen diese Baseline diffen, nicht
+  gegen „grün".
 
 ## Arbeitsmodus: autonom bis zur PR, Mensch an 4 Gates
 
@@ -346,35 +347,32 @@ sudo docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist w
   `npm run test:unblock` oder ein Orchestrator-Start droppen sie, sobald keine
   Verbindung dranhängt — Schema und Seeds des Fallback-Ablaufs sind dann weg.
 - **Lokale Baseline ≠ CI-Baseline, und sie ist datums-fragil.** Voller Lauf am
-  02.08.2026 auf `main` (`024f1e13`, nach #28): **78 rote Tests / 37 Dateien**
-  von 3628, ~19 min. Aufgeschlüsselt:
-  - **§45b-Budget-Mathematik — 21 Tests / 11 Dateien.** Fachlicher Defekt, keine
-    Infrastruktur. Ursächlich belegt: `tests/equality/45b-cap.test.ts` (6) und
-    `tests/billing/storno-reversal.test.ts` K2.1 (`availableCents Δ 0` bei
-    gebuchten 3800) sowie `tests/budget/45b-july-boundary-symmetry.test.ts`
-    (`87900` statt `91700` — die Zahlen der dokumentierten Wurzelanalyse). Die
-    übrigen (`budget-e2e` 4, `45b-forecast-*` 3, `carryover-no-double-count`,
-    `monthly-cap-display-vs-booking` 2, `race-writeoff`, `task-684`,
-    `budget.test`) liegen thematisch auf Carryover/Verfall/Aufstockung, sind
-    aber NICHT als derselbe Defekt verifiziert.
-  - **Host-Ausstattung — 11 Tests / 2 Dateien**, alle mit
-    `ChromiumUnavailableError` (`invoice-pdf-margins` 6,
-    `pdf-generator-resilience` 5). Das ist die EINZIGE host-erklärte Menge;
-    `zugferd-send-failure` und je ein Teil der beiden PDF-Dateien scheitern
-    anders und zählen NICHT hierher.
-  - **Weiterhin datumsabhängig — 7 Tests / 4 Dateien.** #28 hat die
-    `createAppt`-Familie (13 Dateien) auf `tests/helpers/billing-month.ts`
-    umgestellt, aber zwei Fixtures tragen dasselbe Muster eigenständig:
-    `tests/billing/invoice-45b-reduction.test.ts` (eigener `latestPastWeekday`,
-    `kein vergangener Werktag in 8/2026`) und `setupBudgetScenario` in
-    `tests/helpers/budget-scenarios.ts` (`appointment fehlgeschlagen
-    (status=400, date=…)`) → `45b-fifo-breakdown-consistency`,
-    `cascade-concurrency`, `storno-keeps-ln-active`. Beide gehören auf den
-    Ankertag umgestellt.
-  - **Rest — 39 Tests / 22 Dateien**, gemischt (Architektur-Wächter,
-    `team-lead-schreibrechte`, `billing-flow`, UI-Unit-Mocks, Einzelfälle).
+  06.08.2026 auf `main` (`75e9ba69`, nach #58): **28 rote Tests / 11 Dateien**
+  von 3837, ~5 min. Aufgeschlüsselt:
+  - **Host-Ausstattung — 14 Tests / 2 Dateien**, alle mit
+    `ChromiumUnavailableError` (`pdf-generator-resilience` 8,
+    `invoice-pdf-margins` 6). Einzeln nachgeprüft; das ist die EINZIGE
+    host-erklärte Menge. `zugferd-send-failure` scheitert anders und zählt
+    NICHT hierher.
+  - **§45b-/Kalender-Menge — 0 Tests.** Der frühere Block (21 Tests /
+    11 Dateien §45b-Budget-Mathematik plus 7 datumsabhängige) ist über #49–#59
+    abgearbeitet. Wiederverwendbarer Kern ist die Anker-Familie in
+    `tests/helpers/billing-month.ts` — `carryoverAnchor` (Frist als Kontext),
+    `expirySubjectAnchor` (Frist als Prüfgegenstand), `expiredCarryoverAnchor`
+    (bereits verfallen); alle drei per Tages-Sweep über 12–15 Jahre abgesichert.
+    Wer eine §45b-Fixture datiert, greift dort zu statt neu zu rechnen.
+  - **Rest — 14 Tests / 9 Dateien**: `billing/billing-flow` 4, `budget-e2e` 3
+    (durch #59 erledigt, dort noch offen), die vier `architecture/*`-Wächter je
+    1, `query-invalidation-discipline` 1,
+    `equality/appointment-series-bulk-rebook` 1, `billing/zugferd-send-failure` 1.
+  Derselbe Commit in **CI: 15 rote Tests / 9 Dateien**. Die Differenz geht in
+  BEIDE Richtungen und ist strukturell, nicht zufällig: lokal fehlt Chromium
+  (+14 Tests), dafür sind in CI `architecture/bash-gate` (2) und
+  `startup/dedupe-pending-monthly-service-records` (1) rot, die lokal grün
+  laufen — letzteres ein Kontaminations-Flake, der mit der Worker-Verteilung
+  kippt.
   **Die Zahl gilt für diesen Tag.** Sie steigt und fällt mit der Kalenderlage —
-  am 31.07.2026 waren es 29 Dateien / 59 Tests. Bei Zweifel neu auf `main`
+  am 02.08.2026 waren es 37 Dateien / 78 Tests. Bei Zweifel neu auf `main`
   erheben statt fortschreiben, und PRs immer per **same-day-A/B** gegen einen
   frischen `main`-Lauf diffen, nie gegen eine notierte Zahl.
 - Im Fallback-Ablauf den Server nach Server-Code-Änderungen neu starten — die
