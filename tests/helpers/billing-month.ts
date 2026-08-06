@@ -8,6 +8,9 @@
  *   - Frist ist PRÜFGEGENSTAND, der Übertrag soll kontrolliert VERFALLEN
  *     → {@link expirySubjectAnchor} (Zieljahr = Folgejahr, Frist real in der
  *       Zukunft, Test friert selbst auf den Tag danach ein).
+ *   - Der Übertrag soll BEREITS VERFALLEN SEIN, ohne Zutun des Tests
+ *     → {@link expiredCarryoverAnchor} (Zieljahr = Vorjahr, Frist real
+ *       vergangen; der Server hat ihn beim Seed schon abgeschrieben).
  *
  * ERSETZT das direkte `new Date()` in den Billing-Fixtures, die einen
  * VERGANGENEN Werktags-Slot im laufenden Monat suchen (`createAppt`, 13 Dateien).
@@ -276,5 +279,42 @@ export function expirySubjectAnchor(now: Date = new Date()): {
     // nicht abgelaufen und der Test mit irrefuehrender Meldung rot. Gleiches
     // Muster wie `budget-e2e.test.ts` (`${curYear}-07-01T12:00:00`).
     frozenJustAfterExpiry: `${targetYear}-07-01T00:01:00`,
+  };
+}
+
+/**
+ * Anker für einen §45b-Übertrag, der BEREITS VERFALLEN sein soll.
+ *
+ * Dritter und letzter Fall der Anker-Familie (siehe WEGWEISER oben) und
+ * Gegenstück zu {@link expirySubjectAnchor}: dort liegt die Frist garantiert in
+ * der Zukunft, hier garantiert in der Vergangenheit.
+ *
+ * ERSETZT die Inline-Zeile `new Date().getFullYear() - 1` in den Fixtures, die
+ * einen abgeschriebenen Übertrag brauchen (`budget-e2e` INT-13.2/13.3). Sie war
+ * fachlich richtig, stand aber als lose Rechnung im Testkörper — ohne Docstring,
+ * ohne Wächter und ohne Eintrag im Wegweiser. Genau daraus entstehen die
+ * duplizierten Kalender-Rechnungen, die diese Serie beseitigt.
+ *
+ * Zieljahr = Vorjahr, die Frist (30.06.) liegt damit an JEDEM Lauftag zwischen
+ * gut sechs und knapp achtzehn Monaten in der Vergangenheit. `processExpiredCarryover`
+ * schreibt so einen Übertrag bereits beim Seed ab — die Fixture muss dafür
+ * nichts einfrieren.
+ *
+ * DIE FRIST WIRD NICHT ANGEFASST: `expiresAt` ist exakt der 30.06. des
+ * Zieljahres und gehört weiter assertiert, nur relativ statt als Literal.
+ */
+export function expiredCarryoverAnchor(now: Date = new Date()): {
+  /** Jahr, AUS dem der Übertrag stammt (Seed: `carryover.year`). */
+  sourceYear: number;
+  /** Jahr, IN dem der Übertrag galt — immer das Vorjahr. */
+  targetYear: number;
+  /** Verfallsdatum: der 30.06. des Zieljahres, garantiert real vergangen. */
+  expiresAt: string;
+} {
+  const targetYear = now.getFullYear() - 1;
+  return {
+    sourceYear: targetYear - 1,
+    targetYear,
+    expiresAt: `${targetYear}-06-30`,
   };
 }
