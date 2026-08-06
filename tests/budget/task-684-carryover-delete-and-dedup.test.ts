@@ -161,10 +161,18 @@ describe("T684 — §45b-Carryover Delete-Stickiness & Anti-Dedup", () => {
     const customerId = await fresh45bCustomer("T684-MATH");
     const carryoverCents = 34_450; // 344,50 €
 
-    // §45b läuft ab Anfang des ZIELJAHRES (nicht Vorjahr) → die monatliche
-    // Aufstockung umfasst genau die elapsten Monate des Zieljahres.
+    // Beide Werte kommen aus dem STICHTAG, nicht aus `new Date()`. Letzteres
+    // wäre zwar korrekt, solange der Freeze zwei Zeilen weiter oben steht — aber
+    // genau dieses Muster ersetzt dieser PR sonst überall, und beim Verschieben
+    // des Freeze driftete es lautlos auf die reale Uhr zurück.
     const curYear = targetYear;
-    const curMonth = new Date().getMonth() + 1;
+    const curMonth = Number(asOf.slice(5, 7));
+    // Dieser PUT ist faktisch wirkungslos: `fresh45bCustomer` hat die
+    // §45b-Settings-Zeile bereits mit `validFrom = ${targetYear - 1}-01-01`
+    // angelegt, und der PUT ändert sie nicht. Dass die Aufstockung im Januar des
+    // ZIELJAHRES startet, macht der Produktions-Anker
+    // (`floorAutoAnchor45bToCurrentYear`) unter der eingefrorenen Uhr — nicht
+    // dieser Aufruf. Er bleibt als Teil des nachgestellten Wizard-Flows stehen.
     await apiPut(`/api/budget/${customerId}/type-settings`, {
       settings: [
         { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: `${curYear}-01-01`, validTo: null },

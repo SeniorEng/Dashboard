@@ -190,10 +190,26 @@ export function carryoverAnchor(now: Date = new Date()): {
     asOfDate = preferred(targetYear);
   }
 
+  // Der Werktags-Snap läuft NACH der Jahresgrenzen-Korrektur und kann sie wieder
+  // reissen: fällt der 01.01. auf einen Samstag oder Sonntag, zieht ein
+  // Rückwärts-Snap vom 01.01. in den DEZEMBER DES VORJAHRES. Der Stichtag läge
+  // dann vor `validFrom` des Übertrags (`${targetYear}-01-01`), `carryoverCounted`
+  // griffe nicht, und der Aufrufer bekäme 0 statt des geseedeten Betrags —
+  // dieselbe Kalender-Falle, gegen die dieser Helfer gebaut ist, nur an 2–3
+  // Tagen im Jahr (belegt: 02./03.01.2028, 02.01.2033, 02.01.2034).
+  //
+  // Wir prüfen deshalb das GESNAPPTE Ergebnis, nicht das Roh-Datum, und weichen
+  // bei Unterschreitung auf das Vorjahr aus — analog zum Zweig darüber.
+  let asOf = snapToWeekday(ymd(asOfDate), "backward");
+  if (asOf < `${targetYear}-01-01`) {
+    targetYear -= 1;
+    asOf = snapToWeekday(ymd(preferred(targetYear)), "backward");
+  }
+
   return {
     sourceYear: targetYear - 1,
     targetYear,
     expiresAt: `${targetYear}-06-30`,
-    asOf: snapToWeekday(ymd(asOfDate), "backward"),
+    asOf,
   };
 }
