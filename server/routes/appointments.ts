@@ -38,6 +38,7 @@ import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetStorage } from "../storage/budget-storage";
+import { reopenAppointmentForRedocumentation, type AppointmentReopenFacts } from "../lib/appointment-reopen";
 import { getPlannedHoldInputs } from "../storage/budget/appointment-cost-calculator";
 import { rebookAppointmentConsumption, type RebookKmResult } from "../storage/budget/km-rebook";
 import { buildBudgetWarning } from "../lib/budget-warning";
@@ -1760,7 +1761,7 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
   const decision = policyCanReopen(toPolicyUser(req.user!), policyAppt);
   if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
 
-  const transactions = await budgetStorage.getTransactionsByAppointmentId(id);
+  let reopenFacts: AppointmentReopenFacts;
 
   const updatedAppointment = await db.transaction(async (txClient) => {
     // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx. Ein Reopen setzt
@@ -1773,29 +1774,10 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
       throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr geändert werden.");
     }
 
-    for (const tx of transactions) {
-      await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
-    }
-
-    // Task #875 (gated) — beim Reopen lingering Holds freigeben; die Re-Doku
-    // legt beim erneuten Abschluss frische Buchungen an. Flag aus = No-op.
-    if (budgetStorage.hardHoldsEnabled()) {
-      await budgetStorage.releaseHolds(id, req.user!.id, txClient);
-    }
-
-    const result = await storage.updateAppointment(id, {
-      status: "documenting",
-      signatureData: null,
-      signatureHash: null,
-      signedAt: null,
-      signedByUserId: null,
-    }, txClient);
-
-    if (!result) {
-      throw new Error("Termin konnte nicht zurückgesetzt werden");
-    }
-
-    return result;
+    // SSoT — dieselbe Funktion, die der LN-Korrekturweg
+    // (`DELETE /api/service-records/:id`) pro betroffenem Termin ruft.
+    reopenFacts = await reopenAppointmentForRedocumentation(appointment, req.user!.id, txClient);
+    return reopenFacts.appointment;
   });
 
   const ip = req.ip || req.socket.remoteAddress;
@@ -1806,8 +1788,10 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
     id,
     {
       customerId: appointment.customerId,
-      reversedTransactions: transactions.length,
-      hadSignature: !!appointment.signatureData,
+      previousStatus: reopenFacts!.previousStatus,
+      reversedTransactions: reopenFacts!.reversedTransactions,
+      hadSignature: reopenFacts!.clearedDirectSignature,
+      reason: "employee_reopen",
     },
     ip
   );

@@ -8,7 +8,9 @@ import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { db } from "../lib/db";
 import { hasActiveInvoiceForAppointments } from "../lib/appointment-invoiced";
-import { appointmentsRepo } from "../repos";
+import { reopenAppointmentForRedocumentation, type AppointmentReopenFacts } from "../lib/appointment-reopen";
+import { isAdminLike } from "@shared/policies/appointments";
+import { appointmentsRepo, monthlyServiceRecordsRepo } from "../repos";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
 import { getPrimaryCustomerIds } from "../storage/customers-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
@@ -686,8 +688,19 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     return sendNotFound(res, "Leistungsnachweis nicht gefunden.");
   }
 
+  // Zugriff (entschieden 07.08.): Eigentümer für den eigenen Nachweis, Admin für
+  // jeden — beides nur, solange nicht abgerechnet (Guard in der Tx unten).
+  // `isAdminLike` statt `isAdmin`: ein Super-Admin ohne gesetztes `is_admin`
+  // fiele sonst in den Eigentümer-Zweig und bekäme 403 auf fremde Nachweise.
   const isOwner = record.employeeId === req.user!.id;
-  if (!req.user!.isAdmin && !isOwner) {
+  const adminLike = isAdminLike({
+    id: req.user!.id,
+    isAdmin: !!req.user!.isAdmin,
+    isSuperAdmin: !!req.user!.isSuperAdmin,
+    isTeamLead: !!req.user!.isTeamLead,
+    isActive: !!req.user!.isActive,
+  });
+  if (!adminLike && !isOwner) {
     return sendForbidden(res, "FORBIDDEN", "Sie können nur Ihre eigenen Leistungsnachweise löschen.");
   }
 
@@ -700,8 +713,23 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
   }
 
   let linkedAppointmentIds: number[];
+  let reopened: AppointmentReopenFacts[];
   try {
-    linkedAppointmentIds = await db.transaction(async (tx) => {
+    ({ linkedAppointmentIds, reopened } = await db.transaction(async (tx) => {
+    // Die LN-Zeile sperren, bevor wir über sie entscheiden. Ohne den Lock kann
+    // eine gleichzeitig committende Unterschrift zwischen unseren Read und den
+    // Soft-Delete rutschen (Muster wie Task #1544 im Termin-Löschpfad).
+    // Bewusst OHNE `activeOnly()`: wir müssen gerade unterscheiden können, ob
+    // der Nachweis schon soft-gelöscht ist (→ ALREADY_DELETED statt stillem
+    // Durchlauf), und dafür die Zeile trotzdem sperren.
+    const [locked] = await monthlyServiceRecordsRepo
+      .selectColumnsFrom({ deletedAt: monthlyServiceRecords.deletedAt }, tx)
+      .where(eq(monthlyServiceRecords.id, id))
+      .for("update");
+    if (!locked || locked.deletedAt) {
+      throw new Error("ALREADY_DELETED");
+    }
+
     const linkedAppointments = await tx.select({ appointmentId: serviceRecordAppointments.appointmentId })
       .from(serviceRecordAppointments)
       .where(eq(serviceRecordAppointments.serviceRecordId, id));
@@ -714,24 +742,49 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     await tx.delete(serviceRecordAppointments)
       .where(eq(serviceRecordAppointments.serviceRecordId, id));
 
-    if (aptIds.length > 0) {
-      await tx.update(appointments)
-        .set({ status: "documenting" })
-        .where(inArray(appointments.id, aptIds));
+    // ERSETZT das pauschale `UPDATE appointments SET status='documenting'`.
+    // Das setzte nur den Status und ließ zwei Reste stehen: die Budget-Buchung
+    // des alten Umfangs (bei einer Aufwärts-Korrektur bucht der erneute
+    // Abschluss dann zusätzlich) und eine etwaige System-Signatur aus dem
+    // Budget-Backfill (Task #876), die den Termin ohne jedes menschliche Zutun
+    // weiter als „unterschrieben" gelten ließ. Beides erledigt die SSoT, die
+    // auch `POST /api/appointments/:id/reopen` benutzt.
+    //
+    // Nur LEBENDE Termine: für soft-gelöschte Karteileichen gibt es nichts
+    // zurückzudrehen. Der Rechnungs-Guard oben prüft bewusst ALLE verknüpften
+    // Termine, auch die toten — eine alte aktive Rechnung blockiert weiterhin.
+    const livingAppointments = aptIds.length > 0
+      ? await appointmentsRepo
+        .selectColumnsFrom({
+          id: appointments.id,
+          status: appointments.status,
+          signatureData: appointments.signatureData,
+        }, tx)
+        .where(and(inArray(appointments.id, aptIds), appointmentsRepo.activeOnly()))
+      : [];
+
+    const facts: AppointmentReopenFacts[] = [];
+    for (const appt of livingAppointments) {
+      facts.push(await reopenAppointmentForRedocumentation(appt, req.user!.id, tx));
     }
 
     await tx.update(monthlyServiceRecords)
       .set({ deletedAt: new Date() })
       .where(eq(monthlyServiceRecords.id, id));
 
-    return aptIds;
-    });
+    return { linkedAppointmentIds: aptIds, reopened: facts };
+    }));
   } catch (error) {
     if (error instanceof Error && error.message === "INVOICED") {
       return sendConflict(res, "INVOICED", "Dieser Leistungsnachweis kann nicht gelöscht werden, da Termine bereits abgerechnet wurden.");
     }
+    if (error instanceof Error && error.message === "ALREADY_DELETED") {
+      return sendConflict(res, "ALREADY_DELETED", "Dieser Leistungsnachweis wurde bereits gelöscht.");
+    }
     throw error;
   }
+
+  const ip = req.ip || req.socket.remoteAddress;
 
   await auditService.log(
     req.user!.id,
@@ -745,9 +798,33 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
       month: record.month,
       status: record.status,
       affectedAppointmentIds: linkedAppointmentIds,
+      reopenedAppointmentIds: reopened.map((f) => f.appointmentId),
       deletedBy: req.user!.id,
     }
   );
+
+  // Je zurückgegebenem Termin ein eigener Eintrag. Vorher stand die Korrektur
+  // NUR am Nachweis; im Verlauf des Termins war der Rücksprung
+  // `completed → documenting` gar nicht sichtbar und nur indirekt über
+  // `affectedAppointmentIds` des LN-Eintrags rekonstruierbar. Dieselbe Aktion
+  // wie beim Mitarbeiter-Reopen, unterschieden über `reason`.
+  for (const facts of reopened) {
+    await auditService.log(
+      req.user!.id,
+      "appointment_reopened",
+      "appointment",
+      facts.appointmentId,
+      {
+        customerId: record.customerId,
+        previousStatus: facts.previousStatus,
+        reversedTransactions: facts.reversedTransactions,
+        hadSignature: facts.clearedDirectSignature,
+        reason: "service_record_corrected",
+        serviceRecordId: id,
+      },
+      ip
+    );
+  }
 
   res.json({ success: true, message: "Leistungsnachweis gelöscht. Die zugehörigen Termine stehen wieder zur Bearbeitung bereit." });
 }));
