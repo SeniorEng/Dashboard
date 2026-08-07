@@ -30,7 +30,7 @@
 import { validSignatureDataUrl } from "../helpers/valid-signature";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { db } from "../../server/lib/db";
-import { appointments, auditLog, budgetTransactions, monthlyServiceRecords } from "@shared/schema";
+import { appointments, auditLog, budgetTransactions, monthlyServiceRecords, users } from "@shared/schema";
 import { and, eq, desc, sql } from "drizzle-orm";
 import { appointmentDocumentedAndSignedCondition } from "../../server/lib/appointment-signed";
 import {
@@ -57,6 +57,8 @@ const workdays: string[] = [];
 const cleanupCustomerIds: number[] = [];
 const cleanupApptIds: number[] = [];
 const cleanupEmployeeIds: number[] = [];
+/** Rechte-Hochstufungen, die in `afterAll` zurueckgenommen werden MUESSEN. */
+const privilegeRestores: { id: number; isAdmin: boolean; isSuperAdmin: boolean }[] = [];
 
 async function newCustomer(tag: string): Promise<number> {
   const cust = await createTestCustomer({ nachname: `LNKORR-${tag}-${uniqueId()}` });
@@ -195,6 +197,15 @@ afterAll(async () => {
   for (const id of cleanupCustomerIds) {
     await cleanupCustomer(id);
   }
+  for (const restore of privilegeRestores) {
+    try {
+      await db.update(users)
+        .set({ isAdmin: restore.isAdmin, isSuperAdmin: restore.isSuperAdmin })
+        .where(eq(users.id, restore.id));
+    } catch (err) {
+      console.error(`[LN-Korrektur] Rechte-Restore fuer User ${restore.id} fehlgeschlagen:`, err);
+    }
+  }
   for (const id of cleanupEmployeeIds) {
     await deactivateTestEmployee(id);
   }
@@ -321,5 +332,99 @@ describe("LN-Korrekturweg — Termine kommen vollständig zur Re-Dokumentation z
     const allowed = await apiDelete(`/api/service-records/${recordId}`);
     expect(allowed.status).toBe(200);
     expect((await apptRow(apptId)).status).toBe("documenting");
+  });
+
+  it("(g) DER Zweck: Aufwaerts-Korrektur bucht am Ende den NEUEN Betrag, nicht alt und nicht alt+neu", async () => {
+    const customerId = await newCustomer("aufwaerts");
+    const apptId = await createAndDocument(customerId, workdays[4], "13:00");
+    const recordId = await createSignedRecord(customerId, [apptId]);
+
+    const before = await budgetState(apptId);
+    const altCents = Math.abs(before.netCents);
+    expect(altCents).toBeGreaterThan(0);
+
+    // Korrekturweg gehen …
+    expect((await apiDelete(`/api/service-records/${recordId}`)).status).toBe(200);
+    expect((await budgetState(apptId)).netCents).toBe(0);
+
+    // … und nach OBEN neu dokumentieren (60 statt 30 Minuten, mehr km).
+    const redoc = await apiPost<any>(`/api/appointments/${apptId}/document`, {
+      actualStart: "13:00",
+      travelOriginType: "home",
+      travelKilometers: 9,
+      customerKilometers: 5,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Aufwaerts-Korrektur" }],
+    });
+    expect(redoc.status).toBe(200);
+
+    const after = await budgetState(apptId);
+    const neuCents = Math.abs(after.netCents);
+    // Genau EINE lebende Buchung: der neue, hoehere Betrag. Ohne den Reverse im
+    // Korrekturweg bliebe hier die alte, ZU NIEDRIGE Buchung stehen (der
+    // Dokumentations-Pfad uebernimmt eine vorhandene nicht-stornierte
+    // Consumption, statt eine zweite anzulegen) — stille Unterbuchung.
+    expect(neuCents).toBeGreaterThan(altCents);
+    expect((await apptRow(apptId)).status).toBe("completed");
+  });
+
+  it("(h) mehrere Termine an EINEM Nachweis werden alle zurueckgegeben", async () => {
+    const customerId = await newCustomer("mehrfach");
+    const a1 = await createAndDocument(customerId, workdays[5], "08:00");
+    const a2 = await createAndDocument(customerId, workdays[6], "09:00");
+    const a3 = await createAndDocument(customerId, workdays[7], "10:00");
+    const recordId = await createSignedRecord(customerId, [a1, a2, a3]);
+
+    expect((await apiDelete(`/api/service-records/${recordId}`)).status).toBe(200);
+
+    // Die Schleife ueber `livingAppointments` ist die neue Zeile — ein Mutant,
+    // der nur den ersten Termin behandelt, faellt genau hier.
+    for (const id of [a1, a2, a3]) {
+      expect((await apptRow(id)).status).toBe("documenting");
+      expect(await countsAsSigned(id)).toBe(false);
+      expect((await budgetState(id)).netCents).toBe(0);
+      expect((await reopenAuditFor(id)).length).toBe(1);
+    }
+  });
+
+  it("(i) Auth-Weiche: Super-Admin OHNE is_admin darf einen fremden Nachweis korrigieren", async () => {
+    const customerId = await newCustomer("weiche");
+    const apptId = await createAndDocument(customerId, workdays[8], "14:00");
+    const recordId = await createSignedRecord(customerId, [apptId]);
+
+    // Fremder Mitarbeiter, danach zum reinen Super-Admin gemacht (is_admin
+    // bleibt FALSE). Vor der Umstellung auf `isAdminLike` fiel genau dieser
+    // Nutzer in den Eigentuemer-Zweig und bekam 403.
+    const su = await createTestEmployee({ nachnamePrefix: `SuOnly-${uniqueId()}` });
+    cleanupEmployeeIds.push(su.id);
+    privilegeRestores.push({ id: su.id, isAdmin: false, isSuperAdmin: false });
+    await db.update(users).set({ isAdmin: false, isSuperAdmin: true }).where(eq(users.id, su.id));
+    const suAuth = await loginAs(su.email, su.password);
+
+    const res = await apiDeleteAs(suAuth, `/api/service-records/${recordId}`);
+    expect(res.status).toBe(200);
+    expect((await apptRow(apptId)).status).toBe("documenting");
+  });
+
+  it("(j) soft-geloeschter Termin wird uebersprungen, blockiert den Weg aber weiter ueber seine Rechnung", async () => {
+    const customerId = await newCustomer("softdel");
+    const lebend = await createAndDocument(customerId, workdays[9], "15:00");
+    const tot = await createAndDocument(customerId, workdays[10], "16:00");
+    const recordId = await createSignedRecord(customerId, [lebend, tot]);
+
+    // Karteileiche herstellen: `deleted_at` setzen, OHNE die Junction-Zeile zu
+    // loesen. Der Termin-Loeschpfad taugt dafuer NICHT — er entfernt die
+    // Verknuepfung mit (`removeAppointmentFromServiceRecords`), der Termin
+    // taucht dann in `aptIds` gar nicht mehr auf und der Fall waere leer.
+    await db.update(appointments)
+      .set({ deletedAt: new Date() })
+      .where(eq(appointments.id, tot));
+
+    expect((await apiDelete(`/api/service-records/${recordId}`)).status).toBe(200);
+
+    // Der lebende Termin kommt zurueck …
+    expect((await apptRow(lebend)).status).toBe("documenting");
+    expect((await reopenAuditFor(lebend)).length).toBe(1);
+    // … der soft-geloeschte wird NICHT angefasst: kein Reopen, kein Audit.
+    expect((await reopenAuditFor(tot)).length).toBe(0);
   });
 });

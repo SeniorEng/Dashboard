@@ -68,9 +68,21 @@ export async function reopenAppointmentForRedocumentation(
   actorUserId: number,
   txClient: Tx,
 ): Promise<AppointmentReopenFacts> {
-  const transactions = await budgetStorage.getTransactionsByAppointmentId(appointment.id);
+  // `txClient` MUSS mit — sonst liest der Aufruf über den globalen Pool an der
+  // Transaktion vorbei. Das Inline-Original hatte denselben Fehler; beim Umzug
+  // in die SSoT wird er geschlossen statt geerbt. Folgen sonst: eine Consumption,
+  // die derselbe Aufrufer vorher in DIESER Tx geschrieben hat, fehlt im
+  // Reverse-Set, und pro Termin wird eine zweite Pool-Verbindung gezogen,
+  // während die Transaktion bereits eine hält.
+  const transactions = await budgetStorage.getTransactionsByAppointmentId(appointment.id, txClient);
+  // `getTransactionsByAppointmentId` liefert ALLE Consumptions des Termins, auch
+  // bereits stornierte (z.B. nach einem km-Rebook). Gezählt wird deshalb das
+  // tatsächliche Ergebnis, nicht die Eingangsmenge — sonst überzeichnet der
+  // Audit-Eintrag die Zahl der Rückbuchungen.
+  let reversedTransactions = 0;
   for (const tx of transactions) {
-    await budgetStorage.reverseBudgetTransaction(tx.id, actorUserId, txClient);
+    const outcome = await budgetStorage.reverseBudgetTransactionWithOutcome(tx.id, actorUserId, txClient);
+    if (outcome.status === "created") reversedTransactions += 1;
   }
 
   // Task #875 (gated) — beim Reopen lingering Holds freigeben; die Re-Doku legt
@@ -94,7 +106,7 @@ export async function reopenAppointmentForRedocumentation(
   return {
     appointmentId: appointment.id,
     previousStatus: appointment.status,
-    reversedTransactions: transactions.length,
+    reversedTransactions,
     clearedDirectSignature: !!appointment.signatureData,
     appointment: updated,
   };

@@ -13,6 +13,7 @@ import { isAdminLike } from "@shared/policies/appointments";
 import { appointmentsRepo, monthlyServiceRecordsRepo } from "../repos";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
 import { getPrimaryCustomerIds } from "../storage/customers-storage";
+import { invalidateDraftInvoicePdfCache } from "../storage/service-records-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { timeTrackingStorage } from "../storage/time-tracking";
 
@@ -714,8 +715,9 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
 
   let linkedAppointmentIds: number[];
   let reopened: AppointmentReopenFacts[];
+  let recordStatus: string;
   try {
-    ({ linkedAppointmentIds, reopened } = await db.transaction(async (tx) => {
+    ({ linkedAppointmentIds, reopened, recordStatus } = await db.transaction(async (tx) => {
     // Die LN-Zeile sperren, bevor wir über sie entscheiden. Ohne den Lock kann
     // eine gleichzeitig committende Unterschrift zwischen unseren Read und den
     // Soft-Delete rutschen (Muster wie Task #1544 im Termin-Löschpfad).
@@ -723,7 +725,10 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     // der Nachweis schon soft-gelöscht ist (→ ALREADY_DELETED statt stillem
     // Durchlauf), und dafür die Zeile trotzdem sperren.
     const [locked] = await monthlyServiceRecordsRepo
-      .selectColumnsFrom({ deletedAt: monthlyServiceRecords.deletedAt }, tx)
+      .selectColumnsFrom({
+        deletedAt: monthlyServiceRecords.deletedAt,
+        status: monthlyServiceRecords.status,
+      }, tx)
       .where(eq(monthlyServiceRecords.id, id))
       .for("update");
     if (!locked || locked.deletedAt) {
@@ -772,7 +777,17 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
       .set({ deletedAt: new Date() })
       .where(eq(monthlyServiceRecords.id, id));
 
-    return { linkedAppointmentIds: aptIds, reopened: facts };
+    // Wie beim Signieren und beim reduktions-only-Entfernen: der LN ist Anlage
+    // zur Rechnung, sein Inhalt hat sich geändert. Hier sogar maximal — alle
+    // Termine sind raus und der Nachweis ist weg. Ohne die Invalidierung
+    // behielte ein Entwurf seinen gecachten `leistungsnachweisPath`.
+    await invalidateDraftInvoicePdfCache(tx, {
+      customerId: record.customerId,
+      year: record.year,
+      month: record.month,
+    });
+
+    return { linkedAppointmentIds: aptIds, reopened: facts, recordStatus: locked.status };
     }));
   } catch (error) {
     if (error instanceof Error && error.message === "INVOICED") {
@@ -796,7 +811,10 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
       employeeId: record.employeeId,
       year: record.year,
       month: record.month,
-      status: record.status,
+      // Aus der GESPERRTEN Zeile, nicht aus dem Read davor: genau die
+      // gleichzeitig committende Unterschrift, gegen die der Lock schuetzt,
+      // machte den Wert hier sonst falsch.
+      status: recordStatus,
       affectedAppointmentIds: linkedAppointmentIds,
       reopenedAppointmentIds: reopened.map((f) => f.appointmentId),
       deletedBy: req.user!.id,
