@@ -111,6 +111,28 @@ async function linkedApptIds(serviceRecordId: number): Promise<number[]> {
   return rows.map((r) => r.appointmentId);
 }
 
+/**
+ * Der Sweep läuft TABELLENWEIT — er filtert nur auf `recordType`/`status`/
+ * `deletedAt`, nicht auf Kunde, Monat oder Test-Tag. Seine Zähler im Ergebnis
+ * (`recordsSoftDeleted`, `appointmentsMoved`) sind deshalb global.
+ *
+ * Lokal fällt das nicht auf: der Orchestrator gibt jedem Worker eine eigene
+ * Wegwerf-DB, in der nur diese Datei schreibt. Der CI-`tests`-Job fährt dagegen
+ * ALLE Dateien nacheinander gegen EINE geteilte DB — dort räumt der Sweep auch
+ * Duplikate weg, die andere Dateien hinterlassen haben, und die zählen mit.
+ * Kontrolliert nachgestellt: ein einziges fremdes Duplikat-Paar macht aus
+ * `expect(recordsSoftDeleted).toBe(1)` ein `expected 2 to be 1` — genau der
+ * CI-Fehlschlag. Dass nur der Happy Path fiel, passt dazu: er läuft zuerst und
+ * räumt die Tabelle leer, die späteren Fälle finden sie schon sauber vor.
+ *
+ * Die Zähler werden deshalb auf die Zeilen DIESER Datei eingeschränkt. Die
+ * Aussage bleibt dieselbe — welche unserer Zeilen der Sweep angefasst hat —,
+ * nur die stille Voraussetzung „die Tabelle enthält sonst nichts" fällt weg.
+ */
+function oursSoftDeleted(result: { softDeletedIds: number[] }): number[] {
+  return result.softDeletedIds.filter((id) => recordIds.includes(id));
+}
+
 async function auditCountFor(ids: number[]): Promise<number> {
   if (ids.length === 0) return 0;
   const rows = await db
@@ -183,9 +205,12 @@ describe("Task #1534 — dedupe-pending-monthly-service-records", () => {
     const result = await dedupePendingMonthlyServiceRecords();
 
     expect(result.skipReason).toBeNull();
-    expect(result.recordsSoftDeleted).toBe(1);
-    expect(result.softDeletedIds).toEqual([redundant]);
-    expect(result.appointmentsMoved).toBe(1);
+    // Ersetzt `recordsSoftDeleted === 1` + `softDeletedIds === [redundant]`:
+    // beides in einer gescopeten Aussage, ohne den globalen Zähler.
+    expect(oursSoftDeleted(result)).toEqual([redundant]);
+    // `appointmentsMoved` ist global und nicht scopebar. Die beiden
+    // `linkedApptIds`-Zeilen unten sagen für unsere Daten mehr als der Zähler:
+    // sie prüfen die exakten Link-Mengen beider Sätze statt nur deren Anzahl.
 
     expect((await recordState(survivor))?.deletedAtIsNull).toBe(true);
     expect((await recordState(redundant))?.deletedAtIsNull).toBe(false);
@@ -201,7 +226,7 @@ describe("Task #1534 — dedupe-pending-monthly-service-records", () => {
     await linkAppointment(redundant, apptA);
 
     const first = await dedupePendingMonthlyServiceRecords();
-    expect(first.recordsSoftDeleted).toBe(1);
+    expect(oursSoftDeleted(first)).toEqual([redundant]);
 
     const second = await dedupePendingMonthlyServiceRecords();
     expect(second.skipReason).toBe("no_duplicates");
@@ -217,8 +242,10 @@ describe("Task #1534 — dedupe-pending-monthly-service-records", () => {
     await linkAppointment(redundant, shared);
 
     const result = await dedupePendingMonthlyServiceRecords();
-    expect(result.recordsSoftDeleted).toBe(1);
-    expect(result.appointmentsMoved).toBe(0);
+    expect(oursSoftDeleted(result)).toEqual([redundant]);
+    // Statt `appointmentsMoved === 0` (global, zählt Fremd-Verschiebungen mit):
+    // die beiden Link-Mengen unten zeigen direkt, dass der doppelte Link
+    // verworfen wurde und nichts verlorenging.
     expect(await linkedApptIds(survivor)).toEqual([shared]);
     expect(await linkedApptIds(redundant)).toEqual([]);
   });

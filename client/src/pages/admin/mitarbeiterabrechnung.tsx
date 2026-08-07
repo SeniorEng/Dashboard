@@ -714,11 +714,15 @@ function DrillTermine({
   const vacation = vacationMap?.[employeeId] ?? null;
 
   const invalidateDrill = () => {
-    // invalidate-direct-allowed: page-local read models (overview + drill) are not
-    // registered in RELATED_DOMAINS; the mutation hooks already invalidate the
-    // shared "time-entries" domain.
+    // Both read models are page-local and deliberately absent from
+    // RELATED_DOMAINS; the mutation hooks already invalidate the shared
+    // "time-entries" domain. The allow marker is repeated per call because the
+    // guard only looks two lines back — a single marker for the whole block
+    // does not cover the second call.
+    // invalidate-direct-allowed: page-local overview read model
     // eslint-disable-next-line no-restricted-syntax
     queryClient.invalidateQueries({ queryKey: ["mitarbeiterabrechnung"] });
+    // invalidate-direct-allowed: page-local drill read model, scoped by employee/year/month
     // eslint-disable-next-line no-restricted-syntax
     queryClient.invalidateQueries({ queryKey: ["mitarbeiterabrechnung-drill", employeeId, year, month] });
   };
