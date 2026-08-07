@@ -22,11 +22,27 @@ import { describe, expect, it } from "vitest";
 
 const GATE = path.resolve(__dirname, "../../.claude/hooks/bash-gate.sh");
 
+// Das Gate verdrahtet seine `SAFE_PREFIXES` absolut auf den Rechner, den es
+// schützt (`/home/dev/dashboard/`, `/home/dev/.claude/`, …), und löst `~` per
+// `expanduser` gegen das laufende `HOME` auf. Ohne festes `HOME` prüfen die
+// `~`-Fälle deshalb je nach Host etwas anderes: auf dem Dev-Rechner wird
+// `~/dashboard/out.log` zu `/home/dev/dashboard/out.log` (sicher), in CI zu
+// `/home/runner/dashboard/out.log` (nicht sicher) — dieselbe Zeile, zwei
+// Ergebnisse. Der Hook läuft ausschließlich auf dem Dev-Rechner; ein `HOME`,
+// das nicht zu seinen Prefixes passt, ist also eine Lage, die es real nie gibt.
+// Wir pinnen es hier, damit der Test überall die reale Lage prüft statt die des
+// Ausführungshosts. Das schwächt nichts ab: die Deny-Fälle mit `~` (`rm -rf
+// ~/.claude`, Redirect auf `~/.local/bin/python3`) treffen mit diesem `HOME`
+// erst recht, vorher bestanden sie in CI nur zufällig — weil dort JEDER Pfad
+// unsicher war.
+const GATE_HOME = "/home/dev";
+
 function decide(rawStdin: string): { decision: string; reason: string } {
   const out = execFileSync(GATE, {
     input: rawStdin,
     encoding: "utf8",
     timeout: 20_000,
+    env: { ...process.env, HOME: GATE_HOME },
   });
   const parsed = JSON.parse(out) as {
     hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string };
@@ -295,7 +311,15 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
       copyFileSync(GATE, copy);
       chmodSync(copy, 0o755);
       // bash-gate.py wird bewusst NICHT mitkopiert.
-      const out = execFileSync(copy, { input: payload("git status"), encoding: "utf8" });
+      // `GATE_HOME` auch hier, damit die Invariante „das Gate wird immer mit
+      // festem HOME gerufen" ausnahmslos gilt. Für diesen fail-closed-Pfad ist
+      // es folgenlos (er kommt nie zur Pfad-Prüfung) — aber käme hier je ein
+      // Fall mit `~` dazu, wäre er sonst still wieder host-abhängig.
+      const out = execFileSync(copy, {
+        input: payload("git status"),
+        encoding: "utf8",
+        env: { ...process.env, HOME: GATE_HOME },
+      });
       const parsed = JSON.parse(out) as {
         hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string };
       };
