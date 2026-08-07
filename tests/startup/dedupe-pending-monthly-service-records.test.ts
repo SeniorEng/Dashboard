@@ -9,9 +9,12 @@
  *   2. Idempotenz: zweiter Lauf ist No-Op (keine weitere Soft-Löschung/Audit).
  *   3. Doppelter Termin-Link: ist ein Termin bereits beim Überlebenden, wird die
  *      redundante Link-Zeile verworfen (kein Unique-Verstoß, kein Verlust).
- *   4. Nach dem Cleanup lässt sich der partielle Unique-Index aus Task #1528
- *      anlegen (vorher schlägt er an den Duplikaten fehl).
+ *   4. Versiegelter LN (z.B. `employee_signed`) wird nie angefasst — auch
+ *      nicht als Dritter derselben Kunde/MA/Monat-Gruppe.
  *   5. Fehlender Audit-Akteur: keine Mutation.
+ *
+ * (Der frühere Punkt „partieller Unique-Index aus #1528 lässt sich anlegen" ist
+ * mit #1542 entfallen — der Index existiert nicht mehr, siehe `beforeAll`.)
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -76,13 +79,19 @@ async function insertAppointment(): Promise<number> {
 }
 
 async function insertPendingRecord(): Promise<number> {
+  return insertRecordWithStatus("pending");
+}
+
+/** Wie `insertPendingRecord`, aber mit frei wählbarem Status — für den
+ *  versiegelten Fall, den die Migration ausdrücklich NICHT anfassen darf. */
+async function insertRecordWithStatus(status: string): Promise<number> {
   const [row] = await db.insert(monthlyServiceRecords).values({
     customerId,
     employeeId,
     year: YEAR,
     month: MONTH,
     recordType: "monthly",
-    status: "pending",
+    status,
   } as any).returning({ id: monthlyServiceRecords.id });
   recordIds.push(row.id);
   return row.id;
@@ -208,9 +217,15 @@ describe("Task #1534 — dedupe-pending-monthly-service-records", () => {
     // Ersetzt `recordsSoftDeleted === 1` + `softDeletedIds === [redundant]`:
     // beides in einer gescopeten Aussage, ohne den globalen Zähler.
     expect(oursSoftDeleted(result)).toEqual([redundant]);
-    // `appointmentsMoved` ist global und nicht scopebar. Die beiden
-    // `linkedApptIds`-Zeilen unten sagen für unsere Daten mehr als der Zähler:
-    // sie prüfen die exakten Link-Mengen beider Sätze statt nur deren Anzahl.
+    // Die Zähler selbst bleiben als UNTERGRENZE geprüft. Ohne das wäre kein
+    // positiver Assert auf sie übrig, und ein Mutant, der sie auf 0 festnagelt
+    // (oder gar nicht erst hochzählt), käme durch alle vier Fälle. `>=` statt
+    // `===`, weil Fremd-Duplikate der geteilten CI-DB nur addieren können.
+    expect(result.recordsSoftDeleted).toBeGreaterThanOrEqual(1);
+    expect(result.appointmentsMoved).toBeGreaterThanOrEqual(1);
+    // Die exakte Wirkung auf UNSERE Daten steht unten: `linkedApptIds` prüft
+    // die Link-Mengen beider Sätze, nicht nur deren Anzahl — ein Fremd-Termin
+    // im Überlebenden macht die Zeile rot, ein Zähler täte das nicht.
 
     expect((await recordState(survivor))?.deletedAtIsNull).toBe(true);
     expect((await recordState(redundant))?.deletedAtIsNull).toBe(false);
@@ -229,6 +244,15 @@ describe("Task #1534 — dedupe-pending-monthly-service-records", () => {
     expect(oursSoftDeleted(first)).toEqual([redundant]);
 
     const second = await dedupePendingMonthlyServiceRecords();
+    // Die eigentliche Idempotenz-Aussage, gescoped: der zweite Lauf rührt
+    // KEINE unserer Zeilen mehr an.
+    expect(oursSoftDeleted(second)).toEqual([]);
+    // `skipReason`/`recordsSoftDeleted` bleiben bewusst global: sie prüfen, dass
+    // der Sweep das Nichts-zu-tun auch ERKENNT (Pfad `no_duplicates`), und das
+    // ist eine Aussage über die ganze Tabelle. Sie hält, weil CI das
+    // `integration`-Projekt mit einem Worker sequenziell fährt und der erste
+    // Sweep auch Fremd-Duplikate abräumt. Bekäme CI je Datei-Parallelität gegen
+    // eine geteilte DB, kippt genau diese Zeile zuerst — dann hier scopen.
     expect(second.skipReason).toBe("no_duplicates");
     expect(second.recordsSoftDeleted).toBe(0);
     expect(await auditCountFor([survivor, redundant])).toBe(1);
@@ -248,6 +272,31 @@ describe("Task #1534 — dedupe-pending-monthly-service-records", () => {
     // verworfen wurde und nichts verlorenging.
     expect(await linkedApptIds(survivor)).toEqual([shared]);
     expect(await linkedApptIds(redundant)).toEqual([]);
+  });
+
+  // Die Migration verspricht in ihrem Kopf ausdrücklich, NUR offene, nicht
+  // versiegelte LNs anzufassen. Bis hierher prüfte das kein Fall — alle
+  // Fixtures waren `pending`, also konnte der Filter `status = 'pending'`
+  // ersatzlos wegfallen, ohne dass ein Test rot wurde. Genau dieser Mutant
+  // löscht signierte Leistungsnachweise soft: der GoBD-schärfste Fall der Datei.
+  it("Versiegelter LN wird nicht angefasst, auch nicht als Dritter derselben Gruppe", async () => {
+    const survivor = await insertPendingRecord();
+    const redundant = await insertPendingRecord();
+    const signed = await insertRecordWithStatus("employee_signed");
+    const apptSigned = await insertAppointment();
+    await linkAppointment(signed, apptSigned);
+
+    const result = await dedupePendingMonthlyServiceRecords();
+
+    // Der offene Fall wird normal konsolidiert …
+    expect(oursSoftDeleted(result)).toEqual([redundant]);
+    // … der versiegelte bleibt unberührt: nicht soft-gelöscht, Termin bleibt
+    // an ihm hängen, kein Audit-Eintrag gegen ihn.
+    expect((await recordState(signed))?.deletedAtIsNull).toBe(true);
+    expect(await linkedApptIds(signed)).toEqual([apptSigned]);
+    expect(await auditCountFor([signed])).toBe(0);
+    // Und er hat dem Überlebenden nichts abgegeben.
+    expect(await linkedApptIds(survivor)).toEqual([]);
   });
 
   it("Fehlender Audit-Akteur: keine Mutation", async () => {

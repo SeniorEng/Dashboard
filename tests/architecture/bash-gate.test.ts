@@ -311,7 +311,15 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
       copyFileSync(GATE, copy);
       chmodSync(copy, 0o755);
       // bash-gate.py wird bewusst NICHT mitkopiert.
-      const out = execFileSync(copy, { input: payload("git status"), encoding: "utf8" });
+      // `GATE_HOME` auch hier, damit die Invariante „das Gate wird immer mit
+      // festem HOME gerufen" ausnahmslos gilt. Für diesen fail-closed-Pfad ist
+      // es folgenlos (er kommt nie zur Pfad-Prüfung) — aber käme hier je ein
+      // Fall mit `~` dazu, wäre er sonst still wieder host-abhängig.
+      const out = execFileSync(copy, {
+        input: payload("git status"),
+        encoding: "utf8",
+        env: { ...process.env, HOME: GATE_HOME },
+      });
       const parsed = JSON.parse(out) as {
         hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string };
       };
