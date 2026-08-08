@@ -126,9 +126,13 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   entgleisen lassen.
 - **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
   kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
-  Der `tests`-CI-Job ist **bekannt rot** (Stand 07.08.2026, `e86042f1`:
-  4 Tests / 3 Dateien Altbestand); PRs gegen diese Baseline diffen, nicht
-  gegen „grün".
+  Der `tests`-CI-Job hat **keinen roten Altbestand mehr** (Stand 08.08.2026,
+  `3cebe96b`, Lauf `31249683315`: 4259 Tests, **0 rot**). Damit ist **jeder rote
+  Test in CI ab sofort ein echter Regress** — nicht mehr gegen eine Baseline
+  diffen, sondern gegen Grün. Der Job selbst kann trotzdem fehlschlagen: er
+  bricht derzeit am Coverage-Gate `qonto` (Schritt 16), das mit den Tests nichts
+  zu tun hat. Beim Lesen also immer den SCHRITT ansehen, nicht nur die
+  Job-Farbe.
 
 ## Arbeitsmodus: autonom bis zur PR, Mensch an 4 Gates
 
@@ -347,8 +351,8 @@ sudo docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist w
   `npm run test:unblock` oder ein Orchestrator-Start droppen sie, sobald keine
   Verbindung dranhängt — Schema und Seeds des Fallback-Ablaufs sind dann weg.
 - **Lokale Baseline ≠ CI-Baseline, und sie ist datums-fragil.** Voller Lauf am
-  07.08.2026 auf `main` (`e86042f1`, nach #65): **17 rote Tests / 5 Dateien**
-  von 3840, ~5 min. Aufgeschlüsselt:
+  08.08.2026 auf `main` (`3cebe96b`, nach #71): **17 rote Tests / 5 Dateien**
+  von 3862, ~5 min — stabile Schnittmenge aus ZWEI Läufen. Aufgeschlüsselt:
   - **Host-Ausstattung — 14 Tests / 2 Dateien**, alle mit
     `ChromiumUnavailableError` (`pdf-generator-resilience` 8,
     `invoice-pdf-margins` 6). Einzeln nachgeprüft; das ist die EINZIGE
@@ -361,33 +365,24 @@ sudo docker compose -f docker-compose.test.yml down    # DB ist tmpfs, weg ist w
     `expirySubjectAnchor` (Frist als Prüfgegenstand), `expiredCarryoverAnchor`
     (bereits verfallen); alle drei per Tages-Sweep über 12–15 Jahre abgesichert.
     Wer eine §45b-Fixture datiert, greift dort zu statt neu zu rechnen.
-  - **`architecture/*`-Wächter — 0 Tests.** Die vier im Juli still gebrochenen
-    Wächter sind über #63 (`ssot-imports`, echte SSoT-Verletzung im
-    Signatur-Prädikat) und #64 (die drei mechanischen; `replit-boot-path`
-    dokumentiert quarantänisiert) abgearbeitet.
-  - **Rest — 3 Tests / 3 Dateien**: `query-invalidation-discipline` 1,
-    `equality/appointment-series-bulk-rebook` 1,
-    `billing/zugferd-send-failure` 1.
-  Derselbe Commit in **CI: 4 rote Tests / 3 Dateien** (Run `31176139770`, der
-  `push`-Lauf auf `main` — nicht der PR-Lauf; Run-ID mit notieren, sonst ist die
-  Zahl später nicht zuzuordnen): `architecture/bash-gate` 2,
-  `startup/dedupe-pending-monthly-service-records` 1,
-  `query-invalidation-discipline` 1. Die Differenz geht in BEIDE Richtungen und
-  rechnet sich vollständig auf:
-  `17 − 14 (Chromium fehlt lokal) − 1 (`equality/appointment-series-bulk-rebook`)
-  − 1 (`billing/zugferd-send-failure`) + 2 (`architecture/bash-gate`)
-  + 1 (`startup/dedupe-pending-…`) = 4`; Dateien `5 − 2 − 1 − 1 + 1 + 1 = 3`.
-  Wer nur die Chromium-Richtung abzieht, landet bei 3/3 und meldet zwei
-  Phantom-Regressionen — die beiden mittleren Posten sind lokal rot, in CI grün.
-  **Zwei Läufe, zwei Zahlen — auch ohne Kalenderwechsel.** `e86042f1` lieferte
-  lokal zweimal 18/6, aber mit VERSCHIEDENEN Ausreißern: Lauf 1
-  `startup/dedupe-pending-monthly-service-records`, Lauf 2 `tests/services.test.ts`.
-  Die 17/5 oben sind die Schnittmenge. Schon vorher trat dasselbe Muster auf
-  (`91f11570`: erst 27/12, dann 25/10 — `budget-transactions-immutability` 1 und
-  `startup/cleanup-legacy-auto-allocations-migration` 2). Alles
-  Kontaminations-Flakes der geteilten DB. Eine einzelne Messung reicht für eine
-  Baseline also NICHT — immer zweimal fahren und die stabile Schnittmenge nehmen;
-  gleiche Gesamtzahl ist KEIN Beleg für gleiche Menge.
+  - **`architecture/*`-Wächter — 0 Tests** (über #63/#64 abgearbeitet).
+  - **Rest — 3 Tests / 3 Dateien**: `equality/appointment-series-bulk-rebook` 1,
+    `billing/zugferd-send-failure` 1, `customers` 1 (KV-0.2; hängt an Daten
+    anderer Dateien — isoliert rot, im Vollauf meist grün).
+  Derselbe Commit in **CI: 0 rote Tests** (Lauf `31249683315`, der `push`-Lauf
+  auf `main` — nicht der PR-Lauf; Run-ID mit notieren). Die Differenz ist damit
+  **einseitig geworden**: lokal 17 rot, in CI 0. Sie rechnet sich vollständig
+  auf — `17 − 14 (Chromium fehlt lokal) − 1 (`appointment-series-bulk-rebook`)
+  − 1 (`zugferd-send-failure`) − 1 (`customers`) = 0`; Dateien
+  `5 − 2 − 1 − 1 − 1 = 0`. **Alle fünf lokalen Roten sind in CI grün.** Wer
+  lokal misst und die Zahl für CI hält, meldet fünf Phantom-Regressionen.
+  **Zwei Läufe, zwei Zahlen — auch ohne Kalenderwechsel.** `3cebe96b` lieferte
+  lokal erst 18/6, dann 17/5; die Differenz war `tests/services.test.ts`. Schon
+  vorher dasselbe Muster (`e86042f1`: zweimal 18/6 mit VERSCHIEDENEN Ausreißern;
+  `91f11570`: erst 27/12, dann 25/10). Alles Kontaminations-Flakes der geteilten
+  DB. Eine einzelne Messung reicht für eine Baseline also NICHT — immer zweimal
+  fahren und die stabile Schnittmenge nehmen; gleiche Gesamtzahl ist KEIN Beleg
+  für gleiche Menge.
   **Die Zahl gilt für diesen Tag.** Sie steigt und fällt mit der Kalenderlage —
   am 02.08.2026 waren es 37 Dateien / 78 Tests. Bei Zweifel neu auf `main`
   erheben statt fortschreiben, und PRs immer per **same-day-A/B** gegen einen
