@@ -23,6 +23,10 @@
  *       invoices.ts`) ebenso. Es ist ein STEHENDES Werkzeug, kein verbrauchtes
  *       Einmal-Skript — Trockenlauf als Default, Detektor-Exit-Code — und
  *       `--apply` läuft ausschliesslich auf PROD.
+ *   (f) ZWEITE LAGE, DB-Ebene: der GoBD-Trigger auf `invoices` blockt DELETE
+ *       einer je ausgegebenen Rechnung auch im Status `entwurf` — und lässt
+ *       UPDATE (Rechnung UND Positionen) weiter zu. Sonst widerspräche er dem
+ *       Ventil, das die Rechnung ja gerade bearbeitbar machen soll.
  *   (e) Das Fehlmarkierungs-Ventil verlangt eine Begründung, protokolliert sie
  *       — und lässt die Ausgabe-Marke STEHEN. Es macht die Rechnung wieder
  *       bearbeitbar, nicht löschbar (entschieden 08.08., Alrik). Die erste
@@ -33,7 +37,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { db } from "../../server/lib/db";
-import { customers, invoices, auditLog } from "@shared/schema";
+import { customers, invoices, invoiceLineItems, auditLog } from "@shared/schema";
 import { and, eq, inArray, desc, sql } from "drizzle-orm";
 import { apiPost, uniqueId } from "../test-utils";
 import { withGobdMutation } from "../helpers/gobd";
@@ -286,6 +290,79 @@ describe("#66 — Belegnummernkreis", () => {
       (fehler as Error).message,
       "die Ablehnung muss den Grund nennen, sonst schickt sie den Bediener in den falschen Pfad",
     ).toMatch(/bereits ausgegeben/i);
+  });
+
+  it("(f) DB-Ebene: issued-but-entwurf ist unlöschbar, aber weiterhin BEARBEITBAR", async () => {
+    // Die vier App-Guards sind die erste Lage. Diese hier ist die zweite: der
+    // GoBD-Trigger auf `invoices`. Vor #66 prüfte er nur `status <> 'entwurf'`
+    // — nach dem Ventil steht eine ausgegebene Rechnung wieder auf `entwurf`,
+    // und für genau sie fiel das DB-seitige Netz weg. Ein Löschpfad, der an den
+    // App-Guards vorbeigeht (rohes SQL, psql, ein künftiger fünfter Pfad),
+    // hätte den Beleg entfernt.
+    //
+    // Bewusst OHNE `withGobdMutation` — der Bypass würde genau das abschalten,
+    // was hier geprüft wird.
+    const inv = await createDraft();
+    await markSent(inv.id);
+    await db.update(invoices).set({ status: "entwurf", sentAt: null }).where(eq(invoices.id, inv.id));
+    expect((await row(inv.id)).issuedAt).not.toBeNull();
+
+    // 1) LÖSCHEN muss die DB verweigern.
+    let dbFehler: unknown;
+    try {
+      await db.delete(invoices).where(eq(invoices.id, inv.id));
+    } catch (e) {
+      dbFehler = e;
+    }
+    expect((await row(inv.id)), "der Trigger muss die Zeile halten").toBeTruthy();
+    expect(dbFehler, "DELETE auf DB-Ebene muss scheitern, nicht still durchlaufen").toBeTruthy();
+
+    // drizzle verpackt den Postgres-Fehler; die echte Meldung samt SQLSTATE
+    // steckt in `.cause`. Geprüft wird BEIDES — der Code `23001`
+    // (`restrict_violation`, das ERRCODE unseres Triggers) UND der Text. Nur
+    // der Text wäre bei einer Umformulierung brüchig, nur der Code würde auch
+    // bei einem fremden restrict_violation grün.
+    const kette: Array<{ code?: string; message?: string }> = [];
+    for (let cur: any = dbFehler; cur; cur = cur.cause) {
+      kette.push({ code: cur.code, message: String(cur.message ?? "") });
+    }
+    expect(
+      kette.some((g) => g.code === "23001"),
+      `erwartet SQLSTATE 23001 (restrict_violation), Kette: ${JSON.stringify(kette)}`,
+    ).toBe(true);
+    expect(
+      kette.some((g) => /bereits ausgegeben|GoBD-Hard-Delete/i.test(g.message ?? "")),
+      `erwartet die Trigger-Meldung, Kette: ${JSON.stringify(kette)}`,
+    ).toBe(true);
+
+    // 2) BEARBEITEN muss weiter gehen — sonst widerspräche der Trigger dem
+    //    Ventil. Es macht die Rechnung absichtlich wieder bearbeitbar; nur der
+    //    Beleg selbst darf nicht verschwinden.
+    await db.update(invoices)
+      .set({ recipientName: "Korrigiert nach Fehlmarkierung" })
+      .where(eq(invoices.id, inv.id));
+    const [nachEdit] = await db.select({ recipientName: invoices.recipientName })
+      .from(invoices).where(eq(invoices.id, inv.id));
+    expect(
+      nachEdit.recipientName,
+      "UPDATE muss erlaubt bleiben — der Trigger haengt nur an DELETE",
+    ).toBe("Korrigiert nach Fehlmarkierung");
+
+    // 3) Und die Positionen bleiben ebenfalls bearbeitbar: der Inhalt wird ja
+    //    gerade korrigiert. Der Positions-Trigger gated am Eltern-Status und
+    //    darf NICHT auf `issued_at` erweitert werden.
+    const [pos] = await db.insert(invoiceLineItems).values({
+      invoiceId: inv.id,
+      appointmentDate: `${YEAR}-0${MONTH}-01`,
+      serviceDescription: "Korrektur-Position",
+      durationMinutes: 60,
+      unitPriceCents: 1_000,
+      totalCents: 1_000,
+    } as any).returning({ id: invoiceLineItems.id });
+    await db.update(invoiceLineItems)
+      .set({ serviceDescription: "Korrektur-Position (geaendert)" })
+      .where(eq(invoiceLineItems.id, pos.id));
+    await db.delete(invoiceLineItems).where(eq(invoiceLineItems.id, pos.id));
   });
 
   it("(e) Ventil: Begründung ist Pflicht und landet mit dem Ausgabe-Zeitpunkt im Audit", async () => {
