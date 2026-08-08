@@ -33,10 +33,18 @@
  *
  * Korrektur-Pfade
  * ---------------
- *   - ENTWURF (`status = 'entwurf'`): Der Entwurf wird gelöscht und über den
- *     kanonischen `generateInvoiceCore` frisch (mit 19 %) neu erzeugt — exakt
- *     der Pfad von `POST /billing/generate`. Entwürfe wurden nie versendet,
- *     daher ist ein Neu-Entwurf mit neuer Nummer GoBD-unbedenklich.
+ *   - ENTWURF (`status = 'entwurf'` UND nie ausgegeben): Der Entwurf wird
+ *     gelöscht und über den kanonischen `generateInvoiceCore` frisch (mit 19 %)
+ *     neu erzeugt — exakt der Pfad von `POST /billing/generate`.
+ *
+ *     ACHTUNG (#66): „Entwurf" heißt NICHT mehr „nie versendet". Seit dem
+ *     Fehlmarkierungs-Ventil (`POST /billing/:id/revoke-sent-mark`) kann eine
+ *     bereits AUSGEGEBENE Rechnung wieder im Entwurfsstatus stehen — das Ventil
+ *     macht sie bearbeitbar, nicht löschbar, und lässt `issued_at` stehen.
+ *     Dieser Pfad prüft deshalb `neverIssuedCondition()` mit, sonst würde er
+ *     genau den Beleg hart löschen, um dessen Schutz es in #66 geht. Eine
+ *     ausgegebene Rechnung gehört auch hier in den Storno-Pfad darunter.
+ *     (Die frühere Fassung dieses Absatzes behauptete das Gegenteil.)
  *   - AUSGESTELLT (`versendet`/`avis_erhalten`/`bezahlt`): GoBD-konforme
  *     Storno-und-Neuausstellung — `stornoInvoiceCascade` legt die
  *     Stornorechnung an (kopiert & negiert das buggy Original 1:1, KEINE
@@ -76,6 +84,7 @@ import {
   type Invoice,
 } from "@shared/schema";
 import { resolveVatTreatment, STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
+import { isInvoiceIssued, neverIssuedCondition } from "../lib/invoice-issued";
 import { stornoInvoiceCascade } from "../services/invoice-storno";
 import { generateInvoiceCore } from "../services/invoice-calc";
 import { persistInvoicePdf } from "../services/invoice-pdf-orchestrator";
@@ -97,7 +106,7 @@ function correctVatCents(netCents: number): number {
   return Math.round((netCents * STANDARD_VAT_RATE_BP) / 10000);
 }
 
-interface VatFinding {
+export interface VatFinding {
   invoiceId: number;
   invoiceNumber: string;
   customerId: number;
@@ -172,6 +181,9 @@ async function loadCandidates(invoiceNumbers: string[]) {
       billingYear: invoicesTable.billingYear,
       netAmountCents: invoicesTable.netAmountCents,
       vatAmountCents: invoicesTable.vatAmountCents,
+      // #66: Die Ausgabe-Marke MUSS mitgeladen werden — `status` allein
+      // entscheidet seit dem Ventil nicht mehr, welcher Korrektur-Pfad gilt.
+      issuedAt: invoicesTable.issuedAt,
     })
     .from(invoicesTable)
     .where(and(...whereParts));
@@ -192,7 +204,17 @@ function classifyFinding(row: Awaited<ReturnType<typeof loadCandidates>>[number]
   if (correct <= 0) return null;
   if (row.vatAmountCents !== buggy || row.vatAmountCents === correct) return null;
 
-  const kind: VatFinding["kind"] = row.status === "entwurf" ? "draft" : "issued";
+  // #66 — Die Weiche laeuft ueber die AUSGABE-MARKE, nicht ueber den Status.
+  //
+  // `status === "entwurf"` hiess frueher „nie ausgegeben". Seit dem
+  // Fehlmarkierungs-Ventil kann eine ausgegebene Rechnung wieder im
+  // Entwurfsstatus stehen. Die alte Zuordnung haette sie als `draft`
+  // eingestuft — mit drei Folgen: der TROCKENLAUF (die Entscheidungsgrundlage
+  // vor `--apply` auf PROD) haette „loeschen + neu erzeugen" gedruckt, der
+  // scharfe Lauf waere am Loeschschutz mitten im Durchlauf abgebrochen, und
+  // der Docstring oben („gehoert auch hier in den Storno-Pfad") waere nicht
+  // eingeloest worden. Ueber die Marke landet sie da, wo sie hingehoert.
+  const kind: VatFinding["kind"] = isInvoiceIssued(row) ? "issued" : "draft";
   return {
     invoiceId: row.id,
     invoiceNumber: row.invoiceNumber,
@@ -209,8 +231,16 @@ function classifyFinding(row: Awaited<ReturnType<typeof loadCandidates>>[number]
   };
 }
 
-/** ENTWURF: löschen + kanonisch neu erzeugen (Pfad von POST /billing/generate). */
-async function reissueDraft(finding: VatFinding, userId: number): Promise<void> {
+/**
+ * ENTWURF: löschen + kanonisch neu erzeugen.
+ *
+ * EXPORTIERT ausschliesslich für den Löschschutz-Test
+ * (`tests/billing/invoice-number-never-reused.test.ts`, Fall d3). Der Guard
+ * `neverIssuedCondition()` unten ist sonst nicht prüfbar, ohne das ganze
+ * Skript mit `--apply` unter `NODE_ENV=production` zu fahren — und ein
+ * ungeprüfter Löschpfad ist genau das, was #66 dreimal gefunden hat.
+ */
+export async function reissueDraft(finding: VatFinding, userId: number): Promise<void> {
   await withAudit(async (tx, audit) => {
     const deleted = await tx
       .delete(invoicesTable)
@@ -219,12 +249,35 @@ async function reissueDraft(finding: VatFinding, userId: number): Promise<void> 
           eq(invoicesTable.id, finding.invoiceId),
           eq(invoicesTable.status, "entwurf"),
           ne(invoicesTable.invoiceType, "stornorechnung"),
+          // #66: „Entwurf" heisst seit dem Fehlmarkierungs-Ventil NICHT mehr
+          // „nie ausgegeben". Eine ausgegebene Rechnung kann per Ventil wieder
+          // im Entwurfsstatus stehen — sie hart zu loeschen und neu
+          // auszustellen wuerde genau den Beleg verschwinden lassen, um den es
+          // in #66 geht. Dieselbe SSoT wie die drei Loeschpfade in
+          // `routes/billing.ts` und `services/draft-invoice-regen.ts`.
+          neverIssuedCondition(),
         ),
       )
       .returning({ id: invoicesTable.id, invoiceNumber: invoicesTable.invoiceNumber });
     if (deleted.length === 0) {
+      // Zwei Ursachen, und sie brauchen unterschiedliche Reaktionen: eine
+      // ausgegebene Rechnung ist KEIN Wettlauf, sondern gehoert in den
+      // Storno-Pfad. Die frueher pauschale Meldung „Status geaendert?" haette
+      // den Bediener genau in die falsche Richtung geschickt.
+      const [current] = await tx
+        .select({ issuedAt: invoicesTable.issuedAt, status: invoicesTable.status })
+        .from(invoicesTable)
+        .where(eq(invoicesTable.id, finding.invoiceId));
+      if (current && current.issuedAt !== null) {
+        throw new Error(
+          `Entwurf ${finding.invoiceNumber} wurde bereits ausgegeben (issued_at gesetzt) — `
+            + "harte Loeschung ist gesperrt (#66). Diese Rechnung gehoert in den "
+            + "Storno-Pfad: stornieren und neu ausstellen, statt den Beleg zu entfernen.",
+        );
+      }
       throw new Error(
-        `Entwurf ${finding.invoiceNumber} konnte nicht gelöscht werden (Status geändert?).`,
+        `Entwurf ${finding.invoiceNumber} konnte nicht gelöscht werden `
+          + `(Status jetzt "${current?.status ?? "unbekannt"}" — zwischenzeitlich geändert?).`,
       );
     }
     audit.record({

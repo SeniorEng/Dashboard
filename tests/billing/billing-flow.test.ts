@@ -1660,10 +1660,15 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(await countAuditFor("invoice_status_changed", [a.id, b.id], sinceAudit)).toBe(2);
   });
 
-  // BF-10.7 — Task #1434: „versendet" → „entwurf" zurücksetzen (Korrektur eines
-  // versehentlich/zu früh markierten Versands). Einzelpfad MUSS den Status
-  // zurücksetzen, `sentAt` wieder leeren und genau einen Audit-Eintrag schreiben.
-  it("BF-10.7 — Einzel-PATCH setzt versendet → entwurf zurück, leert sentAt und auditet", async () => {
+  // BF-10.7 — Task #1434 / #66: Der generische Weg „versendet" → „entwurf"
+  // ist ENTFERNT. Er war der Einstieg in die Belegnummern-Wiedervergabe:
+  // zurücksetzen leerte `sentAt`, danach griff der Entwurfs-Löschpfad, die
+  // Rechnung verschwand hart und ihre Nummer wurde neu vergeben.
+  //
+  // Dieser Fall hielt vorher das ALTE Verhalten fest (Rücksetzen = 200). Er
+  // hält jetzt die Ablösung fest: der generische Pfad lehnt ab, und die
+  // Korrektur läuft über das ausdrückliche, protokollierte Ventil.
+  it("BF-10.7 — Einzel-PATCH lehnt versendet → entwurf ab; Rücknahme nur über das Ventil", async () => {
     const inv = await createDraftSzInvoice("RESET-SINGLE");
     await finalizeInvoice(inv.id, "versendet");
 
@@ -1673,14 +1678,36 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
 
     const sinceAudit = await latestAuditId();
 
+    // Der generische Statuswechsel ist zu.
     const res = await apiPatch<any>(`/api/billing/${inv.id}/status`, { status: "entwurf" });
-    expect(res.status, `Rücksetzen muss erfolgreich sein: ${JSON.stringify(res.data)}`).toBe(200);
+    expect(res.status, `generischer Rückweg muss abgelehnt werden: ${JSON.stringify(res.data)}`).toBe(400);
+    const unveraendert = await apiGet<any>(`/api/billing/${inv.id}`);
+    expect(unveraendert.data.status, "abgelehnter Wechsel darf nichts verändern").toBe("versendet");
+    expect(await countAuditFor("invoice_status_changed", [inv.id], sinceAudit)).toBe(0);
+
+    // Ohne Begründung geht auch das Ventil nicht.
+    const ohneGrund = await apiPost<any>(`/api/billing/${inv.id}/revoke-sent-mark`, {});
+    expect(ohneGrund.status, "Begründung ist Pflicht").toBe(400);
+
+    // Mit Begründung: Status zurück und `sentAt` geleert — `issuedAt` NICHT.
+    // Das Ventil macht die Rechnung wieder bearbeitbar, nicht löschbar
+    // (entschieden 08.08., Alrik): die Ausgabe-Marke trägt den Löschschutz,
+    // und ausgegeben bleibt ausgegeben. Wer die Rechnung aus der Welt schaffen
+    // will, storniert sie. Ein
+    // eigener Audit-Eintrag mit der Begründung.
+    const ventil = await apiPost<any>(`/api/billing/${inv.id}/revoke-sent-mark`, {
+      reason: "Versehentlich markiert, es wurde nichts versandt.",
+    });
+    expect(ventil.status, `Ventil muss greifen: ${JSON.stringify(ventil.data)}`).toBe(200);
 
     const after = await apiGet<any>(`/api/billing/${inv.id}`);
     expect(after.data.status).toBe("entwurf");
-    expect(after.data.sentAt, "Rücksetzen muss das Versanddatum leeren").toBeFalsy();
-
-    expect(await countAuditFor("invoice_status_changed", [inv.id], sinceAudit)).toBe(1);
+    expect(after.data.sentAt, "Rücknahme muss das Versanddatum leeren").toBeFalsy();
+    expect(
+      after.data.issuedAt,
+      "Ausgabe-Marke überlebt die Rücknahme — sonst wäre die Löschkette wieder offen",
+    ).toBeTruthy();
+    expect(await countAuditFor("invoice_sent_mark_revoked", [inv.id], sinceAudit)).toBe(1);
   });
 
   // BF-10.8 — Task #1434: Aus „bezahlt"/„avis_erhalten" gibt es laut SSoT KEIN
@@ -1696,9 +1723,12 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(after.data.status, "bezahlte Rechnung darf NICHT zurückgesetzt werden").toBe("bezahlt");
   });
 
-  // BF-10.9 — Task #1434: Sammel-Rücksetzen wendet „entwurf" nur auf versendete
-  // Rechnungen an; bezahlte werden als ungültiger Übergang übersprungen.
-  it("BF-10.9 — bulk-status setzt nur versendete Rechnungen auf entwurf zurück", async () => {
+  // BF-10.9 — Task #1434 / #66: Das Sammel-Rücksetzen auf „entwurf" ist mit
+  // dem generischen Übergang entfallen. Der Fall hielt vorher fest, dass eine
+  // versendete Rechnung zurückgesetzt WIRD; er hält jetzt fest, dass sie es
+  // NICHT mehr wird — weder einzeln noch im Sammelpfad. Das Ventil ist
+  // bewusst nur als Einzelaktion mit Begründung erreichbar.
+  it("BF-10.9 — bulk-status setzt keine versendete Rechnung mehr auf entwurf zurück", async () => {
     const sent = await createDraftSzInvoice("RESET-BULK-SENT");
     await finalizeInvoice(sent.id, "versendet");
     const paid = await createDraftSzInvoice("RESET-BULK-PAID");
@@ -1710,25 +1740,37 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
       invoiceIds: [sent.id, paid.id],
       status: "entwurf",
     });
-    expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(200);
-    expect(res.data.summary.updated).toBe(1);
-    expect(res.data.summary.skipped).toBe(1);
-    expect(res.data.summary.total).toBe(2);
-
-    const byId = new Map<number, any>(res.data.results.map((r: any) => [r.invoiceId, r]));
-    expect(byId.get(sent.id).status).toBe("updated");
-    expect(byId.get(paid.id).status).toBe("skipped");
-    expect(byId.get(paid.id).reason).toMatch(/nicht erlaubt/i);
+    // Seit #66 kennt das Schema den Zielstatus `entwurf` gar nicht mehr — der
+    // Rückweg ist nicht mehr AUSDRÜCKBAR, statt pro Rechnung abgelehnt zu
+    // werden. Das ist die stärkere Schranke; geprüft wird beides: die Absage
+    // UND dass nichts angefasst wurde.
+    expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(400);
+    // BEIDE werden jetzt uebersprungen — versendet wie bezahlt.
+    expect(JSON.stringify(res.data)).toMatch(/versendet, avis_erhalten, bezahlt/);
 
     const sentAfter = await apiGet<any>(`/api/billing/${sent.id}`);
-    expect(sentAfter.data.status).toBe("entwurf");
-    expect(sentAfter.data.sentAt, "zurückgesetzte Rechnung darf kein Versanddatum mehr tragen").toBeFalsy();
+    expect(sentAfter.data.status, "versendete Rechnung bleibt versendet").toBe("versendet");
+    expect(sentAfter.data.sentAt, "Versanddatum bleibt stehen").toBeTruthy();
+    expect(sentAfter.data.issuedAt, "Ausgabe-Marke bleibt stehen").toBeTruthy();
     const paidAfter = await apiGet<any>(`/api/billing/${paid.id}`);
     expect(paidAfter.data.status).toBe("bezahlt");
 
-    expect(await countAuditFor("invoice_status_changed", [sent.id], sinceAudit)).toBe(1);
+    expect(await countAuditFor("invoice_status_changed", [sent.id], sinceAudit)).toBe(0);
     expect(await countAuditFor("invoice_status_changed", [paid.id], sinceAudit)).toBe(0);
+  });
 
+  // BF-10.9b — Der Metadaten-Inhalt des Sammel-Pfads bleibt geprueft, jetzt an
+  // einem Uebergang, den es noch gibt (entwurf -> versendet).
+  it("BF-10.9b — bulk-status schreibt vollstaendige Audit-Metadaten", async () => {
+    const inv = await createDraftSzInvoice("BULK-META");
+    const sinceAudit = await latestAuditId();
+    const res = await apiPost<any>("/api/billing/bulk-status", {
+      invoiceIds: [inv.id],
+      status: "versendet",
+    });
+    expect(res.status).toBe(200);
+    expect(res.data.summary.updated).toBe(1);
+    expect(await countAuditFor("invoice_status_changed", [inv.id], sinceAudit)).toBe(1);
     // Der Zaehler allein prueft nur die EXISTENZ des Eintrags. Ohne eine
     // Inhalts-Assertion rutscht eine Mutation durch, die zwar auditiert, aber
     // Unsinn hineinschreibt — und der Audit-Trail ist GoBD-relevant. Wir nageln
@@ -1741,12 +1783,12 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
       .where(and(
         eq(auditLog.action, "invoice_status_changed"),
         eq(auditLog.entityType, "invoice"),
-        eq(auditLog.entityId, sent.id),
+        eq(auditLog.entityId, inv.id),
         gt(auditLog.id, sinceAudit),
       ));
     const meta = (sentAudit?.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.previousStatus, "Audit muss den Vorher-Status tragen").toBe("versendet");
-    expect(meta.newStatus).toBe("entwurf");
+    expect(meta.previousStatus, "Audit muss den Vorher-Status tragen").toBe("entwurf");
+    expect(meta.newStatus).toBe("versendet");
     expect(meta.reason, "Sammel-Pfad muss sich als solcher ausweisen").toBe("bulk_status");
   });
 

@@ -12,11 +12,17 @@
  * versendet/avis_erhalten direkt auf bezahlt gesprungen werden;
  * bezahlt/storniert werden nie herabgestuft.
  *
- * Task #1434: "versendet" darf zusätzlich auf "entwurf" ZURÜCKGESETZT werden
- * (Korrektur eines versehentlich/zu früh markierten Versands). Beim Rücksetzen
- * wird `sentAt` wieder geleert (siehe `updateInvoiceStatusTx`). Bewusst NUR von
- * "versendet" aus — aus "avis_erhalten"/"bezahlt"/"storniert" gibt es kein
- * Zurück (diese Status implizieren bereits eingetretene Folgewirkungen).
+ * Task #1434 / #66: "versendet" → "entwurf" ist ENTFERNT. Der Übergang war der
+ * Einstieg in die Belegnummern-Wiedervergabe: zurücksetzen leerte `sentAt`,
+ * danach griff der Entwurfs-Löschpfad, die Rechnung verschwand hart und ihre
+ * Nummer wurde neu vergeben — dieselbe Belegnummer bezeichnete zwei Dokumente.
+ *
+ * ERSETZT durch zwei getrennte, jeweils ausdrückliche Wege:
+ *  - Inhaltliche Änderung einer ausgegebenen Rechnung → **Storno +
+ *    Neuausstellung** (bestehender Flow, neue Nummer, Original referenziert).
+ *  - Versehentliche Markierung, nichts versandt → `POST /:id/revoke-sent-mark`,
+ *    das die Ausgabe-Marke ausdrücklich und protokolliert zurücknimmt. Kein
+ *    stiller Status-Flip über den generischen Status-Endpunkt.
  *
  * Task #1822: "teilweise_bezahlt" (Teilzahlung) ist ein ABGELEITETER Status —
  * er wird NUR durch den Zahlungsabgleich vergeben (versendet/avis_erhalten →
@@ -29,7 +35,7 @@
  */
 export const INVOICE_STATUS_TRANSITIONS: Record<string, string[]> = {
   entwurf: ["versendet", "storniert"],
-  versendet: ["entwurf", "avis_erhalten", "bezahlt", "storniert"],
+  versendet: ["avis_erhalten", "bezahlt", "storniert"],
   avis_erhalten: ["bezahlt", "storniert"],
   teilweise_bezahlt: ["bezahlt", "storniert"],
   bezahlt: ["storniert"],

@@ -397,6 +397,8 @@ export const InvoiceItemSchema = component(
     vatRate: z.number().nullable(),
     status: z.string(),
     sentAt: nullableString(),
+    // #66: Zeitpunkt der ersten Ausgabe; null = nie ausgegeben.
+    issuedAt: nullableString(),
     dueDate: nullableString(),
     pdfPath: nullableString(),
     createdAt: z.string(),

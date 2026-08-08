@@ -104,6 +104,11 @@ export const AUDIT_ACTIONS = [
   "invoice_pdf_restored_from_backup",
   "invoice_pdf_reseal_on_recovery",
   "invoice_marked_sent_manually",
+  // #66 — ausdrueckliche Ruecknahme einer irrtuemlichen Versand-Markierung
+  // (nichts versandt). ERSETZT den stillen `versendet -> entwurf`-Flip ueber
+  // den generischen Status-Endpunkt; traegt Pflicht-Begruendung und den
+  // urspruenglichen Ausgabe-Zeitpunkt.
+  "invoice_sent_mark_revoked",
   "invoice_pdf_persist_failed",
   "invoice_zugferd_embed_failed",
   "invoice_zugferd_nonstrict_seal",

@@ -94,6 +94,23 @@ export const invoices = pgTable("invoices", {
   // #593 — der Verifier fällt dann auf den Live-Snapshot zurück.
   renderSnapshot: jsonb("render_snapshot"),
   sentAt: timestamp("sent_at"),
+  // #66 — Zeitpunkt der ERSTEN Ausgabe (manuelle „als versendet"-Markierung
+  // oder Systemversand). ERSETZT `sentAt` als Antwort auf die Frage „wurde
+  // dieser Beleg je ausgegeben?" — `sentAt` behaelt seine Rolle („wann zuletzt
+  // als versendet markiert") und wird beim Zuruecksetzen geleert, taugt also
+  // gerade NICHT als dauerhafte Marke. Genau darauf beruhte die
+  // Nummern-Wiedervergabe: zuruecksetzen leerte `sent_at`, danach griff der
+  // Entwurfs-Loeschpfad und die Belegnummer wurde neu vergeben.
+  //
+  // Wird NIE geleert — auch nicht vom Fehlmarkierungs-Ventil (entschieden
+  // 08.08., Alrik). Das Ventil macht eine irrtuemlich markierte Rechnung wieder
+  // BEARBEITBAR, nicht loeschbar: ausgegeben ist ausgegeben. Wer sie aus der
+  // Welt schaffen will, storniert sie.
+  //
+  // Diese Spalte ist damit die einzige Bedingung, die den Loeschschutz traegt
+  // (`server/lib/invoice-issued.ts`). Wuerde sie irgendwo geleert, waere die
+  // Kette aus dem Prod-Befund wieder offen.
+  issuedAt: timestamp("issued_at"),
   paidAt: timestamp("paid_at"),
   storniertAt: timestamp("storniert_at"),
   notes: text("notes"),
@@ -399,3 +416,21 @@ export interface InvoiceRenderSnapshot {
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;
+
+/**
+ * #66 — Hochwassermarke des Belegnummernkreises je Abrechnungsjahr.
+ *
+ * ERSETZT die Ableitung `MAX(invoice_number) + 1` ueber die VERBLIEBENEN
+ * Rechnungszeilen als Quelle der naechsten Nummer. Jene Ableitung vergab eine
+ * Nummer erneut, sobald die zugehoerige Zeile geloescht wurde — GoBD-widrig:
+ * dieselbe Belegnummer bezeichnete dann zwei verschiedene Dokumente.
+ *
+ * Diese Tabelle zaehlt nur AUFWAERTS. Sie wird beim Ziehen einer Nummer
+ * bedarfsweise aus dem aktuellen Bestand nachgezogen (`GREATEST`), damit
+ * Altbestand und importierte Nummern sie nie unterlaufen koennen.
+ */
+export const invoiceNumberSequence = pgTable("invoice_number_sequence", {
+  billingYear: integer("billing_year").primaryKey(),
+  lastNumber: integer("last_number").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});

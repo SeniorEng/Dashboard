@@ -97,6 +97,11 @@ const EXPECTED_TABLES: readonly string[] = [
   "import_batches",
   "insurance_providers",
   "invoice_line_items",
+  // #66 — Hochwassermarke des Belegnummernkreises je Jahr. ERSETZT die
+  // Ableitung `MAX(invoice_number) + 1` ueber die verbliebenen Rechnungszeilen
+  // als Quelle der naechsten Nummer; jene vergab eine Nummer erneut, sobald
+  // ihre Zeile geloescht wurde (GoBD: dieselbe Belegnummer fuer zwei Dokumente).
+  "invoice_number_sequence",
   "invoices",
   "monthly_service_records",
   "notifications",

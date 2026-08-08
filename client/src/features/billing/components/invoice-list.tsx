@@ -2,6 +2,9 @@ import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,15 +51,16 @@ const CLUSTER_HINTS: Record<InvoiceActionCluster, string> = {
 // Task #1376: Sammel-Statuswechsel ist bewusst auf die fortschreitenden
 // Lebenszyklus-Status begrenzt — „storniert" ist KEINE Sammelaktion (Storno
 // läuft cascade-sicher über den Einzelpfad).
-// Task #1434: „Auf Entwurf zurücksetzen" ergänzt die Sammelaktionen — setzt
-// versendete Rechnungen zurück (greift laut SSoT nur bei Quellstatus
-// „versendet", alle anderen werden serverseitig als ungültiger Übergang
-// übersprungen).
-const BULK_STATUS_OPTIONS: { value: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt"; label: string }[] = [
+// Task #1434 / #66: „Auf Entwurf zurücksetzen" ist als SAMMEL-Aktion entfernt.
+// Der Übergang `versendet → entwurf` existiert nicht mehr (er war der Einstieg
+// in die Belegnummern-Wiedervergabe). Eine irrtümliche Versand-Markierung wird
+// einzeln und mit Begründung über „Markierung zurücknehmen" korrigiert — eine
+// Sammelaktion wäre dafür der falsche Ort, weil jede Rücknahme eine eigene
+// Begründung ins Audit-Log schreibt.
+const BULK_STATUS_OPTIONS: { value: "versendet" | "avis_erhalten" | "bezahlt"; label: string }[] = [
   { value: "versendet", label: "Versendet" },
   { value: "avis_erhalten", label: "Avis erhalten" },
   { value: "bezahlt", label: "Bezahlt" },
-  { value: "entwurf", label: "Auf Entwurf zurücksetzen" },
 ];
 
 interface InvoiceListProps {
@@ -71,6 +75,8 @@ interface InvoiceListProps {
   sendInvoiceMutation: UseMutationResult<unknown, Error, number, unknown>;
   markSentMutation: UseMutationResult<unknown, Error, number, unknown>;
   statusMutation: UseMutationResult<unknown, Error, { id: number; status: string }, unknown>;
+  // #66 — Ruecknahme einer irrtuemlichen Versand-Markierung (mit Begruendung).
+  revokeSentMarkMutation: UseMutationResult<unknown, Error, { id: number; reason: string }, unknown>;
   onStorno: (invoice: InvoiceItem) => void;
   onMarkPaid: (invoice: InvoiceItem) => void;
   // Task #1785 P4: §45b-Kürzung (superadmin-only) — durchgereicht an InvoiceRow.
@@ -116,6 +122,7 @@ export function InvoiceList({
   sendInvoiceMutation,
   markSentMutation,
   statusMutation,
+  revokeSentMarkMutation,
   onStorno,
   onMarkPaid,
   isSuperAdmin,
@@ -144,6 +151,12 @@ export function InvoiceList({
   // Task #1412: Rechnungen in Handlungs-Cluster gruppieren (eine SICHT über die
   // SSoT `assignInvoiceActionCluster`). Pro Cluster: Zeilen (in Eingangs-
   // Reihenfolge), €-Summe, Aging je Zeile und Anzahl überfälliger Rechnungen.
+  // #66 — Ziel und Begruendung der Ruecknahme. Bewusst ein eigener Dialog statt
+  // eines stillen Klicks: die Ruecknahme wird protokolliert, also soll der
+  // Anwender sie auch bewusst ausloesen.
+  const [revokeTarget, setRevokeTarget] = useState<InvoiceItem | null>(null);
+  const [revokeReason, setRevokeReason] = useState("");
+
   const grouped = useMemo(() => {
     const byCluster = new Map<
       InvoiceActionCluster,
@@ -467,12 +480,58 @@ export function InvoiceList({
                     onToggleSelect={onToggleSelect}
                     linkedInvoice={linkedInvoiceFor(invoice)}
                     onNavigateToInvoice={onNavigateToInvoice}
+                    onRevokeSentMark={(inv) => { setRevokeTarget(inv); setRevokeReason(""); }}
                     aging={group.aging.get(invoice.id)}
                   />
                 ))}
             </section>
           );
         })}
+
+        {/* #66 — Fehlmarkierungs-Ventil. Die Begruendung ist Pflicht, weil sie
+            im Audit-Log landet: „zurueckgenommen" ohne Grund waere GoBD-seitig
+            wertlos. Kein Blur, keine Transform (CLAUDE.md → UI-Praeferenzen). */}
+        <Dialog open={revokeTarget !== null} onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}>
+          <DialogContent data-testid="dialog-revoke-sent-mark">
+            <DialogHeader>
+              <DialogTitle>Versand-Markierung zurücknehmen</DialogTitle>
+              <DialogDescription>
+                Nur wenn die Rechnung {revokeTarget?.invoiceNumber} irrtümlich als versendet
+                markiert wurde und nichts hinausgegangen ist. Wurde sie tatsächlich
+                verschickt, ist der Weg <strong>Storno und Neuausstellung</strong> — die
+                Belegnummer bleibt dann vergeben.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="revoke-reason">Begründung (wird protokolliert)</Label>
+              <Textarea
+                id="revoke-reason"
+                value={revokeReason}
+                onChange={(e) => setRevokeReason(e.target.value)}
+                placeholder="Warum wurde die Markierung irrtümlich gesetzt?"
+                data-testid="input-revoke-reason"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRevokeTarget(null)} data-testid="button-revoke-cancel">
+                Abbrechen
+              </Button>
+              <Button
+                disabled={revokeReason.trim().length < 10 || revokeSentMarkMutation.isPending}
+                onClick={() => {
+                  if (!revokeTarget) return;
+                  revokeSentMarkMutation.mutate(
+                    { id: revokeTarget.id, reason: revokeReason.trim() },
+                    { onSuccess: () => setRevokeTarget(null) },
+                  );
+                }}
+                data-testid="button-revoke-confirm"
+              >
+                Markierung zurücknehmen
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }

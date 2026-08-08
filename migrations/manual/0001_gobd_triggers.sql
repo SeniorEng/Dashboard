@@ -161,9 +161,19 @@ CREATE OR REPLACE FUNCTION invoices_prevent_finalized_delete()
       IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
         RETURN OLD;
       END IF;
-      IF OLD.status IS DISTINCT FROM 'entwurf' THEN
+      -- Zwei Gruende, eine Sperre:
+      --   status <> 'entwurf'      -- finalisiert, war nie loeschbar
+      --   issued_at IS NOT NULL    -- je ausgegeben (#66)
+      --
+      -- Der zweite Zweig existiert, weil 'entwurf' seit dem
+      -- Fehlmarkierungs-Ventil NICHT mehr 'nie ausgegeben' heisst. Eine
+      -- ausgegebene Rechnung kann wieder im Entwurfsstatus stehen; ohne diesen
+      -- Zweig faellt fuer genau sie das DB-seitige Netz weg und die
+      -- Anwendungsschicht waere die einzige Lage. Jetzt faengt der Trigger auch
+      -- rohes SQL und psql.
+      IF OLD.status IS DISTINCT FROM 'entwurf' OR OLD.issued_at IS NOT NULL THEN
         RAISE EXCEPTION
-          'invoices: GoBD-Hard-Delete einer finalisierten Rechnung verboten (Korrektur nur via Storno)'
+          'invoices: GoBD-Hard-Delete verboten - Rechnung ist finalisiert oder wurde bereits ausgegeben (Korrektur nur via Storno)'
           USING ERRCODE = 'restrict_violation';
       END IF;
       RETURN OLD;

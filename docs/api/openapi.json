@@ -1392,6 +1392,10 @@
           "invoiceType": {
             "type": "string"
           },
+          "issuedAt": {
+            "nullable": true,
+            "type": "string"
+          },
           "netAmountCents": {
             "type": "integer"
           },
@@ -1457,6 +1461,7 @@
           "vatRate",
           "status",
           "sentAt",
+          "issuedAt",
           "dueDate",
           "pdfPath",
           "createdAt",

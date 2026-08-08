@@ -78,6 +78,9 @@ interface InvoiceRowProps {
   // Task #1890: Verknüpfte Rechnung (Original ↔ Stornorechnung) + Sprung dorthin.
   linkedInvoice?: { id: number; invoiceNumber: string; relation: "cancels" | "cancelledBy" };
   onNavigateToInvoice?: (invoiceId: number) => void;
+  // #66 — Ruecknahme einer irrtuemlichen Versand-Markierung. Der Aufrufer holt
+  // die Pflicht-Begruendung ein; die Zeile oeffnet nur den Weg.
+  onRevokeSentMark?: (invoice: InvoiceItem) => void;
   // Task #1412: Aging-Bucket (Ampel) für die wartenden Cluster. `none`/`green`
   // → kein Badge; nur mahnende Stufen werden hervorgehoben.
   aging?: AgingBucket;
@@ -103,6 +106,7 @@ export function InvoiceRow({
   onToggleSelect,
   linkedInvoice,
   onNavigateToInvoice,
+  onRevokeSentMark,
   aging = "none",
 }: InvoiceRowProps) {
   // Task #1785 P4: §45b-Kürzung nur für Superadmins auf einer AUSGESTELLTEN
@@ -490,18 +494,22 @@ export function InvoiceRow({
                         <Banknote className={`${iconSize.sm} mr-2`} />
                         Als bezahlt markieren
                       </DropdownMenuItem>
-                      {/* Task #1434: Versehentlich/zu früh als versendet
-                          markierte Rechnung zurück auf „Entwurf" setzen.
-                          Bewusst NUR ab Status „versendet" (SSoT) — leert das
-                          Versanddatum wieder. */}
-                      {invoice.status === "versendet" && (
+                      {/* #66 — ERSETZT „Auf Entwurf zurücksetzen". Der generische Rückweg
+                          `versendet → entwurf` ist entfernt: er leerte `sentAt`,
+                          wodurch die Rechnung wieder als Entwurf löschbar wurde
+                          und ihre Belegnummer neu vergeben werden konnte.
+
+                          Übrig bleibt genau ein Fall — versehentlich markiert,
+                          nichts versandt. Der verlangt eine Begründung und wird
+                          protokolliert. Alles andere läuft über Storno +
+                          Neuausstellung. */}
+                      {invoice.status === "versendet" && invoice.issuedAt && (
                         <DropdownMenuItem
-                          onSelect={() => statusMutation.mutate({ id: invoice.id, status: "entwurf" })}
-                          disabled={statusMutation.isPending}
-                          data-testid={`button-status-entwurf-${invoice.id}`}
+                          onSelect={() => onRevokeSentMark?.(invoice)}
+                          data-testid={`button-revoke-sent-mark-${invoice.id}`}
                         >
                           <Undo2 className={`${iconSize.sm} mr-2`} />
-                          Auf Entwurf zurücksetzen
+                          Markierung zurücknehmen (Fehlmarkierung)
                         </DropdownMenuItem>
                       )}
                     </>

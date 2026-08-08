@@ -189,6 +189,7 @@ export default function AdminBilling() {
     generateMutation,
     discardDraftsMutation,
     statusMutation,
+    revokeSentMarkMutation,
     reduce45bMutation,
     bulkDeleteMutation,
     bulkStatusMutation,
@@ -413,7 +414,7 @@ export default function AdminBilling() {
   };
 
   const STATUS_ACTION_LABELS: Record<"entwurf" | "versendet" | "avis_erhalten" | "bezahlt", string> = {
-    entwurf: "Auf Entwurf zurücksetzen",
+    entwurf: "Auf Entwurf zurücksetzen",  // #66: nur noch Anzeige-Label für Bestand; als Aktion entfernt
     versendet: "Versendet",
     avis_erhalten: "Avis erhalten",
     bezahlt: "Bezahlt",
@@ -595,6 +596,7 @@ export default function AdminBilling() {
             sendInvoiceMutation={sendInvoiceMutation}
             markSentMutation={markSentMutation}
             statusMutation={statusMutation}
+            revokeSentMarkMutation={revokeSentMarkMutation}
             onStorno={setStornoTarget}
             onMarkPaid={setMarkPaidTarget}
             isSuperAdmin={isSuperAdmin}

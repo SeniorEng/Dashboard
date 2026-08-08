@@ -76,6 +76,11 @@ export interface InvoiceItem {
   status: string;
   // Task #533: Versanddatum für Listenanzeige (Badge „Versendet seit ...").
   sentAt: string | null;
+  // #66 — Zeitpunkt der ERSTEN Ausgabe; `null` = nie ausgegeben. Der Client
+  // entscheidet daran, ob „Auf Entwurf zurücksetzen" (nie ausgegeben) oder
+  // „Markierung zurücknehmen" (ausgegeben, Fehlmarkierungs-Ventil) angeboten
+  // wird. Unterscheidet sich von `sentAt`, das beim Zurücksetzen geleert wird.
+  issuedAt: string | null;
   // Task #1412: Fälligkeitsdatum (ISO yyyy-mm-dd). Anker für das Selbstzahler-/
   // Privat-Aging in der „Zahlung ausstehend"-Gruppe der Rechnungsliste (mirror
   // des Pipeline-Reader-Aging). Wird bereits roh vom Listen-Endpunkt geliefert,

@@ -198,6 +198,24 @@ export const GOBD_CBTS_PREVENT_DELETE_FN_SQL = `
     $$ LANGUAGE plpgsql;
   `;
 
+/**
+ * #66 — Diese Funktion haengt AUSSCHLIESSLICH an `BEFORE DELETE` auf `invoices`
+ * (siehe `GOBD_TABLE_TRIGGERS`: es gibt auf dieser Tabelle keinen
+ * UPDATE-Trigger). Die `issued_at`-Bedingung unten ist damit DELETE-gescopt
+ * durch Konstruktion — sie kann die Bearbeitung, die das Ventil ermoeglicht,
+ * nicht sperren.
+ *
+ * NICHT mitziehen: `invoice_line_items_prevent_finalized_mutation` feuert auf
+ * UPDATE **und** DELETE und gated am Status der Elternrechnung. Wuerde man dort
+ * dieselbe `issued_at`-Bedingung ergaenzen, waeren die Positionen einer
+ * ausgegebenen, per Ventil wieder bearbeitbaren Rechnung gesperrt — also genau
+ * das, wofuer das Ventil da ist. Der Beleg soll unloeschbar sein, sein INHALT
+ * bleibt bis zur erneuten Ausgabe korrigierbar.
+ *
+ * Die Invariante „kein UPDATE-Trigger auf `invoices`" ist strukturell
+ * abgesichert in `tests/startup/trigger-migration.test.ts` — dort steht auch,
+ * warum sie den urspruenglichen Prod-Paritaets-Grund ueberlebt.
+ */
 export const GOBD_INVOICES_PREVENT_FINALIZED_DELETE_FN_SQL = `
     CREATE OR REPLACE FUNCTION invoices_prevent_finalized_delete()
     RETURNS trigger AS $$
@@ -205,9 +223,19 @@ export const GOBD_INVOICES_PREVENT_FINALIZED_DELETE_FN_SQL = `
       IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
         RETURN OLD;
       END IF;
-      IF OLD.status IS DISTINCT FROM 'entwurf' THEN
+      -- Zwei Gruende, eine Sperre:
+      --   status <> 'entwurf'      -- finalisiert, war nie loeschbar
+      --   issued_at IS NOT NULL    -- je ausgegeben (#66)
+      --
+      -- Der zweite Zweig existiert, weil 'entwurf' seit dem
+      -- Fehlmarkierungs-Ventil NICHT mehr 'nie ausgegeben' heisst. Eine
+      -- ausgegebene Rechnung kann wieder im Entwurfsstatus stehen; ohne diesen
+      -- Zweig faellt fuer genau sie das DB-seitige Netz weg und die
+      -- Anwendungsschicht waere die einzige Lage. Jetzt faengt der Trigger auch
+      -- rohes SQL und psql.
+      IF OLD.status IS DISTINCT FROM 'entwurf' OR OLD.issued_at IS NOT NULL THEN
         RAISE EXCEPTION
-          'invoices: GoBD-Hard-Delete einer finalisierten Rechnung verboten (Korrektur nur via Storno)'
+          'invoices: GoBD-Hard-Delete verboten - Rechnung ist finalisiert oder wurde bereits ausgegeben (Korrektur nur via Storno)'
           USING ERRCODE = 'restrict_violation';
       END IF;
       RETURN OLD;
