@@ -248,8 +248,9 @@ describe("#66 — Belegnummernkreis", () => {
     const vorher = await row(inv.id);
     expect(vorher.issuedAt).not.toBeNull();
 
-    await expect(
-      reissueDraft(
+    let fehler: unknown;
+    try {
+      await reissueDraft(
         {
           invoiceId: inv.id,
           invoiceNumber: vorher.invoiceNumber,
@@ -265,16 +266,26 @@ describe("#66 — Belegnummernkreis", () => {
           kind: "draft",
         },
         1,
-      ),
-      "der Loeschpfad muss die ausgegebene Rechnung ablehnen, nicht loeschen",
-    ).rejects.toThrow(/bereits ausgegeben/i);
+      );
+    } catch (e) {
+      fehler = e;
+    }
 
-    // Der eigentliche Schaden waere die verschwundene Zeile — direkt geprueft,
-    // nicht nur ueber die Exception.
+    // ZUERST der Schaden, DANN die Wortwahl. Ohne Guard wird die Zeile
+    // geloescht und der Aufruf scheitert trotzdem — nur spaeter, an der
+    // Neuerzeugung. Haenge die Aussage an der Fehlermeldung, faengt der Test
+    // den Mutanten aus dem schwaecheren Grund und broeckelt, sobald jemand den
+    // Text umformuliert.
     const nachher = await row(inv.id);
     expect(nachher, "ausgegebene Rechnung darf auch hier nicht geloescht werden").toBeTruthy();
     expect(nachher.issuedAt).not.toBeNull();
     expect(nachher.invoiceNumber).toBe(vorher.invoiceNumber);
+
+    expect(fehler, "der Loeschpfad muss ablehnen statt still durchzulaufen").toBeInstanceOf(Error);
+    expect(
+      (fehler as Error).message,
+      "die Ablehnung muss den Grund nennen, sonst schickt sie den Bediener in den falschen Pfad",
+    ).toMatch(/bereits ausgegeben/i);
   });
 
   it("(e) Ventil: Begründung ist Pflicht und landet mit dem Ausgabe-Zeitpunkt im Audit", async () => {

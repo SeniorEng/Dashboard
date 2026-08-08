@@ -16,7 +16,7 @@ import {
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
 import { classifyBillingEligibility, isMonthFullyBilledAndSigned } from "@shared/domain/billing-eligibility";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
-import { neverIssuedCondition } from "../lib/invoice-issued";
+import { isInvoiceIssued, neverIssuedCondition } from "../lib/invoice-issued";
 import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
 import { insuranceValidAt } from "../lib/insurance-period";
@@ -2438,7 +2438,7 @@ router.post("/:id/revoke-sent-mark", asyncHandler("Markierung konnte nicht zurü
       + "danach ist der Weg Storno + Neuausstellung.",
     );
   }
-  if (invoice.issuedAt === null) {
+  if (!isInvoiceIssued(invoice)) {
     throw badRequest("Diese Rechnung trägt keine Ausgabe-Markierung.");
   }
   if (invoice.invoiceType === "stornorechnung") {
@@ -2451,7 +2451,7 @@ router.post("/:id/revoke-sent-mark", asyncHandler("Markierung konnte nicht zurü
   const updated = await withAudit(async (tx, audit) => {
     // Zeile sperren: ein paralleler Statuswechsel darf nicht dazwischenrutschen.
     const locked = await getInvoiceForUpdateTx(tx, id);
-    if (!locked || locked.status !== "versendet" || locked.issuedAt === null) {
+    if (!locked || locked.status !== "versendet" || !isInvoiceIssued(locked)) {
       throw badRequest("Die Rechnung wurde zwischenzeitlich verändert. Bitte erneut prüfen.");
     }
 

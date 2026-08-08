@@ -84,7 +84,7 @@ import {
   type Invoice,
 } from "@shared/schema";
 import { resolveVatTreatment, STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
-import { neverIssuedCondition } from "../lib/invoice-issued";
+import { isInvoiceIssued, neverIssuedCondition } from "../lib/invoice-issued";
 import { stornoInvoiceCascade } from "../services/invoice-storno";
 import { generateInvoiceCore } from "../services/invoice-calc";
 import { persistInvoicePdf } from "../services/invoice-pdf-orchestrator";
@@ -181,6 +181,9 @@ async function loadCandidates(invoiceNumbers: string[]) {
       billingYear: invoicesTable.billingYear,
       netAmountCents: invoicesTable.netAmountCents,
       vatAmountCents: invoicesTable.vatAmountCents,
+      // #66: Die Ausgabe-Marke MUSS mitgeladen werden — `status` allein
+      // entscheidet seit dem Ventil nicht mehr, welcher Korrektur-Pfad gilt.
+      issuedAt: invoicesTable.issuedAt,
     })
     .from(invoicesTable)
     .where(and(...whereParts));
@@ -201,7 +204,17 @@ function classifyFinding(row: Awaited<ReturnType<typeof loadCandidates>>[number]
   if (correct <= 0) return null;
   if (row.vatAmountCents !== buggy || row.vatAmountCents === correct) return null;
 
-  const kind: VatFinding["kind"] = row.status === "entwurf" ? "draft" : "issued";
+  // #66 — Die Weiche laeuft ueber die AUSGABE-MARKE, nicht ueber den Status.
+  //
+  // `status === "entwurf"` hiess frueher „nie ausgegeben". Seit dem
+  // Fehlmarkierungs-Ventil kann eine ausgegebene Rechnung wieder im
+  // Entwurfsstatus stehen. Die alte Zuordnung haette sie als `draft`
+  // eingestuft — mit drei Folgen: der TROCKENLAUF (die Entscheidungsgrundlage
+  // vor `--apply` auf PROD) haette „loeschen + neu erzeugen" gedruckt, der
+  // scharfe Lauf waere am Loeschschutz mitten im Durchlauf abgebrochen, und
+  // der Docstring oben („gehoert auch hier in den Storno-Pfad") waere nicht
+  // eingeloest worden. Ueber die Marke landet sie da, wo sie hingehoert.
+  const kind: VatFinding["kind"] = isInvoiceIssued(row) ? "issued" : "draft";
   return {
     invoiceId: row.id,
     invoiceNumber: row.invoiceNumber,
