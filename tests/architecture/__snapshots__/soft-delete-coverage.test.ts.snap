@@ -43,6 +43,7 @@ exports[`Architektur — Soft-Delete-Coverage in server/routes/** > Snapshot: pr
   ],
   "server/routes/service-records.ts": [
     "appointmentsRepo",
+    "monthlyServiceRecordsRepo",
   ],
 }
 `;
