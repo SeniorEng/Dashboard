@@ -45,13 +45,18 @@ let boundInvoiceId = 0;
 let unboundInvoiceId = 0;
 let partialInvoiceId = 0;
 let qontoTxId = 0;
+let overpaidInvoiceId = 0;
+let overpaidTxId = 0;
+let kasseInvoiceId = 0;
+let kasseTxId = 0;
+let paidInvoiceId = 0;
 const GROSS = 50_000;
 
-async function insertInvoice(opts: { suffix: string; status: string; gross: number }): Promise<number> {
+async function insertInvoice(opts: { suffix: string; status: string; gross: number; billingType?: string }): Promise<number> {
   const [row] = await db.insert(invoices).values({
     invoiceNumber: `P1897-${opts.suffix}-${uniqueId()}`,
     customerId,
-    billingType: "selbstzahler",
+    billingType: opts.billingType ?? "selbstzahler",
     invoiceType: "rechnung",
     billingMonth: MONTH,
     billingYear: YEAR,
@@ -71,13 +76,33 @@ async function bindPayment(invoiceId: number, txId: number, paidCents: number): 
     .where(eq(qontoTransactions.id, txId));
 }
 
-async function cardFor(invoiceId: number) {
-  const board = await readBillingPipeline(YEAR, MONTH, AS_OF);
-  for (const grp of board.stages) {
+async function board() {
+  return readBillingPipeline(YEAR, MONTH, AS_OF);
+}
+
+function cardIn(b: Awaited<ReturnType<typeof board>>, invoiceId: number) {
+  for (const grp of b.stages) {
     const card = grp.cards.find((c) => c.invoiceId === invoiceId);
     if (card) return { card, stage: grp.stage, overdueCount: grp.overdueCount };
   }
   return null;
+}
+
+/**
+ * Zahl der ROTEN Karten UNSERER Rechnungen in der Stufe. `overdueCount` der
+ * Gruppe taugt als Assertion nicht: beide Fixtures liegen in derselben Stufe,
+ * der Zaehler ist also fuer beide identisch, und in der geteilten CI-DB traegt
+ * er zusaetzlich fremde Rechnungen. Ein Mutant, der die Bindung faelschlich
+ * MITZAEHLT, bliebe daran unentdeckt.
+ */
+function ourRedCards(b: Awaited<ReturnType<typeof board>>, ids: number[]): number[] {
+  const red: number[] = [];
+  for (const grp of b.stages) {
+    for (const c of grp.cards) {
+      if (c.invoiceId != null && ids.includes(c.invoiceId) && c.aging === "red") red.push(c.invoiceId);
+    }
+  }
+  return red;
 }
 
 beforeAll(async () => {
@@ -107,11 +132,33 @@ beforeAll(async () => {
   qontoTxId = tx.id;
 
   await bindPayment(boundInvoiceId, qontoTxId, GROSS);
+
+  // Ueberzahlung: 600 EUR auf 500 EUR Brutto ⇒ overpaid, Status bleibt stehen.
+  overpaidInvoiceId = await insertInvoice({ suffix: "UEBER", status: "versendet", gross: GROSS });
+  overpaidTxId = (await db.insert(qontoTransactions).values({
+    qontoTransactionId: `p1897-ueber-${tag}`, amountCents: GROSS + 10_000, currency: "EUR",
+    side: "credit", status: "completed", emittedAt: new Date(),
+  } as any).returning({ id: qontoTransactions.id }))[0].id;
+  await bindPayment(overpaidInvoiceId, overpaidTxId, GROSS + 10_000);
+
+  // Pflegekassen-Pfad im Status `avis_erhalten` — der zweite Warte-Cluster.
+  kasseInvoiceId = await insertInvoice({
+    suffix: "KASSE", status: "avis_erhalten", gross: GROSS, billingType: "pflegekasse_gesetzlich",
+  });
+  kasseTxId = (await db.insert(qontoTransactions).values({
+    qontoTransactionId: `p1897-kasse-${tag}`, amountCents: GROSS, currency: "EUR",
+    side: "credit", status: "completed", emittedAt: new Date(),
+  } as any).returning({ id: qontoTransactions.id }))[0].id;
+  await bindPayment(kasseInvoiceId, kasseTxId, GROSS);
+
+  // Abgeschlossen — darf vom Endpunkt NICHT angereichert werden.
+  paidInvoiceId = await insertInvoice({ suffix: "BEZAHLT", status: "bezahlt", gross: GROSS });
 });
 
 afterAll(async () => {
-  await db.delete(qontoTransactions).where(eq(qontoTransactions.id, qontoTxId));
-  const ids = [boundInvoiceId, unboundInvoiceId, partialInvoiceId].filter(Boolean);
+  const txIds = [qontoTxId, overpaidTxId, kasseTxId].filter(Boolean);
+  if (txIds.length > 0) await db.delete(qontoTransactions).where(inArray(qontoTransactions.id, txIds));
+  const ids = [boundInvoiceId, unboundInvoiceId, partialInvoiceId, overpaidInvoiceId, kasseInvoiceId, paidInvoiceId].filter(Boolean);
   if (ids.length > 0) {
     // Gestellte Rechnungen sind GoBD-geschuetzt (invoices_prevent_finalized_delete).
     await withGobdMutation(async (tx) => {
@@ -123,8 +170,9 @@ afterAll(async () => {
 
 describe("#1897 — gebundene Zahlung auf der Lese-Seite", () => {
   it("(a) Cockpit-Reader: gebundene Rechnung altert nicht, ungebundene schon", async () => {
-    const bound = await cardFor(boundInvoiceId);
-    const unbound = await cardFor(unboundInvoiceId);
+    const b = await board();
+    const bound = cardIn(b, boundInvoiceId);
+    const unbound = cardIn(b, unboundInvoiceId);
 
     expect(bound, "gebundene Rechnung muss im Board auftauchen").not.toBeNull();
     expect(unbound, "ungebundene Rechnung muss im Board auftauchen").not.toBeNull();
@@ -132,10 +180,22 @@ describe("#1897 — gebundene Zahlung auf der Lese-Seite", () => {
     // Die Kontroll-Rechnung altert — sonst wäre (a) auch bei pauschal
     // abgeschaltetem Aging grün.
     expect(unbound!.card.aging).toBe("red");
-    expect(unbound!.overdueCount).toBeGreaterThanOrEqual(1);
-
     // Die gebundene nicht. Kein Geld anmahnen, das da ist.
     expect(bound!.card.aging).toBe("none");
+
+    // Von unseren beiden Rechnungen ist genau die ungebundene rot.
+    expect(ourRedCards(b, [boundInvoiceId, unboundInvoiceId])).toEqual([unboundInvoiceId]);
+
+    // Und die Mahn-ZAEHLUNG selbst: `overdueCount` einer Stufe MUSS der Zahl
+    // ihrer roten Karten entsprechen. Das ist die eigentliche Aussage des PRs
+    // — ohne sie bliebe ein Mutant unentdeckt, der die Bindung beim Aging
+    // beachtet, sie aber trotzdem als ueberfaellig mitzaehlt.
+    // Kontaminations-fest, weil beide Seiten der Gleichung dieselben fremden
+    // Rechnungen der geteilten DB enthalten.
+    for (const grp of b.stages) {
+      const rot = grp.cards.filter((c) => c.aging === "red").length;
+      expect(grp.overdueCount, `overdueCount der Stufe ${grp.stage}`).toBe(rot);
+    }
   });
 
   it("(b) Listen-Endpunkt liefert Bindung, Betrag und Differenz für offene Rechnungen", async () => {
@@ -159,6 +219,45 @@ describe("#1897 — gebundene Zahlung auf der Lese-Seite", () => {
     expect(unbound.hasBoundPayment).toBe(false);
     expect(unbound.boundPaidCents).toBeUndefined();
     expect(unbound.paymentDifferenceCents).toBeUndefined();
+  });
+
+  it("(e) Ueberzahlung: negative Differenz, Klassifikation overpaid, Pruef-Cluster", async () => {
+    const res = await apiGet<any[]>(`/api/billing?year=${YEAR}&month=${MONTH}`);
+    const over = (res.data as any[]).find((r) => r.id === overpaidInvoiceId);
+    expect(over).toBeTruthy();
+    expect(over.hasBoundPayment).toBe(true);
+    expect(over.boundPaidCents).toBe(GROSS + 10_000);
+    // Brutto − Skonto − gezahlt = -10000. Vorzeichen ist die Aussage: negativ
+    // heisst Ueberzahlung. Eine Vorzeichen-Drehung faellt genau hier.
+    expect(over.paymentDifferenceCents).toBe(-10_000);
+    expect(over.paymentDifferenceResult).toBe("overpaid");
+    // Der Status bleibt `versendet` — nie still als Vollzahlung gebucht.
+    expect(over.status).toBe("versendet");
+
+    expect(cardIn(await board(), overpaidInvoiceId)!.card.aging).toBe("none");
+  });
+
+  it("(f) Pflegekassen-Pfad: avis_erhalten mit Bindung altert ebenfalls nicht", async () => {
+    const kasse = cardIn(await board(), kasseInvoiceId);
+    expect(kasse, "Kassen-Rechnung muss im Board auftauchen").not.toBeNull();
+    expect(kasse!.stage).toBe("avis_erhalten");
+    expect(kasse!.card.aging).toBe("none");
+
+    const res = await apiGet<any[]>(`/api/billing?year=${YEAR}&month=${MONTH}`);
+    const row = (res.data as any[]).find((r) => r.id === kasseInvoiceId);
+    expect(row.hasBoundPayment).toBe(true);
+    expect(row.paymentDifferenceResult).toBe("exact");
+  });
+
+  it("(g) bezahlte Rechnung gilt nicht als offen und wird nicht angereichert", async () => {
+    const res = await apiGet<any[]>(`/api/billing?year=${YEAR}&month=${MONTH}`);
+    const paid = (res.data as any[]).find((r) => r.id === paidInvoiceId);
+    expect(paid).toBeTruthy();
+    expect(paid.status).toBe("bezahlt");
+    // Nagelt die „offen"-Abgrenzung fest: wuerde sie auf `bezahlt` ausgeweitet,
+    // faellt dieser Fall.
+    expect(paid.hasBoundPayment).toBeUndefined();
+    expect(paid.boundPaidCents).toBeUndefined();
   });
 
   it("(d) Bestandsvertrag #1822 bleibt: teilweise_bezahlt trägt paidCents/openAmountCents", async () => {

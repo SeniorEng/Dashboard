@@ -1,4 +1,5 @@
 import type { InvoicePotKey } from "../domain/budget-invoice-split";
+import type { PaymentDifferenceResult } from "../domain/qonto/payment-difference";
 import type { BillingEligibilityStatus, BillingBlockReason } from "../domain/billing-eligibility";
 
 export interface BillingCustomerItem {
@@ -118,7 +119,7 @@ export interface InvoiceItem {
   hasBoundPayment?: boolean;
   boundPaidCents?: number;
   paymentDifferenceCents?: number;
-  paymentDifferenceResult?: "exact" | "tolerated" | "underpaid" | "overpaid";
+  paymentDifferenceResult?: PaymentDifferenceResult;
 }
 
 interface InvoiceLineItem {

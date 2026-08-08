@@ -268,7 +268,11 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
     }
   });
 
-  it("ohne gebundene Zahlung bleibt die Zuordnung exakt die alte (rein additiv)", () => {
+  it("`hasBoundPayment` ist optional und false-default (weggelassen == false)", () => {
+    // ACHTUNG, was dieser Fall NICHT beweist: dass die Zuordnung ohne Flag
+    // dieselbe ist wie vor #1897. `false` gegen `undefined` zu vergleichen ist
+    // dafuer tautologisch — beide laufen durch denselben Zweig. Die Aussage
+    // „unveraendert" traegt allein die Tabelle darunter.
     for (const status of INVOICE_STATUSES) {
       for (const invoiceType of INVOICE_TYPES) {
         for (const billingType of ALL_BILLING_TYPES) {
@@ -278,6 +282,34 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
         }
       }
     }
+  });
+
+  it("ohne Bindung gilt die Zuordnung von VOR #1897 — als Tabelle festgenagelt", () => {
+    // Die Abbildung, wie sie auf `main` vor diesem PR war. Genau EIN Eintrag
+    // weicht bewusst ab und ist unten getrennt ausgewiesen.
+    const VOR_1897: Record<string, InvoiceActionCluster> = {
+      entwurf: "zu_versenden",
+      versendet: "zahlung_ausstehend", // Selbstzahler-Pfad; Pflegekasse separat
+      avis_erhalten: "zahlung_ausstehend",
+      bezahlt: "abgeschlossen",
+      storniert: "storniert",
+    };
+    for (const [status, expected] of Object.entries(VOR_1897)) {
+      expect(
+        assignInvoiceActionCluster({ status, invoiceType: "rechnung", billingType: "selbstzahler" }),
+        `${status} ohne Bindung`,
+      ).toBe(expected);
+    }
+    // Pflegekassen-Abzweig im `versendet`-Fall, ebenfalls unveraendert.
+    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "pflegekasse_gesetzlich" }))
+      .toBe("avis_ausstehend");
+
+    // DIE EINE bewusste Abweichung: `teilweise_bezahlt` fiel vorher ueber den
+    // `default`-Zweig von `assignInvoiceStage` auf `rechnung_erstellt` und
+    // landete damit in „Noch zu versenden". Das war ein Fehler (der Status kam
+    // mit #1822 dazu, ohne die Zuordnung zu erweitern) und ist jetzt behoben.
+    expect(assignInvoiceActionCluster({ status: "teilweise_bezahlt", invoiceType: "rechnung", billingType: "selbstzahler" }))
+      .toBe("teilzahlung");
   });
 
   it("Storno schlaegt die Zahlungsbindung (eine stornierte Rechnung ist kein Pruef-Fall)", () => {
