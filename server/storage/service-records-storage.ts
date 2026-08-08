@@ -128,6 +128,26 @@ export class EmptySignatureError extends Error {
 }
 
 /**
+ * Der Leistungsnachweis wurde zwischen dem Oeffnen der Unterschrift und ihrem
+ * Commit soft-geloescht — praktisch immer durch den Korrekturweg
+ * `DELETE /api/service-records/:id`, der seit #70 ein regulaerer Arbeitsablauf
+ * ist (LN loeschen, Termine korrigieren, neu unterschreiben).
+ *
+ * Eigene Klasse, weil der Bestandscode sonst die IRREFUEHRENDE
+ * Out-of-Order-Meldung wirft („Mitarbeiter kann nur bei Status pending
+ * unterschreiben"): der bedingte UPDATE trifft dann 0 Zeilen, und ohne diese
+ * Unterscheidung liest der Anwender einen Status-Fehler, obwohl der Nachweis
+ * in Wahrheit gar nicht mehr existiert. Die Route macht daraus 409
+ * RECORD_DELETED.
+ */
+export class ServiceRecordDeletedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ServiceRecordDeletedError";
+  }
+}
+
+/**
  * Task #749 — Cache-Invalidierung für Kunde/Jahr/Monat.
  *
  * Ändert sich der Inhalt eines Leistungsnachweises (Unterschriftslage ODER —
@@ -236,10 +256,29 @@ export async function signServiceRecord(id: number, signatureData: string, signe
       .where(and(
         eq(monthlyServiceRecords.id, id),
         eq(monthlyServiceRecords.status, expectedStatus),
+        // Ein soft-geloeschter Nachweis darf keine Unterschrift mehr annehmen.
+        // Ohne diesen Guard landete eine gleichzeitig committende Unterschrift
+        // auf einem Nachweis, den der Korrekturweg gerade entfernt hat — der
+        // LN traege dann eine Unterschrift, die kein Dokument mehr belegt.
+        isNull(monthlyServiceRecords.deletedAt),
       ))
       .returning();
 
     if (result.length === 0) {
+      // 0 Zeilen hat ZWEI moegliche Ursachen, und sie sagen dem Anwender
+      // Grundverschiedenes. Deshalb wird hier nachgesehen statt geraten:
+      // ist der Nachweis geloescht, oder hat ihn ein paralleler Request
+      // weitergeschaltet?
+      // Repo-vermittelt, aber bewusst OHNE `activeOnly()`: die Frage ist ja
+      // gerade, OB der Nachweis geloescht ist.
+      const [current] = await monthlyServiceRecordsRepo
+        .selectColumnsFrom({ deletedAt: monthlyServiceRecords.deletedAt }, tx)
+        .where(eq(monthlyServiceRecords.id, id));
+      if (!current || current.deletedAt) {
+        throw new ServiceRecordDeletedError(
+          "Dieser Leistungsnachweis wurde inzwischen gelöscht und kann nicht mehr unterschrieben werden.",
+        );
+      }
       throw new Error(outOfOrderMessage);
     }
 
