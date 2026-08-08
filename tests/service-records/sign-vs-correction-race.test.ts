@@ -24,6 +24,9 @@
  *   (c) Der echte Out-of-Order-Fall (zweimal dieselbe Unterschrift) meldet
  *       weiterhin 400 mit der Status-Meldung. Ohne diesen Fall könnte der neue
  *       Zweig alles einsammeln und niemandem fiele es auf.
+ *   (c2) Dasselbe für den KUNDEN-Übergang (`employee_signed → completed`) —
+ *       er war an keiner Stelle abgesichert, und die 400-Zuordnung hängt am
+ *       Substring „kann nur", den dieser PR angefasst hat.
  *   (d) Das Rennen selbst: gleichzeitige Unterschrift und LN-Korrektur enden
  *       nie in einem widersprüchlichen Zustand.
  */
@@ -163,24 +166,38 @@ describe("PR-A — Unterschrift vs. Korrekturweg", () => {
     // genau dort greift der neue Zweig.
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
+    // ZWEITES Signal: es genuegt nicht, nur die FREIGABE zu synchronisieren.
+    // Ohne dieses hier gaebe es zwischen dem Start der Halte-Transaktion und
+    // dem Unterschrifts-Versuch kein `await` — nichts stellte sicher, dass der
+    // Lock ueberhaupt schon gehalten wird. Gewaenne der Sign-Pfad das
+    // Startrennen, committete er die Unterschrift und der Fall waere
+    // falsch-rot. Beide Seiten ziehen hier ihre erste Pool-Verbindung; der
+    // Vorsprung haenge sonst an zwei parallelen Handshakes, nicht an Logik.
+    let lockAcquired!: () => void;
+    const locked = new Promise<void>((r) => { lockAcquired = r; });
 
     const holder = db.transaction(async (txA) => {
       await txA.select({ id: monthlyServiceRecords.id })
         .from(monthlyServiceRecords)
         .where(eq(monthlyServiceRecords.id, recordId))
         .for("update");
+      lockAcquired();
       await gate;
       await txA.update(monthlyServiceRecords)
         .set({ deletedAt: new Date() })
         .where(eq(monthlyServiceRecords.id, recordId));
     });
 
+    // Erst wenn die Zeile nachweislich gesperrt ist, das Rennen starten.
+    await locked;
     const signAttempt = signServiceRecord(
       recordId, validSignatureDataUrl(), "employee", auth.user.id, null, "Vor Ort",
     );
-    // Kurz warten, damit der Versuch die Sperre wirklich erreicht hat. Ohne das
-    // koennte er VOR Transaktion A zum Zug kommen und der Fall waere ein
-    // anderer als der gemeinte.
+    // Kurz warten, damit der Versuch bis zum blockierenden UPDATE gelaufen ist.
+    // Seit `await locked` oben ist das nur noch Komfort, keine Absicherung:
+    // die Sperre wird bereits gehalten, ein zu kurzes Warten koennte den
+    // Versuch hoechstens auf einen schon geloeschten Datensatz treffen lassen —
+    // was denselben Fehler ergibt.
     await new Promise((r) => setTimeout(r, 400));
     release();
     await holder;
@@ -211,6 +228,26 @@ describe("PR-A — Unterschrift vs. Korrekturweg", () => {
     expect((zweite.data as any).message).toContain("kann nur");
     // Der neue Zweig darf diesen Fall NICHT einsammeln.
     expect((zweite.data as any).error).not.toBe("RECORD_DELETED");
+  });
+
+  it("(c2) Kunden-Uebergang: eigene Out-of-Order-Meldung, ebenfalls 400", async () => {
+    const customerId = await newCustomer("kunde");
+    const apptId = await createAndDocument(customerId, workdays[3], "12:00");
+    const recordId = await createRecord(customerId, [apptId]);
+
+    // Kunde vor dem Mitarbeiter — der ZWEITE Uebergang
+    // (`employee_signed -> completed`) ist an keiner anderen Stelle
+    // abgesichert, und die 400-Zuordnung haengt am Substring "kann nur",
+    // den dieser PR angefasst hat.
+    const zuFrueh = await sign(recordId, "customer");
+    expect(zuFrueh.status).toBe(400);
+    expect((zuFrueh.data as any).message).toContain("kann nur");
+    expect((zuFrueh.data as any).error).not.toBe("RECORD_DELETED");
+
+    // Und der regulaere Weg funktioniert weiterhin.
+    expect((await sign(recordId, "employee")).status).toBe(200);
+    expect((await sign(recordId, "customer")).status).toBe(200);
+    expect((await recordRow(recordId)).status).toBe("completed");
   });
 
   it("(d) Rennen: gleichzeitige Unterschrift und LN-Korrektur bleiben konsistent", async () => {

@@ -728,13 +728,17 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     // SPERR-REIHENFOLGE: erst die TERMINE, dann die LN-Zeile.
     //
     // Das ist die Ordnung, die alle anderen Schreiber verwenden — der
-    // LN-Create sperrt die Termine vor dem Anlegen (`:377`, `:485`), und der
-    // Termin-Löschpfad tut es ebenfalls: `lockAndCheckAppointmentLocked` ruft
-    // als ERSTES `lockAppointmentsForUpdate` und sperrt erst danach die
-    // LN-Zeilen (`service-records-storage.ts:463`). Diese Route war nach #70
-    // die einzige, die umgekehrt herum sperrte (LN-Zeile zuerst, Termine
-    // implizit beim UPDATE) — also die einzige Inversion und damit ein
-    // Deadlock-Risiko in einem GoBD-Pfad. Sie zieht jetzt nach.
+    // LN-Create sperrt die Termine vor dem Anlegen, und der Termin-Löschpfad
+    // tut es ebenfalls: `lockAndCheckAppointmentLocked` ruft als ERSTES
+    // `lockAppointmentsForUpdate` und sperrt erst danach die LN-Zeilen.
+    // Diese Route sperrte nach #70 umgekehrt (LN-Zeile zuerst, Termine implizit
+    // beim UPDATE) und war damit gegen den Reopen-Pfad ein echtes ABBA. Sie
+    // zieht jetzt nach.
+    //
+    // NICHT die letzte Inversion im Repo: der Co-Visit-Zweig des
+    // Termin-Löschpfads sperrt Termin → LN → Partner-Termin, und die
+    // Startup-Dedupe-Migration sperrt Junction vor LN-Zeile ganz ohne
+    // Termin-Locks. Beides eigene Baustellen (FINDINGs im PR).
     //
     // `lockAppointmentsForUpdate` sortiert die IDs aufsteigend; damit sind auch
     // zwei gleichzeitige Korrekturen mit überlappenden Terminmengen
@@ -760,12 +764,21 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
       throw new Error("ALREADY_DELETED");
     }
 
-    // Junction unter BEIDEN Locks autoritativ neu lesen. Zwischen dem
-    // Vor-Read und den Locks kann ein LN-Create Termine hinzugefügt haben —
-    // die wären dann ungesperrt. Sie nachträglich zu sperren hieße, nach der
-    // LN-Zeile wieder Termine zu sperren, also genau die Inversion, die dieser
-    // Umbau beseitigt. Deshalb hier abbrechen statt aufweichen: der Fall ist
-    // selten, und ein zweiter Versuch des Anwenders läuft sauber durch.
+    // Junction unter BEIDEN Locks autoritativ neu lesen und sicherstellen, dass
+    // die Menge nicht GEWACHSEN ist. Der Guard trägt die Invariante, auf der
+    // alles Weitere steht: `aptIds ⊆ preIds` — nur dann sind ALLE Termine, die
+    // `reopenAppointmentForRedocumentation` gleich anfasst, auch gesperrt.
+    //
+    // REIN DEFENSIV, über die Anwendung nicht auslösbar: kein App-Pfad hängt
+    // Termine an einen BESTEHENDEN Nachweis. Alle Aufrufer von
+    // `addAppointmentsToServiceRecord` übergeben eine Record-ID, die in
+    // derselben Transaktion gerade erst entstanden ist (beide LN-Create-Pfade,
+    // Termin-Import). Erreichbar wären allenfalls die Startup-Dedupe-Migration
+    // und ein liegengebliebenes Wartungsskript.
+    //
+    // Warum abbrechen und nicht nachsperren: nachträglich Termine zu sperren
+    // hieße, NACH der LN-Zeile wieder Termine zu sperren — genau die Inversion,
+    // die dieser Umbau beseitigt.
     const linkedAppointments = await tx.select({ appointmentId: serviceRecordAppointments.appointmentId })
       .from(serviceRecordAppointments)
       .where(eq(serviceRecordAppointments.serviceRecordId, id));
@@ -835,7 +848,7 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
       return sendConflict(
         res,
         "CONCURRENT_MODIFICATION",
-        "Dem Leistungsnachweis wurde gerade ein Termin hinzugefügt. Bitte erneut versuchen.",
+        "Der Leistungsnachweis wurde parallel verändert. Bitte erneut versuchen.",
       );
     }
     throw error;
