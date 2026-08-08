@@ -135,11 +135,23 @@ export async function updateInvoiceStatusTx(
   _userId: number,
 ): Promise<Invoice> {
   const { invoices } = await import("@shared/schema");
-  const { eq } = await import("drizzle-orm");
+  const { eq, sql } = await import("drizzle-orm");
   const updateData: Partial<Invoice> = { status: status as Invoice["status"] };
-  if (status === "versendet") updateData.sentAt = new Date();
+  if (status === "versendet") {
+    updateData.sentAt = new Date();
+    // #66 — Die Ausgabe-Marke gehoert an DIESEN Engpass, nicht an die einzelnen
+    // Aufrufer: jeder Weg nach `versendet` ist eine Ausgabe, ob ueber
+    // `mark-sent`, den Sammelversand oder den generischen Statuswechsel.
+    // `COALESCE` haelt den URSPRUNGSZEITPUNKT fest — eine erneute Markierung
+    // ueberschreibt ihn nicht.
+    updateData.issuedAt = sql`COALESCE(${invoices.issuedAt}, now())` as unknown as Date;
+  }
   // Task #1434: Zurücksetzen auf "entwurf" leert das Versanddatum wieder, damit
   // Liste/PDF/Status konsistent bleiben (kein "Versendet am …" auf einem Entwurf).
+  // #66 — `issuedAt` wird hier BEWUSST NICHT geleert. Genau das war die Luecke:
+  // nach dem Leeren galt die Rechnung wieder als nie ausgegeben und der
+  // Entwurfs-Loeschpfad gab ihre Belegnummer frei. Die Marke nimmt allein das
+  // ausdrueckliche Fehlmarkierungs-Ventil zurueck.
   if (status === "entwurf") updateData.sentAt = null;
   if (status === "bezahlt") updateData.paidAt = new Date();
   if (status === "storniert") updateData.storniertAt = new Date();
@@ -161,12 +173,39 @@ export async function getNextInvoiceNumberTx(tx: Tx, year: number): Promise<stri
   const lockKey = `invoice_number_${year}`;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::int8)`);
 
-  const result = await tx.select({
+  // #66 — Die Nummer kommt aus der HOCHWASSERMARKE, nicht mehr aus
+  // `MAX(...) + 1` ueber die verbliebenen Zeilen. Jene Ableitung vergab eine
+  // Nummer erneut, sobald ihre Zeile geloescht wurde: dieselbe Belegnummer
+  // bezeichnete dann zwei verschiedene Dokumente (GoBD).
+  //
+  // Schritt 1 — Marke aus dem Bestand nachziehen. `GREATEST` sorgt dafuer,
+  // dass sie nie unterlaufen kann: weder beim ersten Zug in einem Jahr (leere
+  // Tabelle) noch bei importierten oder von Hand gesetzten Nummern oberhalb
+  // des bisherigen Standes. Die Marke sinkt dabei NIE.
+  const maxExisting = await tx.select({
     maxNum: sql<number>`COALESCE(MAX(CAST(SUBSTRING(${invoices.invoiceNumber} FROM 'RE-\\d{4}-(\\d+)') AS INTEGER)), 0)`,
   })
   .from(invoices)
   .where(eq(invoices.billingYear, year));
-  const next = (result[0]?.maxNum || 0) + 1;
+  const seed = maxExisting[0]?.maxNum || 0;
+
+  await tx.execute(sql`
+    INSERT INTO invoice_number_sequence (billing_year, last_number, updated_at)
+    VALUES (${year}, ${seed}, now())
+    ON CONFLICT (billing_year) DO UPDATE
+      SET last_number = GREATEST(invoice_number_sequence.last_number, EXCLUDED.last_number),
+          updated_at  = now()
+  `);
+
+  // Schritt 2 — Marke um eins erhoehen und den neuen Wert zurueckgeben. Der
+  // Advisory-Lock oben serialisiert das gegen parallele Zuege im selben Jahr.
+  const bumped = await tx.execute(sql`
+    UPDATE invoice_number_sequence
+       SET last_number = last_number + 1, updated_at = now()
+     WHERE billing_year = ${year}
+    RETURNING last_number
+  `);
+  const next = Number((bumped.rows[0] as { last_number: number | string }).last_number);
   return formatInvoiceNumber(year, next);
 }
 

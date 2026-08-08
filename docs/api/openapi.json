@@ -1009,6 +1009,10 @@
           "id": {
             "type": "integer"
           },
+          "issuedAt": {
+            "nullable": true,
+            "type": "string"
+          },
           "letterxpressLetterId": {
             "nullable": true,
             "type": "string"
@@ -1042,6 +1046,7 @@
           "recipientAddress",
           "documentFileNames",
           "sentAt",
+          "issuedAt",
           "createdAt",
           "errorMessage",
           "letterxpressLetterId"
@@ -1392,6 +1397,10 @@
           "invoiceType": {
             "type": "string"
           },
+          "issuedAt": {
+            "nullable": true,
+            "type": "string"
+          },
           "netAmountCents": {
             "type": "integer"
           },
@@ -1457,6 +1466,7 @@
           "vatRate",
           "status",
           "sentAt",
+          "issuedAt",
           "dueDate",
           "pdfPath",
           "createdAt",

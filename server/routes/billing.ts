@@ -817,6 +817,9 @@ router.post("/discard-drafts", asyncHandler("Entwürfe konnten nicht verworfen w
           eq(invoicesTable.billingMonth, month),
           eq(invoicesTable.status, "entwurf"),
           ne(invoicesTable.invoiceType, "stornorechnung"),
+          // #66 — wie im Sammel-Loeschpfad: eine je ausgegebene Rechnung wird
+          // nie geloescht, auch nicht als „verwaister Entwurf".
+          isNull(invoicesTable.issuedAt),
         ))
         .returning({ id: invoicesTable.id, invoiceNumber: invoicesTable.invoiceNumber });
       if (deleted.length === 0) continue;
@@ -873,10 +876,24 @@ router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht wer
           eq(invoicesTable.id, id),
           eq(invoicesTable.status, "entwurf"),
           ne(invoicesTable.invoiceType, "stornorechnung"),
+          // #66 — eine JE AUSGEGEBENE Rechnung wird nie geloescht, auch wenn
+          // sie gerade wieder im Status `entwurf` steht. Genau diese Luecke
+          // fuehrte zur Nummern-Wiedervergabe: versendet markieren →
+          // zuruecksetzen (leerte `sent_at`) → der Entwurfs-Guard griff → hart
+          // geloescht → die Belegnummer wurde neu vergeben.
+          // `issued_at` ueberlebt das Zuruecksetzen und schliesst den Weg.
+          isNull(invoicesTable.issuedAt),
         ))
         .returning({ id: invoicesTable.id, invoiceNumber: invoicesTable.invoiceNumber, grossAmountCents: invoicesTable.grossAmountCents, billingRunId: invoicesTable.billingRunId });
       if (deleted.length === 0) {
-        items.push({ invoiceId: id, invoiceNumber: null, status: "skipped", reason: "Nur Entwürfe können gelöscht werden." });
+        // Zwei Gruende, ein Ausgang — die Meldung nennt beide, damit der
+        // Anwender nicht raet, warum sein Entwurf nicht verschwindet.
+        items.push({
+          invoiceId: id,
+          invoiceNumber: null,
+          status: "skipped",
+          reason: "Nur nie ausgegebene Entwürfe können gelöscht werden. Eine bereits ausgegebene Rechnung wird storniert, nicht gelöscht.",
+        });
         continue;
       }
       numbers.push(deleted[0].invoiceNumber);
@@ -2374,6 +2391,83 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
       ipAddress: req.ip,
     });
     return { ...u, sentAt: new Date() };
+  }, { faults: readTestFaults(req) });
+
+  res.json(updated);
+}));
+
+// #66 — Fehlmarkierungs-Ventil. Nimmt die Ausgabe-Marke einer irrtuemlich als
+// versendet markierten Rechnung ZURUECK, wenn nachweislich nichts hinausging.
+//
+// ERSETZT den frueheren Weg „Auf Entwurf zuruecksetzen" ueber den generischen
+// Status-Endpunkt (`versendet -> entwurf` ist aus der Uebergangs-SSoT
+// entfernt). Der war ein stiller Status-Flip: er leerte `sent_at`, wodurch die
+// Rechnung wieder als Entwurf loeschbar wurde und ihre Belegnummer neu vergeben
+// werden konnte — dieselbe Nummer fuer zwei Dokumente.
+//
+// Bewusst eng gehalten:
+//  - nur aus `versendet` (spaetere Status implizieren Folgewirkungen),
+//  - nur ohne Zahlungsbezug,
+//  - Begruendung ist PFLICHT und landet im Audit-Log.
+// Fuer alles andere gilt: eine ausgegebene Rechnung wird STORNIERT und neu
+// ausgestellt, nicht zurueckgedreht.
+router.post("/:id/revoke-sent-mark", asyncHandler("Markierung konnte nicht zurückgenommen werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const parsed = z.object({
+    reason: z.string().trim().min(10).max(500),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest("Eine Begründung (mind. 10 Zeichen) ist erforderlich — die Rücknahme wird protokolliert.");
+  }
+
+  const invoice = await storage.getInvoice(id);
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+
+  if (invoice.status !== "versendet") {
+    throw badRequest(
+      `Rechnung hat Status "${invoice.status}". Zurücknehmen ist nur bei "versendet" möglich — `
+      + "danach ist der Weg Storno + Neuausstellung.",
+    );
+  }
+  if (invoice.issuedAt === null) {
+    throw badRequest("Diese Rechnung trägt keine Ausgabe-Markierung.");
+  }
+
+  const updated = await withAudit(async (tx, audit) => {
+    // Zeile sperren: ein paralleler Statuswechsel darf nicht dazwischenrutschen.
+    const locked = await getInvoiceForUpdateTx(tx, id);
+    if (!locked || locked.status !== "versendet" || locked.issuedAt === null) {
+      throw badRequest("Die Rechnung wurde zwischenzeitlich verändert. Bitte erneut prüfen.");
+    }
+
+    const [u] = await tx.update(invoicesTable)
+      .set({ status: "entwurf", sentAt: null, issuedAt: null })
+      .where(eq(invoicesTable.id, id))
+      .returning();
+
+    audit.record({
+      userId: req.user!.id,
+      action: "invoice_sent_mark_revoked",
+      entityType: "invoice",
+      entityId: id,
+      metadata: {
+        invoiceNumber: locked.invoiceNumber,
+        customerId: locked.customerId,
+        billingType: locked.billingType,
+        grossAmountCents: locked.grossAmountCents,
+        oldStatus: "versendet",
+        newStatus: "entwurf",
+        // Der urspruengliche Ausgabe-Zeitpunkt bleibt im Protokoll erhalten,
+        // auch wenn die Spalte geleert wird — sonst waere nach der Ruecknahme
+        // nicht mehr nachvollziehbar, WANN faelschlich markiert wurde.
+        revokedIssuedAt: locked.issuedAt,
+        reason: parsed.data.reason,
+      },
+      ipAddress: req.ip,
+    });
+    return u;
   }, { faults: readTestFaults(req) });
 
   res.json(updated);

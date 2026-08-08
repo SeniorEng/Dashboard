@@ -137,6 +137,26 @@ export function useBillingMutations({
     },
   });
 
+  // #66 — Ruecknahme einer irrtuemlichen Versand-Markierung. ERSETZT den Weg
+  // ueber `statusMutation({status: "entwurf"})`, den der Server nicht mehr
+  // erlaubt. Verlangt eine Begruendung, die serverseitig ins Audit-Log geht.
+  const revokeSentMarkMutation = useMutation({
+    mutationFn: async ({ id, reason }: { id: number; reason: string }) => {
+      const result = await api.post(`/billing/${id}/revoke-sent-mark`, { reason });
+      return unwrapResult(result);
+    },
+    onSuccess: async () => {
+      toast({
+        title: "Markierung zurückgenommen",
+        description: "Die Rechnung steht wieder als Entwurf zur Verfügung. Die Rücknahme wurde protokolliert.",
+      });
+      await invalidateRelated(queryClient, "billing");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Rücknahme fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
   const statusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
       const result = await api.patch(`/billing/${id}/status`, { status });
@@ -685,6 +705,7 @@ export function useBillingMutations({
     generateMutation,
     discardDraftsMutation,
     statusMutation,
+    revokeSentMarkMutation,
     reduce45bMutation,
     bulkDeleteMutation,
     bulkStatusMutation,
