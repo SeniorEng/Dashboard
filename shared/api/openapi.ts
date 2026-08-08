@@ -20,6 +20,7 @@
  */
 
 import { z } from "zod";
+import { PAYMENT_DIFFERENCE_RESULTS } from "../domain/qonto/payment-difference";
 import {
   extendZodWithOpenApi,
   OpenAPIRegistry,
@@ -406,6 +407,15 @@ export const InvoiceItemSchema = component(
     // Task #1822: nur im Zustand `teilweise_bezahlt` gesetzt (bereits gezahlt / offener Rest).
     paidCents: z.number().int().optional(),
     openAmountCents: z.number().int().optional(),
+    // #1897: Zahlungsbindung für jede offene Rechnung (SSoT: getClaimedInvoiceIds
+    // + getInvoicePaymentTotals + classifyPaymentDifference).
+    hasBoundPayment: z.boolean().optional(),
+    boundPaidCents: z.number().int().optional(),
+    paymentDifferenceCents: z.number().int().optional(),
+    // Werte aus der SSoT (`PaymentDifferenceResult`) — bewusst als Literal-Liste,
+    // weil das OpenAPI-Artefakt die Werte ausschreiben muss. Aendert sich die SSoT,
+    // faengt es der Typ in shared/api/billing.ts.
+    paymentDifferenceResult: z.enum(PAYMENT_DIFFERENCE_RESULTS).optional(),
   }),
 );
 

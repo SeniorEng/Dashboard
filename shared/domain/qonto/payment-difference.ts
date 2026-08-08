@@ -26,7 +26,13 @@
  */
 export const PAYMENT_DIFFERENCE_TOLERANCE_CENTS = 100;
 
-export type PaymentDifferenceResult = "exact" | "tolerated" | "underpaid" | "overpaid";
+/**
+ * Die moeglichen Ergebnisse der Differenz-Klassifikation — als Konstante, damit
+ * Typ UND Laufzeit-Validierung (OpenAPI/zod) aus derselben Quelle kommen. Vorher
+ * war das eine reine Union und die Werte standen im API-Schema ein zweites Mal.
+ */
+export const PAYMENT_DIFFERENCE_RESULTS = ["exact", "tolerated", "underpaid", "overpaid"] as const;
+export type PaymentDifferenceResult = (typeof PAYMENT_DIFFERENCE_RESULTS)[number];
 
 export interface PaymentDifferenceInput {
   /** Brutto-Forderung der Rechnung (Integer-Cents). */

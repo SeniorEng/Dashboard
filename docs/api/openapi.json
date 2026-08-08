@@ -1349,6 +1349,9 @@
           "billingYear": {
             "type": "integer"
           },
+          "boundPaidCents": {
+            "type": "integer"
+          },
           "budgetType": {
             "nullable": true,
             "type": "string"
@@ -1377,6 +1380,9 @@
           "grossAmountCents": {
             "type": "integer"
           },
+          "hasBoundPayment": {
+            "type": "boolean"
+          },
           "id": {
             "type": "integer"
           },
@@ -1394,6 +1400,18 @@
           },
           "paidCents": {
             "type": "integer"
+          },
+          "paymentDifferenceCents": {
+            "type": "integer"
+          },
+          "paymentDifferenceResult": {
+            "enum": [
+              "exact",
+              "tolerated",
+              "underpaid",
+              "overpaid"
+            ],
+            "type": "string"
           },
           "pdfPath": {
             "nullable": true,

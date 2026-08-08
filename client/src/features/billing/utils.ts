@@ -6,6 +6,7 @@ import {
   resolveAgingBucket,
   type AgingBucket,
   type InvoiceActionCluster,
+  isAgingCluster,
 } from "@shared/domain/billing-pipeline";
 import { PDF_PENDING_THRESHOLD_MS } from "./constants";
 
@@ -57,6 +58,10 @@ export function invoiceActionCluster(inv: InvoiceItem): InvoiceActionCluster {
     status: inv.status,
     invoiceType: inv.invoiceType,
     billingType: inv.billingType,
+    // #1897 — die Zahlungsbindung kommt vom Listen-Endpunkt (GET /api/billing/).
+    // Fehlt sie (aeltere Antwort, anderer Aufrufer), bleibt die Zuordnung exakt
+    // die alte: `undefined` wird in der SSoT wie `false` behandelt.
+    hasBoundPayment: inv.hasBoundPayment,
   });
 }
 
@@ -65,8 +70,12 @@ export function invoiceActionCluster(inv: InvoiceItem): InvoiceActionCluster {
 // Pipeline-Readers: Selbstzahler/Privat → Fälligkeitsdatum (`dueDate`),
 // Pflegekasse → Versanddatum (`sentAt`).
 export function invoiceAgingBucket(inv: InvoiceItem, asOfIso: string = todayIso()): AgingBucket {
+  // #1897 — dieselbe Funktion, die der Cockpit-Reader liest
+  // (`server/storage/billing/pipeline-reader.ts`). Vorher stand die
+  // Cluster-Aufzaehlung hier doppelt; driftete eine Seite, mahnte genau eine
+  // von beiden weiter.
   const cluster = invoiceActionCluster(inv);
-  if (cluster !== "avis_ausstehend" && cluster !== "zahlung_ausstehend") return "none";
+  if (!isAgingCluster(cluster)) return "none";
   const model = agingModelForBillingType(inv.billingType);
   const anchorIso =
     model === "selbstzahler"

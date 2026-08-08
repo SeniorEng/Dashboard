@@ -289,6 +289,8 @@ export const INVOICE_ACTION_CLUSTERS = [
   "zu_versenden",
   "avis_ausstehend",
   "zahlung_ausstehend",
+  "zahlung_zugeordnet_pruefung",
+  "teilzahlung",
   "abgeschlossen",
   "storniert",
 ] as const;
@@ -298,9 +300,33 @@ export const INVOICE_ACTION_CLUSTER_LABELS: Record<InvoiceActionCluster, string>
   zu_versenden: "Noch zu versenden",
   avis_ausstehend: "Avis ausstehend",
   zahlung_ausstehend: "Zahlung ausstehend",
+  zahlung_zugeordnet_pruefung: "Zahlung zugeordnet – Prüfung",
+  teilzahlung: "Teilzahlung eingegangen",
   abgeschlossen: "Abgeschlossen",
   storniert: "Storniert",
 };
+
+/**
+ * Die beiden Cluster, in denen eine Rechnung ALTERT (Mahn-/Wartelauf). Genau
+ * hier — und nur hier — wird die Aging-Ampel berechnet.
+ *
+ * Das ist die geteilte Regel für Schritt 5 aus #1897: Sie ERSETZT die frühere
+ * stufen-basierte Bedingung im Cockpit-Reader
+ * (`stage === "versendet" || stage === "avis_erhalten"`), die die
+ * Zahlungsbindung nicht kannte. Ergebnis dort war, dass eine Rechnung mit
+ * längst eingegangener Zahlung weiter alterte und in `overdueCount` als
+ * überfällig gezählt wurde — die Abrechnung mahnte Geld an, das auf dem Konto
+ * lag.
+ *
+ * Weil die Liste (`client/src/features/billing/utils.ts` →
+ * `invoiceAgingBucket`) schon immer über den Cluster gatet, lesen mit dieser
+ * Funktion beide Seiten dieselbe Wahrheit: sobald eine Zahlung gebunden ist,
+ * fällt die Rechnung in `zahlung_zugeordnet_pruefung` bzw. `teilzahlung` — und
+ * altert damit auf BEIDEN Seiten nicht mehr.
+ */
+export function isAgingCluster(cluster: InvoiceActionCluster): boolean {
+  return cluster === "avis_ausstehend" || cluster === "zahlung_ausstehend";
+}
 
 export interface InvoiceClusterInput {
   /** Rechnungs-Status (`INVOICE_STATUSES`). */
@@ -309,6 +335,16 @@ export interface InvoiceClusterInput {
   invoiceType: string;
   /** Zahler-Typ (`billingType`): selbstzahler | pflegekasse_gesetzlich | pflegekasse_privat. */
   billingType: string;
+  /**
+   * Hängt an dieser Rechnung eine gebundene Qonto-Zahlung? Quelle ist
+   * ausschließlich `qontoStorage.getClaimedInvoiceIds` (1:1-Match ODER Mitglied
+   * eines an eine Transaktion gebundenen Avis) — hier wird NICHT nachgerechnet.
+   *
+   * Optional und `false`-default, damit Aufrufer, die diese Frage nicht
+   * beantworten können (z.B. reine Status-Ansichten), unverändert weiterlaufen:
+   * ohne die Angabe bleibt die Zuordnung exakt die von vorher.
+   */
+  hasBoundPayment?: boolean;
 }
 
 /**
@@ -330,6 +366,27 @@ export function assignInvoiceActionCluster(input: InvoiceClusterInput): InvoiceA
   // entstünde, ebenfalls dem Storniert-Cluster zugeordnet, damit die Zuordnung
   // total bleibt.
   if (assignment.kind !== "stage") return "storniert";
+
+  // Teilzahlung ZUERST — vor der Stufen-Auswertung. `assignInvoiceStage` kennt
+  // den Status `teilweise_bezahlt` nicht (er kam mit Task #1822 dazu, ohne dass
+  // die Stufen-Zuordnung erweitert wurde) und schickt ihn über den
+  // `default`-Zweig auf `rechnung_erstellt`. Ohne diesen Vorgriff stünde eine
+  // teilbezahlte Rechnung in der Liste unter „Noch zu versenden" — ausgerechnet
+  // dort, wo sie am wenigsten hingehört.
+  // Die STUFEN-Zuordnung bleibt davon unberührt (eigene Frage, eigener
+  // Blast-Radius: sie trägt die €-Summen des Cockpit-Boards).
+  if (input.status === "teilweise_bezahlt") return "teilzahlung";
+
+  // Gebundene Zahlung schlägt den Wartelauf: Das Geld ist da, es fehlt nur die
+  // Entscheidung (Volldeckung freigeben, Überzahlung klären). Gilt für BEIDE
+  // Warte-Stufen — auch für `versendet`, weil eine Pflegekassen-Rechnung eine
+  // Zahlung erhalten kann, bevor das Avis eingelesen wurde.
+  if (
+    input.hasBoundPayment === true &&
+    (assignment.stage === "versendet" || assignment.stage === "avis_erhalten")
+  ) {
+    return "zahlung_zugeordnet_pruefung";
+  }
 
   switch (assignment.stage) {
     case "rechnung_erstellt":
