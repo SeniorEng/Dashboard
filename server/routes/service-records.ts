@@ -644,6 +644,13 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
         code: (error as { code?: string }).code ?? "empty_canvas",
       });
     }
+    // VOR der „kann nur"-Prüfung: der gelöschte Nachweis ist ein eigener
+    // Zustand (409 Conflict), kein Eingabefehler (400). Die Reihenfolge ist
+    // bedeutsam — die Meldung enthält bewusst NICHT „kann nur", würde aber bei
+    // einer künftigen Umformulierung sonst in den falschen Zweig fallen.
+    if (error instanceof Error && error.name === "ServiceRecordDeletedError") {
+      return sendConflict(res, "RECORD_DELETED", error.message);
+    }
     if (error instanceof Error && error.message.includes("kann nur")) {
       return res.status(400).json({ message: error.message });
     }
@@ -718,12 +725,34 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
   let recordStatus: string;
   try {
     ({ linkedAppointmentIds, reopened, recordStatus } = await db.transaction(async (tx) => {
-    // Die LN-Zeile sperren, bevor wir über sie entscheiden. Ohne den Lock kann
-    // eine gleichzeitig committende Unterschrift zwischen unseren Read und den
-    // Soft-Delete rutschen (Muster wie Task #1544 im Termin-Löschpfad).
-    // Bewusst OHNE `activeOnly()`: wir müssen gerade unterscheiden können, ob
-    // der Nachweis schon soft-gelöscht ist (→ ALREADY_DELETED statt stillem
-    // Durchlauf), und dafür die Zeile trotzdem sperren.
+    // SPERR-REIHENFOLGE: erst die TERMINE, dann die LN-Zeile.
+    //
+    // Das ist die Ordnung, die alle anderen Schreiber verwenden — der
+    // LN-Create sperrt die Termine vor dem Anlegen, und der Termin-Löschpfad
+    // tut es ebenfalls: `lockAndCheckAppointmentLocked` ruft als ERSTES
+    // `lockAppointmentsForUpdate` und sperrt erst danach die LN-Zeilen.
+    // Diese Route sperrte nach #70 umgekehrt (LN-Zeile zuerst, Termine implizit
+    // beim UPDATE) und war damit gegen den Reopen-Pfad ein echtes ABBA. Sie
+    // zieht jetzt nach.
+    //
+    // NICHT die letzte Inversion im Repo: der Co-Visit-Zweig des
+    // Termin-Löschpfads sperrt Termin → LN → Partner-Termin, und die
+    // Startup-Dedupe-Migration sperrt Junction vor LN-Zeile ganz ohne
+    // Termin-Locks. Beides eigene Baustellen (FINDINGs im PR).
+    //
+    // `lockAppointmentsForUpdate` sortiert die IDs aufsteigend; damit sind auch
+    // zwei gleichzeitige Korrekturen mit überlappenden Terminmengen
+    // untereinander deadlock-frei.
+    const preLinked = await tx.select({ appointmentId: serviceRecordAppointments.appointmentId })
+      .from(serviceRecordAppointments)
+      .where(eq(serviceRecordAppointments.serviceRecordId, id));
+    const preIds = preLinked.map(r => r.appointmentId);
+    await storage.lockAppointmentsForUpdate(preIds, tx);
+
+    // Jetzt die LN-Zeile. Bewusst OHNE `activeOnly()`: wir müssen gerade
+    // unterscheiden können, ob der Nachweis schon soft-gelöscht ist
+    // (→ ALREADY_DELETED statt stillem Durchlauf), und dafür die Zeile
+    // trotzdem sperren.
     const [locked] = await monthlyServiceRecordsRepo
       .selectColumnsFrom({
         deletedAt: monthlyServiceRecords.deletedAt,
@@ -735,10 +764,29 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
       throw new Error("ALREADY_DELETED");
     }
 
+    // Junction unter BEIDEN Locks autoritativ neu lesen und sicherstellen, dass
+    // die Menge nicht GEWACHSEN ist. Der Guard trägt die Invariante, auf der
+    // alles Weitere steht: `aptIds ⊆ preIds` — nur dann sind ALLE Termine, die
+    // `reopenAppointmentForRedocumentation` gleich anfasst, auch gesperrt.
+    //
+    // REIN DEFENSIV, über die Anwendung nicht auslösbar: kein App-Pfad hängt
+    // Termine an einen BESTEHENDEN Nachweis. Alle Aufrufer von
+    // `addAppointmentsToServiceRecord` übergeben eine Record-ID, die in
+    // derselben Transaktion gerade erst entstanden ist (beide LN-Create-Pfade,
+    // Termin-Import). Erreichbar wären allenfalls die Startup-Dedupe-Migration
+    // und ein liegengebliebenes Wartungsskript.
+    //
+    // Warum abbrechen und nicht nachsperren: nachträglich Termine zu sperren
+    // hieße, NACH der LN-Zeile wieder Termine zu sperren — genau die Inversion,
+    // die dieser Umbau beseitigt.
     const linkedAppointments = await tx.select({ appointmentId: serviceRecordAppointments.appointmentId })
       .from(serviceRecordAppointments)
       .where(eq(serviceRecordAppointments.serviceRecordId, id));
     const aptIds = linkedAppointments.map(r => r.appointmentId);
+    const preSet = new Set(preIds);
+    if (aptIds.some(x => !preSet.has(x))) {
+      throw new Error("CONCURRENT_MODIFICATION");
+    }
 
     if (await hasActiveInvoiceForAppointments(aptIds, tx)) {
       throw new Error("INVOICED");
@@ -795,6 +843,13 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
     }
     if (error instanceof Error && error.message === "ALREADY_DELETED") {
       return sendConflict(res, "ALREADY_DELETED", "Dieser Leistungsnachweis wurde bereits gelöscht.");
+    }
+    if (error instanceof Error && error.message === "CONCURRENT_MODIFICATION") {
+      return sendConflict(
+        res,
+        "CONCURRENT_MODIFICATION",
+        "Der Leistungsnachweis wurde parallel verändert. Bitte erneut versuchen.",
+      );
     }
     throw error;
   }
