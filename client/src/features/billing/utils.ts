@@ -115,3 +115,49 @@ export function formatSentAt(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
+
+// #1897 — Beschriftung des Zahlungs-Badges. Bewusst hier und nicht in der
+// Zeile: dieselbe Formulierung wird im Cockpit gebraucht, sobald dort die
+// Zahlungsbindung angezeigt wird, und eine zweite Fassung würde sofort
+// auseinanderlaufen.
+//
+// Die Klassifikation kommt aus der SSoT (`paymentDifferenceResult`), es wird
+// hier NICHT neu gegen Beträge verglichen. `tolerated` heißt: innerhalb der
+// 100-Cent-Toleranz, fachlich gedeckt — deshalb dieselbe Aussage wie `exact`,
+// nur mit dem Zusatz im Tooltip.
+export function paymentBadgeLabel(
+  inv: InvoiceItem,
+  formatAmount: (cents: number) => string,
+): string {
+  const paid = inv.boundPaidCents;
+  if (paid === undefined) return "Zahlung zugeordnet";
+  const betrag = formatAmount(paid);
+  const diff = inv.paymentDifferenceCents ?? 0;
+  switch (inv.paymentDifferenceResult) {
+    case "exact":
+    case "tolerated":
+      return `Zahlung ${betrag} · gedeckt`;
+    case "underpaid":
+      return `Zahlung ${betrag} · ${formatAmount(diff)} fehlen`;
+    case "overpaid":
+      return `Zahlung ${betrag} · ${formatAmount(Math.abs(diff))} zu viel`;
+    default:
+      return `Zahlung ${betrag}`;
+  }
+}
+
+/** Erklärt im Tooltip, was der Zustand für die Bearbeitung bedeutet. */
+export function paymentBadgeTitle(inv: InvoiceItem): string {
+  switch (inv.paymentDifferenceResult) {
+    case "exact":
+      return "Zahlungseingang deckt den Rechnungsbetrag exakt — kann freigegeben werden.";
+    case "tolerated":
+      return "Zahlungseingang deckt den Rechnungsbetrag innerhalb der Toleranz (bis 1,00 €) — kann freigegeben werden.";
+    case "underpaid":
+      return "Zahlungseingang deckt den Rechnungsbetrag noch nicht vollständig.";
+    case "overpaid":
+      return "Es ist mehr eingegangen als berechnet — bitte klären, nicht still als bezahlt buchen.";
+    default:
+      return "Eine Zahlung ist dieser Rechnung zugeordnet.";
+  }
+}
