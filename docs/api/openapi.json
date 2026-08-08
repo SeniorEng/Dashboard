@@ -1009,10 +1009,6 @@
           "id": {
             "type": "integer"
           },
-          "issuedAt": {
-            "nullable": true,
-            "type": "string"
-          },
           "letterxpressLetterId": {
             "nullable": true,
             "type": "string"
@@ -1046,7 +1042,6 @@
           "recipientAddress",
           "documentFileNames",
           "sentAt",
-          "issuedAt",
           "createdAt",
           "errorMessage",
           "letterxpressLetterId"

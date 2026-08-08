@@ -24,6 +24,7 @@ const PRE_BUDGET_ORDER = [
   "backfill-orphan-reversal-appointment-id",
   "backfill-storno-transaction-date",
   "backfill-avis-received-status",
+  "backfill-invoice-issued-at",
   "clear-45b-monthly-limits",
   "migrate-in-progress-appointments",
   "migrate-task-status-in-progress",
@@ -62,14 +63,14 @@ describe("Task #1428 — NICHT-Budget Daten-Migrations-Registry", () => {
     expect(new Set(registry.map((m) => m.name)).size).toBe(registry.length);
   });
 
-  it("registriert genau 17 NICHT-Budget Migrationen mit eindeutigen Namen", async () => {
+  it("registriert genau 18 NICHT-Budget Migrationen mit eindeutigen Namen", async () => {
     const [pre, post] = await Promise.all([
       buildPreBudgetRegistry(),
       buildPostBudgetRegistry(),
     ]);
     const all = [...pre, ...post];
-    expect(all).toHaveLength(17);
-    expect(new Set(all.map((m) => m.name)).size).toBe(17);
+    expect(all).toHaveLength(18);
+    expect(new Set(all.map((m) => m.name)).size).toBe(18);
   });
 
   it("aktiviert GoBD-Bypass NUR für die drei GoBD-Backfills", async () => {

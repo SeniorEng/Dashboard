@@ -16,17 +16,25 @@
  *   (c) `bulk-delete` fasst eine je ausgegebene Rechnung nie an, auch wenn sie
  *       gerade wieder im Status `entwurf` steht.
  *   (d) `discard-drafts` ebenso.
- *   (e) Das Fehlmarkierungs-Ventil nimmt die Marke zurück, verlangt eine
- *       Begründung und schreibt sie samt ursprünglichem Ausgabe-Zeitpunkt ins
- *       Audit-Log.
+ *   (d2) Der dritte Löschpfad (Monats-Umwidmung) ebenso — er hatte den Guard
+ *       beim ersten Wurf vergessen, weil das Prädikat inline stand statt als
+ *       SSoT. Genau der Fall, gegen den CLAUDE.md die SSoT-Regel stellt.
+ *   (e) Das Fehlmarkierungs-Ventil verlangt eine Begründung, protokolliert sie
+ *       — und lässt die Ausgabe-Marke STEHEN. Es macht die Rechnung wieder
+ *       bearbeitbar, nicht löschbar (entschieden 08.08., Alrik). Die erste
+ *       Fassung leerte die Marke; damit war die Kette aus dem Prod-Befund
+ *       wieder offen, und (c) musste sie von Hand wiederherstellen, um den
+ *       Schutz überhaupt prüfen zu können. Genau das war der Beleg für den
+ *       Fehler.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { db } from "../../server/lib/db";
 import { customers, invoices, auditLog } from "@shared/schema";
-import { and, eq, inArray, desc, gt, sql } from "drizzle-orm";
+import { and, eq, inArray, desc, sql } from "drizzle-orm";
 import { apiPost, uniqueId } from "../test-utils";
 import { withGobdMutation } from "../helpers/gobd";
 import { getNextInvoiceNumberTx } from "../../server/storage/billing-storage";
+import { discardAndRegenerateDrafts } from "../../server/services/draft-invoice-regen";
 
 const YEAR = 2033;
 const MONTH = 5;
@@ -156,14 +164,19 @@ describe("#66 — Belegnummernkreis", () => {
     expect((await row(inv.id)).issuedAt).not.toBeNull();
 
     // Zurück auf Entwurf — über das Ventil, denn der generische Weg ist zu.
+    // DAS ist die vollständige Kette aus dem Prod-Befund: markieren →
+    // zurücknehmen → löschen. Sie muss am Löschschutz enden.
     const ventil = await apiPost<any>(`/api/billing/${inv.id}/revoke-sent-mark`, {
       reason: "Kontrollfall für den Löschschutz.",
     });
     expect(ventil.status).toBe(200);
-    // Nach der Rücknahme ist die Marke weg — dieser Fall prüft den Schutz, also
-    // wird sie für die Prüfung wiederhergestellt.
-    await db.update(invoices).set({ issuedAt: new Date() }).where(eq(invoices.id, inv.id));
-    expect((await row(inv.id)).status).toBe("entwurf");
+
+    const nachVentil = await row(inv.id);
+    expect(nachVentil.status).toBe("entwurf");
+    expect(
+      nachVentil.issuedAt,
+      "das Ventil macht bearbeitbar, NICHT löschbar — die Ausgabe-Marke muss überleben",
+    ).not.toBeNull();
 
     const del = await apiPost<any>("/api/billing/bulk-delete", { invoiceIds: [inv.id] });
     expect(del.status).toBe(200);
@@ -193,6 +206,25 @@ describe("#66 — Belegnummernkreis", () => {
     expect(nachher.issuedAt).not.toBeNull();
   });
 
+  it("(d2) der dritte Loeschpfad (Monats-Umwidmung) fasst sie ebenfalls nicht an", async () => {
+    // `discardAndRegenerateDrafts` loescht Entwuerfe hart und hatte den
+    // Loeschschutz beim ersten Wurf VERGESSEN — er stand als Bedingung inline
+    // in den beiden Routen statt als SSoT. Der Fall haelt fest, dass alle drei
+    // Pfade dieselbe Funktion lesen.
+    const inv = await createDraft();
+    await markSent(inv.id);
+    // In den Entwurfs-Zustand, Marke bleibt (so verhaelt sich jetzt das Ventil).
+    await db.update(invoices).set({ status: "entwurf", sentAt: null }).where(eq(invoices.id, inv.id));
+
+    await discardAndRegenerateDrafts({
+      customerId, year: YEAR, month: MONTH, userId: 1, reason: "Test Umwidmung",
+    }).catch(() => { /* die Neuerzeugung darf scheitern — geprueft wird das Loeschen */ });
+
+    const nachher = await row(inv.id);
+    expect(nachher, "ausgegebene Rechnung darf auch hier nicht geloescht werden").toBeTruthy();
+    expect(nachher.issuedAt).not.toBeNull();
+  });
+
   it("(e) Ventil: Begründung ist Pflicht und landet mit dem Ausgabe-Zeitpunkt im Audit", async () => {
     const inv = await createDraft();
     await markSent(inv.id);
@@ -210,7 +242,10 @@ describe("#66 — Belegnummernkreis", () => {
     const nachher = await row(inv.id);
     expect(nachher.status).toBe("entwurf");
     expect(nachher.sentAt).toBeNull();
-    expect(nachher.issuedAt, "die Ausgabe-Marke muss zurückgenommen sein").toBeNull();
+    expect(
+      nachher.issuedAt,
+      "die Ausgabe-Marke bleibt — sonst wäre die Löschkette wieder offen",
+    ).not.toBeNull();
 
     const [eintrag] = await db.select({ metadata: auditLog.metadata })
       .from(auditLog)
@@ -226,7 +261,7 @@ describe("#66 — Belegnummernkreis", () => {
     // Der ursprüngliche Ausgabe-Zeitpunkt bleibt im Protokoll, obwohl die
     // Spalte geleert wurde — sonst wäre nicht mehr nachvollziehbar, WANN
     // fälschlich markiert wurde.
-    expect(meta.revokedIssuedAt, "Ausgabe-Zeitpunkt muss im Audit erhalten bleiben").toBeTruthy();
+    expect(meta.issuedAt, "Ausgabe-Zeitpunkt gehört ins Protokoll").toBeTruthy();
     expect(meta.invoiceNumber).toBe(vorher.invoiceNumber);
   });
 });

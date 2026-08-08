@@ -94,6 +94,7 @@ export async function buildPreBudgetRegistry(): Promise<GuardedBudgetMigration[]
   const { backfillOrphanReversalAppointmentId } = await import("./backfill-orphan-reversal-appointment-id");
   const { backfillStornoTransactionDate } = await import("./backfill-storno-transaction-date");
   const { backfillAvisReceivedStatus } = await import("./backfill-avis-received-status");
+  const { backfillInvoiceIssuedAt } = await import("./backfill-invoice-issued-at");
   const { clear45bMonthlyLimits } = await import("./clear-45b-monthly-limits");
   const { migrateInProgressAppointments } = await import("./migrate-in-progress-appointments");
   const { migrateTaskStatusInProgress } = await import("./migrate-task-status-in-progress");
@@ -139,6 +140,23 @@ export async function buildPreBudgetRegistry(): Promise<GuardedBudgetMigration[]
       conservationCheck: false,
       migrate: async (tx) => {
         await backfillAvisReceivedStatus(tx);
+      },
+    },
+    {
+      // #66 — ohne diesen Fix waeren Loeschschutz UND Nummernkreis fuer den
+      // Bestand wirkungslos: `issued_at` kommt als NULL in die Welt, und die
+      // Hochwassermarke wuerde erst beim ersten Zug eines Jahres geseedet.
+      name: "backfill-invoice-issued-at",
+      // KEIN GoBD-Bypass: auf `invoices` liegen nur ein DELETE- und ein
+      // TRUNCATE-Trigger (`invoices_no_finalized_delete`, `..._no_truncate`),
+      // kein UPDATE-Trigger. Dieser Backfill schreibt ausschliesslich UPDATEs
+      // (plus INSERT in `invoice_number_sequence`, ungeschuetzt) — er laeuft
+      // also gegen die aktiven Trigger durch. Der Bypass waere wirkungslos und
+      // wuerde nur den Schutz fuer die Dauer der Transaktion abschalten.
+      gobdBypass: false,
+      conservationCheck: false,
+      migrate: async (tx) => {
+        await backfillInvoiceIssuedAt(tx);
       },
     },
     {

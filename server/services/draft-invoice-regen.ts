@@ -1,4 +1,5 @@
 import { and, eq, ne } from "drizzle-orm";
+import { neverIssuedCondition } from "../lib/invoice-issued";
 import { invoices as invoicesTable } from "@shared/schema";
 import { withAudit } from "../lib/with-audit";
 import { getBlockingDraftInvoices } from "./invoice-data";
@@ -36,6 +37,11 @@ export async function discardAndRegenerateDrafts(params: {
   // (1) Entwürfe verwerfen — gleiche Semantik wie POST /billing/discard-drafts:
   // je Beleg defensiv auf Entwurf + kein Storno gescopt, einzeln auditiert,
   // Line-Items kaskadieren per FK ON DELETE CASCADE.
+  //
+  // #66 — inklusive des Löschschutzes: eine JE AUSGEGEBENE Rechnung wird auch
+  // hier nie hart gelöscht. Dieser Pfad hatte den Guard beim ersten Wurf
+  // vergessen, weil das Prädikat inline stand statt als SSoT — deshalb jetzt
+  // `neverIssuedCondition()` aus `server/lib/invoice-issued.ts`.
   const discardedInvoiceNumbers = await withAudit(async (tx, audit) => {
     const numbers: string[] = [];
     for (const draft of drafts) {
@@ -47,6 +53,7 @@ export async function discardAndRegenerateDrafts(params: {
           eq(invoicesTable.billingMonth, month),
           eq(invoicesTable.status, "entwurf"),
           ne(invoicesTable.invoiceType, "stornorechnung"),
+          neverIssuedCondition(),
         ))
         .returning({ id: invoicesTable.id, invoiceNumber: invoicesTable.invoiceNumber });
       if (deleted.length === 0) continue;

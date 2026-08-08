@@ -102,8 +102,14 @@ export const invoices = pgTable("invoices", {
   // Nummern-Wiedervergabe: zuruecksetzen leerte `sent_at`, danach griff der
   // Entwurfs-Loeschpfad und die Belegnummer wurde neu vergeben.
   //
-  // Wird NIE still geleert. Der einzige Weg zurueck ist das ausdrueckliche,
-  // ins Audit-Log geschriebene „Markierung zuruecknehmen (Fehlmarkierung)".
+  // Wird NIE geleert — auch nicht vom Fehlmarkierungs-Ventil (entschieden
+  // 08.08., Alrik). Das Ventil macht eine irrtuemlich markierte Rechnung wieder
+  // BEARBEITBAR, nicht loeschbar: ausgegeben ist ausgegeben. Wer sie aus der
+  // Welt schaffen will, storniert sie.
+  //
+  // Diese Spalte ist damit die einzige Bedingung, die den Loeschschutz traegt
+  // (`server/lib/invoice-issued.ts`). Wuerde sie irgendwo geleert, waere die
+  // Kette aus dem Prod-Befund wieder offen.
   issuedAt: timestamp("issued_at"),
   paidAt: timestamp("paid_at"),
   storniertAt: timestamp("storniert_at"),

@@ -1689,7 +1689,11 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     const ohneGrund = await apiPost<any>(`/api/billing/${inv.id}/revoke-sent-mark`, {});
     expect(ohneGrund.status, "Begründung ist Pflicht").toBe(400);
 
-    // Mit Begründung: Status zurück, `sentAt` UND `issuedAt` geleert, ein
+    // Mit Begründung: Status zurück und `sentAt` geleert — `issuedAt` NICHT.
+    // Das Ventil macht die Rechnung wieder bearbeitbar, nicht löschbar
+    // (entschieden 08.08., Alrik): die Ausgabe-Marke trägt den Löschschutz,
+    // und ausgegeben bleibt ausgegeben. Wer die Rechnung aus der Welt schaffen
+    // will, storniert sie. Ein
     // eigener Audit-Eintrag mit der Begründung.
     const ventil = await apiPost<any>(`/api/billing/${inv.id}/revoke-sent-mark`, {
       reason: "Versehentlich markiert, es wurde nichts versandt.",
@@ -1699,7 +1703,10 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     const after = await apiGet<any>(`/api/billing/${inv.id}`);
     expect(after.data.status).toBe("entwurf");
     expect(after.data.sentAt, "Rücknahme muss das Versanddatum leeren").toBeFalsy();
-    expect(after.data.issuedAt, "Rücknahme muss die Ausgabe-Marke leeren").toBeFalsy();
+    expect(
+      after.data.issuedAt,
+      "Ausgabe-Marke überlebt die Rücknahme — sonst wäre die Löschkette wieder offen",
+    ).toBeTruthy();
     expect(await countAuditFor("invoice_sent_mark_revoked", [inv.id], sinceAudit)).toBe(1);
   });
 
@@ -1733,17 +1740,13 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
       invoiceIds: [sent.id, paid.id],
       status: "entwurf",
     });
-    expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(200);
+    // Seit #66 kennt das Schema den Zielstatus `entwurf` gar nicht mehr — der
+    // Rückweg ist nicht mehr AUSDRÜCKBAR, statt pro Rechnung abgelehnt zu
+    // werden. Das ist die stärkere Schranke; geprüft wird beides: die Absage
+    // UND dass nichts angefasst wurde.
+    expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(400);
     // BEIDE werden jetzt uebersprungen — versendet wie bezahlt.
-    expect(res.data.summary.updated).toBe(0);
-    expect(res.data.summary.skipped).toBe(2);
-    expect(res.data.summary.total).toBe(2);
-
-    const byId = new Map<number, any>(res.data.results.map((r: any) => [r.invoiceId, r]));
-    expect(byId.get(sent.id).status).toBe("skipped");
-    expect(byId.get(sent.id).reason).toMatch(/nicht erlaubt/i);
-    expect(byId.get(paid.id).status).toBe("skipped");
-    expect(byId.get(paid.id).reason).toMatch(/nicht erlaubt/i);
+    expect(JSON.stringify(res.data)).toMatch(/versendet, avis_erhalten, bezahlt/);
 
     const sentAfter = await apiGet<any>(`/api/billing/${sent.id}`);
     expect(sentAfter.data.status, "versendete Rechnung bleibt versendet").toBe("versendet");

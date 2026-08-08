@@ -163,11 +163,6 @@ export interface DeliveryRecord {
   recipientAddress: string | null;
   documentFileNames: string | null;
   sentAt: string | null;
-  // #66 — Zeitpunkt der ERSTEN Ausgabe; `null` = nie ausgegeben. Der Client
-  // entscheidet daran, ob „Auf Entwurf zurücksetzen" (nie ausgegeben) oder
-  // „Markierung zurücknehmen" (ausgegeben, Fehlmarkierungs-Ventil) angeboten
-  // wird. Unterscheidet sich von `sentAt`, das beim Zurücksetzen geleert wird.
-  issuedAt: string | null;
   createdAt: string;
   errorMessage: string | null;
   letterxpressLetterId: string | null;

@@ -16,6 +16,7 @@ import {
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
 import { classifyBillingEligibility, isMonthFullyBilledAndSigned } from "@shared/domain/billing-eligibility";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
+import { neverIssuedCondition } from "../lib/invoice-issued";
 import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
 import { insuranceValidAt } from "../lib/insurance-period";
@@ -819,7 +820,7 @@ router.post("/discard-drafts", asyncHandler("Entwürfe konnten nicht verworfen w
           ne(invoicesTable.invoiceType, "stornorechnung"),
           // #66 — wie im Sammel-Loeschpfad: eine je ausgegebene Rechnung wird
           // nie geloescht, auch nicht als „verwaister Entwurf".
-          isNull(invoicesTable.issuedAt),
+          neverIssuedCondition(),
         ))
         .returning({ id: invoicesTable.id, invoiceNumber: invoicesTable.invoiceNumber });
       if (deleted.length === 0) continue;
@@ -882,7 +883,7 @@ router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht wer
           // zuruecksetzen (leerte `sent_at`) → der Entwurfs-Guard griff → hart
           // geloescht → die Belegnummer wurde neu vergeben.
           // `issued_at` ueberlebt das Zuruecksetzen und schliesst den Weg.
-          isNull(invoicesTable.issuedAt),
+          neverIssuedCondition(),
         ))
         .returning({ id: invoicesTable.id, invoiceNumber: invoicesTable.invoiceNumber, grossAmountCents: invoicesTable.grossAmountCents, billingRunId: invoicesTable.billingRunId });
       if (deleted.length === 0) {
@@ -929,13 +930,15 @@ router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht wer
 // Aufgabe und erfordert die Cascade-Logik aus `PATCH /:id/status`). Pro Rechnung
 // gilt dieselbe Übergangs-SSoT wie der Einzel-Statuswechsel; ungültige Übergänge
 // werden übersprungen und gemeldet. Audit analog zum Einzelpfad.
-// Task #1434: "entwurf" ist als Sammel-Ziel erlaubt — setzt versehentlich als
-// versendet markierte Rechnungen zurück (nur "versendet" → "entwurf" laut SSoT;
-// alle anderen Quellstatus werden als ungültiger Übergang übersprungen).
+// Task #1434 / #66: "entwurf" ist als Sammel-Ziel ENTFERNT. Der Übergang
+// `versendet → entwurf` existiert nicht mehr (er war der Einstieg in die
+// Belegnummern-Wiedervergabe); als Sammelziel wäre er zudem falsch, weil jede
+// Rücknahme eine eigene Begründung ins Audit-Log schreibt. Einzelweg:
+// POST /:id/revoke-sent-mark.
 router.post("/bulk-status", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
   const parsed = z.object({
     invoiceIds: z.array(z.number().int().positive()).min(1).max(200),
-    status: z.enum(["entwurf", "versendet", "avis_erhalten", "bezahlt"]),
+    status: z.enum(["versendet", "avis_erhalten", "bezahlt"]),
   }).safeParse(req.body);
   if (!parsed.success) {
     throw badRequest(fromError(parsed.error).toString());
@@ -2406,8 +2409,12 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
 // werden konnte — dieselbe Nummer fuer zwei Dokumente.
 //
 // Bewusst eng gehalten:
-//  - nur aus `versendet` (spaetere Status implizieren Folgewirkungen),
-//  - nur ohne Zahlungsbezug,
+//  - nur aus `versendet` (spaetere Status implizieren Folgewirkungen; ein
+//    Zahlungsbezug hebt ohnehin auf `teilweise_bezahlt`/`bezahlt` und faellt
+//    damit schon durch diese Bedingung),
+//  - NIE auf einer Stornorechnung: das Gegendokument einer Storno-Kette darf
+//    nicht in den Entwurfsstatus zurueckfallen, waehrend das Original
+//    `storniert` bleibt,
 //  - Begruendung ist PFLICHT und landet im Audit-Log.
 // Fuer alles andere gilt: eine ausgegebene Rechnung wird STORNIERT und neu
 // ausgestellt, nicht zurueckgedreht.
@@ -2434,6 +2441,12 @@ router.post("/:id/revoke-sent-mark", asyncHandler("Markierung konnte nicht zurü
   if (invoice.issuedAt === null) {
     throw badRequest("Diese Rechnung trägt keine Ausgabe-Markierung.");
   }
+  if (invoice.invoiceType === "stornorechnung") {
+    throw badRequest(
+      "Eine Stornorechnung kann nicht zurückgenommen werden — sie ist das Gegendokument "
+      + "einer bereits stornierten Rechnung.",
+    );
+  }
 
   const updated = await withAudit(async (tx, audit) => {
     // Zeile sperren: ein paralleler Statuswechsel darf nicht dazwischenrutschen.
@@ -2442,8 +2455,17 @@ router.post("/:id/revoke-sent-mark", asyncHandler("Markierung konnte nicht zurü
       throw badRequest("Die Rechnung wurde zwischenzeitlich verändert. Bitte erneut prüfen.");
     }
 
+    // `issued_at` wird BEWUSST NICHT geleert (entschieden 08.08., Alrik).
+    // Die erste Fassung setzte sie auf NULL — damit war die Kette wieder offen:
+    // markieren -> zuruecknehmen -> harter Loeschvorgang. Die Belegnummer war
+    // zwar geschuetzt (die Hochwassermarke haelt), der BELEG aber nicht.
+    //
+    // Jetzt gilt: ausgegeben ist ausgegeben. Das Ventil macht die Rechnung
+    // wieder BEARBEITBAR, nicht loeschbar. Wer sie aus der Welt schaffen will,
+    // storniert sie — das ist der einzige Weg und hinterlaesst ein
+    // Gegendokument.
     const [u] = await tx.update(invoicesTable)
-      .set({ status: "entwurf", sentAt: null, issuedAt: null })
+      .set({ status: "entwurf", sentAt: null })
       .where(eq(invoicesTable.id, id))
       .returning();
 
@@ -2459,10 +2481,9 @@ router.post("/:id/revoke-sent-mark", asyncHandler("Markierung konnte nicht zurü
         grossAmountCents: locked.grossAmountCents,
         oldStatus: "versendet",
         newStatus: "entwurf",
-        // Der urspruengliche Ausgabe-Zeitpunkt bleibt im Protokoll erhalten,
-        // auch wenn die Spalte geleert wird — sonst waere nach der Ruecknahme
-        // nicht mehr nachvollziehbar, WANN faelschlich markiert wurde.
-        revokedIssuedAt: locked.issuedAt,
+        // Der Ausgabe-Zeitpunkt wandert mit ins Protokoll. Die Spalte bleibt
+        // zwar stehen, aber der Audit-Eintrag soll fuer sich lesbar sein.
+        issuedAt: locked.issuedAt,
         reason: parsed.data.reason,
       },
       ipAddress: req.ip,
