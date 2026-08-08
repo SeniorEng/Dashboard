@@ -19,6 +19,10 @@
  *   (d2) Der dritte Löschpfad (Monats-Umwidmung) ebenso — er hatte den Guard
  *       beim ersten Wurf vergessen, weil das Prädikat inline stand statt als
  *       SSoT. Genau der Fall, gegen den CLAUDE.md die SSoT-Regel stellt.
+ *   (d3) Der vierte Löschpfad (USt-Korrektur-Skript `reissue-selbstzahler-vat-
+ *       invoices.ts`) ebenso. Es ist ein STEHENDES Werkzeug, kein verbrauchtes
+ *       Einmal-Skript — Trockenlauf als Default, Detektor-Exit-Code — und
+ *       `--apply` läuft ausschliesslich auf PROD.
  *   (e) Das Fehlmarkierungs-Ventil verlangt eine Begründung, protokolliert sie
  *       — und lässt die Ausgabe-Marke STEHEN. Es macht die Rechnung wieder
  *       bearbeitbar, nicht löschbar (entschieden 08.08., Alrik). Die erste
@@ -35,6 +39,7 @@ import { apiPost, uniqueId } from "../test-utils";
 import { withGobdMutation } from "../helpers/gobd";
 import { getNextInvoiceNumberTx } from "../../server/storage/billing-storage";
 import { discardAndRegenerateDrafts } from "../../server/services/draft-invoice-regen";
+import { reissueDraft } from "../../server/scripts/reissue-selbstzahler-vat-invoices";
 
 const YEAR = 2033;
 const MONTH = 5;
@@ -223,6 +228,53 @@ describe("#66 — Belegnummernkreis", () => {
     const nachher = await row(inv.id);
     expect(nachher, "ausgegebene Rechnung darf auch hier nicht geloescht werden").toBeTruthy();
     expect(nachher.issuedAt).not.toBeNull();
+  });
+
+  it("(d3) der VIERTE Loeschpfad (USt-Korrektur-Skript) fasst sie ebenfalls nicht an", async () => {
+    // `reissueDraft` aus `server/scripts/reissue-selbstzahler-vat-invoices.ts`
+    // loescht einen Entwurf HART und stellt ihn neu aus. Das Skript ist ein
+    // STEHENDES Werkzeug (Trockenlauf als Default, Detektor-Exit-Code), kein
+    // verbrauchtes Einmal-Skript — es kann also jederzeit wieder laufen.
+    //
+    // Sein Docstring behauptete „Entwuerfe wurden nie versendet". Seit dem
+    // Ventil stimmt das nicht mehr: eine ausgegebene Rechnung kann im
+    // Entwurfsstatus stehen. Ohne den Guard haette dieses Skript genau den
+    // Beleg geloescht, um dessen Schutz es in #66 geht — und zwar auf PROD,
+    // denn `--apply` laeuft nur dort.
+    const inv = await createDraft();
+    await markSent(inv.id);
+    await db.update(invoices).set({ status: "entwurf", sentAt: null }).where(eq(invoices.id, inv.id));
+
+    const vorher = await row(inv.id);
+    expect(vorher.issuedAt).not.toBeNull();
+
+    await expect(
+      reissueDraft(
+        {
+          invoiceId: inv.id,
+          invoiceNumber: vorher.invoiceNumber,
+          customerId,
+          status: "entwurf",
+          billingType: "selbstzahler",
+          budgetType: null,
+          billingMonth: MONTH,
+          billingYear: YEAR,
+          netAmountCents: 10_000,
+          storedVatCents: 19,
+          correctVatCents: 1_900,
+          kind: "draft",
+        },
+        1,
+      ),
+      "der Loeschpfad muss die ausgegebene Rechnung ablehnen, nicht loeschen",
+    ).rejects.toThrow(/bereits ausgegeben/i);
+
+    // Der eigentliche Schaden waere die verschwundene Zeile — direkt geprueft,
+    // nicht nur ueber die Exception.
+    const nachher = await row(inv.id);
+    expect(nachher, "ausgegebene Rechnung darf auch hier nicht geloescht werden").toBeTruthy();
+    expect(nachher.issuedAt).not.toBeNull();
+    expect(nachher.invoiceNumber).toBe(vorher.invoiceNumber);
   });
 
   it("(e) Ventil: Begründung ist Pflicht und landet mit dem Ausgabe-Zeitpunkt im Audit", async () => {
