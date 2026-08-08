@@ -46,6 +46,8 @@ import {
   formatSentAt,
   getInvoiceCustomerDisplayName,
   getPdfStatus,
+  paymentBadgeLabel,
+  paymentBadgeTitle,
 } from "../utils";
 import { InvoiceDetail } from "./invoice-detail";
 
@@ -214,6 +216,22 @@ export function InvoiceRow({
                   Stornorechnung zeigt die stornierte Originalrechnung, ein
                   storniertes Original seine Gutschrift — beide anklickbar
                   (Sprung + Aufklappen der Gegenseite). */}
+              {/* #1897 — Absprung in den Qonto-Tab. Deep-Link ueber die
+                  RECHNUNG (nicht die Transaktion): der Listen-Endpunkt liefert
+                  `hasBoundPayment`, aber keine Transaktions-ID. Die Qonto-Seite
+                  loest sie fuer den 1:1-Match selbst auf; siehe FINDING im
+                  PR-Body zum Sammel-Avis-Fall. */}
+              {invoice.hasBoundPayment && (
+                <Link
+                  href={`/admin/qonto?invoiceId=${invoice.id}`}
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                  title="Zugeordnete Zahlung in Zahlungen & Qonto ansehen"
+                  data-testid={`link-qonto-payment-${invoice.id}`}
+                >
+                  <Banknote className={iconSize.xs} />
+                  Zahlung ansehen
+                </Link>
+              )}
               {linkedInvoice && (
                 <button
                   type="button"
@@ -242,6 +260,22 @@ export function InvoiceRow({
                   data-testid={`badge-open-amount-${invoice.id}`}
                 >
                   Rest {formatAmount(invoice.openAmountCents)} offen
+                </Badge>
+              )}
+              {/* #1897 — Zahlungsbindung. NEUTRAL gehalten (grau/blau, kein
+                  Ampel-Ton): das Geld ist da, es ist keine Mahnstufe, sondern
+                  eine offene Pruefung. Der Betrag steht dabei, damit man ohne
+                  Absprung sieht, ob die Zahlung passt. Die Mahn-Ampel weiter
+                  unten kann hier nicht gleichzeitig feuern — `invoiceAgingBucket`
+                  liefert fuer die gebundenen Cluster `none` (#1897, Schritt 5). */}
+              {invoice.hasBoundPayment && (
+                <Badge
+                  variant="outline"
+                  className="bg-slate-50 text-slate-700 border-slate-300"
+                  title={paymentBadgeTitle(invoice)}
+                  data-testid={`badge-payment-bound-${invoice.id}`}
+                >
+                  {paymentBadgeLabel(invoice, formatAmount)}
                 </Badge>
               )}
               {/* Task #1412: Aging-Ampel-Badge — nur mahnende Stufen

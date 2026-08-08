@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect} from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -92,11 +92,20 @@ export function TransactionsTab({
   matchFilter,
   onFilterChange,
   lastSync,
+  highlightInvoiceId,
 }: {
   configured: boolean;
   matchFilter: MatchFilter;
   onFilterChange: (v: MatchFilter) => void;
   lastSync?: string | null;
+  /**
+   * #1897 — Absprung aus der Rechnungsliste (`/admin/qonto?invoiceId=…`).
+   * Die zugeordnete Zahlung wird hervorgehoben und in den Blick gescrollt.
+   * Aufgeloest wird ueber `matchedInvoiceId`, also den 1:1-Match; bei einer
+   * Bindung ueber ein Sammel-Avis traegt keine Transaktion die Rechnungs-ID
+   * und es bleibt bei der Navigation ohne Hervorhebung (siehe FINDING).
+   */
+  highlightInvoiceId?: number | null;
 }) {
   const [matchingTxId, setMatchingTxId] = useState<number | null>(null);
   // Task #1742 — welche zugeordnete Zahlung ist gerade aufgeklappt (Details zu
@@ -114,6 +123,21 @@ export function TransactionsTab({
   const [showOnlyDifferences, setShowOnlyDifferences] = useState(false);
 
   const transactionsQuery = useQontoTransactions(matchFilter, configured);
+
+  // #1897 — die hervorzuhebende Zahlung, sobald die Liste geladen ist.
+  const highlightedTxId = useMemo(() => {
+    if (highlightInvoiceId == null) return null;
+    const hit = (transactionsQuery.data?.transactions ?? [])
+      .find(t => t.matchedInvoiceId === highlightInvoiceId);
+    return hit?.id ?? null;
+  }, [highlightInvoiceId, transactionsQuery.data]);
+
+  // Einmal in den Blick scrollen, sobald die Karte im DOM ist.
+  useEffect(() => {
+    if (highlightedTxId == null) return;
+    const el = document.querySelector(`[data-testid="transaction-card-${highlightedTxId}"]`);
+    el?.scrollIntoView({ block: "center" });
+  }, [highlightedTxId]);
   const invoicesQuery = useMatchableInvoices(matchingTxId !== null);
   // Task #1742 — lazy: erst laden, wenn eine zugeordnete Zahlung aufgeklappt ist.
   const matchedInvoicesQuery = useMatchedInvoicesForTransaction(detailTxId, detailTxId !== null);
@@ -502,7 +526,15 @@ export function TransactionsTab({
       ) : (
         <div className="space-y-2">
           {transactions.map(tx => (
-            <Card key={tx.id} data-testid={`transaction-card-${tx.id}`}>
+            <Card
+              key={tx.id}
+              // #1897 — Hervorhebung des Absprung-Ziels. Bewusst ein neutraler
+              // Ring statt einer Ampel-Farbe: es ist ein Wegweiser, keine
+              // Bewertung der Zahlung.
+              className={highlightedTxId === tx.id ? "ring-2 ring-teal-400" : undefined}
+              data-testid={`transaction-card-${tx.id}`}
+              data-highlighted={highlightedTxId === tx.id ? "true" : undefined}
+            >
               <CardContent className="p-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex-1 min-w-0">

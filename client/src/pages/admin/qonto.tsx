@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { iconSize, componentStyles } from "@/design-system";
@@ -9,6 +9,16 @@ import type { Tab, MatchFilter } from "@/features/qonto";
 import { useQontoStatus } from "@/features/qonto";
 
 export default function AdminQonto() {
+  // #1897 — Absprung aus der Rechnungsliste: `/admin/qonto?invoiceId=<id>`
+  // oeffnet den Transaktions-Tab und hebt die zugeordnete Zahlung hervor.
+  const search = useSearch();
+  const invoiceIdParam = new URLSearchParams(search).get("invoiceId");
+  const highlightInvoiceId = invoiceIdParam !== null && /^\d+$/.test(invoiceIdParam)
+    ? Number(invoiceIdParam)
+    : null;
+
+  // Der Deep-Link zeigt immer auf die Transaktionen; ein anderer Start-Tab
+  // waere fuer den Absprung sinnlos.
   const [tab, setTab] = useState<Tab>("transactions");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
 
@@ -57,6 +67,7 @@ export default function AdminQonto() {
           matchFilter={matchFilter}
           onFilterChange={setMatchFilter}
           lastSync={statusQuery.data?.lastSync ?? null}
+          highlightInvoiceId={highlightInvoiceId}
         />
       )}
       {tab === "advices" && <AdvicesTab />}
