@@ -103,6 +103,22 @@ export interface InvoiceItem {
   // damit Anzeige und Buchung nie auseinanderlaufen. Sonst undefined.
   paidCents?: number;
   openAmountCents?: number;
+  // #1897 — Zahlungsbindung für JEDE offene Rechnung (nicht nur
+  // `teilweise_bezahlt`). Ohne diese Felder konnte die Liste den Fall
+  // „Geld ist da, Freigabe fehlt" nicht von „nichts eingegangen" unterscheiden
+  // und hat ihn weiter angemahnt.
+  //
+  // `hasBoundPayment` ist die Zahlungs-Wahrheit aus `getClaimedInvoiceIds`
+  // (1:1-Match ODER Mitglied eines gebundenen Avis) und speist
+  // `assignInvoiceActionCluster` im Client — dieselbe Funktion, die der
+  // Cockpit-Reader liest. `boundPaidCents`/`paymentDifferenceCents` stammen aus
+  // `getInvoicePaymentTotals` + `classifyPaymentDifference`; die Differenz ist
+  // Brutto − Skonto − gezahlt (positiv = es fehlt, negativ = Überzahlung).
+  // `paymentDifferenceResult` ist die Klassifikation derselben SSoT.
+  hasBoundPayment?: boolean;
+  boundPaidCents?: number;
+  paymentDifferenceCents?: number;
+  paymentDifferenceResult?: "exact" | "tolerated" | "underpaid" | "overpaid";
 }
 
 interface InvoiceLineItem {

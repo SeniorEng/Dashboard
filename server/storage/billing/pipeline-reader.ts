@@ -31,10 +31,13 @@ import { num } from "../statistics/common";
 import { hasDirectSignatureSqlRaw, serviceRecordWithStatusExistsSqlRaw } from "../../lib/appointment-signed";
 import { activeInvoiceForAppointmentExistsSqlRaw } from "../../lib/appointment-invoiced";
 import { getInvoices } from "../billing-storage";
+import { qontoStorage } from "../qonto";
 import {
   agingModelForBillingType,
   assignAppointmentStage,
   assignInvoiceStage,
+  assignInvoiceActionCluster,
+  isAgingCluster,
   resolveAgingBucket,
   summarizePipelineCents,
   PIPELINE_STAGES,
@@ -196,6 +199,14 @@ export async function readBillingPipeline(
 
   // --- 2) Rechnungen (späte Stufen, NACH Topf-Split) --------------------------
   const invoices = await getInvoices({ year: billingYear, month: billingMonth });
+  // #1897 — Welche dieser Rechnungen tragen bereits eine gebundene Zahlung?
+  // Gelesen aus der SSoT (`getClaimedInvoiceIds`: 1:1-Match ODER Mitglied eines
+  // an eine Transaktion gebundenen Avis), NICHT hier nachgerechnet. Ein Aufruf
+  // für alle Rechnungen des Monats statt einer Abfrage je Rechnung.
+  const claimedInvoiceIds = invoices.length > 0
+    ? await qontoStorage.getClaimedInvoiceIds(db, invoices.map((i) => i.id))
+    : new Set<number>();
+
   for (const inv of invoices) {
     const cents = inv.netAmountCents ?? 0;
     const assignment = assignInvoiceStage({ status: inv.status, invoiceType: inv.invoiceType });
@@ -207,9 +218,23 @@ export async function readBillingPipeline(
       grp.itemCount += 1;
       grp.totalCents += cents;
 
-      // Aging nur in den versendet-/avis-Stufen sinnvoll (Zahlungs-/Avis-Lauf).
+      // #1897 — Aging über den CLUSTER statt über die Stufe. ERSETZT die
+      // frühere Bedingung `stage === "versendet" || stage === "avis_erhalten"`,
+      // die die Zahlungsbindung nicht kannte: eine Rechnung mit längst
+      // eingegangener Zahlung alterte weiter und wurde unten als `overdueCount`
+      // mitgezählt — die Abrechnung mahnte Geld an, das auf dem Konto lag.
+      //
+      // Die Liste (`client/src/features/billing/utils.ts` → `invoiceAgingBucket`)
+      // gatet schon immer über den Cluster. Mit `isAgingCluster` lesen beide
+      // Seiten jetzt dieselbe Funktion und können nicht mehr auseinanderdriften.
+      const cluster = assignInvoiceActionCluster({
+        status: inv.status,
+        invoiceType: inv.invoiceType,
+        billingType: inv.billingType,
+        hasBoundPayment: claimedInvoiceIds.has(inv.id),
+      });
       let aging: AgingBucket = "none";
-      if (assignment.stage === "versendet" || assignment.stage === "avis_erhalten") {
+      if (isAgingCluster(cluster)) {
         const model = agingModelForBillingType(inv.billingType);
         const anchorIso =
           model === "selbstzahler"

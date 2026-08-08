@@ -26,6 +26,7 @@ import {
   assignAppointmentStage,
   assignInvoiceStage,
   assignInvoiceActionCluster,
+  isAgingCluster,
   summarizePipelineCents,
   type PipelineAssignment,
   type AppointmentPipelineInput,
@@ -215,8 +216,13 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
     for (const status of INVOICE_STATUSES) {
       for (const invoiceType of INVOICE_TYPES) {
         for (const billingType of ALL_BILLING_TYPES) {
-          const cluster = assignInvoiceActionCluster({ status, invoiceType, billingType });
-          expect(CLUSTER_SET.has(cluster)).toBe(true);
+          // #1897: `hasBoundPayment` ist eine weitere Achse der Zuordnung — die
+          // Totalitaet muss ueber BEIDE Auspraegungen halten, sonst faellt eine
+          // gebundene Rechnung durch.
+          for (const hasBoundPayment of [false, true]) {
+            const cluster = assignInvoiceActionCluster({ status, invoiceType, billingType, hasBoundPayment });
+            expect(CLUSTER_SET.has(cluster)).toBe(true);
+          }
         }
       }
     }
@@ -248,5 +254,54 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
       .toBe("storniert");
     expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "stornorechnung", billingType: "pflegekasse_gesetzlich" }))
       .toBe("storniert");
+  });
+
+  // ---------------------------------------------------------------- #1897 ---
+  it("gebundene Zahlung schlaegt den Wartelauf — beide Warte-Stufen, beide Zahler-Typen", () => {
+    for (const billingType of ALL_BILLING_TYPES) {
+      for (const status of ["versendet", "avis_erhalten"] as const) {
+        expect(
+          assignInvoiceActionCluster({ status, invoiceType: "rechnung", billingType, hasBoundPayment: true }),
+          `${status}/${billingType} mit gebundener Zahlung`,
+        ).toBe("zahlung_zugeordnet_pruefung");
+      }
+    }
+  });
+
+  it("ohne gebundene Zahlung bleibt die Zuordnung exakt die alte (rein additiv)", () => {
+    for (const status of INVOICE_STATUSES) {
+      for (const invoiceType of INVOICE_TYPES) {
+        for (const billingType of ALL_BILLING_TYPES) {
+          const withFlag = assignInvoiceActionCluster({ status, invoiceType, billingType, hasBoundPayment: false });
+          const withoutFlag = assignInvoiceActionCluster({ status, invoiceType, billingType });
+          expect(withFlag, `${status}/${invoiceType}/${billingType}`).toBe(withoutFlag);
+        }
+      }
+    }
+  });
+
+  it("Storno schlaegt die Zahlungsbindung (eine stornierte Rechnung ist kein Pruef-Fall)", () => {
+    expect(assignInvoiceActionCluster({ status: "storniert", invoiceType: "rechnung", billingType: "selbstzahler", hasBoundPayment: true }))
+      .toBe("storniert");
+    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "stornorechnung", billingType: "selbstzahler", hasBoundPayment: true }))
+      .toBe("storniert");
+  });
+
+  it("teilweise_bezahlt hat einen eigenen Cluster — nie mehr \"Noch zu versenden\"", () => {
+    for (const billingType of ALL_BILLING_TYPES) {
+      for (const hasBoundPayment of [false, true]) {
+        expect(
+          assignInvoiceActionCluster({ status: "teilweise_bezahlt", invoiceType: "rechnung", billingType, hasBoundPayment }),
+          `teilweise_bezahlt/${billingType}/bound=${hasBoundPayment}`,
+        ).toBe("teilzahlung");
+      }
+    }
+  });
+
+  it("nur die beiden Warte-Cluster altern (geteilte Regel fuer Cockpit UND Liste)", () => {
+    const aging = INVOICE_ACTION_CLUSTERS.filter(isAgingCluster);
+    expect(aging).toEqual(["avis_ausstehend", "zahlung_ausstehend"]);
+    expect(isAgingCluster("zahlung_zugeordnet_pruefung")).toBe(false);
+    expect(isAgingCluster("teilzahlung")).toBe(false);
   });
 });

@@ -406,6 +406,12 @@ export const InvoiceItemSchema = component(
     // Task #1822: nur im Zustand `teilweise_bezahlt` gesetzt (bereits gezahlt / offener Rest).
     paidCents: z.number().int().optional(),
     openAmountCents: z.number().int().optional(),
+    // #1897: Zahlungsbindung für jede offene Rechnung (SSoT: getClaimedInvoiceIds
+    // + getInvoicePaymentTotals + classifyPaymentDifference).
+    hasBoundPayment: z.boolean().optional(),
+    boundPaidCents: z.number().int().optional(),
+    paymentDifferenceCents: z.number().int().optional(),
+    paymentDifferenceResult: z.enum(["exact", "tolerated", "underpaid", "overpaid"]).optional(),
   }),
 );
 

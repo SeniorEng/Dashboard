@@ -219,24 +219,67 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   // (`getInvoicePaymentTotals` summiert alle gebundenen Zahlungen,
   // `classifyPaymentDifference` rechnet Brutto − Skonto − gezahlt). Mehrere
   // Teilüberweisungen ergeben so denselben Restbetrag wie beim Statuswechsel.
-  const partialIds = invoices.filter(inv => inv.status === "teilweise_bezahlt").map(inv => inv.id);
-  if (partialIds.length > 0) {
-    const totals = await qontoStorage.getInvoicePaymentTotals(partialIds);
-    const enriched = invoices.map(inv => {
-      if (inv.status !== "teilweise_bezahlt") return inv;
-      const t = totals.get(inv.id) ?? { paidCents: 0, skontoCents: 0 };
-      const cls = classifyPaymentDifference({
-        invoiceGrossCents: inv.grossAmountCents,
-        paidCents: t.paidCents,
-        skontoCents: t.skontoCents,
-      });
-      return { ...inv, paidCents: t.paidCents, openAmountCents: cls.differenceCents };
-    });
-    res.json(enriched);
+  // #1897 — ERSETZT die frühere Anreicherung, die NUR `teilweise_bezahlt`
+  // erfasste. Damit fielen genau die Rechnungen durch, um die es geht: eine
+  // gebundene, aber noch nicht freigegebene Zahlung lässt den Status auf
+  // `versendet`/`avis_erhalten` stehen — die Liste sah sie als unbezahlt und
+  // mahnte sie an, obwohl das Geld auf dem Konto lag.
+  //
+  // Angereichert wird jetzt jede OFFENE Rechnung (alles außer `bezahlt` und den
+  // Storno-Fällen). Die Wahrheit kommt vollständig aus der bestehenden SSoT:
+  // `getClaimedInvoiceIds` sagt, OB eine Zahlung gebunden ist,
+  // `getInvoicePaymentTotals` WIE VIEL gebunden ist, `classifyPaymentDifference`
+  // rechnet die Differenz. Hier wird nichts nachgerechnet.
+  const openInvoices = invoices.filter(inv =>
+    inv.status !== "bezahlt" && !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }),
+  );
+  if (openInvoices.length === 0) {
+    res.json(invoices);
     return;
   }
 
-  res.json(invoices);
+  const openIds = openInvoices.map(inv => inv.id);
+  const [claimed, totals] = await Promise.all([
+    qontoStorage.getClaimedInvoiceIds(db, openIds),
+    qontoStorage.getInvoicePaymentTotals(openIds),
+  ]);
+
+  const openIdSet = new Set(openIds);
+  const enriched = invoices.map(inv => {
+    if (!openIdSet.has(inv.id)) return inv;
+
+    const hasBoundPayment = claimed.has(inv.id);
+    const t = totals.get(inv.id) ?? { paidCents: 0, skontoCents: 0 };
+    const cls = classifyPaymentDifference({
+      invoiceGrossCents: inv.grossAmountCents,
+      paidCents: t.paidCents,
+      skontoCents: t.skontoCents,
+    });
+
+    return {
+      ...inv,
+      // Immer gesetzt, damit der Client nicht zwischen „nicht gebunden" und
+      // „Feld fehlt" raten muss.
+      hasBoundPayment,
+      // Beträge nur, wenn tatsächlich etwas gebunden ist — sonst wäre eine
+      // „0 € eingegangen"-Anzeige an einer unberührten Rechnung irreführend.
+      ...(hasBoundPayment || t.paidCents > 0
+        ? {
+            boundPaidCents: t.paidCents,
+            paymentDifferenceCents: cls.differenceCents,
+            paymentDifferenceResult: cls.result,
+          }
+        : {}),
+      // Bestandsvertrag aus Task #1822: `teilweise_bezahlt` trägt `paidCents`
+      // und `openAmountCents` — UNABHÄNGIG davon, ob eine Bindung vorliegt.
+      // (Ohne diese Zeile verlor eine teilbezahlte Rechnung ohne gebundene
+      // Zahlung ihre Beträge; genau das hat Fall (d) gefangen.)
+      ...(inv.status === "teilweise_bezahlt"
+        ? { paidCents: t.paidCents, openAmountCents: cls.differenceCents }
+        : {}),
+    };
+  });
+  res.json(enriched);
 }));
 
 // Task #1710/#1859 — Rechnungen, die für die manuelle (Mehrfach-)Zuordnung zu
