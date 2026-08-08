@@ -211,6 +211,10 @@ export const GOBD_CBTS_PREVENT_DELETE_FN_SQL = `
  * ausgegebenen, per Ventil wieder bearbeitbaren Rechnung gesperrt — also genau
  * das, wofuer das Ventil da ist. Der Beleg soll unloeschbar sein, sein INHALT
  * bleibt bis zur erneuten Ausgabe korrigierbar.
+ *
+ * Die Invariante „kein UPDATE-Trigger auf `invoices`" ist strukturell
+ * abgesichert in `tests/startup/trigger-migration.test.ts` — dort steht auch,
+ * warum sie den urspruenglichen Prod-Paritaets-Grund ueberlebt.
  */
 export const GOBD_INVOICES_PREVENT_FINALIZED_DELETE_FN_SQL = `
     CREATE OR REPLACE FUNCTION invoices_prevent_finalized_delete()
@@ -231,7 +235,7 @@ export const GOBD_INVOICES_PREVENT_FINALIZED_DELETE_FN_SQL = `
       -- rohes SQL und psql.
       IF OLD.status IS DISTINCT FROM 'entwurf' OR OLD.issued_at IS NOT NULL THEN
         RAISE EXCEPTION
-          'invoices: GoBD-Hard-Delete verboten — Rechnung ist finalisiert oder wurde bereits ausgegeben (Korrektur nur via Storno)'
+          'invoices: GoBD-Hard-Delete verboten - Rechnung ist finalisiert oder wurde bereits ausgegeben (Korrektur nur via Storno)'
           USING ERRCODE = 'restrict_violation';
       END IF;
       RETURN OLD;

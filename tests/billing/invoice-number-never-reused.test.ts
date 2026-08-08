@@ -362,7 +362,17 @@ describe("#66 — Belegnummernkreis", () => {
     await db.update(invoiceLineItems)
       .set({ serviceDescription: "Korrektur-Position (geaendert)" })
       .where(eq(invoiceLineItems.id, pos.id));
+    const [nachPosUpdate] = await db.select({ d: invoiceLineItems.serviceDescription })
+      .from(invoiceLineItems).where(eq(invoiceLineItems.id, pos.id));
+    expect(nachPosUpdate.d).toBe("Korrektur-Position (geaendert)");
+
     await db.delete(invoiceLineItems).where(eq(invoiceLineItems.id, pos.id));
+    const weg = await db.select({ id: invoiceLineItems.id })
+      .from(invoiceLineItems).where(eq(invoiceLineItems.id, pos.id));
+    expect(
+      weg.length,
+      "Positionen muessen loeschbar bleiben — ein still wirkungsloses DELETE waere sonst gruen",
+    ).toBe(0);
   });
 
   it("(e) Ventil: Begründung ist Pflicht und landet mit dem Ausgabe-Zeitpunkt im Audit", async () => {

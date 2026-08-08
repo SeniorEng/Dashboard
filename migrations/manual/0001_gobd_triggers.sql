@@ -173,7 +173,7 @@ CREATE OR REPLACE FUNCTION invoices_prevent_finalized_delete()
       -- rohes SQL und psql.
       IF OLD.status IS DISTINCT FROM 'entwurf' OR OLD.issued_at IS NOT NULL THEN
         RAISE EXCEPTION
-          'invoices: GoBD-Hard-Delete verboten — Rechnung ist finalisiert oder wurde bereits ausgegeben (Korrektur nur via Storno)'
+          'invoices: GoBD-Hard-Delete verboten - Rechnung ist finalisiert oder wurde bereits ausgegeben (Korrektur nur via Storno)'
           USING ERRCODE = 'restrict_violation';
       END IF;
       RETURN OLD;

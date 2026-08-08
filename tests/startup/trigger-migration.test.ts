@@ -116,10 +116,24 @@ describe("A1 — Trigger-Migration == Startup-Renderer", () => {
     ).not.toContain("CASCADE");
   });
 
-  it("KEIN invoices-UPDATE-Trigger (Status quo, eigenes Ticket)", () => {
-    // `invoice_line_items` hat UPDATE und DELETE, `invoices` nur DELETE. Die
-    // Asymmetrie ist beabsichtigt: ein hier ergänzter UPDATE-Trigger stünde in
-    // der Migration, aber nicht in Prod — und die A3-Gegenprobe würde fallen.
+  it("KEIN invoices-UPDATE-Trigger — sonst sperrt der issued_at-Zweig das Ventil", () => {
+    // `invoice_line_items` hat UPDATE und DELETE, `invoices` nur DELETE.
+    //
+    // ZWEI Gründe, und der zweite überlebt den ersten:
+    //
+    // 1. Prod-Parität (Status quo): ein hier ergänzter UPDATE-Trigger stünde in
+    //    der Migration, aber nicht in Prod — die A3-Gegenprobe würde fallen.
+    //    Dieser Grund VERFÄLLT mit dem Cutover (Track B/C).
+    //
+    // 2. #66 — der tragende Grund: `invoices_prevent_finalized_delete` prüft
+    //    seit `e8a052c6` auch `OLD.issued_at IS NOT NULL`. Diese Bedingung ist
+    //    DELETE-gescopt AUSSCHLIESSLICH deshalb, weil die Funktion nirgends an
+    //    UPDATE hängt. Käme ein UPDATE-Trigger auf `invoices` dazu, wären
+    //    Änderungen an einer ausgegebenen, per Fehlmarkierungs-Ventil wieder
+    //    bearbeitbaren Rechnung gesperrt — also genau das, wofür das Ventil da
+    //    ist. Wer diesen Fall streicht, entfernt die Garantie.
+    //    Gegenstück: der Docblock von `GOBD_INVOICES_PREVENT_FINALIZED_DELETE_FN_SQL`
+    //    in `server/startup/trigger-registry.ts`.
     const invoicesUpdate = ALL_STARTUP_TRIGGER_SPECS.filter(
       (s) => s.table === "invoices" && s.events.includes("UPDATE"),
     );
