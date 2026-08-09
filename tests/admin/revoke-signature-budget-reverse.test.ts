@@ -20,6 +20,7 @@
  * direkt benennt.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { appointments, auditLog, budgetTransactions } from "@shared/schema";
@@ -33,11 +34,14 @@ import {
   createTestCustomer,
   cleanupCustomer,
 } from "../test-utils";
+import { pastWeekdayInBillingMonth, billingReferenceMonth } from "../helpers/billing-month";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let hwServiceId: number;
 let customerId: number;
 let workday: string;
+let billingYear: number;
+let billingMonth: number;
 const cleanupApptIds: number[] = [];
 
 /**
@@ -65,9 +69,23 @@ async function budgetState(appointmentId: number): Promise<{
   };
 }
 
-async function createAndDocument(time: string, minutes: number): Promise<number> {
+const cleanupCustomerIds: number[] = [];
+
+async function newCustomer(): Promise<number> {
+  const cust = await createTestCustomer({ nachname: `REVOKE-${uniqueId()}` });
+  const id = cust.id as number;
+  cleanupCustomerIds.push(id);
+  await apiPatch(`/api/admin/customers/${id}/assign`, {
+    primaryEmployeeId: auth.user.id,
+    backupEmployeeId: null,
+    backupEmployeeId2: null,
+  });
+  return id;
+}
+
+async function createAndDocument(time: string, minutes: number, forCustomerId: number = customerId): Promise<number> {
   const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-    customerId,
+    customerId: forCustomerId,
     date: workday,
     scheduledStart: time,
     services: [{ serviceId: hwServiceId, durationMinutes: minutes }],
@@ -124,33 +142,24 @@ beforeAll(async () => {
   const services = await apiGet<any[]>("/api/services/all");
   hwServiceId = (services.data as any[]).find((s) => s.code === "hauswirtschaft")!.id;
 
-  const cust = await createTestCustomer({ nachname: `REVOKE-${uniqueId()}` });
-  customerId = cust.id as number;
-  await apiPatch(`/api/admin/customers/${customerId}/assign`, {
-    primaryEmployeeId: auth.user.id,
-    backupEmployeeId: null,
-    backupEmployeeId2: null,
-  });
+  customerId = await newCustomer();
 
-  // Werktag im Vormonat — vermeidet Kollisionen mit anderen Testdaten des Tages.
-  const now = new Date();
-  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const y = prev.getFullYear();
-  const m = prev.getMonth() + 1;
-  for (let day = 2; day <= 28; day++) {
-    const cur = new Date(y, m - 1, day);
-    if (cur.getDay() !== 0 && cur.getDay() !== 6) {
-      workday = `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      break;
-    }
-  }
+  // Datum aus der Anker-Familie statt handgerechnet: ein selbst gesuchter
+  // "erster Werktag des Vormonats" kippt an der Jahresgrenze und trifft dann
+  // eine andere Abrechnungsperiode als gedacht (CLAUDE.md, Test-Fallen).
+  workday = pastWeekdayInBillingMonth();
+  const ref = billingReferenceMonth();
+  billingYear = ref.year;
+  billingMonth = ref.month;
 });
 
 afterAll(async () => {
   for (const id of cleanupApptIds) {
     try { await apiDelete(`/api/appointments/${id}`); } catch { /* schon weg */ }
   }
-  await cleanupCustomer(customerId);
+  for (const id of cleanupCustomerIds) {
+    await cleanupCustomer(id);
+  }
 });
 
 describe("admin/audit revoke-signature — Budget-Reverse (Task #70-FINDING)", () => {
@@ -240,7 +249,52 @@ describe("admin/audit revoke-signature — Budget-Reverse (Task #70-FINDING)", (
       const meta = entry.metadata as Record<string, unknown>;
       expect(meta.previousStatus).toBe("completed");
       expect(meta.reversedTransactions, "Zahl der Rueckbuchungen gehoert in den Eintrag").toBeGreaterThan(0);
+      // `hadSignature` ist auf DIESEM Pfad strukturell immer true (die Route
+      // lehnt vorher ab, wenn keine Signatur da ist) — hier also nur ein
+      // Form-Check, dass das Feld ueberhaupt ankommt. Aussagekraft hat es auf
+      // den beiden anderen SSoT-Aufrufern, wo es variiert.
       expect(meta.hadSignature).toBe(true);
+    },
+    60_000,
+  );
+  it(
+    "(e) Termin auf einem unterschriebenen Leistungsnachweis: 400, und das Budget bleibt UNANGETASTET",
+    async () => {
+      // Eigener Kunde: die Vorgaengertests lassen ihre Termine bewusst in
+      // `documenting` zurueck (das ist ja das Ergebnis des Storno), und ein
+      // undokumentierter Termin im selben Kunden-Monat blockiert die LN-Anlage.
+      const lnCustomerId = await newCustomer();
+      const apptId = await createAndDocument("11:00", 30, lnCustomerId);
+      const before = await budgetState(apptId);
+
+      const rec = await apiPost<any>("/api/service-records", {
+        customerId: lnCustomerId,
+        employeeId: auth.user.id,
+        year: billingYear,
+        month: billingMonth,
+        appointmentIds: [apptId],
+      });
+      expect(rec.status, JSON.stringify(rec.data)).toBe(201);
+      const sig = await apiPost<any>(`/api/service-records/${rec.data.id}/sign`, {
+        signerType: "employee",
+        signatureData: validSignatureDataUrl(),
+        signingLocation: "Vor Ort",
+      });
+      expect(sig.status, JSON.stringify(sig.data)).toBe(200);
+
+      await putDirectSignature(apptId);
+      const res = await revoke(apptId);
+      expect(res.status).toBe(400);
+      expect(String(res.data?.message)).toContain("Leistungsnachweis");
+
+      // Der eigentliche Punkt: die Ablehnung darf NICHTS zurueckgedreht haben.
+      // Der Reverse laeuft in derselben Transaktion wie der Guard — bricht er
+      // ab, muss das Budget unveraendert sein.
+      const after = await budgetState(apptId);
+      expect(after.netCents).toBe(before.netCents);
+      expect(after.reversals).toBe(0);
+
+      try { await apiDelete(`/api/service-records/${rec.data.id}`); } catch { /* egal */ }
     },
     60_000,
   );

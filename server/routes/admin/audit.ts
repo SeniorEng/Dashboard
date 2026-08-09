@@ -7,6 +7,8 @@ import { storage } from "../../storage";
 import { computeDataHash } from "../../services/signature-integrity";
 import { db } from "../../lib/db";
 import { reopenAppointmentForRedocumentation, type AppointmentReopenFacts } from "../../lib/appointment-reopen";
+import { hasActiveInvoiceForAppointments } from "../../lib/appointment-invoiced";
+import { timeTrackingStorage } from "../../storage/time-tracking";
 
 const revokeSignatureSchema = z.object({
   reason: z.string().min(3, "Ein Stornierungsgrund mit mindestens 3 Zeichen ist erforderlich.").max(500, "Der Stornierungsgrund darf maximal 500 Zeichen lang sein."),
@@ -161,6 +163,19 @@ router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung
     // dieselbe Funktion, die die beiden anderen Pfade rufen. Damit ist die
     // Frage „Termin zur Re-Dokumentation zurueckgeben" nur noch EINMAL
     // beantwortet.
+    // Monatsabschluss: dieselbe Grenze wie auf den beiden Schwester-Pfaden
+    // (`/appointments/:id/reopen` ueber `canOverrideClosedMonth`, LN-Loeschpfad
+    // ueber `ensureMonthOpenForRecord`). Vor diesem PR bewegte die Route kein
+    // Geld, deshalb war die Luecke folgenlos; jetzt koennte ein Admin mit der
+    // `audit_log`-Berechtigung Budget-Buchungen in einem bereits
+    // abgeschlossenen Monat zurueckdrehen. Superadmin darf das weiterhin.
+    const monthOwnerId = appointment.performedByEmployeeId ?? appointment.assignedEmployeeId;
+    if (monthOwnerId && appointment.date && !(req as any).user!.isSuperAdmin) {
+      if (await timeTrackingStorage.isMonthClosed(monthOwnerId, appointment.date as string)) {
+        throw badRequest("Der Monat dieses Termins ist bereits abgeschlossen. Nur die Geschäftsführung kann ihn noch korrigieren.");
+      }
+    }
+
     let facts: AppointmentReopenFacts;
     await db.transaction(async (txClient) => {
       // ERSETZT die vorherige Pruefung ausserhalb jeder Transaktion
@@ -175,6 +190,23 @@ router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung
       // Pruefung nicht mehr rennanfaellig ist.
       if (await storage.lockAndCheckAppointmentLocked(entityId, txClient)) {
         throw badRequest("Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Bitte stornieren Sie zuerst den Leistungsnachweis.");
+      }
+
+      // GoBD: Storno first. Beide Schwester-Aufrufer der SSoT pruefen das
+      // (`DELETE /api/service-records/:id` -> 409 INVOICED,
+      // `DELETE /api/appointments/:id` -> findActiveInvoicesForAppointments);
+      // hier fehlte es. Solange dieser Pfad nur Status und Signatur zuruecksetzte,
+      // war das folgenlos — mit dem Reverse bewegt er Geld und braucht denselben
+      // Guard: sonst holt der Topf den Verbrauch zurueck, waehrend die gestellte
+      // Rechnung ihn weiter berechnet, und das freigewordene Budget laesst sich
+      // ein zweites Mal verbrauchen.
+      //
+      // Erreichbar wird das erst ueber den Umweg
+      // `revoke-signature/service_record/:id` (setzt den LN zurueck, wodurch der
+      // Lock-Check oben nicht mehr greift) — genau deshalb reicht der Lock-Check
+      // als alleiniger Schutz nicht.
+      if (await hasActiveInvoiceForAppointments([entityId], txClient)) {
+        throw badRequest("Für diesen Termin existiert eine aktive Rechnung. Bitte stornieren Sie zuerst die Rechnung (GoBD: Storno vor Korrektur).");
       }
 
       facts = await reopenAppointmentForRedocumentation(appointment, userId, txClient);

@@ -212,6 +212,31 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "appointment-reopen",
+    question:
+      "Wie gibt man einen dokumentierten Termin zur Re-Dokumentation zurueck? (Budget reversen, Holds freigeben, Signatur leeren, Status zuruecksetzen)",
+    canonical: [
+      { symbol: "reopenAppointmentForRedocumentation", module: "server/lib/appointment-reopen.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Task #70-FINDING — Definitions-Rand: `status: "documenting"` zusammen
+        // mit dem Leeren der Termin-Signatur ist der Reopen. Wer das selbst
+        // schreibt, laesst die Budget-Buchung stehen — und weil der
+        // Dokumentations-Pfad beim erneuten Abschluss eine vorhandene,
+        // nicht-stornierte Buchung UEBERNIMMT statt neu zu buchen, ist die
+        // Folge eine stille Unterbuchung. Genau so entstanden drei Kopien.
+        //
+        // Die Allowlist enthaelt nur die SSoT selbst; die drei Routen rufen sie.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "APPOINTMENT_REOPEN_ALLOWLIST",
+        allowlist: ["server/lib/appointment-reopen.ts"],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "service-record-employee-scope",
     question:
       "Gehört dieser Termin dem Mitarbeiter? (Umfang seines Leistungsnachweises)",

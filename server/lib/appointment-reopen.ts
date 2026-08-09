@@ -2,13 +2,19 @@
  * SSoT für „einen dokumentierten Termin zur Re-Dokumentation zurückgeben".
  *
  * ERSETZT die zuvor NUR in `POST /api/appointments/:id/reopen` inline stehende
- * Logik. Sie hat jetzt zwei Aufrufer, die dieselbe fachliche Frage stellen:
+ * Logik. Sie hat jetzt DREI Aufrufer, die dieselbe fachliche Frage stellen:
  *
  *   1. `POST /api/appointments/:id/reopen` — der Mitarbeiter korrigiert einen
  *      noch nicht in einen Leistungsnachweis eingegangenen Termin.
  *   2. `DELETE /api/service-records/:id` — der Korrekturweg für einen bereits
  *      unterschriebenen Leistungsnachweis: der LN wird soft-gelöscht und JEDER
  *      seiner Termine kommt zur Re-Dokumentation zurück.
+ *   3. `POST /api/admin/revoke-signature/appointment/:id` — das Büro storniert
+ *      die Unterschrift eines Termins (Task #70-FINDING). Dieser Pfad machte
+ *      denselben halben Weg wie früher (2) und ließ die Budget-Buchung stehen —
+ *      eine stille UNTERbuchung, weil der Dokumentations-Pfad beim erneuten
+ *      Abschluss eine vorhandene, nicht-stornierte Buchung übernimmt statt neu
+ *      zu buchen.
  *
  * Vorher machte (2) nur den halben Weg — `status = 'documenting'` und sonst
  * nichts. Das ließ zwei Reste stehen:
