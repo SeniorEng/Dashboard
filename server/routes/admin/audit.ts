@@ -5,6 +5,8 @@ import { auditService } from "../../services/audit";
 import { auditLogFilterSchema } from "@shared/schema";
 import { storage } from "../../storage";
 import { computeDataHash } from "../../services/signature-integrity";
+import { db } from "../../lib/db";
+import { reopenAppointmentForRedocumentation, type AppointmentReopenFacts } from "../../lib/appointment-reopen";
 
 const revokeSignatureSchema = z.object({
   reason: z.string().min(3, "Ein Stornierungsgrund mit mindestens 3 Zeichen ist erforderlich.").max(500, "Der Stornierungsgrund darf maximal 500 Zeichen lang sein."),
@@ -143,23 +145,53 @@ router.post("/revoke-signature/:entityType/:entityId", asyncHandler("Stornierung
       throw badRequest("Dieser Termin hat keine Unterschrift zum Stornieren.");
     }
 
-    const isLocked = await storage.isAppointmentLocked(entityId);
-    if (isLocked) {
-      throw badRequest("Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Bitte stornieren Sie zuerst den Leistungsnachweis.");
-    }
+    // Task #70-FINDING — Dieser Pfad stellte denselben Zustand her wie
+    // `POST /api/appointments/:id/reopen` und der LN-Korrekturweg (Signatur
+    // weg, Status `documenting`), aber OHNE die Budget-Buchung
+    // zurueckzudrehen. Das war die dritte Kopie derselben fachlichen Frage —
+    // und die einzige, die dabei Geld liegen liess:
+    //
+    // Der Verbrauch der alten, stornierten Dokumentation blieb gebucht. Beim
+    // erneuten Abschluss uebernimmt der Dokumentations-Pfad eine vorhandene
+    // nicht-stornierte Buchung, statt neu zu buchen — eine Aufwaerts-Korrektur
+    // (mehr Stunden/km) landete deshalb NIE im Topf. Stille Unterbuchung,
+    // geld- und GoBD-relevant, ohne jede Spur im Audit-Log.
+    //
+    // Laeuft jetzt ueber die SSoT `reopenAppointmentForRedocumentation` —
+    // dieselbe Funktion, die die beiden anderen Pfade rufen. Damit ist die
+    // Frage „Termin zur Re-Dokumentation zurueckgeben" nur noch EINMAL
+    // beantwortet.
+    let facts: AppointmentReopenFacts;
+    await db.transaction(async (txClient) => {
+      // ERSETZT die vorherige Pruefung ausserhalb jeder Transaktion
+      // (check-then-write): `lockAndCheckAppointmentLocked` sperrt Termin- und
+      // LN-Zeilen mit FOR UPDATE und wertet den Lock-Status darin erneut aus.
+      // Ohne das konnte eine gleichzeitig committende Unterschrift den Nachweis
+      // versiegeln, waehrend hier bereits zurueckgesetzt wurde — der Nachweis
+      // verwiese danach auf einen un-dokumentierten Termin.
+      //
+      // Status und Meldung bleiben bewusst unveraendert (400), damit der
+      // Vertrag dieser Admin-Route gleich bleibt; neu ist nur, dass die
+      // Pruefung nicht mehr rennanfaellig ist.
+      if (await storage.lockAndCheckAppointmentLocked(entityId, txClient)) {
+        throw badRequest("Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Bitte stornieren Sie zuerst den Leistungsnachweis.");
+      }
 
-    await storage.updateAppointment(entityId, {
-      signatureData: null,
-      signatureHash: null,
-      signedAt: null,
-      signedByUserId: null,
-      status: "documenting",
-    } as any);
+      facts = await reopenAppointmentForRedocumentation(appointment, userId, txClient);
+    });
 
     await auditService.appointmentRevoked(
       userId,
       entityId,
-      { customerId: appointment.customerId!, reason, previousStatus: appointment.status },
+      {
+        customerId: appointment.customerId!,
+        reason,
+        previousStatus: facts!.previousStatus,
+        // Ohne diese beiden Zahlen bliebe die Rueckbuchung im Audit-Log
+        // unsichtbar — der Vorgang waere nicht rekonstruierbar.
+        reversedTransactions: facts!.reversedTransactions,
+        hadSignature: facts!.clearedDirectSignature,
+      },
       ip
     );
 

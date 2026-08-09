@@ -126,7 +126,20 @@ class AuditService {
   async appointmentRevoked(
     userId: number,
     appointmentId: number,
-    metadata: { customerId: number; reason?: string; previousStatus: string },
+    metadata: {
+      customerId: number;
+      reason?: string;
+      previousStatus: string;
+      /**
+       * Task #70-FINDING — Anzahl zurueckgedrehter Budget-Buchungen und, ob
+       * eine eigene Termin-Signatur geleert wurde. Ohne diese beiden Zahlen
+       * bliebe die Rueckbuchung im Audit-Log unsichtbar; der Vorgang waere
+       * nicht rekonstruierbar. Optional, weil aeltere Eintraege sie nicht
+       * tragen.
+       */
+      reversedTransactions?: number;
+      hadSignature?: boolean;
+    },
     ipAddress?: string,
     exec?: DbOrTx,
   ): Promise<void> {
