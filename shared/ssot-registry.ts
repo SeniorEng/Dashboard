@@ -216,7 +216,14 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     question:
       "Gehört dieser Termin dem Mitarbeiter? (Umfang seines Leistungsnachweises)",
     canonical: [
+      // Task #1896 — KEINE eigene Formel: ein benannter Aufruf der
+      // Zuordnungs-SSoT `appointmentBelongsToEmployee` (Task #838) mit
+      // `coverage = null`. Damit ist die Regel status-abhängig (dokumentiert →
+      // Erbringer, sonst → Zugewiesener) und identisch zur Lohn-/Stunden-Sicht;
+      // `coverage = null` schaltet allein die Kunden-Vertretungs-Kette ab, die
+      // für den Leistungsnachweis die entfernte Stammkraft-Ausnahme wäre.
       { symbol: "appointmentBelongsToEmployeeScope", module: "shared/domain/service-record-scope.ts" },
+      { symbol: "appointmentBelongsToEmployee", module: "shared/domain/appointment-attribution.ts" },
       { symbol: "employeeServiceRecordScopeCondition", module: "server/lib/service-record-scope.ts" },
     ],
     ownedLiterals: [],

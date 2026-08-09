@@ -10,10 +10,11 @@
  * Einzel-Nachweises — drifteten sie auseinander, dürfte man einen Termin
  * anlegen, den man anschließend nicht mehr sieht (oder umgekehrt).
  *
- * Der Test fährt die vollständige NULL-Matrix gegen ECHTE Zeilen, weil genau
- * dort die Fallen sitzen: `= NULL` ist in SQL nicht `false`, sondern NULL, und
- * `NULL OR NULL` filtert wie `false`. Der Fall „beide Spalten NULL" (kein
- * Mitarbeiterbezug) muss auf BEIDEN Seiten `false` ergeben.
+ * Der Test fährt die vollständige Matrix aus Status × NULL-Kombinationen gegen
+ * ECHTE Zeilen, weil dort die Fallen sitzen: `= NULL` ist in SQL nicht `false`,
+ * sondern NULL, und NULL filtert im `WHERE` wie `false`. Zwei Fälle müssen auf
+ * BEIDEN Seiten `false` ergeben — „kein Mitarbeiterbezug" und, seit der Weiche
+ * vom 09.08.2026, „dokumentiert, aber nur zugewiesen statt geleistet".
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
@@ -37,8 +38,11 @@ let customerId: number;
 let mine: { id: number };
 let other: { id: number };
 let hwServiceId: number;
-/** appointmentId → erwarteter Zustand der beiden Spalten. */
-const matrix = new Map<number, { assignedEmployeeId: number | null; performedByEmployeeId: number | null }>();
+/** appointmentId → erwarteter Zustand (Status entscheidet, welche Spalte zählt). */
+const matrix = new Map<
+  number,
+  { status: string; assignedEmployeeId: number | null; performedByEmployeeId: number | null }
+>();
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -60,23 +64,30 @@ beforeAll(async () => {
   day.setDate(day.getDate() + 30);
   const dateStr = ymd(day);
 
-  // Fünf Zeilen — die vollständige Matrix. Angelegt über die Route (damit alle
-  // NOT-NULL-Spalten stimmen), die beiden Mitarbeiter-Spalten anschließend
-  // gezielt gesetzt: über die Anwendung sind „beide NULL" und „nur
-  // performed_by" nach #1896 nicht mehr herstellbar, geprüft werden müssen sie
-  // trotzdem — es gibt keinen DB-Zwang, der sie ausschließt.
-  const combos: Array<{ assigned: number | null; performed: number | null }> = [
-    { assigned: null, performed: null },
-    { assigned: null, performed: 0 },
-    { assigned: 0, performed: null },
-    { assigned: 0, performed: 0 },
-    { assigned: 0, performed: 1 },
-    { assigned: 1, performed: 1 },
-  ];
+  // Angelegt über die Route (damit alle NOT-NULL-Spalten stimmen), Status und
+  // die beiden Mitarbeiter-Spalten anschließend gezielt gesetzt: über die
+  // Anwendung sind „beide NULL" und „nur performed_by" nach #1896 nicht mehr
+  // herstellbar, geprüft werden müssen sie trotzdem — es gibt keinen DB-Zwang,
+  // der sie ausschließt.
+  //
+  // Volle Matrix: sechs Spalten-Kombinationen MAL beide Status-Zweige. Der
+  // Status entscheidet seit der Weiche vom 09.08.2026, welche der beiden
+  // Spalten überhaupt zählt — eine Matrix ohne Status prüfte die halbe Regel.
+  const combos: Array<{ status: string; assigned: number | null; performed: number | null }> = [];
+  for (const status of ["completed", "scheduled"]) {
+    combos.push(
+      { status, assigned: null, performed: null },
+      { status, assigned: null, performed: 0 },
+      { status, assigned: 0, performed: null },
+      { status, assigned: 0, performed: 0 },
+      { status, assigned: 0, performed: 1 },
+      { status, assigned: 1, performed: 1 },
+    );
+  }
 
   let slot = 0;
   for (const combo of combos) {
-    const time = `${String(7 + slot).padStart(2, "0")}:00`;
+    const time = `${String(6 + Math.floor(slot / 2)).padStart(2, "0")}:${slot % 2 === 0 ? "00" : "30"}`;
     slot++;
     const res = await apiPost<any>("/api/appointments/kundentermin", {
       customerId,
@@ -94,9 +105,9 @@ beforeAll(async () => {
     const performedByEmployeeId = resolve(combo.performed);
     await db
       .update(appointments)
-      .set({ assignedEmployeeId, performedByEmployeeId })
+      .set({ assignedEmployeeId, performedByEmployeeId, status: combo.status })
       .where(eq(appointments.id, res.data.id));
-    matrix.set(res.data.id, { assignedEmployeeId, performedByEmployeeId });
+    matrix.set(res.data.id, { status: combo.status, assignedEmployeeId, performedByEmployeeId });
   }
 });
 
@@ -109,7 +120,7 @@ afterAll(async () => {
 });
 
 describe("Equality — Umfangs-Prädikat vs. SQL-Spiegel (Task #1896)", () => {
-  it("liefert für jede NULL-Kombination dieselbe Menge", async () => {
+  it("liefert für jede Status-/NULL-Kombination dieselbe Menge", async () => {
     const ids = [...matrix.keys()];
 
     const sqlRows = await appointmentsRepo
@@ -124,12 +135,18 @@ describe("Equality — Umfangs-Prädikat vs. SQL-Spiegel (Task #1896)", () => {
     expect([...fromSql].sort((a, b) => a - b)).toEqual([...fromPredicate].sort((a, b) => a - b));
 
     // Gegenprobe, damit ein „beide leer" nicht als Übereinstimmung durchgeht.
-    expect(fromPredicate.size).toBe(4);
+    // Treffer für `mine`: completed(null,mine), completed(mine,mine),
+    // scheduled(mine,null), scheduled(mine,mine), scheduled(mine,other).
+    // NICHT dabei: completed(mine,other) — dokumentiert zählt nur der Erbringer.
+    expect(fromPredicate.size).toBe(5);
   });
 
   it("schließt den Termin ohne jeden Mitarbeiterbezug auf BEIDEN Seiten aus", async () => {
     const orphanId = [...matrix.entries()].find(
-      ([, v]) => v.assignedEmployeeId === null && v.performedByEmployeeId === null,
+      ([, v]) =>
+        v.status === "completed" &&
+        v.assignedEmployeeId === null &&
+        v.performedByEmployeeId === null,
     )![0];
 
     expect(appointmentBelongsToEmployeeScope(matrix.get(orphanId)!, mine.id)).toBe(false);
@@ -141,5 +158,27 @@ describe("Equality — Umfangs-Prädikat vs. SQL-Spiegel (Task #1896)", () => {
         .where(and(eq(appointments.id, orphanId), employeeServiceRecordScopeCondition(employeeId)));
       expect(rows, `Termin ohne Mitarbeiterbezug darf für ${employeeId} nicht sichtbar sein`).toEqual([]);
     }
+  });
+
+  it("DIVERGENZ dokumentiert: SQL rechnet den Termin dem Erbringer zu, nicht dem Zugewiesenen", async () => {
+    // `assigned = mine`, `performed = other`, `completed` — vor der Weiche
+    // hätte das flache `assigned OR performed` hier BEIDE geliefert und damit
+    // dem bloß Zugewiesenen den Nachweis überlassen.
+    const divergentId = [...matrix.entries()].find(
+      ([, v]) =>
+        v.status === "completed" &&
+        v.assignedEmployeeId === mine.id &&
+        v.performedByEmployeeId === other.id,
+    )![0];
+
+    const forMine = await appointmentsRepo
+      .selectColumnsFrom({ id: appointments.id }, db)
+      .where(and(eq(appointments.id, divergentId), employeeServiceRecordScopeCondition(mine.id)));
+    const forOther = await appointmentsRepo
+      .selectColumnsFrom({ id: appointments.id }, db)
+      .where(and(eq(appointments.id, divergentId), employeeServiceRecordScopeCondition(other.id)));
+
+    expect(forMine, "der bloß Zugewiesene darf den dokumentierten Termin NICHT bekommen").toEqual([]);
+    expect(forOther.map((r) => r.id), "der Erbringer bekommt ihn").toEqual([divergentId]);
   });
 });

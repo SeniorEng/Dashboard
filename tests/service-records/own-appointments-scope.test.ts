@@ -63,9 +63,15 @@ let year: number;
 let month: number;
 let dateStr: string;
 const cleanupApptIds: number[] = [];
+/** Termin mit `assigned = Stammkraft`, `performed = Vertretung`, dokumentiert. */
+let divergentApptId: number;
 const cleanupRecordIds: number[] = [];
 
-async function createDocumentedAppointment(time: string, employeeId: number): Promise<number> {
+async function createDocumentedAppointment(
+  time: string,
+  employeeId: number,
+  performedByEmployeeId: number = employeeId,
+): Promise<number> {
   const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
     customerId,
     date: dateStr,
@@ -84,7 +90,7 @@ async function createDocumentedAppointment(time: string, employeeId: number): Pr
     travelKilometers: 0,
     customerKilometers: 0,
     services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "T1896" }],
-    performedByEmployeeId: employeeId,
+    performedByEmployeeId,
   });
   if (docRes.status !== 200) {
     throw new Error(`document failed: ${docRes.status} ${JSON.stringify(docRes.data)}`);
@@ -120,9 +126,19 @@ beforeAll(async () => {
   month = day.getMonth() + 1;
   dateStr = ymd(day);
 
-  // EIN Termin, geleistet von der VERTRETUNG. Die Stammkraft hat in diesem
-  // Monat bei diesem Kunden keinen einzigen eigenen Termin.
+  // Termin 1: zugewiesen UND geleistet von der VERTRETUNG.
   await createDocumentedAppointment("08:00", vertretung.id);
+
+  // Termin 2 — DIVERGENZ: der STAMMKRAFT zugewiesen, aber von der Vertretung
+  // GELEISTET (Feld „Durchgeführt von" beim Dokumentieren). Seit der Weiche vom
+  // 09.08.2026 zählt bei dokumentierten Terminen ausschließlich der Erbringer:
+  // der Termin gehört der Vertretung, nicht der Stammkraft. Unter dem früheren
+  // flachen `assigned ODER performed` hätte ihn die Stammkraft besessen und
+  // unterschrieben — obwohl die Vertretung ihn geleistet hat.
+  divergentApptId = await createDocumentedAppointment("09:00", stammkraft.id, vertretung.id);
+
+  // Die Stammkraft hat damit in diesem Monat bei diesem Kunden NULL eigene
+  // Termine — obwohl ihr einer davon zugewiesen ist.
 });
 
 afterAll(async () => {
@@ -170,15 +186,38 @@ describe("Leistungsnachweis-Umfang: nur eigene Termine (Task #1896)", () => {
   );
 
   it(
-    "Stammkraft kann über den fremden Termin auch keinen EINZEL-Nachweis anlegen (403, nicht 201)",
+    "Stammkraft kann über den ihr ZUGEWIESENEN, aber fremd geleisteten Termin keinen Einzel-Nachweis anlegen",
     async () => {
+      // Der schärfste Fall der Weiche: der Termin ist ihr zugewiesen. Unter dem
+      // flachen `assigned ODER performed` wäre das ein 201 gewesen.
       const auth = await loginAs(stammkraft.email, stammkraft.password);
       const res = await apiPostAs<any>(auth, "/api/service-records/single", {
         customerId,
-        appointmentId: cleanupApptIds[0],
+        appointmentId: divergentApptId,
       });
       expect(res.status, JSON.stringify(res.data)).toBe(403);
       expect(String(res.data?.message)).toContain("eigenen Termine");
+    },
+    60_000,
+  );
+
+  it(
+    "DIVERGENZ: der zugewiesene-aber-fremd-geleistete Termin liegt im Umfang des ERBRINGERS",
+    async () => {
+      const stammAuth = await loginAs(stammkraft.email, stammkraft.password);
+      const vertretungAuth = await loginAs(vertretung.email, vertretung.password);
+      const path = `/api/service-records/check-period?customerId=${customerId}&year=${year}&month=${month}`;
+
+      const beiStammkraft = await apiGetAs<any>(stammAuth, path);
+      const beiVertretung = await apiGetAs<any>(vertretungAuth, path);
+
+      const idsStamm = beiStammkraft.data.selectableAppointments.map((a: any) => a.id);
+      const idsVertretung = beiVertretung.data.selectableAppointments.map((a: any) => a.id);
+
+      expect(idsStamm, "der Zugewiesene darf den dokumentierten Termin NICHT bekommen").not.toContain(
+        divergentApptId,
+      );
+      expect(idsVertretung, "der Erbringer bekommt ihn").toContain(divergentApptId);
     },
     60_000,
   );
@@ -193,7 +232,7 @@ describe("Leistungsnachweis-Umfang: nur eigene Termine (Task #1896)", () => {
         `/api/service-records/check-period?customerId=${customerId}&year=${year}&month=${month}`,
       );
       expect(check.status, JSON.stringify(check.data)).toBe(200);
-      expect(check.data.documentedCount).toBe(1);
+      expect(check.data.documentedCount).toBe(2);
       expect(check.data.canCreateRecord).toBe(true);
 
       const overview = await apiGetAs<any[]>(
