@@ -392,8 +392,12 @@ describe("LN-9: Monatlicher Leistungsnachweis", () => {
     cleanupApptIds.push(createRes.data.id);
 
     const d = new Date(futureDate);
+    // Task #1896 — `viewAsEmployeeId`: der Kunde ist dem Admin als Stammkraft
+    // zugeordnet, die Termine gehören aber `testEmployeeId`. Bis #1896 sah der
+    // Admin sie über die Stammkraft-Ausnahme als die eigenen; seit #1896 ist
+    // der Umfang immer der EIGENE, und das Büro wählt den Mitarbeiter explizit.
     const checkRes = await apiGet<any>(
-      `/api/service-records/check-period?customerId=${testCustomerId}&year=${d.getFullYear()}&month=${d.getMonth() + 1}`
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${d.getFullYear()}&month=${d.getMonth() + 1}&viewAsEmployeeId=${testEmployeeId}`
     );
     expect(checkRes.status).toBe(200);
     expect(checkRes.data.undocumentedCount).toBeGreaterThan(0);
@@ -461,8 +465,12 @@ describe("LN-12: Monatlicher LN – Erstellung und Blocking", () => {
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
+    // Task #1896 — `viewAsEmployeeId`: der Kunde ist dem Admin als Stammkraft
+    // zugeordnet, die Termine gehören aber `testEmployeeId`. Bis #1896 sah der
+    // Admin sie über die Stammkraft-Ausnahme als die eigenen; seit #1896 ist
+    // der Umfang immer der EIGENE, und das Büro wählt den Mitarbeiter explizit.
     const checkRes = await apiGet<any>(
-      `/api/service-records/check-period?customerId=${testCustomerId}&year=${year}&month=${month}`
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${year}&month=${month}&viewAsEmployeeId=${testEmployeeId}`
     );
     expect(checkRes.status).toBe(200);
     expect(checkRes.data.documentedCount).toBeGreaterThan(0);
@@ -556,15 +564,21 @@ describe("LN-13: Monatlicher LN – Positive Erstellung mit dokumentierten Termi
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
 
+    // Task #1896 — `viewAsEmployeeId`: der Kunde ist dem Admin als Stammkraft
+    // zugeordnet, die Termine gehören aber `testEmployeeId`. Bis #1896 sah der
+    // Admin sie über die Stammkraft-Ausnahme als die eigenen; seit #1896 ist
+    // der Umfang immer der EIGENE, und das Büro wählt den Mitarbeiter explizit.
     const checkRes = await apiGet<any>(
-      `/api/service-records/check-period?customerId=${testCustomerId}&year=${year}&month=${month}`
+      `/api/service-records/check-period?customerId=${testCustomerId}&year=${year}&month=${month}&viewAsEmployeeId=${testEmployeeId}`
     );
     expect(checkRes.status).toBe(200);
     expect(checkRes.data.documentedCount, "Dokumentierte Termine müssen vorhanden sein").toBeGreaterThan(0);
 
+    // Der Nachweis geht auf den Mitarbeiter, der die Termine geleistet hat —
+    // nicht auf den Admin, der ihn anlegt (GoBD: Erbringer = Unterzeichner).
     const createRes = await apiPost<any>("/api/service-records", {
       customerId: testCustomerId,
-      employeeId: auth.user.id,
+      employeeId: testEmployeeId,
       year,
       month,
     });

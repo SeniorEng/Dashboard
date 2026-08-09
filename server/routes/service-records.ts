@@ -12,7 +12,7 @@ import { reopenAppointmentForRedocumentation, type AppointmentReopenFacts } from
 import { isAdminLike } from "@shared/policies/appointments";
 import { appointmentsRepo, monthlyServiceRecordsRepo } from "../repos";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
-import { getPrimaryCustomerIds } from "../storage/customers-storage";
+import { appointmentBelongsToEmployeeScope } from "@shared/domain/service-record-scope";
 import { invalidateDraftInvoicePdfCache } from "../storage/service-records-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { timeTrackingStorage } from "../storage/time-tracking";
@@ -110,6 +110,13 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
       status = pendingRecord.status as "pending" | "employee_signed" | "completed";
     } else if (hasAnyRecord) {
       status = "completed";
+    } else if (item.documentedCount > 0) {
+      // Task #1896 — alle eigenen dokumentierten Termine sind abgedeckt, aber
+      // durch einen FREMDEN Nachweis (Altbestand aus der Stammkraft-Zeit).
+      // Ohne diesen Zweig fiel der Fall auf "ready" — die Kachel bot einen
+      // Nachweis an, den `canCreateRecord` im selben Objekt verweigert. Genau
+      // die Phantom-Aufgabe, die #1896 abräumt.
+      status = "completed";
     } else {
       status = "ready";
     }
@@ -164,17 +171,18 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     });
   }
 
-  const primaryIds = await getPrimaryCustomerIds(effectiveUserId);
-  const isPrimary = primaryIds.includes(customerId);
-  
+  // Task #1896 — kein `isPrimary` mehr: alle sieben Leser liefern denselben,
+  // eigenen Umfang. Vorher schaltete die Stammkraft-Ausnahme hier den
+  // Mitarbeiter-Filter ab und der Dialog zeigte die Termine der Kollegen als
+  // die eigenen an.
   const [existingRecord, counts, customerData, coveredBySingleCount, coveredByMonthlyCount, noShowAppointments, documentedAppointments] = await Promise.all([
-    storage.getServiceRecordByPeriod(customerId, effectiveUserId, year, month, isPrimary),
-    storage.getAppointmentCountsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
+    storage.getServiceRecordByPeriod(customerId, effectiveUserId, year, month),
+    storage.getAppointmentCountsForPeriod(customerId, effectiveUserId, year, month),
     storage.getCustomer(customerId),
-    storage.getCoveredBySingleCount(customerId, effectiveUserId, year, month, isPrimary),
-    storage.getCoveredByMonthlyCount(customerId, effectiveUserId, year, month, isPrimary),
-    storage.getNoShowAppointmentsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
-    storage.getDocumentedAppointmentsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
+    storage.getCoveredBySingleCount(customerId, effectiveUserId, year, month),
+    storage.getCoveredByMonthlyCount(customerId, effectiveUserId, year, month),
+    storage.getNoShowAppointmentsForPeriod(customerId, effectiveUserId, year, month),
+    storage.getDocumentedAppointmentsForPeriod(customerId, effectiveUserId, year, month),
   ]);
 
   const coveredCount = coveredBySingleCount + coveredByMonthlyCount;
@@ -298,6 +306,12 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   // werden. Gesperrt bleibt nur das LÖSCHEN (Superadmin) und das Dokumentieren
   // selbst (separater Gate).
 
+  // `canAccessCustomer` beantwortet „darf sehen?" — notwendig, aber NICHT
+  // hinreichend. Task #1896: welche Termine in den Nachweis dürfen, entscheidet
+  // allein „gehören sie ihm?". Das erzwingen die Leser unten, die seit #1896
+  // ausnahmslos auf den eigenen Umfang gefiltert sind
+  // (`employeeServiceRecordScopeCondition`); der frühere `isPrimary`-Durchgriff,
+  // über den die Stammkraft fremde Termine bündeln konnte, ist ersatzlos weg.
   const hasAccess = await canAccessCustomer(
     userId,
     req.user!.isAdmin,
@@ -305,16 +319,13 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     (employeeId) => storage.getAssignedCustomerIds(employeeId)
   );
   if (!hasAccess) {
-    return res.status(403).json({ 
+    return res.status(403).json({
       error: "FORBIDDEN",
-      message: "Sie haben keinen Zugriff auf diesen Kunden" 
+      message: "Sie haben keinen Zugriff auf diesen Kunden"
     });
   }
 
-  const primaryIds = await getPrimaryCustomerIds(effectiveEmployeeId);
-  const isPrimary = primaryIds.includes(customerId);
-  
-  const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month, isPrimary);
+  const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month);
   if (undocumentedAppointments.length > 0) {
     return res.status(400).json({ 
       message: `Es gibt noch ${undocumentedAppointments.length} nicht dokumentierte Termine in diesem Monat. Bitte dokumentieren Sie alle Termine, bevor Sie den Leistungsnachweis erstellen.`,
@@ -322,7 +333,7 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
   
-  const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month, isPrimary);
+  const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month);
   if (documentedAppointments.length === 0) {
     return res.status(400).json({ 
       message: "Es gibt keine dokumentierten Termine in diesem Monat." 
@@ -452,9 +463,30 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
   }
   
   if (appointment.status !== "completed") {
-    return res.status(400).json({ 
-      message: "Nur abgeschlossene Termine können einen Leistungsnachweis erhalten." 
+    return res.status(400).json({
+      message: "Nur abgeschlossene Termine können einen Leistungsnachweis erhalten."
     });
+  }
+
+  // Task #1896 — „gehört er ihm?" statt „darf er ihn sehen?".
+  //
+  // Der Sammel-Pfad erzwingt den eigenen Umfang über die Leser (die liefern nur
+  // eigene Termine). Dieser Pfad holt den Termin per ID und hatte deshalb gar
+  // keine Eigentümer-Grenze: `canAccessCustomer` oben sagt für jede Stammkraft
+  // ja, und damit konnte sie über den Termin eines KOLLEGEN einen
+  // Leistungsnachweis anlegen — auf dessen Namen (`appointmentEmployeeId` unten
+  // ist der Erbringer), aber ohne dessen Zutun. Genau das Dokument, das die
+  // GoBD-Regel „Erbringer = Unterzeichner" verbietet.
+  //
+  // Admins bleiben ausgenommen (Büro legt für Mitarbeiter an) — die
+  // Unterschrift bleibt ihnen davon unabhängig verwehrt, dafür sorgt
+  // `allowedSignerIds` in `POST /:id/sign`.
+  if (!req.user!.isAdmin && !appointmentBelongsToEmployeeScope(appointment, userId)) {
+    return sendForbidden(
+      res,
+      "FORBIDDEN",
+      "Sie können einen Leistungsnachweis nur für Ihre eigenen Termine erstellen.",
+    );
   }
 
   const existingRecord = await storage.getServiceRecordForAppointment(appointmentId);
@@ -570,22 +602,29 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
 
   const linkedAppointments = await storage.getAppointmentsForServiceRecord(id);
 
-  // Wer darf unterschreiben? Der dem Leistungsnachweis zugeordnete Mitarbeiter
-  // (existingRecord.employeeId) ODER der Mitarbeiter, der einen der enthaltenen
-  // Termine nachweislich geleistet hat (performedByEmployeeId) bzw. ihm zugewiesen
-  // war (assignedEmployeeId — Vertretung/Backup). Admins immer.
-  // Der Kunden-Zugriff ist oben bereits geprüft; hier wird die Eigentümer-Grenze
-  // korrekt auf den tatsächlich Leistenden erweitert, ohne sie aufzuweichen — ein
-  // fremder Mitarbeiter ohne Bezug zu den Terminen bleibt blockiert (Task #978).
-  const allowedSignerIds = new Set<number>([existingRecord.employeeId]);
-  for (const appt of linkedAppointments) {
-    if (appt.performedByEmployeeId != null) allowedSignerIds.add(appt.performedByEmployeeId);
-    if (appt.assignedEmployeeId != null) allowedSignerIds.add(appt.assignedEmployeeId);
-  }
-  if (!req.user!.isAdmin && !allowedSignerIds.has(req.user!.id)) {
+  // Wer darf unterschreiben? NUR der Mitarbeiter, auf den der Nachweis
+  // ausgestellt ist — plus Admins.
+  //
+  // Task #1896 — ERSETZT die Erweiterung aus Task #978, die zusätzlich jeden
+  // `performedByEmployeeId`/`assignedEmployeeId` der enthaltenen Termine
+  // zuließ. Sie war nötig, solange ein Nachweis fremde Termine enthalten
+  // konnte; seit der Umfang eines Nachweises auf die eigenen Termine begrenzt
+  // ist (Leser + Anlege-Guards), ist der zugeordnete Mitarbeiter per
+  // Konstruktion auch der Erbringer. Die Erweiterung ließe nur noch das zu, was
+  // die GoBD-Regel „Erbringer = Unterzeichner" gerade verbietet: dass B
+  // unterschreibt, was A geleistet hat.
+  //
+  // Abgesichert durch die Prod-Abfrage vom 08.08.2026
+  // (`docs/p1-1896-performer-vs-assigned-exposure.sql`): `performed_by` und
+  // `assigned` fallen in KEINEM Termin auseinander, die Verengung nimmt also
+  // niemandem eine heute genutzte Unterschrift.
+  //
+  // Co-Visit (Zwei-Kräfte-Einsatz, #1613): jede Kraft hat ihren EIGENEN Termin
+  // und damit ihren eigenen Nachweis — die Kante braucht die Erweiterung nicht.
+  if (!req.user!.isAdmin && req.user!.id !== existingRecord.employeeId) {
     return res.status(403).json({
       error: "FORBIDDEN",
-      message: "Nur der zugeordnete oder der ausführende Mitarbeiter darf diesen Leistungsnachweis unterschreiben",
+      message: "Nur der zugeordnete Mitarbeiter darf diesen Leistungsnachweis unterschreiben",
     });
   }
 

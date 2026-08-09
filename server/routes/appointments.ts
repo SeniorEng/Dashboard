@@ -513,26 +513,25 @@ router.get("/undocumented/by-customer", asyncHandler("Fehler beim Laden der offe
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string, 10) : undefined;
   const adminScope = user.isAdmin || isTeamLead(user);
   // Scope-Parität mit /appointments/undocumented:
-  // - Admin/Teamlead ohne viewAs → globale Sicht (kein Employee-Filter); via isPrimary=true erzwungen.
+  // - Admin/Teamlead ohne viewAs → globale Sicht (kein Employee-Filter).
   // - Admin/Teamlead mit viewAs → Sicht des gewählten Mitarbeiters.
-  // - Mitarbeiter → eigene Sicht (assigned/performed), isPrimary nach Primary-Liste.
+  // - Mitarbeiter → eigene Sicht (assigned/performed).
+  //
+  // Task #1896 — die kundenweite Sicht hängt jetzt AUSSCHLIESSLICH an der
+  // Admin-Rolle des Aufrufers (`includeAllEmployees`). Vorher lief sie über
+  // dasselbe `isPrimary`-Flag, das ein Mitarbeiter auch dadurch bekam, dass er
+  // Stammkraft des Kunden war — damit weitete sich die Sicht ohne jede
+  // Admin-Rolle auf die Termine aller Kollegen.
   const effectiveEmployeeId = adminScope && viewAsEmployeeId ? viewAsEmployeeId : user.id;
 
   if (!(await checkCustomerAccess(user, customerId, res))) return;
 
-  let isPrimary: boolean;
-  if (adminScope && !viewAsEmployeeId) {
-    isPrimary = true;
-  } else {
-    const primaryIds = await storage.getPrimaryCustomerIds(effectiveEmployeeId);
-    isPrimary = primaryIds.includes(customerId);
-  }
   const appointments = await storage.getUndocumentedAppointmentsForPeriod(
     customerId,
     effectiveEmployeeId,
     year,
     month,
-    isPrimary,
+    { includeAllEmployees: adminScope && !viewAsEmployeeId },
   );
   res.json(appointments);
 }));

@@ -108,15 +108,15 @@ export interface IStorage {
   getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number, customerId?: number): Promise<MonthlyServiceRecord[]>;
   getServiceRecordsForCustomer(customerId: number): Promise<MonthlyServiceRecord[]>;
   getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined>;
-  getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<MonthlyServiceRecord | undefined>;
+  getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined>;
   createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord>;
   signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number, signingIp?: string | null, signingLocation?: string | null): Promise<MonthlyServiceRecord | undefined>;
   updateServiceRecord(id: number, data: Partial<typeof monthlyServiceRecords.$inferInsert>): Promise<MonthlyServiceRecord | undefined>;
   getAppointmentsForServiceRecord(serviceRecordId: number): Promise<AppointmentWithCustomer[]>;
   addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void>;
-  getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]>;
-  getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]>;
-  getNoShowAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]>;
+  getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
+  getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, options?: { includeAllEmployees?: boolean }): Promise<AppointmentWithCustomer[]>;
+  getNoShowAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]>;
   getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]>;
   isAppointmentLocked(appointmentId: number): Promise<boolean>;
   getAppointmentIdsInServiceRecords(appointmentIds: number[], txClient?: DbOrTx): Promise<number[]>;
@@ -129,9 +129,9 @@ export interface IStorage {
   getServiceRecordsOverview(employeeId: number, year: number, month: number): Promise<ServiceRecordOverviewItem[]>;
   
   // Optimized period check - counts only
-  getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<{ documentedCount: number; undocumentedCount: number }>;
-  getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number>;
-  getCoveredByMonthlyCount(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number>;
+  getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<{ documentedCount: number; undocumentedCount: number }>;
+  getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number): Promise<number>;
+  getCoveredByMonthlyCount(customerId: number, employeeId: number, year: number, month: number): Promise<number>;
 
   // Appointment Services
   getAppointmentServices(appointmentId: number): Promise<AppointmentServiceWithDetails[]>;

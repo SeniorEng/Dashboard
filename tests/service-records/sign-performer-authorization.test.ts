@@ -1,19 +1,26 @@
 /**
- * Task #978 — Regression: Wer darf einen Leistungsnachweis unterschreiben?
+ * Task #1896 — Wer darf einen Leistungsnachweis unterschreiben?
  *
- * Bug: Der Sign-Endpoint (`POST /api/service-records/:id/sign`) verglich nur
- * `existingRecord.employeeId === req.user.id` und blockierte damit den
- * Vertretungs-/Backup-Mitarbeiter, der den Termin tatsächlich geleistet hat,
- * mit HTTP 403 — obwohl der Leistungsnachweis weiterhin dem ursprünglich
- * zugeordneten Mitarbeiter "gehört".
+ * **Diese Datei ERSETZT den Vertrag aus Task #978.** #978 hatte den Kreis der
+ * Unterzeichner über den zugeordneten Mitarbeiter hinaus erweitert: auch wer
+ * einen der enthaltenen Termine geleistet (`performedByEmployeeId`) oder
+ * zugewiesen bekommen hatte (`assignedEmployeeId`), durfte unterschreiben. Das
+ * war nötig, SOLANGE ein Nachweis fremde Termine enthalten konnte — die
+ * Stammkraft-Ausnahme bündelte die Termine aller Kollegen eines Kunden in einen
+ * Nachweis.
  *
- * Fix: Unterschreiben darf der zugeordnete Mitarbeiter (record.employeeId)
- * ODER wer einen der enthaltenen Termine geleistet (performedByEmployeeId)
- * bzw. zugewiesen bekommen hat (assignedEmployeeId). Admins immer. Ein
- * fremder Mitarbeiter mit Kunden-Zugriff, aber ohne Bezug zu den Terminen,
- * bleibt blockiert.
+ * Seit #1896 ist der Umfang eines Nachweises auf die EIGENEN Termine begrenzt.
+ * Damit ist der zugeordnete Mitarbeiter per Konstruktion auch der Erbringer,
+ * und die #978-Erweiterung ließe nur noch genau das zu, was die GoBD-Regel
+ * „Erbringer = Unterzeichner" verbietet: dass B unterschreibt, was A geleistet
+ * hat. Sie ist deshalb zurückgenommen.
  *
- * Beide Fälle laufen über den echten HTTP-Endpoint mit nicht-Admin-Logins.
+ * Alrik hat die Weiche am 08.08.2026 entschieden; abgesichert durch die
+ * Prod-Abfrage `docs/p1-1896-performer-vs-assigned-exposure.sql`
+ * (`performed_by` und `assigned` fallen in KEINEM Termin auseinander — die
+ * Verengung nimmt niemandem eine heute genutzte Unterschrift).
+ *
+ * Alle Fälle laufen über den echten HTTP-Endpoint mit nicht-Admin-Logins.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -87,25 +94,26 @@ function pastWeekday(): Date {
 }
 
 let admin: Awaited<ReturnType<typeof getAuthCookie>>;
-let performer: { id: number; email: string; password: string };
+let owner: { id: number; email: string; password: string };
 let bystander: { id: number; email: string; password: string };
 let customerId: number;
 let hwServiceId: number;
-let recordForPerformerId: number;
-let recordForAssigneeId: number;
-let recordForBystanderId: number;
+/** Nachweis, der `owner` gehört (über seinen eigenen Termin entstanden). */
+let recordOwnedByOwnerId: number;
+/** Nachweis, der dem Admin gehört — `owner` ist nur der Erbringer des Termins. */
+let recordOwnedByAdminId: number;
 const cleanupApptIds: number[] = [];
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 
-async function createDocumentedAppointment(date: string, time: string): Promise<number> {
+async function createDocumentedAppointment(date: string, time: string, assignedEmployeeId: number): Promise<number> {
   const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
     customerId,
     date,
     scheduledStart: time,
     services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-    assignedEmployeeId: admin.user.id,
-    notes: `T978-${uniqueId()}`,
+    assignedEmployeeId,
+    notes: `T1896-${uniqueId()}`,
   });
   if (apptRes.status !== 201) {
     throw new Error(`appointment failed: ${apptRes.status} ${JSON.stringify(apptRes.data)}`);
@@ -116,7 +124,8 @@ async function createDocumentedAppointment(date: string, time: string): Promise<
     travelOriginType: "home",
     travelKilometers: 0,
     customerKilometers: 0,
-    services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "T978" }],
+    services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "T1896" }],
+    performedByEmployeeId: assignedEmployeeId,
   });
   if (docRes.status !== 200) {
     throw new Error(`document failed: ${docRes.status} ${JSON.stringify(docRes.data)}`);
@@ -124,10 +133,10 @@ async function createDocumentedAppointment(date: string, time: string): Promise<
   return apptRes.data.id;
 }
 
-async function createMonthlyRecord(year: number, month: number): Promise<number> {
+async function createMonthlyRecord(employeeId: number, year: number, month: number): Promise<number> {
   const res = await apiPost<any>("/api/service-records", {
     customerId,
-    employeeId: admin.user.id,
+    employeeId,
     year,
     month,
   });
@@ -144,18 +153,18 @@ beforeAll(async () => {
   const svcJson = (await svcRes.json()) as any[];
   hwServiceId = svcJson.find((s) => s.code === "hauswirtschaft")!.id;
 
-  performer = await createTestEmployee({ nachnamePrefix: "T978_Performer" });
-  bystander = await createTestEmployee({ nachnamePrefix: "T978_Bystander" });
+  owner = await createTestEmployee({ nachnamePrefix: "T1896_Owner" });
+  bystander = await createTestEmployee({ nachnamePrefix: "T1896_Bystander" });
 
-  const cust = await createTestCustomer({ nachname: `Privat-T978-${uniqueId()}` });
+  const cust = await createTestCustomer({ nachname: `Privat-T1896-${uniqueId()}` });
   customerId = cust.id as number;
 
-  // Admin = Primär, performer = Backup, bystander = Backup2.
-  // → beide Nicht-Admins haben Kunden-Zugriff (canAccessCustomer), aber nur
-  //   performer wird unten als tatsächlicher Leistender markiert.
+  // Admin = Primär (die frühere „Stammkraft"), owner = Backup,
+  // bystander = Backup2 → alle drei haben Kunden-Zugriff (canAccessCustomer).
+  // Genau deshalb reicht Zugriff als Unterschrifts-Kriterium nicht.
   const assignRes = await apiPatch<any>(`/api/admin/customers/${customerId}/assign`, {
     primaryEmployeeId: admin.user.id,
-    backupEmployeeId: performer.id,
+    backupEmployeeId: owner.id,
     backupEmployeeId2: bystander.id,
   });
   if (assignRes.status !== 200) {
@@ -167,33 +176,26 @@ beforeAll(async () => {
   const month = day.getMonth() + 1;
   const dateStr = ymd(day);
 
-  // Termin 1 → eigener Monatsnachweis (gehört Admin), danach als von
-  // `performer` geleistet markieren.
-  const appt1 = await createDocumentedAppointment(dateStr, "08:00");
-  recordForPerformerId = await createMonthlyRecord(year, month);
-  await db
-    .update(appointments)
-    .set({ performedByEmployeeId: performer.id })
-    .where(eq(appointments.id, appt1));
+  // Termin 1 gehört `owner` (zugewiesen UND geleistet) → sein eigener Nachweis.
+  await createDocumentedAppointment(dateStr, "08:00", owner.id);
+  recordOwnedByOwnerId = await createMonthlyRecord(owner.id, year, month);
 
-  // Termin 2 → dritter Allow-Pfad: `performer` ist dem Termin ZUGEWIESEN
-  // (assignedEmployeeId), hat ihn aber nicht geleistet (performedBy = null).
-  const appt2 = await createDocumentedAppointment(dateStr, "08:30");
-  recordForAssigneeId = await createMonthlyRecord(year, month);
+  // Termin 2 gehört dem Admin → Nachweis auf den Admin. ERST DANACH wird
+  // `performed_by` auf `owner` umgebogen: der Nachweis weist damit einen
+  // Erbringer aus, der nicht sein Mitarbeiter ist — genau die Konstellation,
+  // die #978 zum Unterschreiben freigab und #1896 wieder sperrt. Über die
+  // Anwendung ist sie nach #1896 nicht mehr herstellbar, deshalb der
+  // direkte DB-Eingriff.
+  const appt2 = await createDocumentedAppointment(dateStr, "08:30", admin.user.id);
+  recordOwnedByAdminId = await createMonthlyRecord(admin.user.id, year, month);
   await db
     .update(appointments)
-    .set({ assignedEmployeeId: performer.id, performedByEmployeeId: null })
+    .set({ performedByEmployeeId: owner.id })
     .where(eq(appointments.id, appt2));
-
-  // Termin 3 (nach Anlage der Vorgänger, damit er separat abgedeckt wird) →
-  // Monatsnachweis bleibt `performer`-/`bystander`-fremd (zugeordnet/geleistet
-  // = Admin).
-  await createDocumentedAppointment(dateStr, "09:00");
-  recordForBystanderId = await createMonthlyRecord(year, month);
 });
 
 afterAll(async () => {
-  for (const id of [recordForPerformerId, recordForAssigneeId, recordForBystanderId]) {
+  for (const id of [recordOwnedByOwnerId, recordOwnedByAdminId]) {
     if (id) {
       try { await apiDelete(`/api/service-records/${id}`); } catch {}
     }
@@ -204,48 +206,61 @@ afterAll(async () => {
   await cleanupCustomer(customerId);
 });
 
-describe("service-record sign authorization (Task #978)", () => {
+describe("Leistungsnachweis-Unterschrift: nur der zugeordnete Mitarbeiter (Task #1896)", () => {
   it(
-    "lässt den tatsächlich leistenden (Backup-)Mitarbeiter unterschreiben, auch wenn ihm der Nachweis nicht gehört",
+    "blockiert den ERBRINGER eines enthaltenen Termins, wenn ihm der Nachweis nicht gehört (Rücknahme #978)",
     async () => {
-      const authPerformer = await loginAs(performer.email, performer.password);
-      const res = await apiPostAs<any>(authPerformer, `/api/service-records/${recordForPerformerId}/sign`, {
+      const auth = await loginAs(owner.email, owner.password);
+      const res = await apiPostAs<any>(auth, `/api/service-records/${recordOwnedByAdminId}/sign`, {
         signatureData: VALID_SIGNATURE,
         signerType: "employee",
         signingLocation: null,
       });
-      expect(res.status, JSON.stringify(res.data)).toBe(200);
-      expect(res.data?.employeeSignedAt ?? res.data?.status).toBeTruthy();
+      expect(res.status, JSON.stringify(res.data)).toBe(403);
+      expect(String(res.data?.message)).toContain("zugeordnete Mitarbeiter");
     },
     60_000,
   );
 
   it(
-    "lässt den dem Termin ZUGEWIESENEN Mitarbeiter unterschreiben, auch ohne gesetztes performedBy",
+    "blockiert einen fremden Mitarbeiter mit Kunden-Zugriff, aber ohne Bezug zum Nachweis",
     async () => {
-      const authAssignee = await loginAs(performer.email, performer.password);
-      const res = await apiPostAs<any>(authAssignee, `/api/service-records/${recordForAssigneeId}/sign`, {
-        signatureData: VALID_SIGNATURE,
-        signerType: "employee",
-        signingLocation: null,
-      });
-      expect(res.status, JSON.stringify(res.data)).toBe(200);
-      expect(res.data?.employeeSignedAt ?? res.data?.status).toBeTruthy();
-    },
-    60_000,
-  );
-
-  it(
-    "blockiert einen fremden Mitarbeiter (Zugriff, aber kein Bezug zu den Terminen) mit 403 und klarer Meldung",
-    async () => {
-      const authBystander = await loginAs(bystander.email, bystander.password);
-      const res = await apiPostAs<any>(authBystander, `/api/service-records/${recordForBystanderId}/sign`, {
+      const auth = await loginAs(bystander.email, bystander.password);
+      const res = await apiPostAs<any>(auth, `/api/service-records/${recordOwnedByOwnerId}/sign`, {
         signatureData: VALID_SIGNATURE,
         signerType: "employee",
         signingLocation: null,
       });
       expect(res.status).toBe(403);
-      expect(String(res.data?.message)).toContain("zugeordnete oder der ausführende Mitarbeiter");
+      expect(String(res.data?.message)).toContain("zugeordnete Mitarbeiter");
+    },
+    60_000,
+  );
+
+  it(
+    "lässt den zugeordneten Mitarbeiter seinen EIGENEN Nachweis unterschreiben",
+    async () => {
+      const auth = await loginAs(owner.email, owner.password);
+      const res = await apiPostAs<any>(auth, `/api/service-records/${recordOwnedByOwnerId}/sign`, {
+        signatureData: VALID_SIGNATURE,
+        signerType: "employee",
+        signingLocation: null,
+      });
+      expect(res.status, JSON.stringify(res.data)).toBe(200);
+      expect(res.data?.employeeSignedAt ?? res.data?.status).toBeTruthy();
+    },
+    60_000,
+  );
+
+  it(
+    "lässt den Admin weiterhin auch fremde Nachweise unterschreiben (Büro-Pfad bleibt)",
+    async () => {
+      const res = await apiPost<any>(`/api/service-records/${recordOwnedByAdminId}/sign`, {
+        signatureData: VALID_SIGNATURE,
+        signerType: "employee",
+        signingLocation: null,
+      });
+      expect(res.status, JSON.stringify(res.data)).toBe(200);
     },
     60_000,
   );

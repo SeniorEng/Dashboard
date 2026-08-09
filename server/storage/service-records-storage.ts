@@ -13,22 +13,89 @@ import type { AppointmentWithCustomer } from "@shared/types";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import { computeDataHash } from "../services/signature-integrity";
 import { analyzeSignatureImage } from "../lib/signature-validation";
-import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQL, type SQLWrapper } from "drizzle-orm";
+import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQLWrapper } from "drizzle-orm";
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
-
-function employeeFilter(employeeId: number): SQL {
-  return sqlBuilder`(${appointments.assignedEmployeeId} = ${employeeId} OR ${appointments.performedByEmployeeId} = ${employeeId})`;
-}
-import { getAssignedCustomerIds, getPrimaryCustomerIds } from "./customers-storage";
+import { employeeServiceRecordScopeCondition } from "../lib/service-record-scope";
+import { getAssignedCustomerIds } from "./customers-storage";
 import type { ServiceRecordOverviewItem } from "../storage";
 import { appointmentsRepo, customersRepo, monthlyServiceRecordsRepo } from "../repos";
 
-export async function getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number, customerId?: number): Promise<MonthlyServiceRecord[]> {
-  const primaryCustomerIds = await getPrimaryCustomerIds(employeeId);
-  const primarySet = new Set(primaryCustomerIds);
+/**
+ * Halb offenes Monatsintervall `[startDate, endDate)` als ISO-Datum.
+ *
+ * ERSETZT die vier wörtlichen Kopien derselben Rechnung in dieser Datei. Sie
+ * mussten ohnehin identisch bleiben — die Abdeckungs-Zahl der Übersicht und die
+ * der Detailansicht dürfen sich nicht um einen Tag unterscheiden.
+ */
+function periodRange(year: number, month: number): { startDate: string; endDate: string } {
+  const endMonth = month === 12 ? 1 : month + 1;
+  const endYear = month === 12 ? year + 1 : year;
+  return {
+    startDate: `${year}-${String(month).padStart(2, '0')}-01`,
+    endDate: `${endYear}-${String(endMonth).padStart(2, '0')}-01`,
+  };
+}
 
-  const baseConditions: SQLWrapper[] = [isNull(monthlyServiceRecords.deletedAt)];
+/**
+ * Task #1896 — DIE eine Formulierung der Frage „welche meiner Termine sind in
+ * diesem Monat bereits durch einen Leistungsnachweis abgedeckt?".
+ *
+ * Zwei Aufrufer, die deckungsgleich bleiben MÜSSEN, weil ihre Ergebnisse in der
+ * Oberfläche direkt gegeneinander gelesen werden: die Kachel-Übersicht
+ * (`getServiceRecordsOverview`, alle Kunden auf einmal) und die Detailansicht
+ * vor dem Anlegen (`getCoveredByRecordTypeCount` über `GET /check-period`).
+ * Drifteten sie auseinander, meldete die Kachel „Nachweis erstellbar" und der
+ * Dialog dahinter „alles bereits abgedeckt".
+ *
+ * Bewusst NICHT auf die eigenen Nachweise eingeschränkt: abgedeckt ist
+ * abgedeckt, auch durch den Nachweis eines Kollegen (Altbestand aus der
+ * Stammkraft-Zeit). Eingeschränkt wird die TERMIN-Seite — über
+ * `employeeServiceRecordScopeCondition`.
+ *
+ * `recordType` weglassen, wenn der Aufrufer selbst danach gruppiert.
+ */
+function coverageConditions(
+  customerCondition: SQLWrapper,
+  employeeId: number,
+  year: number,
+  month: number,
+  recordType?: "single" | "monthly",
+): SQLWrapper[] {
+  const { startDate, endDate } = periodRange(year, month);
+  const conditions: SQLWrapper[] = [
+    customerCondition,
+    employeeServiceRecordScopeCondition(employeeId),
+    sqlBuilder`${appointments.date} >= ${startDate}`,
+    sqlBuilder`${appointments.date} < ${endDate}`,
+    isNull(monthlyServiceRecords.deletedAt),
+    isNull(appointments.deletedAt),
+  ];
+  if (recordType !== undefined) {
+    conditions.push(eq(monthlyServiceRecords.recordType, recordType));
+  }
+  return conditions;
+}
+
+/**
+ * Die eigenen Leistungsnachweise eines Mitarbeiters.
+ *
+ * Task #1896 — ERSETZT die frühere Primär-/Backup-Aufteilung. Für Kunden, deren
+ * Stammkraft der Mitarbeiter war, lieferte die Funktion FREMDE Nachweise mit
+ * (alle Nachweise dieses Kunden, unabhängig vom Mitarbeiter). Genau daraus
+ * entstanden die Phantom-Aufgaben und die Möglichkeit, einen fremden Nachweis
+ * zu unterschreiben. Ein Nachweis gehört jetzt ausschließlich dem Mitarbeiter,
+ * auf den er ausgestellt ist.
+ *
+ * Die frühere Einschränkung auf `getAssignedCustomerIds` entfällt damit: eigene
+ * Nachweise bleiben sichtbar, auch wenn der Kunde später umverteilt wurde —
+ * es ist die eigene Abrechnungshistorie.
+ */
+export async function getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number, customerId?: number): Promise<MonthlyServiceRecord[]> {
+  const baseConditions: SQLWrapper[] = [
+    isNull(monthlyServiceRecords.deletedAt),
+    eq(monthlyServiceRecords.employeeId, employeeId),
+  ];
   if (year !== undefined) {
     baseConditions.push(eq(monthlyServiceRecords.year, year));
   }
@@ -37,32 +104,6 @@ export async function getServiceRecordsForEmployee(employeeId: number, year?: nu
   }
   if (customerId !== undefined) {
     baseConditions.push(eq(monthlyServiceRecords.customerId, customerId));
-    const isPrimary = primarySet.has(customerId);
-    if (!isPrimary) {
-      baseConditions.push(eq(monthlyServiceRecords.employeeId, employeeId));
-    }
-  } else {
-    const assignedCustomerIds = await getAssignedCustomerIds(employeeId);
-    if (assignedCustomerIds.length === 0) return [];
-    const backupCustomerIds = assignedCustomerIds.filter(id => !primarySet.has(id));
-
-    const orConditions: SQLWrapper[] = [];
-    if (primaryCustomerIds.length > 0) {
-      orConditions.push(inArray(monthlyServiceRecords.customerId, primaryCustomerIds));
-    }
-    if (backupCustomerIds.length > 0) {
-      const backupCondition = and(
-        eq(monthlyServiceRecords.employeeId, employeeId),
-        inArray(monthlyServiceRecords.customerId, backupCustomerIds),
-      );
-      if (backupCondition) orConditions.push(backupCondition);
-    }
-    if (orConditions.length > 0) {
-      const combined = or(...orConditions);
-      if (combined) baseConditions.push(combined);
-    } else {
-      return [];
-    }
   }
   return await monthlyServiceRecordsRepo.selectFrom(db)
     .where(and(...baseConditions))
@@ -81,19 +122,21 @@ export async function getServiceRecord(id: number): Promise<MonthlyServiceRecord
   return result[0];
 }
 
-export async function getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<MonthlyServiceRecord | undefined> {
-  const conditions: SQLWrapper[] = [
-    eq(monthlyServiceRecords.customerId, customerId),
-    eq(monthlyServiceRecords.year, year),
-    eq(monthlyServiceRecords.month, month),
-    eq(monthlyServiceRecords.recordType, "monthly"),
-    isNull(monthlyServiceRecords.deletedAt),
-  ];
-  if (!isPrimary) {
-    conditions.push(eq(monthlyServiceRecords.employeeId, employeeId));
-  }
+/**
+ * Task #1896 — `isPrimary` ENTFERNT: der Sammel-Nachweis einer Periode wird
+ * immer über den eigenen Mitarbeiter gesucht. Die frühere Ausnahme lieferte der
+ * Stammkraft den Nachweis eines KOLLEGEN als „ihren" zurück.
+ */
+export async function getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<MonthlyServiceRecord | undefined> {
   const result = await monthlyServiceRecordsRepo.selectFrom(db)
-    .where(and(...conditions));
+    .where(and(
+      eq(monthlyServiceRecords.customerId, customerId),
+      eq(monthlyServiceRecords.employeeId, employeeId),
+      eq(monthlyServiceRecords.year, year),
+      eq(monthlyServiceRecords.month, month),
+      eq(monthlyServiceRecords.recordType, "monthly"),
+      isNull(monthlyServiceRecords.deletedAt),
+    ));
   return result[0];
 }
 
@@ -332,18 +375,30 @@ export async function addAppointmentsToServiceRecord(serviceRecordId: number, ap
     .onConflictDoNothing();
 }
 
+/**
+ * Task #1896 — Der Umfang ist IMMER der eigene: nur Termine, die dem
+ * Mitarbeiter gehören (`employeeServiceRecordScopeCondition`, SSoT).
+ *
+ * ERSETZT das frühere `isPrimary`-Flag, das den Filter für die Stammkraft eines
+ * Kunden komplett abschaltete und ihr damit die Termine ALLER Kollegen bei
+ * diesem Kunden in den eigenen Leistungsnachweis legte.
+ *
+ * `includeAllEmployees` ist NICHT dessen Nachfolger, sondern eine eng gefasste
+ * Admin-Sicht: es gibt genau einen Aufrufer
+ * (`GET /api/appointments/undocumented-for-period` für Admin/Teamlead OHNE
+ * `viewAsEmployeeId`), der bewusst kundenweit liest. Es wird nie aus einer
+ * Kunden-Zuordnung abgeleitet — das war der Fehler von `isPrimary` — sondern
+ * ausschließlich aus der Admin-Rolle des Aufrufers.
+ */
 function getAppointmentsForPeriodBase(
   customerId: number,
   employeeId: number,
   year: number,
   month: number,
   statusConditions: SQLWrapper[],
-  isPrimary?: boolean,
+  options?: { includeAllEmployees?: boolean },
 ): Promise<AppointmentWithCustomer[]> {
-  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endMonth = month === 12 ? 1 : month + 1;
-  const endYear = month === 12 ? year + 1 : year;
-  const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+  const { startDate, endDate } = periodRange(year, month);
 
   const conditions: SQLWrapper[] = [
     eq(appointments.customerId, customerId),
@@ -352,8 +407,8 @@ function getAppointmentsForPeriodBase(
     sqlBuilder`${appointments.date} < ${endDate}`,
     isNull(appointments.deletedAt),
   ];
-  if (!isPrimary) {
-    conditions.push(employeeFilter(employeeId));
+  if (!options?.includeAllEmployees) {
+    conditions.push(employeeServiceRecordScopeCondition(employeeId));
   }
 
   return appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
@@ -364,11 +419,11 @@ function getAppointmentsForPeriodBase(
     .then(rows => rows.map(mapAppointmentRow));
 }
 
-export function getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
-  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [eq(appointments.status, 'completed')], isPrimary);
+export function getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]> {
+  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [eq(appointments.status, 'completed')]);
 }
 
-export function getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
+export function getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, options?: { includeAllEmployees?: boolean }): Promise<AppointmentWithCustomer[]> {
   // „Undokumentiert" = der Termin wartet noch auf eine Mitarbeiter-Handlung
   // (geplant oder in Dokumentation). Terminal-Status — `completed`,
   // `cancelled` UND `customer_no_show` — gehören NICHT hierher. No-Shows sind
@@ -376,7 +431,7 @@ export function getUndocumentedAppointmentsForPeriod(customerId: number, employe
   // LN-Erstellung blockieren als auch in der „Offene Termine"-Liste auftauchen.
   // Positiv gefiltert über UNDOCUMENTED_STATUSES, damit diese Liste deckungs-
   // gleich mit `getAppointmentCountsForPeriod.undocumentedCount` bleibt.
-  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [inArray(appointments.status, UNDOCUMENTED_STATUSES)], isPrimary);
+  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [inArray(appointments.status, UNDOCUMENTED_STATUSES)], options);
 }
 
 /**
@@ -388,44 +443,25 @@ export function getUndocumentedAppointmentsForPeriod(customerId: number, employe
  * Abrechnungslogik (private „Vergebliche Anfahrt" für Selbstzahler) bleibt
  * unberührt.
  */
-export function getNoShowAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
-  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [eq(appointments.status, 'customer_no_show')], isPrimary);
+export function getNoShowAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<AppointmentWithCustomer[]> {
+  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [eq(appointments.status, 'customer_no_show')]);
 }
 
+/**
+ * Offene eigene Leistungsnachweise — die Zahl hinter der Aufgaben-Kachel.
+ *
+ * Task #1896 — ERSETZT die Primär-/Backup-Aufteilung. Der Stammkraft wurde
+ * bisher JEDER unfertige Nachweis ihrer Kunden als eigene Aufgabe gezählt, auch
+ * der eines Kollegen, den sie nach der Verengung gar nicht mehr unterschreiben
+ * darf. Das waren die Phantom-Aufgaben.
+ */
 export async function getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]> {
-  const [primaryCustomerIds, assignedCustomerIds] = await Promise.all([
-    getPrimaryCustomerIds(employeeId),
-    getAssignedCustomerIds(employeeId),
-  ]);
-  if (assignedCustomerIds.length === 0) return [];
-  const primarySet = new Set(primaryCustomerIds);
-  const backupCustomerIds = assignedCustomerIds.filter(id => !primarySet.has(id));
-
-  const conditions: SQLWrapper[] = [
-    ne(monthlyServiceRecords.status, 'completed'),
-    isNull(monthlyServiceRecords.deletedAt),
-  ];
-
-  const orConditions: SQLWrapper[] = [];
-  if (primaryCustomerIds.length > 0) {
-    orConditions.push(inArray(monthlyServiceRecords.customerId, primaryCustomerIds));
-  }
-  if (backupCustomerIds.length > 0) {
-    const backupCondition = and(
-      eq(monthlyServiceRecords.employeeId, employeeId),
-      inArray(monthlyServiceRecords.customerId, backupCustomerIds),
-    );
-    if (backupCondition) orConditions.push(backupCondition);
-  }
-  if (orConditions.length > 0) {
-    const combined = or(...orConditions);
-    if (combined) conditions.push(combined);
-  } else {
-    return [];
-  }
-
   return await monthlyServiceRecordsRepo.selectFrom(db)
-    .where(and(...conditions))
+    .where(and(
+      eq(monthlyServiceRecords.employeeId, employeeId),
+      ne(monthlyServiceRecords.status, 'completed'),
+      isNull(monthlyServiceRecords.deletedAt),
+    ))
     .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
 }
 
@@ -678,21 +714,32 @@ export async function isAppointmentLocked(appointmentId: number): Promise<boolea
   return result.length > 0;
 }
 
+/**
+ * Monats-Übersicht je Kunde für EINEN Mitarbeiter.
+ *
+ * Task #1896 — ERSETZT die Primär-/Backup-Zweiteilung durch EINE Abfrage über
+ * den eigenen Umfang. Für Stammkraft-Kunden zählte die Übersicht bisher die
+ * Termine ALLER Mitarbeiter und listete deren Nachweise; der Mitarbeiter sah
+ * Aufgaben, die ihm nicht gehören, und Zahlen, die zu dem Nachweis, den er
+ * erstellen kann, nicht passten.
+ *
+ * Drei Größen, drei Umfänge — bewusst NICHT derselbe:
+ *  - Termin-Zähler: eigene Termine (`employeeServiceRecordScopeCondition`).
+ *  - Nachweise: eigene Nachweise (`employeeId`).
+ *  - ABDECKUNG: kundenweit über ALLE Nachweise (auch fremde), aber nur über
+ *    EIGENE Termine gebildet. Das ist der Punkt, an dem die Phantom-Aufgaben
+ *    verschwinden: liegt mein Termin bereits im (Alt-)Nachweis eines Kollegen,
+ *    ist er abgedeckt und darf nicht als „noch zu erstellen" erscheinen. Zählte
+ *    man die Abdeckung nur über die EIGENEN Nachweise, bliebe genau dieser
+ *    Termin ewig offen.
+ */
 export async function getServiceRecordsOverview(employeeId: number, year: number, month: number): Promise<ServiceRecordOverviewItem[]> {
-  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endMonth = month === 12 ? 1 : month + 1;
-  const endYear = month === 12 ? year + 1 : year;
-  const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+  const { startDate, endDate } = periodRange(year, month);
 
-  const [assignedCustomerIds, primaryCustomerIds] = await Promise.all([
-    getAssignedCustomerIds(employeeId),
-    getPrimaryCustomerIds(employeeId),
-  ]);
+  const assignedCustomerIds = await getAssignedCustomerIds(employeeId);
   if (assignedCustomerIds.length === 0) {
     return [];
   }
-  const primarySet = new Set(primaryCustomerIds);
-  const backupCustomerIds = assignedCustomerIds.filter(id => !primarySet.has(id));
 
   const dateConditions = [
     sqlBuilder`${appointments.date} >= ${startDate}`,
@@ -701,7 +748,7 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
     isNull(appointments.deletedAt),
   ];
 
-  const primaryOverview = primaryCustomerIds.length > 0 ? await customersRepo.selectColumnsFrom({
+  const overviewData = await customersRepo.selectColumnsFrom({
     customerId: customers.id,
     vorname: customers.vorname,
     nachname: customers.nachname,
@@ -711,50 +758,13 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
   }, db)
     .leftJoin(appointments, and(
       eq(appointments.customerId, customers.id),
+      employeeServiceRecordScopeCondition(employeeId),
       ...dateConditions,
     ))
-    .where(inArray(customers.id, primaryCustomerIds))
-    .groupBy(customers.id, customers.vorname, customers.nachname) : [];
+    .where(inArray(customers.id, assignedCustomerIds))
+    .groupBy(customers.id, customers.vorname, customers.nachname);
 
-  const backupOverview = backupCustomerIds.length > 0 ? await customersRepo.selectColumnsFrom({
-    customerId: customers.id,
-    vorname: customers.vorname,
-    nachname: customers.nachname,
-    documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
-    undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
-    totalAppointments: sqlBuilder<number>`COUNT(${appointments.id})::int`,
-  }, db)
-    .leftJoin(appointments, and(
-      eq(appointments.customerId, customers.id),
-      or(
-        eq(appointments.assignedEmployeeId, employeeId),
-        eq(appointments.performedByEmployeeId, employeeId)
-      ),
-      ...dateConditions,
-    ))
-    .where(inArray(customers.id, backupCustomerIds))
-    .groupBy(customers.id, customers.vorname, customers.nachname) : [];
-
-  const overviewData = [...primaryOverview, ...backupOverview];
-
-  const recordConditions = [
-    eq(monthlyServiceRecords.year, year),
-    eq(monthlyServiceRecords.month, month),
-    isNull(monthlyServiceRecords.deletedAt),
-  ];
-
-  const primaryRecords = primaryCustomerIds.length > 0 ? await monthlyServiceRecordsRepo.selectColumnsFrom({
-    customerId: monthlyServiceRecords.customerId,
-    id: monthlyServiceRecords.id,
-    status: monthlyServiceRecords.status,
-    recordType: monthlyServiceRecords.recordType,
-  }, db)
-    .where(and(
-      inArray(monthlyServiceRecords.customerId, primaryCustomerIds),
-      ...recordConditions,
-    )) : [];
-
-  const backupRecords = backupCustomerIds.length > 0 ? await monthlyServiceRecordsRepo.selectColumnsFrom({
+  const existingRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
     customerId: monthlyServiceRecords.customerId,
     id: monthlyServiceRecords.id,
     status: monthlyServiceRecords.status,
@@ -762,11 +772,11 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
   }, db)
     .where(and(
       eq(monthlyServiceRecords.employeeId, employeeId),
-      inArray(monthlyServiceRecords.customerId, backupCustomerIds),
-      ...recordConditions,
-    )) : [];
-
-  const existingRecords = [...primaryRecords, ...backupRecords];
+      inArray(monthlyServiceRecords.customerId, assignedCustomerIds),
+      eq(monthlyServiceRecords.year, year),
+      eq(monthlyServiceRecords.month, month),
+      isNull(monthlyServiceRecords.deletedAt),
+    ));
 
   const monthlyRecordsMap = new Map<number, { id: number; status: string }[]>();
   const singleRecordsMap = new Map<number, { id: number; status: string; recordType: string }[]>();
@@ -785,29 +795,34 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
 
   const customerHasAnyRecord = new Set(existingRecords.map(r => r.customerId));
 
-  const allRecordIds = existingRecords.map(r => r.id);
+  const coveredBySingleByCustomer = new Map<number, number>();
+  const coveredByMonthlyByCustomer = new Map<number, number>();
 
-  let coveredBySingleByCustomer = new Map<number, number>();
-  let coveredByMonthlyByCustomer = new Map<number, number>();
+  // Läuft IMMER — auch wenn der Mitarbeiter selbst keinen Nachweis hat. Die
+  // frühere Fassung sprang bei `allRecordIds.length === 0` ganz heraus und
+  // konnte einen durch einen fremden Nachweis abgedeckten Termin deshalb nie
+  // als abgedeckt sehen.
+  const coveredRows = await db.select({
+    customerId: appointments.customerId,
+    recordType: monthlyServiceRecords.recordType,
+    count: sqlBuilder<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
+  })
+    .from(serviceRecordAppointments)
+    .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
+    .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
+    .where(and(...coverageConditions(
+      inArray(appointments.customerId, assignedCustomerIds),
+      employeeId,
+      year,
+      month,
+    )))
+    .groupBy(appointments.customerId, monthlyServiceRecords.recordType);
 
-  if (allRecordIds.length > 0) {
-    const coveredRows = await db.select({
-      customerId: appointments.customerId,
-      recordType: monthlyServiceRecords.recordType,
-      count: sqlBuilder<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
-    })
-      .from(serviceRecordAppointments)
-      .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
-      .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
-      .where(inArray(serviceRecordAppointments.serviceRecordId, allRecordIds))
-      .groupBy(appointments.customerId, monthlyServiceRecords.recordType);
-
-    for (const row of coveredRows) {
-      if (row.recordType === "single") {
-        coveredBySingleByCustomer.set(row.customerId!, row.count);
-      } else {
-        coveredByMonthlyByCustomer.set(row.customerId!, row.count);
-      }
+  for (const row of coveredRows) {
+    if (row.recordType === "single") {
+      coveredBySingleByCustomer.set(row.customerId!, row.count);
+    } else {
+      coveredByMonthlyByCustomer.set(row.customerId!, row.count);
     }
   }
 
@@ -834,22 +849,17 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
     });
 }
 
-export async function getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<{ documentedCount: number; undocumentedCount: number }> {
-  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endMonth = month === 12 ? 1 : month + 1;
-  const endYear = month === 12 ? year + 1 : year;
-  const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+export async function getAppointmentCountsForPeriod(customerId: number, employeeId: number, year: number, month: number): Promise<{ documentedCount: number; undocumentedCount: number }> {
+  const { startDate, endDate } = periodRange(year, month);
 
   const conditions: SQLWrapper[] = [
     eq(appointments.customerId, customerId),
+    employeeServiceRecordScopeCondition(employeeId),
     ne(appointments.status, 'cancelled'),
     sqlBuilder`${appointments.date} >= ${startDate}`,
     sqlBuilder`${appointments.date} < ${endDate}`,
     isNull(appointments.deletedAt),
   ];
-  if (!isPrimary) {
-    conditions.push(employeeFilter(employeeId));
-  }
 
   const result = await appointmentsRepo.selectColumnsFrom({
     documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
@@ -863,39 +873,28 @@ export async function getAppointmentCountsForPeriod(customerId: number, employee
   };
 }
 
-async function getCoveredByRecordTypeCount(recordType: "single" | "monthly", customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number> {
-  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endMonth = month === 12 ? 1 : month + 1;
-  const endYear = month === 12 ? year + 1 : year;
-  const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
-
-  const conditions: SQLWrapper[] = [
-    eq(monthlyServiceRecords.recordType, recordType),
-    eq(appointments.customerId, customerId),
-    sqlBuilder`${appointments.date} >= ${startDate}`,
-    sqlBuilder`${appointments.date} < ${endDate}`,
-    isNull(monthlyServiceRecords.deletedAt),
-    isNull(appointments.deletedAt),
-  ];
-  if (!isPrimary) {
-    conditions.push(employeeFilter(employeeId));
-  }
-
+async function getCoveredByRecordTypeCount(recordType: "single" | "monthly", customerId: number, employeeId: number, year: number, month: number): Promise<number> {
   const result = await db.select({
     count: sqlBuilder<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
   })
     .from(serviceRecordAppointments)
     .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
     .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
-    .where(and(...conditions));
+    .where(and(...coverageConditions(
+      eq(appointments.customerId, customerId),
+      employeeId,
+      year,
+      month,
+      recordType,
+    )));
 
   return result[0]?.count ?? 0;
 }
 
-export function getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number> {
-  return getCoveredByRecordTypeCount("single", customerId, employeeId, year, month, isPrimary);
+export function getCoveredBySingleCount(customerId: number, employeeId: number, year: number, month: number): Promise<number> {
+  return getCoveredByRecordTypeCount("single", customerId, employeeId, year, month);
 }
 
-export function getCoveredByMonthlyCount(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<number> {
-  return getCoveredByRecordTypeCount("monthly", customerId, employeeId, year, month, isPrimary);
+export function getCoveredByMonthlyCount(customerId: number, employeeId: number, year: number, month: number): Promise<number> {
+  return getCoveredByRecordTypeCount("monthly", customerId, employeeId, year, month);
 }

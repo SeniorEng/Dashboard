@@ -212,6 +212,30 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "service-record-employee-scope",
+    question:
+      "Gehört dieser Termin dem Mitarbeiter? (Umfang seines Leistungsnachweises)",
+    canonical: [
+      { symbol: "appointmentBelongsToEmployeeScope", module: "shared/domain/service-record-scope.ts" },
+      { symbol: "employeeServiceRecordScopeCondition", module: "server/lib/service-record-scope.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Task #1896 — Query-Rand: `assigned ODER performed` darf im
+        // Leistungsnachweis-Kontext nicht erneut formuliert werden. Die
+        // Allowlist ist absichtlich klein: die Frage hat genau zwei kanonische
+        // Orte. Dieselbe Formel für ANDERE Fragen (Kundensicht, Arbeitszeit,
+        // Deaktivierungs-Guard) faengt der Detektor nicht — er greift nur in
+        // Dateien, die auch die Leistungsnachweis-Tabellen anfassen.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "SERVICE_RECORD_SCOPE_ALLOWLIST",
+        allowlist: ["server/lib/service-record-scope.ts"],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "appointment-active-invoice",
     question: "Liegt dieser Termin auf einer AKTIVEN Rechnung? (Task #1892)",
     canonical: [
