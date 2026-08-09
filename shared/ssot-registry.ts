@@ -212,6 +212,37 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "service-record-employee-scope",
+    question:
+      "Gehört dieser Termin dem Mitarbeiter? (Umfang seines Leistungsnachweises)",
+    canonical: [
+      // Task #1896 — KEINE eigene Formel: ein benannter Aufruf der
+      // Zuordnungs-SSoT `appointmentBelongsToEmployee` (Task #838) mit
+      // `coverage = null`. Damit ist die Regel status-abhängig (dokumentiert →
+      // Erbringer, sonst → Zugewiesener) und identisch zur Lohn-/Stunden-Sicht;
+      // `coverage = null` schaltet allein die Kunden-Vertretungs-Kette ab, die
+      // für den Leistungsnachweis die entfernte Stammkraft-Ausnahme wäre.
+      { symbol: "appointmentBelongsToEmployeeScope", module: "shared/domain/service-record-scope.ts" },
+      { symbol: "appointmentBelongsToEmployee", module: "shared/domain/appointment-attribution.ts" },
+      { symbol: "employeeServiceRecordScopeCondition", module: "server/lib/service-record-scope.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Task #1896 — Query-Rand: `assigned ODER performed` darf im
+        // Leistungsnachweis-Kontext nicht erneut formuliert werden. Die
+        // Allowlist ist absichtlich klein: die Frage hat genau zwei kanonische
+        // Orte. Dieselbe Formel für ANDERE Fragen (Kundensicht, Arbeitszeit,
+        // Deaktivierungs-Guard) faengt der Detektor nicht — er greift nur in
+        // Dateien, die auch die Leistungsnachweis-Tabellen anfassen.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "SERVICE_RECORD_SCOPE_ALLOWLIST",
+        allowlist: ["server/lib/service-record-scope.ts"],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "appointment-active-invoice",
     question: "Liegt dieser Termin auf einer AKTIVEN Rechnung? (Task #1892)",
     canonical: [

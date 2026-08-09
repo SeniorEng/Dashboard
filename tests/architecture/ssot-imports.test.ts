@@ -479,6 +479,104 @@ export function detectActiveInvoicePredicateViolations(files: ScanFile[]): Guard
 }
 
 // ---------------------------------------------------------------------------
+// A7 — „Gehört dieser Termin dem Mitarbeiter?"-SSoT (Leistungsnachweis-Umfang)
+// ---------------------------------------------------------------------------
+
+/**
+ * Task #1896 — Der Umfang eines Leistungsnachweises („nur eigene Termine") war
+ * zweimal formuliert: als private Funktion `employeeFilter` und wortgleich
+ * inline in `getServiceRecordsOverview`. Die Inline-Kopie war der Grund, warum
+ * die Regel überhaupt umgangen werden konnte, ohne dass es auffiel.
+ *
+ * SSoT ist jetzt `appointmentBelongsToEmployeeScope`
+ * (`shared/domain/service-record-scope.ts`) mit dem SQL-Spiegel
+ * `employeeServiceRecordScopeCondition` (`server/lib/service-record-scope.ts`).
+ *
+ * ABGRENZUNG (bewusst eng): Das Paar `assigned OR performed` beantwortet im
+ * Repo MEHRERE Fragen — „welche Kunden sieht der Mitarbeiter?"
+ * (`customers-storage.ts`), „welche Termine sind seine Arbeitszeit?"
+ * (`appointments-storage.ts` / Zeiterfassung), „hat er noch offene Termine?"
+ * (Deaktivierungs-Guard). Die alle einzusammeln hieße, verschiedene Fragen zu
+ * einer zu erklären, und die Allowlist wäre eine Attrappe. Erkannt wird deshalb
+ * nur das Paar in Dateien, die AUCH die Leistungsnachweis-Tabellen anfassen —
+ * genau dort, wo die Frage „was darf in MEINEN Nachweis?" gestellt wird.
+ */
+const SERVICE_RECORD_SCOPE_ALLOWLIST = new Set<string>(
+  ssotGuardAllowlist("service-record-employee-scope", "SERVICE_RECORD_SCOPE_ALLOWLIST"),
+);
+
+/** Kennzeichnet eine Datei als Leistungsnachweis-Kontext. */
+const SERVICE_RECORD_CONTEXT_RE =
+  /\b(monthlyServiceRecords|serviceRecordAppointments|monthly_service_records|service_record_appointments)\b/;
+
+/** Fenster hinter einem `or(` — grob eine Bedingungs-Gruppe. */
+const SCOPE_PAIR_WINDOW = 300;
+
+/**
+ * Beide Spalten als Drizzle-Interpolation mit `=` und einem `OR` dazwischen,
+ * in beiden Reihenfolgen. Deckt die SQL-Template-Schreibweise ab.
+ */
+const SCOPE_PAIR_TEMPLATE_RE =
+  /\.(?:assignedEmployeeId|performedByEmployeeId)\}?\s*=[^;]{0,160}\bOR\b[^;]{0,160}\.(?:assignedEmployeeId|performedByEmployeeId)\}?\s*=/;
+
+export function detectServiceRecordScopeViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (SERVICE_RECORD_SCOPE_ALLOWLIST.has(rel)) continue;
+    const code = stripComments(content).replace(/\s+/g, " ");
+    if (!SERVICE_RECORD_CONTEXT_RE.test(code)) continue;
+
+    let hit = false;
+
+    // Drizzle-Form: or( eq|inArray(*.assignedEmployeeId, …), eq|inArray(*.performedByEmployeeId, …) )
+    for (const m of code.matchAll(/\bor\(/g)) {
+      const w = code.slice(m.index, m.index + SCOPE_PAIR_WINDOW);
+      if (
+        /\b(?:eq|inArray)\(\s*[A-Za-z0-9_.]*\.assignedEmployeeId\s*,/.test(w) &&
+        /\b(?:eq|inArray)\(\s*[A-Za-z0-9_.]*\.performedByEmployeeId\s*,/.test(w)
+      ) {
+        hit = true;
+        break;
+      }
+    }
+
+    // SQL-Template-Form mit camelCase-Interpolation — GENAU die Schreibweise der
+    // entfernten `employeeFilter`:
+    //   sql`(${appointments.assignedEmployeeId} = ${id} OR ${appointments.performedByEmployeeId} = ${id})`
+    // Sie ist weder `or(eq(...))` noch snake_case-Roh-SQL und lief deshalb an
+    // den beiden anderen Regeln vorbei. Der wahrscheinlichste Rückfall ist,
+    // genau diese Zeile zurückzuschreiben — sie war zehn Monate lang der
+    // Bestand.
+    if (!hit && SCOPE_PAIR_TEMPLATE_RE.test(code)) hit = true;
+
+    // Roh-SQL-Form: beide Spalten mit `=` und einem `OR` dazwischen.
+    if (
+      !hit &&
+      /assigned_employee_id\s*=[^;]{0,120}\bOR\b[^;]{0,120}performed_by_employee_id\s*=/i.test(code)
+    ) {
+      hit = true;
+    }
+    if (
+      !hit &&
+      /performed_by_employee_id\s*=[^;]{0,120}\bOR\b[^;]{0,120}assigned_employee_id\s*=/i.test(code)
+    ) {
+      hit = true;
+    }
+
+    if (hit) {
+      out.push({
+        file: rel,
+        detail:
+          "formuliert den Leistungsnachweis-Umfang (`assigned ODER performed`) selbst, statt " +
+          "`employeeServiceRecordScopeCondition()` / `appointmentBelongsToEmployeeScope()` zu benutzen",
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -730,6 +828,87 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
           "Zusatz-Scope (Kunde, Zeitraum …) daneben, statt „aktiv“ neu zu formulieren.",
       );
     }
+  });
+
+  it("A7: der Leistungsnachweis-Umfang wird nur in der Scope-SSoT formuliert", () => {
+    const v = detectServiceRecordScopeViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Leistungsnachweis-Umfangs-SSoT verletzt — eigenes `assigned ODER performed` im LN-Kontext:\n" +
+          formatViolations(v) +
+          "\n\nDie Frage \u201egeh\u00f6rt dieser Termin dem Mitarbeiter?\u201c geh\u00f6rt in " +
+          "`shared/domain/service-record-scope.ts` (Pr\u00e4dikat) bzw. " +
+          "`server/lib/service-record-scope.ts` (SQL-Spiegel). Beantwortet die Stelle " +
+          "eine ANDERE Frage (Kundensicht, Arbeitszeit, offene Termine), geh\u00f6rt sie " +
+          "nicht in eine Datei mit den Leistungsnachweis-Tabellen \u2014 sonst wird der " +
+          "Umfang zum zweiten Mal definiert.",
+      );
+    }
+  });
+
+  it("A7 (Negativ): alle drei Schreibweisen im LN-Kontext werden erkannt, dieselbe Formel ohne LN-Bezug und der SSoT-Aufruf nicht", () => {
+    const synthetic: ScanFile[] = [
+      {
+        // Drizzle-Kopie IM LN-Kontext -> Verstoss.
+        rel: "server/storage/fake-sr-drizzle.ts",
+        content: `const rows = await db.select().from(monthlyServiceRecords)
+          .leftJoin(appointments, and(
+            eq(appointments.customerId, customers.id),
+            or(
+              eq(appointments.assignedEmployeeId, employeeId),
+              eq(appointments.performedByEmployeeId, employeeId),
+            ),
+          ));`,
+      },
+      {
+        // Roh-SQL-Kopie IM LN-Kontext -> Verstoss.
+        rel: "server/storage/fake-sr-raw.ts",
+        content: `const q = sql\`SELECT 1 FROM service_record_appointments sra
+          JOIN appointments a ON a.id = sra.appointment_id
+          WHERE (a.assigned_employee_id = 7 OR a.performed_by_employee_id = 7)\`;`,
+      },
+      {
+        // Die ORIGINAL-Schreibweise der entfernten `employeeFilter`
+        // (SQL-Template, camelCase) IM LN-Kontext -> Verstoss. Sie lief an den
+        // ersten beiden Regeln vorbei; ohne diesen Fall waere der Waechter
+        // gegen den wahrscheinlichsten Rueckfall blind.
+        rel: "server/storage/fake-sr-template.ts",
+        content: `import { monthlyServiceRecords } from "@shared/schema";
+          function employeeFilter(employeeId: number) {
+            return sqlBuilder\`(\${appointments.assignedEmployeeId} = \${employeeId} OR \${appointments.performedByEmployeeId} = \${employeeId})\`;
+          }`,
+      },
+      {
+        // Mengen-Variante `or(inArray, inArray)` IM LN-Kontext -> Verstoss.
+        rel: "server/storage/fake-sr-inarray.ts",
+        content: `const rows = await db.select().from(serviceRecordAppointments)
+          .where(or(
+            inArray(appointments.assignedEmployeeId, ids),
+            inArray(appointments.performedByEmployeeId, ids),
+          ));`,
+      },
+      {
+        // Dieselbe Formel, aber ANDERE Frage (keine LN-Tabelle) -> kein Verstoss.
+        rel: "server/storage/fake-worktime.ts",
+        content: `const filter = or(
+          eq(appointments.assignedEmployeeId, employeeId),
+          eq(appointments.performedByEmployeeId, employeeId),
+        );`,
+      },
+      {
+        // SSoT benutzt -> kein Verstoss.
+        rel: "server/storage/fake-sr-ssot.ts",
+        content: `const rows = await db.select().from(monthlyServiceRecords)
+          .where(and(employeeServiceRecordScopeCondition(employeeId)));`,
+      },
+    ];
+    const v = detectServiceRecordScopeViolations(synthetic);
+    expect(v.map((h) => h.file).sort()).toEqual([
+      "server/storage/fake-sr-drizzle.ts",
+      "server/storage/fake-sr-inarray.ts",
+      "server/storage/fake-sr-raw.ts",
+      "server/storage/fake-sr-template.ts",
+    ]);
   });
 
   it("A6 (Negativ): termin-gebundene Kopien (beide Schreibrichtungen) werden erkannt, Aggregate ohne Termin-Bindung und der SSoT-Aufruf nicht", () => {

@@ -7,6 +7,7 @@ import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
 import { FINAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
+import { serviceRecordEmployeeId } from "@shared/domain/service-record-scope";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, budgetTransactions } from "@shared/schema";
 import { eq, and, isNull, inArray, notInArray, ne, desc, or, gte, lt, lte, sql } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
@@ -484,7 +485,12 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
   // der Kundenzeile gewinnt auch bei cents = 0).
   const priceCtx = await loadCustomerPriceContext(resolvedCustomerId ?? null);
 
-  const employeeIds = [...new Set(appts.map(a => a.assignedEmployeeId || a.performedByEmployeeId).filter((id): id is number => id != null))];
+  // Task #1896 — WEM gehört der Termin? Über die Umfangs-SSoT, nicht über eine
+  // eigene Reihenfolge. Die frühere Formel (`assigned || performed`) stellte
+  // den Zugewiesenen VOR den Erbringer und nannte damit im
+  // Leistungsnachweis-PDF („Mitarbeiter/in (Leistungserbringer/in)") einen
+  // anderen Mitarbeiter, als darunter unterschrieben hat.
+  const employeeIds = [...new Set(appts.map(a => serviceRecordEmployeeId(a)).filter((id): id is number => id != null))];
   const employeeMap = new Map<number, { displayName: string }>();
   if (employeeIds.length > 0) {
     const emps = await db.select({ id: users.id, displayName: users.displayName }).from(users).where(inArray(users.id, employeeIds));
@@ -512,7 +518,7 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
     const apptServices = serviceBreakdown.filter(s => s.appointmentId === appt.id);
     const apptDate = appt.date;
 
-    const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
+    const employeeId = serviceRecordEmployeeId(appt);
     const emp = employeeId ? employeeMap.get(employeeId) : undefined;
     const employeeName = emp?.displayName || "";
 
