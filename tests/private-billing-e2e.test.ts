@@ -215,10 +215,23 @@ async function documentAppointmentAs(
   expect(docRes.status, `Dokumentation für Termin ${apptId} als Mitarbeiter muss erfolgreich sein`).toBe(200);
 }
 
-async function createServiceRecord(customerId: number, year: number, month: number): Promise<number> {
+/**
+ * Task #1896 — Der Nachweis geht auf den Mitarbeiter, der die Termine GELEISTET
+ * hat, nicht auf den Admin, der ihn anlegt (GoBD: Erbringer = Unterzeichner).
+ * Vorher stand hier `auth.user.id`; das funktionierte nur, weil der Admin als
+ * Stammkraft des Kunden die Termine aller Kollegen bündeln durfte — genau die
+ * Ausnahme, die #1896 entfernt. Der Default passt zu `findFreeSlotAndCreate`,
+ * das Termine ohne abweichende Angabe `testEmployeeId` zuweist.
+ */
+async function createServiceRecord(
+  customerId: number,
+  year: number,
+  month: number,
+  employeeId: number = testEmployeeId,
+): Promise<number> {
   const res = await apiPost<any>("/api/service-records", {
     customerId,
-    employeeId: auth.user.id,
+    employeeId,
     year,
     month,
   });
@@ -226,6 +239,25 @@ async function createServiceRecord(customerId: number, year: number, month: numb
     console.error(`Service record creation failed:`, JSON.stringify(res.data));
   }
   expect(res.status, "Leistungsnachweis muss erstellt werden").toBe(201);
+  cleanupServiceRecordIds.push(res.data.id);
+  return res.data.id;
+}
+
+/**
+ * Wie `createServiceRecord`, aber `null` statt Fehlschlag, wenn der Mitarbeiter
+ * in dieser Periode keinen eigenen dokumentierten Termin hat. Gebraucht, sobald
+ * mehrere Mitarbeiter denselben Kunden bedienen und nicht jeder in jedem Monat
+ * dran war.
+ */
+async function createServiceRecordIfAny(
+  customerId: number,
+  year: number,
+  month: number,
+  employeeId: number,
+): Promise<number | null> {
+  const res = await apiPost<any>("/api/service-records", { customerId, employeeId, year, month });
+  if (res.status === 400) return null;
+  expect(res.status, `Leistungsnachweis fuer MA ${employeeId} muss erstellt werden`).toBe(201);
   cleanupServiceRecordIds.push(res.data.id);
   return res.data.id;
 }
@@ -750,10 +782,17 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
     const dates = [new Date(meAppt1.date), new Date(meAppt2.date)];
     const months = [...new Set(dates.map(d => `${d.getFullYear()}-${d.getMonth() + 1}`))];
 
+    // Task #1896 — je Mitarbeiter EIN Nachweis. Termin 1 gehoert MA1
+    // (auth.user), Termin 2 gehoert MA2; ein gemeinsamer Nachweis waere genau
+    // das Dokument, das Erbringer A ausweist und von B unterschrieben wird.
+    // Nicht jeder Mitarbeiter hat in jedem Monat einen Termin — deshalb wird
+    // ein 400 ("keine dokumentierten Termine") hier toleriert.
     for (const m of months) {
       const [year, month] = m.split("-").map(Number);
-      const srId = await createServiceRecord(meCustomerId, year, month);
-      await signServiceRecord(srId);
+      for (const employeeId of [auth.user.id, employee2Id]) {
+        const srId = await createServiceRecordIfAny(meCustomerId, year, month, employeeId);
+        if (srId !== null) await signServiceRecord(srId);
+      }
     }
 
     const meInvoiceIds: number[] = [];
@@ -1514,7 +1553,14 @@ describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für
     await documentAppointment(abAppt.id, abAppt.time, abServiceId, 90, `IP-AB-${nachname}`, 0, 0);
 
     const apptDate = new Date(hwAppt.date);
-    const srId = await createServiceRecord(customerId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    // Task #1896 — beide Termine gehören `dedicatedEmp`, also geht der Nachweis
+    // auch auf ihn (nicht auf den Admin, der ihn anlegt).
+    const srId = await createServiceRecord(
+      customerId,
+      apptDate.getFullYear(),
+      apptDate.getMonth() + 1,
+      dedicatedEmp.id,
+    );
     await signServiceRecord(srId);
     const invData = await generateInvoice(customerId, apptDate.getFullYear(), apptDate.getMonth() + 1);
     const inv = Array.isArray(invData) ? invData[0] : invData;
