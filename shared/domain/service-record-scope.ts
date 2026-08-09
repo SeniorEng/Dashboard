@@ -73,6 +73,7 @@
  */
 import {
   appointmentBelongsToEmployee,
+  attributeAppointmentToEmployees,
   type AppointmentAttributionInput,
 } from "./appointment-attribution";
 
@@ -98,4 +99,31 @@ export function appointmentBelongsToEmployeeScope(
   employeeId: number,
 ): boolean {
   return appointmentBelongsToEmployee(appt, null, employeeId);
+}
+
+/**
+ * Dieselbe Regel als ID statt als Prädikat: **WEM** gehört dieser Termin?
+ * `null`, wenn niemandem (siehe „kein Mitarbeiterbezug" im Datei-Kopf).
+ *
+ * ERSETZT zwei Zweitformeln, die dieselbe Frage anders beantworteten und dabei
+ * `assigned` VOR `performed` stellten — also genau gegen die Weiche:
+ *  - `server/services/invoice-data.ts` (`assignedEmployeeId || performedByEmployeeId`):
+ *    daraus entsteht `lineItems[].employeeName` und damit die Zeile
+ *    „Mitarbeiter/in (Leistungserbringer/in)" im Leistungsnachweis-PDF. Bei
+ *    Divergenz nannte der Kopf A, während darunter B unterschrieb — ein
+ *    Dokument, das sich selbst widerspricht.
+ *  - `server/routes/service-records.ts` (`performedByEmployeeId || assignedEmployeeId
+ *    || userId`): legte den Einzel-Nachweis eines dokumentierten Termins ohne
+ *    Erbringer auf den bloß Zugewiesenen — oder, ganz ohne beides, auf den
+ *    handelnden Admin.
+ *
+ * Der Umweg über `attributeAppointmentToEmployees` ist Absicht: es gibt nur die
+ * eine Zuordnungsregel, hier nur eine andere Darreichungsform. Mehr als eine ID
+ * kann ohne Coverage nicht herauskommen (die Vertretungs-Kette ist der einzige
+ * mehrwertige Zweig, und die ist mit `coverage = null` abgeschaltet).
+ */
+export function serviceRecordEmployeeId(
+  appt: ServiceRecordScopeAppointment,
+): number | null {
+  return attributeAppointmentToEmployees(appt, null)[0] ?? null;
 }

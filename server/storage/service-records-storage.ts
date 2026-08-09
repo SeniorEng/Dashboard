@@ -66,6 +66,14 @@ function coverageConditions(
   const conditions: SQLWrapper[] = [
     customerCondition,
     employeeServiceRecordScopeCondition(employeeId),
+    // Nur DOKUMENTIERTE Termine zaehlen als abgedeckt — dieselbe Menge, gegen
+    // die `documentedCount` gerechnet wird. Ohne diesen Filter hielt ein
+    // Termin, der nach der Aufnahme in den Nachweis auf `customer_no_show`
+    // zurueckging (Reopen → `document-no-show`), die Abdeckung kuenstlich hoch:
+    // er zaehlte weder als dokumentiert noch als undokumentiert, blieb aber
+    // verknuepft. Ein danebenliegender, echt offener Termin bekam dadurch
+    // NIE einen Leistungsnachweis.
+    eq(appointments.status, 'completed'),
     sqlBuilder`${appointments.date} >= ${startDate}`,
     sqlBuilder`${appointments.date} < ${endDate}`,
     isNull(monthlyServiceRecords.deletedAt),

@@ -12,7 +12,7 @@ import { reopenAppointmentForRedocumentation, type AppointmentReopenFacts } from
 import { isAdminLike } from "@shared/policies/appointments";
 import { appointmentsRepo, monthlyServiceRecordsRepo } from "../repos";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
-import { appointmentBelongsToEmployeeScope } from "@shared/domain/service-record-scope";
+import { appointmentBelongsToEmployeeScope, serviceRecordEmployeeId } from "@shared/domain/service-record-scope";
 import { invalidateDraftInvoicePdfCache } from "../storage/service-records-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { timeTrackingStorage } from "../storage/time-tracking";
@@ -486,7 +486,14 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
   // Admins bleiben ausgenommen (Büro legt für Mitarbeiter an) — die
   // Unterschrift bleibt ihnen davon unabhängig verwehrt, dafür sorgt
   // `allowedSignerIds` in `POST /:id/sign`.
-  if (!req.user!.isAdmin && !appointmentBelongsToEmployeeScope(appointment, userId)) {
+  const creatorIsAdmin = isAdminLike({
+    id: req.user!.id,
+    isAdmin: !!req.user!.isAdmin,
+    isSuperAdmin: !!req.user!.isSuperAdmin,
+    isTeamLead: !!req.user!.isTeamLead,
+    isActive: !!req.user!.isActive,
+  });
+  if (!creatorIsAdmin && !appointmentBelongsToEmployeeScope(appointment, userId)) {
     return sendForbidden(
       res,
       "FORBIDDEN",
@@ -508,7 +515,18 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
   const year = appointmentDate.getFullYear();
   const month = appointmentDate.getMonth() + 1;
   
-  const appointmentEmployeeId = appointment.performedByEmployeeId || appointment.assignedEmployeeId || userId;
+  // Task #1896 — WEM gehört der Termin? Über dieselbe SSoT wie der Guard oben.
+  // Die frühere Formel (`performed || assigned || userId`) legte den Nachweis
+  // eines dokumentierten Termins OHNE Erbringer auf den bloß Zugewiesenen —
+  // und ganz ohne beides auf den handelnden Admin. Beides widerspricht der
+  // Definition „gehört niemandem".
+  const appointmentEmployeeId = serviceRecordEmployeeId(appointment);
+  if (appointmentEmployeeId === null) {
+    return sendBadRequest(
+      res,
+      "Für diesen Termin ist kein Leistungserbringer eingetragen. Ohne Erbringer kann kein Leistungsnachweis entstehen.",
+    );
+  }
 
   // Task #1496: Einzel-Leistungsnachweis nach Monatsabschluss erlaubt (siehe oben).
   // Die Vorbedingung „Termin ist abgeschlossen (completed)" bleibt aktiv.
@@ -626,11 +644,49 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
   //
   // Co-Visit (Zwei-Kräfte-Einsatz, #1613): jede Kraft hat ihren EIGENEN Termin
   // und damit ihren eigenen Nachweis — die Kante braucht die Erweiterung nicht.
-  if (!req.user!.isAdmin && req.user!.id !== existingRecord.employeeId) {
+  const signerIsAdmin = isAdminLike({
+    id: req.user!.id,
+    isAdmin: !!req.user!.isAdmin,
+    isSuperAdmin: !!req.user!.isSuperAdmin,
+    isTeamLead: !!req.user!.isTeamLead,
+    isActive: !!req.user!.isActive,
+  });
+  if (!signerIsAdmin && req.user!.id !== existingRecord.employeeId) {
     return res.status(403).json({
       error: "FORBIDDEN",
       message: "Nur der zugeordnete Mitarbeiter darf diesen Leistungsnachweis unterschreiben",
     });
+  }
+
+  // Task #1896 — die Invariante „Inhaber = Erbringer" wird hier ERZWUNGEN,
+  // nicht vorausgesetzt.
+  //
+  // Sie folgt NICHT aus dem Umfang allein: ein Termin kann einen bereits
+  // angelegten Nachweis wieder verlassen, ohne die Verknüpfung zu lösen —
+  // `POST /appointments/:id/reopen` greift, solange der Nachweis erst `pending`
+  // ist, lässt die Junction-Zeile aber stehen, und die erneute Dokumentation
+  // darf `performed_by` frei setzen. Danach enthielte der Nachweis von B einen
+  // Termin, den C geleistet hat, und B dürfte ihn unterschreiben — genau das
+  // Dokument, das #1896 verhindern soll.
+  //
+  // Gilt bewusst AUCH für Admins: das ist keine Berechtigungs-, sondern eine
+  // Dokument-Integritäts-Frage. Ein Nachweis mit fremden Terminen ist für
+  // niemanden gültig unterschreibbar.
+  //
+  // Ausweg für den Anwender ist der reguläre Korrekturweg aus #70: Nachweis
+  // löschen (die Termine werden dabei wieder bearbeitbar) und neu erstellen —
+  // dann entsteht er beim richtigen Mitarbeiter.
+  const foreignAppointments = linkedAppointments.filter(
+    (a) => !appointmentBelongsToEmployeeScope(a, existingRecord.employeeId),
+  );
+  if (foreignAppointments.length > 0) {
+    const details = foreignAppointments.slice(0, 3).map((a) => `${a.date}`).join(", ");
+    return sendConflict(
+      res,
+      "FOREIGN_APPOINTMENTS",
+      `Dieser Leistungsnachweis enthält ${foreignAppointments.length} Termin(e), die nicht dem zugeordneten Mitarbeiter gehören (${details}). ` +
+        "Er kann deshalb nicht unterschrieben werden. Bitte den Nachweis löschen und neu erstellen.",
+    );
   }
 
   // Task #1496: Unterschreiben eines Leistungsnachweises ist nach Monatsabschluss

@@ -286,6 +286,44 @@ describe("Leistungsnachweis-Umfang: nur eigene Termine (Task #1896)", () => {
   );
 
   it(
+    "Invariante wird ERZWUNGEN: wechselt der Erbringer nach der Anlage, ist der Nachweis nicht mehr unterschreibbar",
+    async () => {
+      // Der Weg, auf dem „Inhaber = Erbringer" NICHT aus dem Umfang folgt:
+      // der Nachweis ist erst `pending`, also greift die Termin-Sperre noch
+      // nicht. Reopen loest die Verknuepfung zum Nachweis NICHT, und die
+      // erneute Dokumentation darf `performed_by` frei setzen. Ohne den Guard
+      // im Sign-Pfad enthielte der Nachweis der Vertretung danach einen
+      // Termin, den die Stammkraft geleistet hat — und die Vertretung duerfte
+      // ihn unterschreiben.
+      const recordId = cleanupRecordIds[0];
+      expect(recordId, "Vorgängertest muss den Nachweis angelegt haben").toBeTruthy();
+
+      const reopen = await apiPost<any>(`/api/appointments/${cleanupApptIds[0]}/reopen`, {});
+      expect(reopen.status, JSON.stringify(reopen.data)).toBe(200);
+
+      const redoc = await apiPost<any>(`/api/appointments/${cleanupApptIds[0]}/document`, {
+        actualStart: "08:00",
+        travelOriginType: "home",
+        travelKilometers: 0,
+        customerKilometers: 0,
+        services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "T1896-redoc" }],
+        performedByEmployeeId: stammkraft.id,
+      });
+      expect(redoc.status, JSON.stringify(redoc.data)).toBe(200);
+
+      const auth = await loginAs(vertretung.email, vertretung.password);
+      const sign = await apiPostAs<any>(auth, `/api/service-records/${recordId}/sign`, {
+        signatureData: "data:image/png;base64,iVBORw0KGgo=",
+        signerType: "employee",
+        signingLocation: null,
+      });
+      expect(sign.status, JSON.stringify(sign.data)).toBe(409);
+      expect(String(sign.data?.error)).toBe("FOREIGN_APPOINTMENTS");
+    },
+    60_000,
+  );
+
+  it(
     "Invariante: der Nachweis gehört dem Erbringer — und NUR der darf unterschreiben",
     async () => {
       const recordId = cleanupRecordIds[0];
