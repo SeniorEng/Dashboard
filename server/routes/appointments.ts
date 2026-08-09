@@ -517,11 +517,17 @@ router.get("/undocumented/by-customer", asyncHandler("Fehler beim Laden der offe
   // - Admin/Teamlead mit viewAs → Sicht des gewählten Mitarbeiters.
   // - Mitarbeiter → eigene Sicht (assigned/performed).
   //
-  // Task #1896 — die kundenweite Sicht hängt jetzt AUSSCHLIESSLICH an der
-  // Admin-Rolle des Aufrufers (`includeAllEmployees`). Vorher lief sie über
-  // dasselbe `isPrimary`-Flag, das ein Mitarbeiter auch dadurch bekam, dass er
-  // Stammkraft des Kunden war — damit weitete sich die Sicht ohne jede
-  // Admin-Rolle auf die Termine aller Kollegen.
+  // Task #1896 — die kundenweite Sicht hängt jetzt an der ROLLE des Aufrufers
+  // (`adminScope` = Admin ODER Teamleitung, siehe `isTeamLead`: das ist eine
+  // eigenständige Nicht-Admin-Rolle), nicht mehr an einer Kunden-Zuordnung.
+  // Vorher lief sie über dasselbe `isPrimary`-Flag, das ein ganz normaler
+  // Mitarbeiter dadurch bekam, dass er Stammkraft des Kunden war — damit
+  // weitete sich die Sicht ohne jede Rolle auf die Termine aller Kollegen.
+  //
+  // FOLGE, bewusst offen: für die Teamleitung zeigt diese Route kundenweit,
+  // `GET /api/service-records/check-period` aber nur den eigenen Umfang. Ob
+  // Teamleitungen die Mitarbeitersicht (`viewAsEmployeeId`) brauchen, ist
+  // ungeklärt — als FINDING im PR vermerkt, hier NICHT nebenbei entschieden.
   const effectiveEmployeeId = adminScope && viewAsEmployeeId ? viewAsEmployeeId : user.id;
 
   if (!(await checkCustomerAccess(user, customerId, res))) return;

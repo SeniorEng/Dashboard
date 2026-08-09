@@ -113,9 +113,14 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
     } else if (item.documentedCount > 0) {
       // Task #1896 — alle eigenen dokumentierten Termine sind abgedeckt, aber
       // durch einen FREMDEN Nachweis (Altbestand aus der Stammkraft-Zeit).
-      // Ohne diesen Zweig fiel der Fall auf "ready" — die Kachel bot einen
-      // Nachweis an, den `canCreateRecord` im selben Objekt verweigert. Genau
-      // die Phantom-Aufgabe, die #1896 abräumt.
+      // Ohne diesen Zweig fiele der Fall auf "ready", obwohl `canCreateRecord`
+      // im selben Objekt false ist — ein in sich widersprüchliches Objekt.
+      //
+      // WIRKUNG: nur die serverseitige Grob-Sortierung (`statusOrder` unten).
+      // Die Kachel-Einordnung macht der Client selbst aus
+      // `uncoveredDocumentedCount` + den Record-Arrays (`bucketize` in
+      // client/src/features/service-records/components/overview-sections.tsx)
+      // und liest dieses Feld NICHT.
       status = "completed";
     } else {
       status = "ready";

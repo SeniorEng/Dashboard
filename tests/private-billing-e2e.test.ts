@@ -787,13 +787,25 @@ describe("ME: Multi-Employee – Verschiedene Mitarbeiter in Rechnungspositionen
     // das Dokument, das Erbringer A ausweist und von B unterschrieben wird.
     // Nicht jeder Mitarbeiter hat in jedem Monat einen Termin — deshalb wird
     // ein 400 ("keine dokumentierten Termine") hier toleriert.
+    const createdRecordIds: number[] = [];
     for (const m of months) {
       const [year, month] = m.split("-").map(Number);
       for (const employeeId of [auth.user.id, employee2Id]) {
         const srId = await createServiceRecordIfAny(meCustomerId, year, month, employeeId);
-        if (srId !== null) await signServiceRecord(srId);
+        if (srId !== null) {
+          createdRecordIds.push(srId);
+          await signServiceRecord(srId);
+        }
       }
     }
+    // Ohne diese Zusicherung waere der Test blind: scheitert die LN-Erstellung
+    // kuenftig fuer BEIDE Mitarbeiter, liefe die Schleife leer durch und ME-3
+    // bliebe gruen, solange nur die Rechnung entsteht. Zwei Mitarbeiter, zwei
+    // Termine -> mindestens zwei Nachweise.
+    expect(
+      createdRecordIds.length,
+      "je Mitarbeiter muss ein Leistungsnachweis entstanden sein",
+    ).toBeGreaterThanOrEqual(2);
 
     const meInvoiceIds: number[] = [];
     for (const m of months) {

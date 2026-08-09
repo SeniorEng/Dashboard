@@ -253,14 +253,23 @@ describe("Leistungsnachweis-Unterschrift: nur der zugeordnete Mitarbeiter (Task 
   );
 
   it(
-    "lässt den Admin weiterhin auch fremde Nachweise unterschreiben (Büro-Pfad bleibt)",
+    "lässt den Admin einen FREMDEN Nachweis unterschreiben (Büro-Pfad bleibt)",
     async () => {
-      const res = await apiPost<any>(`/api/service-records/${recordOwnedByAdminId}/sign`, {
+      // Bewusst `recordOwnedByOwnerId`: dieser Nachweis gehört `owner`, nicht
+      // dem Admin. Auf dem Admin-eigenen Nachweis wäre der Test wertlos — er
+      // bliebe grün, wenn man den `isAdmin`-Bypass ersatzlos striche, weil
+      // dann schon `req.user.id === record.employeeId` greift.
+      //
+      // Der Vorgängertest hat ihn auf `employee_signed` gebracht, also
+      // unterschreibt der Admin hier den Kunden-Teil — derselbe
+      // Unterzeichner-Guard, er ist signerType-unabhängig.
+      const res = await apiPost<any>(`/api/service-records/${recordOwnedByOwnerId}/sign`, {
         signatureData: VALID_SIGNATURE,
-        signerType: "employee",
+        signerType: "customer",
         signingLocation: null,
       });
       expect(res.status, JSON.stringify(res.data)).toBe(200);
+      expect(res.data?.status).toBe("completed");
     },
     60_000,
   );

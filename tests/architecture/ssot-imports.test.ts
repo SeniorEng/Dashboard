@@ -512,6 +512,13 @@ const SERVICE_RECORD_CONTEXT_RE =
 /** Fenster hinter einem `or(` — grob eine Bedingungs-Gruppe. */
 const SCOPE_PAIR_WINDOW = 300;
 
+/**
+ * Beide Spalten als Drizzle-Interpolation mit `=` und einem `OR` dazwischen,
+ * in beiden Reihenfolgen. Deckt die SQL-Template-Schreibweise ab.
+ */
+const SCOPE_PAIR_TEMPLATE_RE =
+  /\.(?:assignedEmployeeId|performedByEmployeeId)\}?\s*=[^;]{0,160}\bOR\b[^;]{0,160}\.(?:assignedEmployeeId|performedByEmployeeId)\}?\s*=/;
+
 export function detectServiceRecordScopeViolations(files: ScanFile[]): GuardViolation[] {
   const out: GuardViolation[] = [];
   for (const { rel, content } of files) {
@@ -522,17 +529,26 @@ export function detectServiceRecordScopeViolations(files: ScanFile[]): GuardViol
 
     let hit = false;
 
-    // Drizzle-Form: or( eq(*.assignedEmployeeId, …), eq(*.performedByEmployeeId, …) )
+    // Drizzle-Form: or( eq|inArray(*.assignedEmployeeId, …), eq|inArray(*.performedByEmployeeId, …) )
     for (const m of code.matchAll(/\bor\(/g)) {
       const w = code.slice(m.index, m.index + SCOPE_PAIR_WINDOW);
       if (
-        /\beq\(\s*[A-Za-z0-9_.]*\.assignedEmployeeId\s*,/.test(w) &&
-        /\beq\(\s*[A-Za-z0-9_.]*\.performedByEmployeeId\s*,/.test(w)
+        /\b(?:eq|inArray)\(\s*[A-Za-z0-9_.]*\.assignedEmployeeId\s*,/.test(w) &&
+        /\b(?:eq|inArray)\(\s*[A-Za-z0-9_.]*\.performedByEmployeeId\s*,/.test(w)
       ) {
         hit = true;
         break;
       }
     }
+
+    // SQL-Template-Form mit camelCase-Interpolation — GENAU die Schreibweise der
+    // entfernten `employeeFilter`:
+    //   sql`(${appointments.assignedEmployeeId} = ${id} OR ${appointments.performedByEmployeeId} = ${id})`
+    // Sie ist weder `or(eq(...))` noch snake_case-Roh-SQL und lief deshalb an
+    // den beiden anderen Regeln vorbei. Der wahrscheinlichste Rückfall ist,
+    // genau diese Zeile zurückzuschreiben — sie war zehn Monate lang der
+    // Bestand.
+    if (!hit && SCOPE_PAIR_TEMPLATE_RE.test(code)) hit = true;
 
     // Roh-SQL-Form: beide Spalten mit `=` und einem `OR` dazwischen.
     if (
@@ -830,7 +846,7 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
     }
   });
 
-  it("A7 (Negativ): die Kopie im LN-Kontext wird erkannt, dieselbe Formel ohne LN-Bezug und der SSoT-Aufruf nicht", () => {
+  it("A7 (Negativ): alle drei Schreibweisen im LN-Kontext werden erkannt, dieselbe Formel ohne LN-Bezug und der SSoT-Aufruf nicht", () => {
     const synthetic: ScanFile[] = [
       {
         // Drizzle-Kopie IM LN-Kontext -> Verstoss.
@@ -852,6 +868,26 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
           WHERE (a.assigned_employee_id = 7 OR a.performed_by_employee_id = 7)\`;`,
       },
       {
+        // Die ORIGINAL-Schreibweise der entfernten `employeeFilter`
+        // (SQL-Template, camelCase) IM LN-Kontext -> Verstoss. Sie lief an den
+        // ersten beiden Regeln vorbei; ohne diesen Fall waere der Waechter
+        // gegen den wahrscheinlichsten Rueckfall blind.
+        rel: "server/storage/fake-sr-template.ts",
+        content: `import { monthlyServiceRecords } from "@shared/schema";
+          function employeeFilter(employeeId: number) {
+            return sqlBuilder\`(\${appointments.assignedEmployeeId} = \${employeeId} OR \${appointments.performedByEmployeeId} = \${employeeId})\`;
+          }`,
+      },
+      {
+        // Mengen-Variante `or(inArray, inArray)` IM LN-Kontext -> Verstoss.
+        rel: "server/storage/fake-sr-inarray.ts",
+        content: `const rows = await db.select().from(serviceRecordAppointments)
+          .where(or(
+            inArray(appointments.assignedEmployeeId, ids),
+            inArray(appointments.performedByEmployeeId, ids),
+          ));`,
+      },
+      {
         // Dieselbe Formel, aber ANDERE Frage (keine LN-Tabelle) -> kein Verstoss.
         rel: "server/storage/fake-worktime.ts",
         content: `const filter = or(
@@ -869,7 +905,9 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
     const v = detectServiceRecordScopeViolations(synthetic);
     expect(v.map((h) => h.file).sort()).toEqual([
       "server/storage/fake-sr-drizzle.ts",
+      "server/storage/fake-sr-inarray.ts",
       "server/storage/fake-sr-raw.ts",
+      "server/storage/fake-sr-template.ts",
     ]);
   });
 
