@@ -1,257 +1,238 @@
 {
+  "openapi": "3.0.0",
+  "info": {
+    "title": "CareConnect API",
+    "version": "1.0.0",
+    "description": "Maschinenlesbare API-Oberfläche, generiert aus Zod-Schemas (Schema-First). Quelle: shared/api/openapi.ts. Nicht von Hand editieren — `npm run gen:openapi` ausführen."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "CareConnect"
+    }
+  ],
   "components": {
-    "parameters": {},
     "schemas": {
-      "BatchSendInvoiceResponse": {
+      "PaginationParams": {
+        "type": "object",
         "properties": {
-          "message": {
+          "page": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "search": {
             "type": "string"
-          },
-          "results": {
-            "items": {
-              "properties": {
-                "error": {
-                  "type": "string"
-                },
-                "invoiceId": {
-                  "type": "integer"
-                },
-                "invoiceNumber": {
-                  "type": "string"
-                },
-                "recipientEmail": {
-                  "type": "string"
-                },
-                "status": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "invoiceId",
-                "invoiceNumber",
-                "status"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "summary": {
-            "properties": {
-              "errors": {
-                "type": "integer"
-              },
-              "sent": {
-                "type": "integer"
-              },
-              "skipped": {
-                "type": "integer"
-              },
-              "total": {
-                "type": "integer"
-              }
-            },
-            "required": [
-              "sent",
-              "errors",
-              "skipped",
-              "total"
-            ],
-            "type": "object"
           }
-        },
-        "required": [
-          "message",
-          "summary",
-          "results"
-        ],
-        "type": "object"
+        }
       },
-      "BillingCustomerItem": {
+      "EmployeeRole": {
+        "type": "string",
+        "enum": [
+          "hauswirtschaft",
+          "alltagsbegleitung",
+          "erstberatung",
+          "personenbefoerderung",
+          "kinderbetreuung"
+        ]
+      },
+      "EmployeeListItem": {
+        "type": "object",
         "properties": {
-          "billingType": {
-            "type": "string"
-          },
-          "completedAppointments": {
-            "type": "integer"
-          },
-          "coveredAppointments": {
-            "type": "integer"
-          },
-          "eligibility": {
-            "properties": {
-              "reason": {
-                "enum": [
-                  "customer_signature_required",
-                  "not_signed",
-                  "no_appointments",
-                  "already_billed"
-                ],
-                "nullable": true,
-                "type": "string"
-              },
-              "status": {
-                "enum": [
-                  "eligible",
-                  "blocked"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "status",
-              "reason"
-            ],
-            "type": "object"
-          },
-          "estimatedAmountCents": {
-            "type": "integer"
-          },
           "id": {
             "type": "integer"
           },
-          "nachname": {
-            "nullable": true,
+          "email": {
             "type": "string"
           },
-          "name": {
+          "displayName": {
             "type": "string"
-          },
-          "openAppointments": {
-            "type": "integer"
-          },
-          "signedAppointmentCount": {
-            "type": "integer"
-          },
-          "status": {
-            "type": "string"
-          },
-          "unbilledAppointmentCount": {
-            "type": "integer"
           },
           "vorname": {
-            "nullable": true,
+            "type": "string",
+            "nullable": true
+          },
+          "nachname": {
+            "type": "string",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmployeeRole"
+            }
+          },
+          "createdAt": {
             "type": "string"
           }
         },
         "required": [
           "id",
-          "name",
+          "email",
+          "displayName",
           "vorname",
           "nachname",
-          "billingType",
-          "status",
-          "completedAppointments",
-          "coveredAppointments",
-          "openAppointments",
-          "signedAppointmentCount",
-          "unbilledAppointmentCount",
-          "estimatedAmountCents",
-          "eligibility"
-        ],
-        "type": "object"
+          "isActive",
+          "isAdmin",
+          "roles",
+          "createdAt"
+        ]
       },
-      "BillingInvoicePreview": {
+      "InsuranceProviderItem": {
+        "type": "object",
         "properties": {
-          "alreadyBilledAppointments": {
-            "type": "integer"
-          },
-          "completedAppointments": {
-            "type": "integer"
-          },
-          "coveredAppointments": {
-            "type": "integer"
-          },
-          "excludedAppointments": {
-            "items": {
-              "properties": {
-                "date": {
-                  "type": "string"
-                },
-                "reason": {
-                  "enum": [
-                    "customer_signature_required",
-                    "not_signed",
-                    "no_appointments",
-                    "already_billed"
-                  ],
-                  "type": "string"
-                }
-              },
-              "required": [
-                "date",
-                "reason"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "serviceRecordCount": {
-            "type": "integer"
-          },
-          "splitInvoices": {
-            "type": "boolean"
-          },
-          "splitPots": {
-            "items": {
-              "enum": [
-                "entlastungsbetrag_45b",
-                "umwandlung_45a",
-                "ersatzpflege_39_42a",
-                "private"
-              ],
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "totalCents": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "serviceRecordCount",
-          "coveredAppointments",
-          "completedAppointments",
-          "alreadyBilledAppointments",
-          "totalCents",
-          "splitInvoices",
-          "splitPots",
-          "excludedAppointments"
-        ],
-        "type": "object"
-      },
-      "BirthdayEntry": {
-        "properties": {
-          "address": {
-            "type": "string"
-          },
-          "age": {
-            "type": "number"
-          },
-          "cardSent": {
-            "type": "boolean"
-          },
-          "cardSentAt": {
-            "nullable": true,
-            "type": "string"
-          },
-          "daysUntil": {
-            "type": "number"
-          },
-          "geburtsdatum": {
-            "type": "string"
-          },
           "id": {
             "type": "integer"
           },
           "name": {
             "type": "string"
           },
+          "empfaenger": {
+            "type": "string",
+            "nullable": true
+          },
+          "empfaengerZeile2": {
+            "type": "string",
+            "nullable": true
+          },
+          "isPrivate": {
+            "type": "boolean"
+          },
+          "ikNummer": {
+            "type": "string",
+            "nullable": true
+          },
+          "strasse": {
+            "type": "string",
+            "nullable": true
+          },
+          "hausnummer": {
+            "type": "string",
+            "nullable": true
+          },
+          "plz": {
+            "type": "string",
+            "nullable": true
+          },
+          "stadt": {
+            "type": "string",
+            "nullable": true
+          },
+          "telefon": {
+            "type": "string",
+            "nullable": true
+          },
+          "fax": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "emailVerhinderungspflege": {
+            "type": "string",
+            "nullable": true
+          },
+          "kimAdresse": {
+            "type": "string",
+            "nullable": true
+          },
+          "ansprechpartner": {
+            "type": "string",
+            "nullable": true
+          },
+          "datenannahmeIk": {
+            "type": "string",
+            "nullable": true
+          },
+          "emailInvoiceEnabled": {
+            "type": "boolean"
+          },
+          "zahlungsbedingungen": {
+            "type": "string",
+            "nullable": true
+          },
+          "zahlungsart": {
+            "type": "string",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "isUsed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "empfaenger",
+          "empfaengerZeile2",
+          "isPrivate",
+          "ikNummer",
+          "strasse",
+          "hausnummer",
+          "plz",
+          "stadt",
+          "telefon",
+          "fax",
+          "email",
+          "emailVerhinderungspflege",
+          "kimAdresse",
+          "ansprechpartner",
+          "datenannahmeIk",
+          "emailInvoiceEnabled",
+          "zahlungsbedingungen",
+          "zahlungsart",
+          "isActive",
+          "createdAt"
+        ]
+      },
+      "BirthdayEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
           "type": {
+            "type": "string",
             "enum": [
               "employee",
               "customer"
-            ],
+            ]
+          },
+          "name": {
             "type": "string"
+          },
+          "geburtsdatum": {
+            "type": "string"
+          },
+          "daysUntil": {
+            "type": "number"
+          },
+          "age": {
+            "type": "number"
+          },
+          "address": {
+            "type": "string"
+          },
+          "cardSent": {
+            "type": "boolean"
+          },
+          "cardSentAt": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -261,598 +242,156 @@
           "geburtsdatum",
           "daysUntil",
           "age"
-        ],
-        "type": "object"
+        ]
       },
-      "BudgetOverview39_42aDTO": {
+      "MissingBreakDay": {
+        "type": "object",
         "properties": {
-          "currentYearAllocatedCents": {
-            "type": "integer"
-          },
-          "currentYearAvailableCents": {
-            "type": "integer"
-          },
-          "currentYearUsedCents": {
-            "type": "integer"
-          },
-          "label": {
+          "date": {
             "type": "string"
           },
-          "yearlyBudgetCents": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "yearlyBudgetCents",
-          "currentYearAllocatedCents",
-          "currentYearUsedCents",
-          "currentYearAvailableCents",
-          "label"
-        ],
-        "type": "object"
-      },
-      "BudgetOverview45aDTO": {
-        "properties": {
-          "currentMonthAllocatedCents": {
-            "type": "integer"
-          },
-          "currentMonthAvailableCents": {
-            "type": "integer"
-          },
-          "currentMonthUsedCents": {
-            "type": "integer"
-          },
-          "isCurrentlyActive": {
-            "type": "boolean"
-          },
-          "label": {
-            "type": "string"
-          },
-          "monthlyBudgetCents": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "monthlyBudgetCents",
-          "currentMonthAllocatedCents",
-          "currentMonthUsedCents",
-          "currentMonthAvailableCents",
-          "isCurrentlyActive",
-          "label"
-        ],
-        "type": "object"
-      },
-      "BudgetOverview45bDTO": {
-        "properties": {
-          "availableAfterPlannedCents": {
-            "type": "integer"
-          },
-          "availableCents": {
-            "type": "integer"
-          },
-          "carryoverCents": {
-            "type": "integer"
-          },
-          "carryoverExpiresAt": {
-            "nullable": true,
-            "type": "string"
-          },
-          "currentMonthAvailableCents": {
-            "type": "integer"
-          },
-          "currentMonthUsedCents": {
-            "type": "integer"
-          },
-          "currentYearAllocatedCents": {
-            "type": "integer"
-          },
-          "isCurrentlyActive": {
-            "type": "boolean"
-          },
-          "monthlyLimitCents": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "plannedCents": {
-            "type": "integer"
-          },
-          "plannedShortfallMonth": {
-            "nullable": true,
-            "type": "string"
-          },
-          "totalAllocatedCents": {
-            "type": "integer"
-          },
-          "totalUsedCents": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "totalAllocatedCents",
-          "totalUsedCents",
-          "availableCents",
-          "plannedCents",
-          "availableAfterPlannedCents",
-          "currentMonthUsedCents",
-          "currentMonthAvailableCents",
-          "monthlyLimitCents",
-          "carryoverCents",
-          "carryoverExpiresAt",
-          "currentYearAllocatedCents",
-          "isCurrentlyActive",
-          "plannedShortfallMonth"
-        ],
-        "type": "object"
-      },
-      "BudgetOverviewDTO": {
-        "properties": {
-          "entlastungsbetrag45b": {
-            "$ref": "#/components/schemas/BudgetOverview45bDTO"
-          },
-          "ersatzpflege39_42a": {
-            "$ref": "#/components/schemas/BudgetOverview39_42aDTO"
-          },
-          "umwandlung45a": {
-            "$ref": "#/components/schemas/BudgetOverview45aDTO"
-          }
-        },
-        "required": [
-          "entlastungsbetrag45b",
-          "umwandlung45a",
-          "ersatzpflege39_42a"
-        ],
-        "type": "object"
-      },
-      "BudgetSetupMissingCount": {
-        "properties": {
-          "count": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count"
-        ],
-        "type": "object"
-      },
-      "BulkSendInvoiceResponse": {
-        "properties": {
-          "results": {
-            "items": {
-              "properties": {
-                "billingType": {
-                  "type": "string"
-                },
-                "customerId": {
-                  "type": "integer"
-                },
-                "invoiceId": {
-                  "type": "integer"
-                },
-                "invoiceNumber": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                },
-                "status": {
-                  "enum": [
-                    "marked_sent",
-                    "skipped",
-                    "error"
-                  ],
-                  "type": "string"
-                }
-              },
-              "required": [
-                "invoiceId",
-                "invoiceNumber",
-                "customerId",
-                "billingType",
-                "status"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "summary": {
-            "properties": {
-              "errors": {
-                "type": "integer"
-              },
-              "markedSent": {
-                "type": "integer"
-              },
-              "skipped": {
-                "type": "integer"
-              },
-              "total": {
-                "type": "integer"
-              }
-            },
-            "required": [
-              "total",
-              "markedSent",
-              "skipped",
-              "errors"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "summary",
-          "results"
-        ],
-        "type": "object"
-      },
-      "CreateCustomerRequest": {
-        "properties": {
-          "acceptsPrivatePayment": {
-            "type": "boolean"
-          },
-          "acknowledgeRecentDuplicate": {
-            "type": "boolean"
-          },
-          "billingType": {
-            "enum": [
-              "pflegekasse_gesetzlich",
-              "pflegekasse_privat",
-              "selbstzahler"
-            ],
-            "type": "string"
-          },
-          "budgets": {
-            "properties": {
-              "entlastungsbetrag45b": {
-                "type": "number"
-              },
-              "pflegesachleistungen36": {
-                "type": "number"
-              },
-              "validFrom": {
-                "type": "string"
-              },
-              "verhinderungspflege39": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "entlastungsbetrag45b",
-              "verhinderungspflege39",
-              "pflegesachleistungen36",
-              "validFrom"
-            ],
-            "type": "object"
-          },
-          "contacts": {
-            "items": {
-              "properties": {
-                "contactType": {
-                  "type": "string"
-                },
-                "email": {
-                  "type": "string"
-                },
-                "festnetz": {
-                  "type": "string"
-                },
-                "isPrimary": {
-                  "type": "boolean"
-                },
-                "mobilnummer": {
-                  "type": "string"
-                },
-                "nachname": {
-                  "type": "string"
-                },
-                "notes": {
-                  "type": "string"
-                },
-                "vorname": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "contactType",
-                "isPrimary",
-                "vorname",
-                "nachname"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "contract": {
-            "properties": {
-              "contractDate": {
-                "type": "string"
-              },
-              "contractStart": {
-                "type": "string"
-              },
-              "hoursPerPeriod": {
-                "type": "number"
-              },
-              "periodType": {
-                "type": "string"
-              },
-              "rates": {
-                "items": {
-                  "properties": {
-                    "hourlyRateCents": {
-                      "type": "integer"
-                    },
-                    "serviceCategory": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "serviceCategory",
-                    "hourlyRateCents"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "vereinbarteLeistungen": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "contractStart",
-              "hoursPerPeriod",
-              "periodType"
-            ],
-            "type": "object"
-          },
-          "documentDeliveryMethod": {
-            "enum": [
-              "email",
-              "post"
-            ],
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "festnetz": {
-            "type": "string"
-          },
-          "haustierDetails": {
-            "type": "string"
-          },
-          "haustierVorhanden": {
-            "type": "boolean"
-          },
-          "insurance": {
-            "properties": {
-              "providerId": {
-                "type": "integer"
-              },
-              "validFrom": {
-                "type": "string"
-              },
-              "versichertennummer": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "providerId",
-              "versichertennummer",
-              "validFrom"
-            ],
-            "type": "object"
-          },
-          "nachname": {
-            "type": "string"
-          },
-          "nr": {
-            "type": "string"
-          },
-          "personenbefoerderungGewuenscht": {
-            "type": "boolean"
-          },
-          "pflegegrad": {
-            "type": "integer"
-          },
-          "pflegegradSeit": {
-            "type": "string"
-          },
-          "plz": {
-            "type": "string"
-          },
-          "receivesMonthlyInvoice": {
-            "type": "boolean"
-          },
-          "rechnungAnKunde": {
-            "type": "boolean"
-          },
-          "skipDuplicateCheck": {
-            "type": "boolean"
-          },
-          "stadt": {
-            "type": "string"
-          },
-          "strasse": {
-            "type": "string"
-          },
-          "telefon": {
-            "type": "string"
-          },
-          "vorerkrankungen": {
-            "type": "string"
-          },
-          "vorname": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "vorname",
-          "nachname",
-          "strasse",
-          "nr",
-          "plz",
-          "stadt"
-        ],
-        "type": "object"
-      },
-      "CreateTimeEntryRequest": {
-        "properties": {
-          "durationMinutes": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "endDate": {
-            "nullable": true,
-            "type": "string"
-          },
-          "endTime": {
-            "nullable": true,
-            "type": "string"
-          },
-          "entryDate": {
-            "type": "string"
-          },
-          "entryType": {
-            "$ref": "#/components/schemas/TimeEntryType"
-          },
-          "isFullDay": {
-            "type": "boolean"
-          },
-          "kilometers": {
-            "nullable": true,
+          "totalWorkMinutes": {
             "type": "number"
           },
-          "notes": {
-            "nullable": true,
-            "type": "string"
+          "requiredBreakMinutes": {
+            "type": "number"
           },
-          "startTime": {
-            "nullable": true,
-            "type": "string"
-          },
-          "targetUserId": {
-            "type": "integer"
+          "documentedBreakMinutes": {
+            "type": "number"
           }
         },
         "required": [
-          "entryType",
-          "entryDate"
-        ],
-        "type": "object"
+          "date",
+          "totalWorkMinutes",
+          "requiredBreakMinutes",
+          "documentedBreakMinutes"
+        ]
       },
-      "CustomerContactItem": {
+      "OpenTasksSummary": {
+        "type": "object",
         "properties": {
-          "contactType": {
-            "type": "string"
-          },
-          "email": {
-            "nullable": true,
-            "type": "string"
-          },
-          "festnetz": {
-            "nullable": true,
-            "type": "string"
-          },
+          "daysWithMissingBreaks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MissingBreakDay"
+            }
+          }
+        },
+        "required": [
+          "daysWithMissingBreaks"
+        ]
+      },
+      "CustomerListItem": {
+        "type": "object",
+        "properties": {
           "id": {
             "type": "integer"
           },
-          "isPrimary": {
-            "type": "boolean"
-          },
-          "mobilnummer": {
-            "nullable": true,
-            "type": "string"
-          },
-          "nachname": {
-            "type": "string"
-          },
-          "notes": {
-            "nullable": true,
+          "name": {
             "type": "string"
           },
           "vorname": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "contactType",
-          "isPrimary",
-          "vorname",
-          "nachname",
-          "festnetz",
-          "mobilnummer",
-          "email",
-          "notes"
-        ],
-        "type": "object"
-      },
-      "CustomerListItem": {
-        "properties": {
-          "address": {
-            "nullable": true,
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
-          "backupEmployee": {
-            "nullable": true,
-            "properties": {
-              "displayName": {
-                "type": "string"
-              },
-              "id": {
-                "type": "integer"
-              }
-            },
-            "required": [
-              "id",
-              "displayName"
-            ],
-            "type": "object"
-          },
-          "backupEmployee2": {
-            "nullable": true,
-            "properties": {
-              "displayName": {
-                "type": "string"
-              },
-              "id": {
-                "type": "integer"
-              }
-            },
-            "required": [
-              "id",
-              "displayName"
-            ],
-            "type": "object"
+          "nachname": {
+            "type": "string",
+            "nullable": true
           },
           "billingType": {
-            "nullable": true,
-            "type": "string"
-          },
-          "budgetSetupMissing": {
-            "type": "boolean"
-          },
-          "contractEnd": {
-            "nullable": true,
-            "type": "string"
-          },
-          "contractTerminated": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "email": {
-            "nullable": true,
-            "type": "string"
+            "type": "string",
+            "nullable": true
+          },
+          "telefon": {
+            "type": "string",
+            "nullable": true
           },
           "festnetz": {
-            "nullable": true,
-            "type": "string"
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "stadt": {
+            "type": "string",
+            "nullable": true
+          },
+          "pflegegrad": {
+            "type": "integer",
+            "nullable": true
           },
           "geburtsdatum": {
-            "nullable": true,
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
             "type": "string"
+          },
+          "inaktivAb": {
+            "type": "string",
+            "nullable": true
+          },
+          "primaryEmployee": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "displayName"
+            ]
+          },
+          "backupEmployee": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "displayName"
+            ]
+          },
+          "backupEmployee2": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "displayName"
+            ]
+          },
+          "matchedRole": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "backup",
+              "backup2"
+            ]
           },
           "hasActiveContract": {
             "type": "boolean"
@@ -860,64 +399,20 @@
           "hasBetreuer": {
             "type": "boolean"
           },
-          "id": {
-            "type": "integer"
-          },
-          "inaktivAb": {
-            "nullable": true,
-            "type": "string"
-          },
-          "matchedRole": {
-            "enum": [
-              "primary",
-              "backup",
-              "backup2"
-            ],
-            "type": "string"
-          },
-          "nachname": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "pflegegrad": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "primaryEmployee": {
-            "nullable": true,
-            "properties": {
-              "displayName": {
-                "type": "string"
-              },
-              "id": {
-                "type": "integer"
-              }
-            },
-            "required": [
-              "id",
-              "displayName"
-            ],
-            "type": "object"
-          },
           "rechnungAnKunde": {
             "type": "boolean"
           },
-          "stadt": {
-            "nullable": true,
-            "type": "string"
+          "budgetSetupMissing": {
+            "type": "boolean"
           },
-          "status": {
-            "type": "string"
+          "contractEnd": {
+            "type": "string",
+            "nullable": true
           },
-          "telefon": {
-            "nullable": true,
-            "type": "string"
+          "contractTerminated": {
+            "type": "boolean"
           },
-          "vorname": {
-            "nullable": true,
+          "createdAt": {
             "type": "string"
           }
         },
@@ -946,36 +441,39 @@
           "contractEnd",
           "contractTerminated",
           "createdAt"
-        ],
-        "type": "object"
+        ]
       },
       "CustomerListParams": {
+        "type": "object",
         "properties": {
-          "billingType": {
-            "type": "string"
-          },
-          "budgetSetupMissing": {
-            "type": "string"
-          },
-          "insuranceProviderId": {
-            "type": "string"
-          },
-          "lifecycle": {
-            "type": "string"
+          "page": {
+            "type": "integer"
           },
           "limit": {
             "type": "integer"
           },
-          "page": {
-            "type": "integer"
+          "search": {
+            "type": "string"
           },
           "pflegegrad": {
+            "type": "string"
+          },
+          "billingType": {
             "type": "string"
           },
           "responsibleEmployeeId": {
             "type": "string"
           },
-          "search": {
+          "status": {
+            "type": "string"
+          },
+          "insuranceProviderId": {
+            "type": "string"
+          },
+          "budgetSetupMissing": {
+            "type": "string"
+          },
+          "lifecycle": {
             "type": "string"
           },
           "sortBy": {
@@ -983,464 +481,470 @@
           },
           "sortOrder": {
             "type": "string"
-          },
-          "status": {
-            "type": "string"
           }
-        },
-        "type": "object"
+        }
       },
-      "DeliveryRecord": {
+      "CustomerContactItem": {
+        "type": "object",
         "properties": {
-          "createdAt": {
-            "type": "string"
-          },
-          "deliveryMethod": {
-            "type": "string"
-          },
-          "documentFileNames": {
-            "nullable": true,
-            "type": "string"
-          },
-          "errorMessage": {
-            "nullable": true,
-            "type": "string"
-          },
           "id": {
             "type": "integer"
           },
-          "letterxpressLetterId": {
-            "nullable": true,
+          "contactType": {
             "type": "string"
           },
-          "recipientAddress": {
-            "nullable": true,
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "vorname": {
             "type": "string"
           },
-          "recipientEmail": {
-            "nullable": true,
+          "nachname": {
             "type": "string"
           },
-          "recipientName": {
-            "nullable": true,
-            "type": "string"
+          "festnetz": {
+            "type": "string",
+            "nullable": true
           },
-          "sentAt": {
-            "nullable": true,
-            "type": "string"
+          "mobilnummer": {
+            "type": "string",
+            "nullable": true
           },
-          "status": {
-            "type": "string"
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
           "id",
-          "deliveryMethod",
-          "status",
-          "recipientEmail",
-          "recipientName",
-          "recipientAddress",
-          "documentFileNames",
-          "sentAt",
-          "createdAt",
-          "errorMessage",
-          "letterxpressLetterId"
-        ],
-        "type": "object"
+          "contactType",
+          "isPrimary",
+          "vorname",
+          "nachname",
+          "festnetz",
+          "mobilnummer",
+          "email",
+          "notes"
+        ]
       },
-      "EmployeeListItem": {
+      "BudgetSetupMissingCount": {
+        "type": "object",
         "properties": {
-          "createdAt": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ]
+      },
+      "CreateCustomerRequest": {
+        "type": "object",
+        "properties": {
+          "skipDuplicateCheck": {
+            "type": "boolean"
+          },
+          "acknowledgeRecentDuplicate": {
+            "type": "boolean"
+          },
+          "vorname": {
             "type": "string"
           },
-          "displayName": {
+          "nachname": {
+            "type": "string"
+          },
+          "telefon": {
+            "type": "string"
+          },
+          "festnetz": {
             "type": "string"
           },
           "email": {
             "type": "string"
           },
-          "id": {
+          "strasse": {
+            "type": "string"
+          },
+          "nr": {
+            "type": "string"
+          },
+          "plz": {
+            "type": "string"
+          },
+          "stadt": {
+            "type": "string"
+          },
+          "pflegegrad": {
             "type": "integer"
           },
-          "isActive": {
-            "type": "boolean"
-          },
-          "isAdmin": {
-            "type": "boolean"
-          },
-          "nachname": {
-            "nullable": true,
+          "pflegegradSeit": {
             "type": "string"
           },
-          "roles": {
-            "items": {
-              "$ref": "#/components/schemas/EmployeeRole"
+          "vorerkrankungen": {
+            "type": "string"
+          },
+          "haustierVorhanden": {
+            "type": "boolean"
+          },
+          "haustierDetails": {
+            "type": "string"
+          },
+          "personenbefoerderungGewuenscht": {
+            "type": "boolean"
+          },
+          "acceptsPrivatePayment": {
+            "type": "boolean"
+          },
+          "rechnungAnKunde": {
+            "type": "boolean"
+          },
+          "documentDeliveryMethod": {
+            "type": "string",
+            "enum": [
+              "email",
+              "post"
+            ]
+          },
+          "receivesMonthlyInvoice": {
+            "type": "boolean"
+          },
+          "billingType": {
+            "type": "string",
+            "enum": [
+              "pflegekasse_gesetzlich",
+              "pflegekasse_privat",
+              "selbstzahler"
+            ]
+          },
+          "insurance": {
+            "type": "object",
+            "properties": {
+              "providerId": {
+                "type": "integer"
+              },
+              "versichertennummer": {
+                "type": "string"
+              },
+              "validFrom": {
+                "type": "string"
+              }
             },
-            "type": "array"
+            "required": [
+              "providerId",
+              "versichertennummer",
+              "validFrom"
+            ]
           },
-          "vorname": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "email",
-          "displayName",
-          "vorname",
-          "nachname",
-          "isActive",
-          "isAdmin",
-          "roles",
-          "createdAt"
-        ],
-        "type": "object"
-      },
-      "EmployeeRole": {
-        "enum": [
-          "hauswirtschaft",
-          "alltagsbegleitung",
-          "erstberatung",
-          "personenbefoerderung",
-          "kinderbetreuung"
-        ],
-        "type": "string"
-      },
-      "GenerateInvoiceResponse": {
-        "properties": {
-          "invoices": {
+          "contacts": {
+            "type": "array",
             "items": {
+              "type": "object",
               "properties": {
-                "id": {
-                  "type": "integer"
+                "contactType": {
+                  "type": "string"
+                },
+                "isPrimary": {
+                  "type": "boolean"
+                },
+                "vorname": {
+                  "type": "string"
+                },
+                "nachname": {
+                  "type": "string"
+                },
+                "festnetz": {
+                  "type": "string"
+                },
+                "mobilnummer": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "notes": {
+                  "type": "string"
                 }
               },
               "required": [
-                "id"
-              ],
-              "type": "object"
+                "contactType",
+                "isPrimary",
+                "vorname",
+                "nachname"
+              ]
+            }
+          },
+          "budgets": {
+            "type": "object",
+            "properties": {
+              "entlastungsbetrag45b": {
+                "type": "number"
+              },
+              "verhinderungspflege39": {
+                "type": "number"
+              },
+              "pflegesachleistungen36": {
+                "type": "number"
+              },
+              "validFrom": {
+                "type": "string"
+              }
             },
-            "type": "array"
+            "required": [
+              "entlastungsbetrag45b",
+              "verhinderungspflege39",
+              "pflegesachleistungen36",
+              "validFrom"
+            ]
           },
-          "message": {
-            "type": "string"
-          },
-          "splitInvoices": {
-            "type": "boolean"
+          "contract": {
+            "type": "object",
+            "properties": {
+              "contractStart": {
+                "type": "string"
+              },
+              "contractDate": {
+                "type": "string"
+              },
+              "vereinbarteLeistungen": {
+                "type": "string"
+              },
+              "hoursPerPeriod": {
+                "type": "number"
+              },
+              "periodType": {
+                "type": "string"
+              },
+              "rates": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "serviceCategory": {
+                      "type": "string"
+                    },
+                    "hourlyRateCents": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "serviceCategory",
+                    "hourlyRateCents"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "contractStart",
+              "hoursPerPeriod",
+              "periodType"
+            ]
           }
         },
-        "type": "object"
+        "required": [
+          "vorname",
+          "nachname",
+          "strasse",
+          "nr",
+          "plz",
+          "stadt"
+        ]
       },
-      "InsuranceProviderItem": {
+      "BillingCustomerItem": {
+        "type": "object",
         "properties": {
-          "ansprechpartner": {
-            "nullable": true,
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "datenannahmeIk": {
-            "nullable": true,
-            "type": "string"
-          },
-          "email": {
-            "nullable": true,
-            "type": "string"
-          },
-          "emailInvoiceEnabled": {
-            "type": "boolean"
-          },
-          "emailVerhinderungspflege": {
-            "nullable": true,
-            "type": "string"
-          },
-          "empfaenger": {
-            "nullable": true,
-            "type": "string"
-          },
-          "empfaengerZeile2": {
-            "nullable": true,
-            "type": "string"
-          },
-          "fax": {
-            "nullable": true,
-            "type": "string"
-          },
-          "hausnummer": {
-            "nullable": true,
-            "type": "string"
-          },
           "id": {
             "type": "integer"
-          },
-          "ikNummer": {
-            "nullable": true,
-            "type": "string"
-          },
-          "isActive": {
-            "type": "boolean"
-          },
-          "isPrivate": {
-            "type": "boolean"
-          },
-          "isUsed": {
-            "type": "boolean"
-          },
-          "kimAdresse": {
-            "nullable": true,
-            "type": "string"
           },
           "name": {
             "type": "string"
           },
-          "plz": {
-            "nullable": true,
+          "vorname": {
+            "type": "string",
+            "nullable": true
+          },
+          "nachname": {
+            "type": "string",
+            "nullable": true
+          },
+          "billingType": {
             "type": "string"
           },
-          "stadt": {
-            "nullable": true,
+          "status": {
             "type": "string"
           },
-          "strasse": {
-            "nullable": true,
-            "type": "string"
+          "completedAppointments": {
+            "type": "integer"
           },
-          "telefon": {
-            "nullable": true,
-            "type": "string"
+          "coveredAppointments": {
+            "type": "integer"
           },
-          "zahlungsart": {
-            "nullable": true,
-            "type": "string"
+          "openAppointments": {
+            "type": "integer"
           },
-          "zahlungsbedingungen": {
-            "nullable": true,
-            "type": "string"
+          "signedAppointmentCount": {
+            "type": "integer"
+          },
+          "unbilledAppointmentCount": {
+            "type": "integer"
+          },
+          "estimatedAmountCents": {
+            "type": "integer"
+          },
+          "eligibility": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "eligible",
+                  "blocked"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "nullable": true,
+                "enum": [
+                  "customer_signature_required",
+                  "not_signed",
+                  "no_appointments",
+                  "already_billed"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "reason"
+            ]
           }
         },
         "required": [
           "id",
           "name",
-          "empfaenger",
-          "empfaengerZeile2",
-          "isPrivate",
-          "ikNummer",
-          "strasse",
-          "hausnummer",
-          "plz",
-          "stadt",
-          "telefon",
-          "fax",
-          "email",
-          "emailVerhinderungspflege",
-          "kimAdresse",
-          "ansprechpartner",
-          "datenannahmeIk",
-          "emailInvoiceEnabled",
-          "zahlungsbedingungen",
-          "zahlungsart",
-          "isActive",
-          "createdAt"
-        ],
-        "type": "object"
-      },
-      "InvoiceDetail": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/InvoiceItem"
-          },
-          {
-            "properties": {
-              "leistungsnachweisDrift": {
-                "type": "boolean"
-              },
-              "lineItems": {
-                "items": {
-                  "properties": {
-                    "appointmentDate": {
-                      "type": "string"
-                    },
-                    "durationMinutes": {
-                      "type": "integer"
-                    },
-                    "employeeName": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "endTime": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "integer"
-                    },
-                    "quantityRaw": {
-                      "nullable": true,
-                      "type": "number"
-                    },
-                    "quantityUnit": {
-                      "enum": [
-                        "hours",
-                        "km"
-                      ],
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "serviceCode": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "serviceDescription": {
-                      "type": "string"
-                    },
-                    "startTime": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "totalCents": {
-                      "type": "integer"
-                    },
-                    "unitPriceCents": {
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "appointmentDate",
-                    "serviceDescription",
-                    "serviceCode",
-                    "startTime",
-                    "endTime",
-                    "durationMinutes",
-                    "quantityRaw",
-                    "quantityUnit",
-                    "totalCents",
-                    "unitPriceCents",
-                    "employeeName"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "pdfDrift": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "lineItems"
-            ],
-            "type": "object"
-          }
+          "vorname",
+          "nachname",
+          "billingType",
+          "status",
+          "completedAppointments",
+          "coveredAppointments",
+          "openAppointments",
+          "signedAppointmentCount",
+          "unbilledAppointmentCount",
+          "estimatedAmountCents",
+          "eligibility"
         ]
       },
       "InvoiceItem": {
+        "type": "object",
         "properties": {
-          "billingMonth": {
-            "type": "integer"
-          },
-          "billingRunId": {
-            "nullable": true,
-            "type": "string"
-          },
-          "billingType": {
-            "type": "string"
-          },
-          "billingYear": {
-            "type": "integer"
-          },
-          "boundPaidCents": {
-            "type": "integer"
-          },
-          "budgetType": {
-            "nullable": true,
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "customerId": {
-            "type": "integer"
-          },
-          "customerNachname": {
-            "nullable": true,
-            "type": "string"
-          },
-          "customerName": {
-            "type": "string"
-          },
-          "customerVorname": {
-            "nullable": true,
-            "type": "string"
-          },
-          "dueDate": {
-            "nullable": true,
-            "type": "string"
-          },
-          "grossAmountCents": {
-            "type": "integer"
-          },
-          "hasBoundPayment": {
-            "type": "boolean"
-          },
           "id": {
             "type": "integer"
           },
           "invoiceNumber": {
             "type": "string"
           },
+          "customerId": {
+            "type": "integer"
+          },
+          "billingType": {
+            "type": "string"
+          },
           "invoiceType": {
             "type": "string"
           },
-          "issuedAt": {
-            "nullable": true,
+          "billingMonth": {
+            "type": "integer"
+          },
+          "billingYear": {
+            "type": "integer"
+          },
+          "recipientName": {
             "type": "string"
           },
+          "customerName": {
+            "type": "string"
+          },
+          "customerVorname": {
+            "type": "string",
+            "nullable": true
+          },
+          "customerNachname": {
+            "type": "string",
+            "nullable": true
+          },
           "netAmountCents": {
+            "type": "integer"
+          },
+          "vatAmountCents": {
+            "type": "integer"
+          },
+          "grossAmountCents": {
+            "type": "integer"
+          },
+          "vatRate": {
+            "type": "number",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "sentAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "issuedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "dueDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "pdfPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "billingRunId": {
+            "type": "string",
+            "nullable": true
+          },
+          "budgetType": {
+            "type": "string",
+            "nullable": true
+          },
+          "stornierteRechnungId": {
+            "type": "integer",
+            "nullable": true
+          },
+          "paidCents": {
             "type": "integer"
           },
           "openAmountCents": {
             "type": "integer"
           },
-          "paidCents": {
+          "hasBoundPayment": {
+            "type": "boolean"
+          },
+          "boundPaidCents": {
             "type": "integer"
           },
           "paymentDifferenceCents": {
             "type": "integer"
           },
           "paymentDifferenceResult": {
+            "type": "string",
             "enum": [
               "exact",
               "tolerated",
               "underpaid",
               "overpaid"
-            ],
-            "type": "string"
-          },
-          "pdfPath": {
-            "nullable": true,
-            "type": "string"
-          },
-          "recipientName": {
-            "type": "string"
-          },
-          "sentAt": {
-            "nullable": true,
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "stornierteRechnungId": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "vatAmountCents": {
-            "type": "integer"
-          },
-          "vatRate": {
-            "nullable": true,
-            "type": "number"
+            ]
           }
         },
         "required": [
@@ -1468,61 +972,354 @@
           "billingRunId",
           "budgetType",
           "stornierteRechnungId"
-        ],
-        "type": "object"
+        ]
       },
-      "MissingBreakDay": {
-        "properties": {
-          "date": {
-            "type": "string"
+      "InvoiceDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/InvoiceItem"
           },
-          "documentedBreakMinutes": {
-            "type": "number"
-          },
-          "requiredBreakMinutes": {
-            "type": "number"
-          },
-          "totalWorkMinutes": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "date",
-          "totalWorkMinutes",
-          "requiredBreakMinutes",
-          "documentedBreakMinutes"
-        ],
-        "type": "object"
-      },
-      "OpenTasksSummary": {
-        "properties": {
-          "daysWithMissingBreaks": {
-            "items": {
-              "$ref": "#/components/schemas/MissingBreakDay"
+          {
+            "type": "object",
+            "properties": {
+              "lineItems": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "appointmentDate": {
+                      "type": "string"
+                    },
+                    "serviceDescription": {
+                      "type": "string"
+                    },
+                    "serviceCode": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "startTime": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "endTime": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "durationMinutes": {
+                      "type": "integer"
+                    },
+                    "quantityRaw": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "quantityUnit": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "hours",
+                        "km"
+                      ]
+                    },
+                    "totalCents": {
+                      "type": "integer"
+                    },
+                    "unitPriceCents": {
+                      "type": "integer"
+                    },
+                    "employeeName": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "appointmentDate",
+                    "serviceDescription",
+                    "serviceCode",
+                    "startTime",
+                    "endTime",
+                    "durationMinutes",
+                    "quantityRaw",
+                    "quantityUnit",
+                    "totalCents",
+                    "unitPriceCents",
+                    "employeeName"
+                  ]
+                }
+              },
+              "pdfDrift": {
+                "type": "boolean"
+              },
+              "leistungsnachweisDrift": {
+                "type": "boolean"
+              }
             },
-            "type": "array"
+            "required": [
+              "lineItems"
+            ]
+          }
+        ]
+      },
+      "DeliveryRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "deliveryMethod": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "recipientEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "recipientName": {
+            "type": "string",
+            "nullable": true
+          },
+          "recipientAddress": {
+            "type": "string",
+            "nullable": true
+          },
+          "documentFileNames": {
+            "type": "string",
+            "nullable": true
+          },
+          "sentAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "errorMessage": {
+            "type": "string",
+            "nullable": true
+          },
+          "letterxpressLetterId": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
-          "daysWithMissingBreaks"
-        ],
-        "type": "object"
+          "id",
+          "deliveryMethod",
+          "status",
+          "recipientEmail",
+          "recipientName",
+          "recipientAddress",
+          "documentFileNames",
+          "sentAt",
+          "createdAt",
+          "errorMessage",
+          "letterxpressLetterId"
+        ]
       },
-      "PaginationParams": {
+      "BillingInvoicePreview": {
+        "type": "object",
         "properties": {
-          "limit": {
+          "serviceRecordCount": {
             "type": "integer"
           },
-          "page": {
+          "coveredAppointments": {
             "type": "integer"
           },
-          "search": {
-            "type": "string"
+          "completedAppointments": {
+            "type": "integer"
+          },
+          "alreadyBilledAppointments": {
+            "type": "integer"
+          },
+          "totalCents": {
+            "type": "integer"
+          },
+          "splitInvoices": {
+            "type": "boolean"
+          },
+          "splitPots": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "entlastungsbetrag_45b",
+                "umwandlung_45a",
+                "ersatzpflege_39_42a",
+                "private"
+              ]
+            }
+          },
+          "excludedAppointments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "customer_signature_required",
+                    "not_signed",
+                    "no_appointments",
+                    "already_billed"
+                  ]
+                }
+              },
+              "required": [
+                "date",
+                "reason"
+              ]
+            }
           }
         },
-        "type": "object"
+        "required": [
+          "serviceRecordCount",
+          "coveredAppointments",
+          "completedAppointments",
+          "alreadyBilledAppointments",
+          "totalCents",
+          "splitInvoices",
+          "splitPots",
+          "excludedAppointments"
+        ]
+      },
+      "GenerateInvoiceResponse": {
+        "type": "object",
+        "properties": {
+          "splitInvoices": {
+            "type": "boolean"
+          },
+          "invoices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "SendInvoiceResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "invoice": {
+            "$ref": "#/components/schemas/InvoiceItem"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "invoiceId": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "recipientEmail": {
+                  "type": "string"
+                },
+                "customerCopy": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "invoiceId",
+                "status",
+                "recipientEmail"
+              ]
+            }
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "BatchSendInvoiceResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "sent": {
+                "type": "integer"
+              },
+              "errors": {
+                "type": "integer"
+              },
+              "skipped": {
+                "type": "integer"
+              },
+              "total": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "sent",
+              "errors",
+              "skipped",
+              "total"
+            ]
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "invoiceId": {
+                  "type": "integer"
+                },
+                "invoiceNumber": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                },
+                "recipientEmail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "invoiceId",
+                "invoiceNumber",
+                "status"
+              ]
+            }
+          }
+        },
+        "required": [
+          "message",
+          "summary",
+          "results"
+        ]
       },
       "PayerSummary": {
+        "type": "object",
         "properties": {
           "insuranceProviderId": {
             "type": "integer"
@@ -1534,112 +1331,137 @@
         "required": [
           "insuranceProviderId",
           "name"
-        ],
-        "type": "object"
+        ]
       },
-      "SendInvoiceResponse": {
+      "BulkSendInvoiceResponse": {
+        "type": "object",
         "properties": {
-          "invoice": {
-            "$ref": "#/components/schemas/InvoiceItem"
-          },
-          "message": {
-            "type": "string"
+          "summary": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "markedSent": {
+                "type": "integer"
+              },
+              "skipped": {
+                "type": "integer"
+              },
+              "errors": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total",
+              "markedSent",
+              "skipped",
+              "errors"
+            ]
           },
           "results": {
+            "type": "array",
             "items": {
+              "type": "object",
               "properties": {
-                "customerCopy": {
-                  "type": "boolean"
-                },
                 "invoiceId": {
                   "type": "integer"
                 },
-                "recipientEmail": {
+                "invoiceNumber": {
+                  "type": "string"
+                },
+                "customerId": {
+                  "type": "integer"
+                },
+                "billingType": {
                   "type": "string"
                 },
                 "status": {
+                  "type": "string",
+                  "enum": [
+                    "marked_sent",
+                    "skipped",
+                    "error"
+                  ]
+                },
+                "message": {
                   "type": "string"
                 }
               },
               "required": [
                 "invoiceId",
-                "status",
-                "recipientEmail"
-              ],
-              "type": "object"
-            },
-            "type": "array"
+                "invoiceNumber",
+                "customerId",
+                "billingType",
+                "status"
+              ]
+            }
           }
         },
         "required": [
-          "message"
-        ],
-        "type": "object"
+          "summary",
+          "results"
+        ]
       },
-      "ServiceHoursSummary": {
-        "properties": {
-          "alltagsbegleitungMinutes": {
-            "type": "number"
-          },
-          "erstberatungMinutes": {
-            "type": "number"
-          },
-          "hauswirtschaftMinutes": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "hauswirtschaftMinutes",
-          "alltagsbegleitungMinutes",
-          "erstberatungMinutes"
-        ],
-        "type": "object"
+      "TimeEntryType": {
+        "type": "string",
+        "enum": [
+          "urlaub",
+          "krankheit",
+          "pause",
+          "bueroarbeit",
+          "vertrieb",
+          "sonstiges",
+          "verfuegbar",
+          "blocker"
+        ]
       },
       "TimeEntry": {
+        "type": "object",
         "properties": {
-          "createdAt": {
-            "type": "string"
-          },
-          "durationMinutes": {
-            "nullable": true,
+          "id": {
             "type": "integer"
           },
-          "endTime": {
-            "nullable": true,
-            "type": "string"
-          },
-          "entryDate": {
-            "type": "string"
+          "userId": {
+            "type": "integer"
           },
           "entryType": {
             "$ref": "#/components/schemas/TimeEntryType"
           },
-          "id": {
-            "type": "integer"
+          "entryDate": {
+            "type": "string"
           },
-          "isAutoGenerated": {
-            "type": "boolean"
+          "startTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "endTime": {
+            "type": "string",
+            "nullable": true
           },
           "isFullDay": {
             "type": "boolean"
           },
+          "durationMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
           "kilometers": {
-            "nullable": true,
-            "type": "number"
+            "type": "number",
+            "nullable": true
           },
           "notes": {
-            "nullable": true,
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
-          "startTime": {
-            "nullable": true,
+          "isAutoGenerated": {
+            "type": "boolean"
+          },
+          "createdAt": {
             "type": "string"
           },
           "updatedAt": {
             "type": "string"
-          },
-          "userId": {
-            "type": "integer"
           }
         },
         "required": [
@@ -1656,60 +1478,7 @@
           "isAutoGenerated",
           "createdAt",
           "updatedAt"
-        ],
-        "type": "object"
-      },
-      "TimeEntrySummary": {
-        "properties": {
-          "bueroarbeitMinutes": {
-            "type": "number"
-          },
-          "krankheitDays": {
-            "type": "number"
-          },
-          "krankheitHours": {
-            "type": "number"
-          },
-          "pauseMinutes": {
-            "type": "number"
-          },
-          "sonstigesMinutes": {
-            "type": "number"
-          },
-          "urlaubDays": {
-            "type": "number"
-          },
-          "urlaubHours": {
-            "type": "number"
-          },
-          "vertriebMinutes": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "urlaubDays",
-          "krankheitDays",
-          "urlaubHours",
-          "krankheitHours",
-          "pauseMinutes",
-          "bueroarbeitMinutes",
-          "vertriebMinutes",
-          "sonstigesMinutes"
-        ],
-        "type": "object"
-      },
-      "TimeEntryType": {
-        "enum": [
-          "urlaub",
-          "krankheit",
-          "pause",
-          "bueroarbeit",
-          "vertrieb",
-          "sonstiges",
-          "verfuegbar",
-          "blocker"
-        ],
-        "type": "string"
+        ]
       },
       "TimeEntryWithUser": {
         "allOf": [
@@ -1717,8 +1486,10 @@
             "$ref": "#/components/schemas/TimeEntry"
           },
           {
+            "type": "object",
             "properties": {
               "user": {
+                "type": "object",
                 "properties": {
                   "displayName": {
                     "type": "string"
@@ -1726,142 +1497,172 @@
                 },
                 "required": [
                   "displayName"
-                ],
-                "type": "object"
+                ]
               }
             },
             "required": [
               "user"
-            ],
-            "type": "object"
+            ]
           }
         ]
       },
-      "TravelSummary": {
+      "CreateTimeEntryRequest": {
+        "type": "object",
         "properties": {
-          "customerKilometers": {
-            "type": "number"
-          },
-          "timeEntryKilometers": {
-            "type": "number"
-          },
-          "totalKilometers": {
-            "type": "number"
-          },
-          "totalMinutes": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "totalKilometers",
-          "customerKilometers",
-          "timeEntryKilometers",
-          "totalMinutes"
-        ],
-        "type": "object"
-      },
-      "UpdateTimeEntryRequest": {
-        "properties": {
-          "durationMinutes": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "endDate": {
-            "nullable": true,
-            "type": "string"
-          },
-          "endTime": {
-            "nullable": true,
-            "type": "string"
+          "entryType": {
+            "$ref": "#/components/schemas/TimeEntryType"
           },
           "entryDate": {
             "type": "string"
           },
-          "entryType": {
-            "$ref": "#/components/schemas/TimeEntryType"
+          "endDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "startTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "endTime": {
+            "type": "string",
+            "nullable": true
           },
           "isFullDay": {
             "type": "boolean"
           },
+          "durationMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
           "kilometers": {
-            "nullable": true,
-            "type": "number"
+            "type": "number",
+            "nullable": true
           },
           "notes": {
-            "nullable": true,
-            "type": "string"
-          },
-          "startTime": {
-            "nullable": true,
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "targetUserId": {
             "type": "integer"
           }
         },
-        "type": "object"
+        "required": [
+          "entryType",
+          "entryDate"
+        ]
+      },
+      "UpdateTimeEntryRequest": {
+        "type": "object",
+        "properties": {
+          "entryType": {
+            "$ref": "#/components/schemas/TimeEntryType"
+          },
+          "entryDate": {
+            "type": "string"
+          },
+          "endDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "startTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "endTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "isFullDay": {
+            "type": "boolean"
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "nullable": true
+          },
+          "kilometers": {
+            "type": "number",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "targetUserId": {
+            "type": "integer"
+          }
+        }
       },
       "VacationEntitlementHistoryItem": {
+        "type": "object",
         "properties": {
-          "daysPerYear": {
-            "type": "number"
+          "validFromYear": {
+            "type": "integer"
           },
           "validFromMonth": {
             "type": "integer"
           },
-          "validFromYear": {
-            "type": "integer"
+          "daysPerYear": {
+            "type": "number"
           }
         },
         "required": [
           "validFromYear",
           "validFromMonth",
           "daysPerYear"
-        ],
-        "type": "object"
+        ]
       },
       "VacationMonthlyBreakdownItem": {
+        "type": "object",
         "properties": {
-          "daysPerYear": {
-            "type": "number"
-          },
           "fromMonth": {
             "type": "integer"
           },
           "toMonth": {
             "type": "integer"
+          },
+          "daysPerYear": {
+            "type": "number"
           }
         },
         "required": [
           "fromMonth",
           "toMonth",
           "daysPerYear"
-        ],
-        "type": "object"
+        ]
       },
       "VacationSummary": {
+        "type": "object",
         "properties": {
-          "carryOverDays": {
+          "year": {
+            "type": "integer"
+          },
+          "totalDays": {
             "type": "number"
           },
           "configuredAnnualDays": {
             "type": "number"
           },
           "eintrittsdatum": {
-            "nullable": true,
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "entitlementHistory": {
+            "type": "array",
             "items": {
               "$ref": "#/components/schemas/VacationEntitlementHistoryItem"
-            },
-            "type": "array"
+            }
           },
           "monthlyBreakdown": {
+            "type": "array",
             "items": {
               "$ref": "#/components/schemas/VacationMonthlyBreakdownItem"
-            },
-            "type": "array"
+            }
+          },
+          "carryOverDays": {
+            "type": "number"
+          },
+          "usedDays": {
+            "type": "number"
           },
           "plannedDays": {
             "type": "number"
@@ -1871,15 +1672,6 @@
           },
           "sickDays": {
             "type": "number"
-          },
-          "totalDays": {
-            "type": "number"
-          },
-          "usedDays": {
-            "type": "number"
-          },
-          "year": {
-            "type": "integer"
           }
         },
         "required": [
@@ -1894,20 +1686,359 @@
           "plannedDays",
           "remainingDays",
           "sickDays"
-        ],
-        "type": "object"
+        ]
+      },
+      "ServiceHoursSummary": {
+        "type": "object",
+        "properties": {
+          "hauswirtschaftMinutes": {
+            "type": "number"
+          },
+          "alltagsbegleitungMinutes": {
+            "type": "number"
+          },
+          "erstberatungMinutes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "hauswirtschaftMinutes",
+          "alltagsbegleitungMinutes",
+          "erstberatungMinutes"
+        ]
+      },
+      "TravelSummary": {
+        "type": "object",
+        "properties": {
+          "totalKilometers": {
+            "type": "number"
+          },
+          "customerKilometers": {
+            "type": "number"
+          },
+          "timeEntryKilometers": {
+            "type": "number"
+          },
+          "totalMinutes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "totalKilometers",
+          "customerKilometers",
+          "timeEntryKilometers",
+          "totalMinutes"
+        ]
+      },
+      "TimeEntrySummary": {
+        "type": "object",
+        "properties": {
+          "urlaubDays": {
+            "type": "number"
+          },
+          "krankheitDays": {
+            "type": "number"
+          },
+          "urlaubHours": {
+            "type": "number"
+          },
+          "krankheitHours": {
+            "type": "number"
+          },
+          "pauseMinutes": {
+            "type": "number"
+          },
+          "bueroarbeitMinutes": {
+            "type": "number"
+          },
+          "vertriebMinutes": {
+            "type": "number"
+          },
+          "sonstigesMinutes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "urlaubDays",
+          "krankheitDays",
+          "urlaubHours",
+          "krankheitHours",
+          "pauseMinutes",
+          "bueroarbeitMinutes",
+          "vertriebMinutes",
+          "sonstigesMinutes"
+        ]
+      },
+      "BudgetOverview45bDTO": {
+        "type": "object",
+        "properties": {
+          "totalAllocatedCents": {
+            "type": "integer"
+          },
+          "totalUsedCents": {
+            "type": "integer"
+          },
+          "availableCents": {
+            "type": "integer"
+          },
+          "plannedCents": {
+            "type": "integer"
+          },
+          "availableAfterPlannedCents": {
+            "type": "integer"
+          },
+          "currentMonthUsedCents": {
+            "type": "integer"
+          },
+          "currentMonthAvailableCents": {
+            "type": "integer"
+          },
+          "monthlyLimitCents": {
+            "type": "integer",
+            "nullable": true
+          },
+          "carryoverCents": {
+            "type": "integer"
+          },
+          "carryoverExpiresAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "currentYearAllocatedCents": {
+            "type": "integer"
+          },
+          "isCurrentlyActive": {
+            "type": "boolean"
+          },
+          "plannedShortfallMonth": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "totalAllocatedCents",
+          "totalUsedCents",
+          "availableCents",
+          "plannedCents",
+          "availableAfterPlannedCents",
+          "currentMonthUsedCents",
+          "currentMonthAvailableCents",
+          "monthlyLimitCents",
+          "carryoverCents",
+          "carryoverExpiresAt",
+          "currentYearAllocatedCents",
+          "isCurrentlyActive",
+          "plannedShortfallMonth"
+        ]
+      },
+      "BudgetOverview45aDTO": {
+        "type": "object",
+        "properties": {
+          "monthlyBudgetCents": {
+            "type": "integer"
+          },
+          "currentMonthAllocatedCents": {
+            "type": "integer"
+          },
+          "currentMonthUsedCents": {
+            "type": "integer"
+          },
+          "currentMonthAvailableCents": {
+            "type": "integer"
+          },
+          "isCurrentlyActive": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "monthlyBudgetCents",
+          "currentMonthAllocatedCents",
+          "currentMonthUsedCents",
+          "currentMonthAvailableCents",
+          "isCurrentlyActive",
+          "label"
+        ]
+      },
+      "BudgetOverview39_42aDTO": {
+        "type": "object",
+        "properties": {
+          "yearlyBudgetCents": {
+            "type": "integer"
+          },
+          "currentYearAllocatedCents": {
+            "type": "integer"
+          },
+          "currentYearUsedCents": {
+            "type": "integer"
+          },
+          "currentYearAvailableCents": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "yearlyBudgetCents",
+          "currentYearAllocatedCents",
+          "currentYearUsedCents",
+          "currentYearAvailableCents",
+          "label"
+        ]
+      },
+      "BudgetOverviewDTO": {
+        "type": "object",
+        "properties": {
+          "entlastungsbetrag45b": {
+            "$ref": "#/components/schemas/BudgetOverview45bDTO"
+          },
+          "umwandlung45a": {
+            "$ref": "#/components/schemas/BudgetOverview45aDTO"
+          },
+          "ersatzpflege39_42a": {
+            "$ref": "#/components/schemas/BudgetOverview39_42aDTO"
+          }
+        },
+        "required": [
+          "entlastungsbetrag45b",
+          "umwandlung45a",
+          "ersatzpflege39_42a"
+        ]
       }
-    }
+    },
+    "parameters": {}
   },
-  "info": {
-    "description": "Maschinenlesbare API-Oberfläche, generiert aus Zod-Schemas (Schema-First). Quelle: shared/api/openapi.ts. Nicht von Hand editieren — `npm run gen:openapi` ausführen.",
-    "title": "CareConnect API",
-    "version": "1.0.0"
-  },
-  "openapi": "3.0.0",
   "paths": {
+    "/api/customers": {
+      "get": {
+        "summary": "Kundenliste (paginiert, filterbar)",
+        "tags": [
+          "Customers"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer"
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "pflegegrad",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "billingType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "responsibleEmployeeId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "insuranceProviderId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "budgetSetupMissing",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "lifecycle",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sortBy",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sortOrder",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Liste der Kunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomerListItem"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/customers": {
       "post": {
+        "summary": "Kunde anlegen",
+        "tags": [
+          "Customers"
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1919,244 +2050,113 @@
         },
         "responses": {
           "201": {
+            "description": "Angelegter Kunde (Wire-Shape vereinfacht)",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CustomerListItem"
                 }
               }
-            },
-            "description": "Angelegter Kunde (Wire-Shape vereinfacht)"
+            }
           }
-        },
-        "summary": "Kunde anlegen",
-        "tags": [
-          "Customers"
-        ]
-      }
-    },
-    "/api/billing/customers": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/BillingCustomerItem"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Kunden mit Abrechnungsstatus"
-          }
-        },
-        "summary": "Abrechnungsfähige Kunden",
-        "tags": [
-          "Billing"
-        ]
-      }
-    },
-    "/api/billing/generate": {
-      "post": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerateInvoiceResponse"
-                }
-              }
-            },
-            "description": "Erzeugte Rechnung(en)"
-          }
-        },
-        "summary": "Rechnung(en) erzeugen",
-        "tags": [
-          "Billing"
-        ]
+        }
       }
     },
     "/api/budget/{customerId}/overview": {
       "get": {
+        "summary": "Budget-Übersicht (Drei-Topf-Ledger)",
+        "tags": [
+          "Budget"
+        ],
         "parameters": [
           {
-            "in": "path",
-            "name": "customerId",
-            "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "required": true,
+            "name": "customerId",
+            "in": "path"
           }
         ],
         "responses": {
           "200": {
+            "description": "Budget-Übersicht je Topf",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BudgetOverviewDTO"
                 }
               }
-            },
-            "description": "Budget-Übersicht je Topf"
+            }
           }
-        },
-        "summary": "Budget-Übersicht (Drei-Topf-Ledger)",
-        "tags": [
-          "Budget"
-        ]
+        }
       }
     },
-    "/api/customers": {
+    "/api/billing/customers": {
       "get": {
-        "parameters": [
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "search",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "pflegegrad",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "billingType",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "responsibleEmployeeId",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "insuranceProviderId",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "budgetSetupMissing",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "lifecycle",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sortBy",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sortOrder",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
+        "summary": "Abrechnungsfähige Kunden",
+        "tags": [
+          "Billing"
         ],
         "responses": {
           "200": {
+            "description": "Kunden mit Abrechnungsstatus",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/CustomerListItem"
-                  },
-                  "type": "array"
+                    "$ref": "#/components/schemas/BillingCustomerItem"
+                  }
                 }
               }
-            },
-            "description": "Liste der Kunden"
+            }
           }
-        },
-        "summary": "Kundenliste (paginiert, filterbar)",
+        }
+      }
+    },
+    "/api/billing/generate": {
+      "post": {
+        "summary": "Rechnung(en) erzeugen",
         "tags": [
-          "Customers"
-        ]
+          "Billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "Erzeugte Rechnung(en)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateInvoiceResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/employees": {
       "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/EmployeeListItem"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Liste der Mitarbeiter"
-          }
-        },
         "summary": "Mitarbeiterliste",
         "tags": [
           "Employees"
-        ]
+        ],
+        "responses": {
+          "200": {
+            "description": "Liste der Mitarbeiter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeListItem"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
-  },
-  "servers": [
-    {
-      "description": "CareConnect",
-      "url": "/"
-    }
-  ]
+  }
 }
