@@ -83,6 +83,15 @@ export default defineConfig({
   timeout: 30000,
   use: {
     baseURL: process.env.TEST_BASE_URL || "http://localhost:5000",
+    // Hoeher als Playwrights Default (1280x720). Der Datepicker-Popover des
+    // Wizards braucht bei einem Monat mit sechs Kalenderzeilen mehr Hoehe, als
+    // unter dem Trigger frei war; `PopoverContent` deklariert zwar
+    // `side="bottom"`, Radix kippt aber bei Platzmangel nach oben und der
+    // Popover-Kopf landete bei negativem y (gemessen: -14) — ausserhalb des
+    // Viewports, unklickbar. Der Wizard-Schritt ist kuerzer als der Viewport,
+    // das Dokument also nicht scrollbar: Scrollen half nachweislich nicht
+    // (CI-Lauf 31369343726), nur mehr Hoehe hilft.
+    viewport: { width: 1280, height: 1000 },
     // Trace bei jedem Retry-Versuch aufzeichnen (nicht nur beim ersten),
     // damit jeder Flake-Retry diagnostizierbar ist.
     trace: "retain-on-failure",

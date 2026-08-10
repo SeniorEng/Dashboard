@@ -80,10 +80,27 @@ async function pickDate(
   monthIndex: number,
   day: number,
 ): Promise<void> {
-  await page.locator(`[data-testid='${triggerTestId}']`).scrollIntoViewIfNeeded();
+  // Kein eigenes Scrollen mehr — `click()` holt den Trigger selbst in den
+  // sichtbaren Bereich. Die Platzfrage loest der hoehere Viewport in
+  // playwright.config.ts.
+  //
+  // Erster Versuch war, den Trigger per scrollIntoView an den oberen Rand zu
+  // schieben, damit der Popover nach unten aufklappt. Das griff NICHT (CI-Lauf
+  // 31369343726: unveraendert y=-14): der Wizard-Schritt ist kuerzer als der
+  // Viewport, das Dokument also gar nicht scrollbar — jedes Scrollen ist ein
+  // No-op, der Trigger bleibt bei y≈386 stehen. Gegen fehlenden Platz hilft
+  // dann nur mehr Platz.
   await page.locator(`[data-testid='${triggerTestId}']`).click();
   const pop = page.locator("[data-radix-popper-content-wrapper]").last();
   await expect(pop).toBeVisible();
+  // Der eigentliche Regressions-Wächter: klappt der Popover je wieder nach
+  // oben aus dem Viewport heraus, scheitert der Test HIER mit einer Zahl
+  // statt 30 Sekunden später mit einem nichtssagenden Klick-Timeout.
+  const popBox = await pop.boundingBox();
+  expect(
+    popBox?.y ?? -1,
+    `Datepicker-Popover ragt oben aus dem Viewport (y=${popBox?.y}) — Trigger sitzt zu tief`,
+  ).toBeGreaterThanOrEqual(0);
   // Tage-Ansicht → Jahres-Ansicht
   await pop.locator("[data-testid='btn-quick-year-month']").click();
   // bei Bedarf zu früheren Jahres-Seiten blättern (alle Zieljahre ≤ aktuelles Jahr)
