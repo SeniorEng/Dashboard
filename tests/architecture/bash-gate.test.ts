@@ -200,7 +200,40 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   ["git rm .claude/hooks/bash-gate.py", "git kann den Hook löschen"],
 ];
 
+/**
+ * B1 aus dem Gate-2-Review zu #81 — Shell-Konstrukte als Tarnung.
+ *
+ * Die Segment-Pruefung nimmt `basename(toks[0])`. Solange Schluesselwoerter
+ * nicht abgestreift wurden, hiess das erste Wort `until`/`do`/`then` und die
+ * gesperrte Handvoll stand auf Position 2+ — unsichtbar fuer jede Regel.
+ *
+ * Das wog fuer Bash schon schwer, war aber von der „erstes Wort"-Regel formal
+ * gedeckt. Fuer Monitor ist die Schleifenform die vom Werkzeug SELBST
+ * vorgeschriebene Standardform („use Monitor with an until-loop"), und mit der
+ * Auto-Freigabe faellt die Rueckfrage als letzte Bremse weg. Deshalb sind diese
+ * Faelle jetzt DENY und nicht BEWUSST_OFFEN.
+ */
+const DENY_KONSTRUKTE: Array<[string, string]> = [
+  ["until sudo -n true; do sleep 2; done", "until-Schleife (die kanonische Monitor-Form)"],
+  ["until gh pr merge 81 --admin; do sleep 5; done", "Gate 3 in einer until-Schleife"],
+  ["while true; do git push origin main; done", "Push nach main im while-Rumpf"],
+  ["for f in a; do rm -rf /etc/nginx; done", "rm -rf im for-Rumpf"],
+  ["if true; then sudo -n true; fi", "sudo im then-Zweig"],
+  ["! sudo -n true", "Negation als Praefix"],
+  ["time sudo -n true", "time als Praefix"],
+  ["until docker ps; do sleep 1; done", "docker in der until-Bedingung"],
+  ["while sleep 1; do FOO=1 sudo -n true; done", "Schluesselwort + ENV-Zuweisung gestapelt"],
+];
+
 const ALLOW: Array<[string, string]> = [
+  // Die legitime Monitor-Form MUSS durchlaufen — sonst waere das Werkzeug nach
+  // der Verschaerfung unbenutzbar und der Fix schlimmer als das Problem.
+  [
+    "until gh run view 123 --json status | grep -q completed; do sleep 30; done",
+    "CI-Beobachtung: until-Schleife um gh run view",
+  ],
+  ["while true; do sleep 5; done", "reine Warteschleife"],
+  ["for f in a b; do echo $f; done", "for-Schleife ohne gesperrtes Kommando"],
   ["git status --short", "Routine: git status"],
   ["git diff --stat", "Routine: git diff"],
   ["git push -u origin feature/foo", "Push auf Feature-Branch"],
@@ -297,7 +330,7 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
   });
 
   describe("gesperrte Handvoll", () => {
-    it.each([...DENY, ...DENY_SELF])("deny: %s (%s)", (cmd) => {
+    it.each([...DENY, ...DENY_SELF, ...DENY_KONSTRUKTE])("deny: %s (%s)", (cmd) => {
       const { decision, reason } = decide(payload(cmd));
       expect(decision, `"${cmd}" muss deny sein, Begründung: ${reason}`).toBe("deny");
       expect(reason.length, "deny braucht eine Begründung").toBeGreaterThan(0);
@@ -337,6 +370,10 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
       ["git push origin main", "Push nach main"],
       ["gh pr merge 27 --admin", "gh pr merge"],
       ["rm -rf ~", "rm -rf im Home"],
+      // Der Fall, um den es bei der Auto-Freigabe wirklich geht: genau diese
+      // Form empfiehlt die Monitor-Doku fuers Warten auf eine Bedingung.
+      ["until sudo -n true; do sleep 2; done", "until-Schleife"],
+      ["until gh pr merge 81 --admin; do sleep 5; done", "Gate 3 in der Schleife"],
     ])("deny: %s (%s)", (cmd) => {
       const { decision, reason } = decide(monitorPayload(cmd));
       expect(decision, `"${cmd}" muss auch als Monitor-Aufruf deny sein`).toBe("deny");
@@ -349,7 +386,7 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
     // einer Liste kuenftig einen Fall hinzufuegt, bekommt ihn fuer Monitor
     // automatisch mitgeprueft; ohne die Schleife muesste er daran denken, und
     // genau daran denkt niemand.
-    it.each([...DENY, ...DENY_SELF, ...ALLOW, ...BEWUSST_OFFEN])(
+    it.each([...DENY, ...DENY_SELF, ...DENY_KONSTRUKTE, ...ALLOW, ...BEWUSST_OFFEN])(
       "Bash und Monitor entscheiden gleich: %s (%s)",
       (cmd) => {
         expect(
