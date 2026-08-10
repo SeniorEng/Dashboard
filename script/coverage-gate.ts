@@ -167,14 +167,41 @@ const MODULES: ModuleGate[] = [
     key: "month-close-scheduler",
     mode: "vitest",
     target: "server/services/month-close-scheduler.ts",
+    // Dieselbe Drift wie beim `qonto`-Gate: die Liste blieb STEHEN, während das
+    // Modul wuchs und die Tests dafür in ANDERE Dateien geschrieben wurden.
+    // Gemessen wurden zuletzt 28,8 % — nicht weil der Code untestet ist,
+    // sondern weil das Gate die einschlägigen Dateien nicht ausführte. Genau
+    // daran ist Schritt 18 in CI gescheitert: die Schwellen (33/21) standen
+    // über dem, was die verkürzte Liste überhaupt messen konnte.
     tests: [
       "tests/auto-close-scheduler.test.ts",
       "tests/month-closing.test.ts",
+      // Beide importieren `autoCloseMonthForCutoff` direkt und fahren den
+      // Auto-Close-Pfad an — zusammen der Teil des Moduls, der vorher
+      // vollständig ungemessen blieb.
+      "tests/auto-close-no-overwrite.test.ts",
+      "tests/month-close-unified-readiness.test.ts",
     ],
-    // Ist (Mai 2026): Lines 38.5 % / Branch 26.1 %. Reminder-Versand
-    // (WhatsApp/SMTP) und Banner-HTTP-Pfade laufen außerhalb der direkt
-    // importierenden Tests und sind daher nicht abgedeckt.
-    lines: 33,
+    // NICHT dabei: `tests/equality/month-close-cutoff.test.ts`. Die Datei nennt
+    // das Modul nur in einem Kommentar; importiert wird `shared/utils/
+    // month-close-cutoff`, und die Cutoff-/Banner-Pfade werden über HTTP
+    // geprüft. Im `vitest`-Modus misst der v8-Provider aber nur, was der
+    // Worker selbst lädt — die Datei trägt hier also nichts bei und kostet nur
+    // Laufzeit. Gemessen und verworfen, nicht vermutet.
+    //
+    // Ist (10.08.2026): Lines 41,66 % / Branch 26,74 % — vorher 28,78 / 16,27
+    // mit der verkürzten Liste. Kalibriert mit dem im Datei-Kopf dokumentierten
+    // ~5 %-Puffer: 41,66 − 5 ≈ 36, 26,74 − 5 ≈ 21.
+    //
+    // Branches bleibt damit auf 21 STEHEN. Das ist keine Absenkung, sondern das
+    // Ergebnis derselben Rechnung — die Schwelle war schon vorher über dem, was
+    // die alte Liste messen konnte (16,27 %), und trägt jetzt echten Puffer
+    // statt zufällig zu passen.
+    //
+    // Reminder-Versand (WhatsApp/SMTP) und die Banner-HTTP-Pfade laufen
+    // weiterhin außerhalb der direkt importierenden Tests und bleiben
+    // unabgedeckt — das ist der Rest bis 100 %.
+    lines: 36,
     branches: 21,
   },
 ];
