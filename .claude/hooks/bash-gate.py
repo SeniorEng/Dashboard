@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-"""Entscheidungslogik des PreToolUse-Gates fuer das Bash-Tool.
+"""Entscheidungslogik des PreToolUse-Gates fuer das Bash- und das Monitor-Tool.
 
 STOLPERDRAHT GEGEN VERSEHEN — KEIN SANDBOX-ERSATZ.
 Dieses Gate faengt das versehentlich getippte `sudo …`, `docker …`,
 `git push origin main` oder `rm -rf /…`. Es ist ein Kommando-FILTER und als
 solcher grundsaetzlich umgehbar. Die Regel, an der die Grenze verlaeuft:
-**geprueft wird das ERSTE WORT jedes Teilkommandos.** Alles, was das
-eigentliche Kommando dahinter versteckt, laeuft vorbei — Praefix-Kommandos
-(`env`, `command`, `nohup`, `time`, `{ …; }`), Variablen-Expansion
-(`X=sudo; $X …`), Command-Substitution (`$(sudo id)`), `xargs`, `find -exec`,
-`eval`, Heredoc-Ruempfe an eine Shell, oder ein umbenanntes Verzeichnis
-(`mv .claude .claude-off`). Das ist BEWUSST nicht geschlossen — ein Filter, der
-all das faengt, blockiert normale Arbeit, und vollstaendig wird er trotzdem nie.
+**geprueft wird das ERSTE WORT jedes Teilkommandos** — wobei Shell-Syntax, die
+kein Kommando IST, vorher abgestreift wird: Schluesselwoerter (`until`, `do`,
+`then`, `case`-Muster, `{ …; }`, `time`), ENV-Zuweisungen und fuehrende
+Redirects. Geprueft wird ausserdem, was ein Segment als ARGUMENT traegt
+(Redirect-Ziel, Gate-Pfad) — dafuer laufen diese Scans ueber die ROHEN Tokens,
+nicht ueber die gekuerzten. Ein fuehrender Redirect (`> /etc/cron.d/x echo …`)
+ist damit NICHT mehr offen, und der Rumpf von `$(…)` ist ein eigenes Segment
+und wird mitgeprueft.
+
+Offen bleibt, was ein echtes KOMMANDO davorschiebt: Wrapper (`env`, `command`,
+`nohup`, `exec`, `eval`, `xargs`, `find -exec`, `time -p`), Variablen-Expansion
+(`X=sudo; $X …`), Backtick-Substitution (`echo \\`sudo id\\`` — anders als
+`$(…)`, weil der Lexer dort keine Klammern kennt), die arithmetische
+Schleifenform (`while (( i < 3 )); do …`), Schreib-Redirects auf das Gate hinter
+einem Kommando aus `READONLY_CMDS` (`cat x > .claude/hooks/…`), Heredoc-Ruempfe
+an eine Shell, oder ein umbenanntes Verzeichnis (`mv .claude .claude-off`). Das
+ist BEWUSST nicht geschlossen — ein Filter, der all das faengt, blockiert
+normale Arbeit, und vollstaendig wird er trotzdem nie.
 `tests/architecture/bash-gate.test.ts` haelt diese Grenze als Block
 `BEWUSST_OFFEN` fest, damit sie sichtbar bleibt.
 **Unbeaufsichtigter Betrieb mit fremdem Input braucht eine Sandbox, nicht
@@ -70,8 +81,27 @@ BLOCKED_COMMANDS = {
 SHELLS = ("bash", "sh", "zsh")
 DOWNLOADERS = ("curl", "wget")
 
-OPERATORS = (";", "&&", "||", "|", "&")
+OPERATORS = (";", ";;", ";&", ";;&", "&&", "||", "|", "&")
 REDIRECTS = (">", ">>", ">|", "&>", "&>>", "<", "<<", "<<<")
+
+# Shell-Schluesselwoerter und Gruppierungs-Token, die VOR dem eigentlichen
+# Kommando stehen duerfen. Sie werden am Segment-Anfang abgestreift, damit
+# `until sudo …`, `do sudo …`, `then sudo …`, `{ sudo …; }` und `time sudo …`
+# nicht das Schluesselwort als „erstes Wort" liefern und damit jede Regel
+# abschalten. Kein Kommando dieses Namens existiert — das Abstreifen kann
+# also nichts Echtes verdecken.
+SHELL_KEYWORDS = frozenset({
+    "if", "then", "elif", "else", "fi",
+    "while", "until", "for", "select", "do", "done",
+    "case", "in", "esac",
+    "function", "coproc", "time", "{", "}", "!",
+})
+
+# Schluesselwoerter, auf die per Shell-Grammatik ein NAME folgt (`for f in …`,
+# `select f in …`, `case $x in …`). Der Name wird mit abgestreift, sonst wird er
+# als „erstes Wort" gelesen — `for docker in a b; do echo $docker; done` waere
+# sonst ein Falsch-Positiv auf `docker`. Ein Kommando kann dort nie stehen.
+KEYWORDS_WITH_NAME = frozenset({"for", "select", "case"})
 
 # git-Flags, die einen WERT nach sich ziehen. Ohne die Liste laese
 # `git -C <dir> push …` das Verzeichnis als Subkommando und alle git-Regeln
@@ -156,45 +186,104 @@ def logical_lines(cmd):
 
 
 def segments(cmd):
-    """Liste von (vorheriger Operator, Tokens). ENV-Zuweisungen und fuehrende
-    Redirects werden abgestreift — `> /tmp/log sudo -n id` haette sonst `>` als
-    Kommando gelesen und jede Regel des Segments abgeschaltet."""
+    """Liste von (vorheriger Operator, ROH-Tokens, KOMMANDO-Tokens).
+
+    Beide Listen werden gebraucht, und sie zu verwechseln war die Ursache
+    der vorbestehenden Redirect-Luecke:
+      - KOMMANDO-Tokens sind um alles gekuerzt, was VOR dem Kommando stehen
+        darf (Schluesselwoerter, ENV-Zuweisungen, fuehrende Redirects).
+        Daraus wird das „erste Wort" bestimmt — sonst haette `> /tmp/log
+        sudo -n id` das `>` als Kommando gelesen und jede Regel abgeschaltet.
+      - ROH-Tokens sind ungekuerzt. Ueber sie laufen die Scans, die ein
+        ARGUMENT irgendwo im Segment suchen (Redirect-Ziel, Gate-Selbstschutz).
+        Liefe der Redirect-Scan ueber die gekuerzte Liste, waere genau das
+        abgestreifte `> /etc/cron.d/x` unsichtbar — der Fall, den der
+        Waechter `while true; do > /etc/cron.d/x echo boese; done` festhaelt.
+    """
     out = []
     for line in logical_lines(cmd):
         toks = try_lex(line)
         if toks is None:
             emit("deny", "Kommando nicht parsebar (unbalancierte Quotes) — fail-closed.")
         cur, prev_op = [], None
-        pending_op = None
+        depth = []
         for t in toks:
             if t in OPERATORS:
                 if cur:
                     out.append((prev_op, cur))
                 cur, prev_op = [], t
-                pending_op = t
                 continue
-            if t in ("(", ")"):
+            # Klammern werden mit TIEFE gefuehrt, nicht als blinder Trenner.
+            # `)` blind zu trennen war die naheliegende Fassung und ist falsch:
+            # bei `rm -rf $(cat liste) /etc/nginx` landet `/etc/nginx` dann in
+            # einem eigenen Segment ohne Kommando — `rm -rf` sieht sein
+            # gefaehrliches Argument nicht mehr und das Kommando wird `allow`.
+            # (Gemessen: head deny, blinde Fassung allow. Gilt genauso fuer
+            # `chmod 777 $(…) /etc/passwd`, `git push $(…) main`, `tee $(…)
+            # /etc/hosts`.)
+            if t == "(":
+                # Klammer AUF: das bisher Gesammelte wird nur GEPARKT, nicht
+                # abgeschlossen — seine Argumente laufen hinter der
+                # schliessenden Klammer weiter.
+                depth.append((cur, prev_op))
+                cur = []
+                continue
+            if t == ")":
+                if depth:
+                    # Klammer ZU: das Innere ist ein eigenes Segment
+                    # (`(sudo …)` bleibt damit deny), das geparkte Aeussere
+                    # laeuft weiter.
+                    if cur:
+                        out.append((prev_op, cur))
+                    cur, prev_op = depth.pop()
+                    continue
+                # Ohne offene Klammer ist `)` das Ende eines `case`-Musters
+                # (`a) sudo -n true;;`) — dort und nur dort trennt es.
+                if cur:
+                    out.append((prev_op, cur))
+                cur, prev_op = [], ")"
                 continue
             cur.append(t)
         if cur:
             out.append((prev_op, cur))
-        _ = pending_op
+        # Unbalancierte Klammern: das Geparkte darf nicht verloren gehen.
+        while depth:
+            parked, parked_op = depth.pop()
+            if parked:
+                out.append((parked_op, parked))
 
+    # Alles, was VOR dem eigentlichen Kommando stehen darf, bis zum FIXPUNKT
+    # abstreifen: Schluesselwoerter, ENV-Zuweisungen und fuehrende Redirects
+    # koennen sich beliebig mischen (`{ FOO=1 > /tmp/l sudo -n id; }`). Drei
+    # nacheinander laufende Schleifen haetten nur die erste Reihenfolge
+    # erwischt; jede andere haette das erste Wort falsch bestimmt und damit
+    # ALLE Regeln des Segments abgeschaltet.
     cleaned = []
-    for op, s in out:
-        while s and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", s[0]):
-            s = s[1:]
-        # `> /tmp/log cmd` und `2> /tmp/log cmd`. Der Lexer liefert die
-        # Dateideskriptor-Ziffer als EIGENES Token, deshalb beide Formen.
-        while True:
-            if len(s) >= 2 and s[0] in REDIRECTS:
+    for op, raw in out:
+        s = list(raw)
+        while s:
+            head = s[0]
+            if head in SHELL_KEYWORDS:
+                # `for f in …` — den Namen gleich mit abstreifen (siehe
+                # KEYWORDS_WITH_NAME).
+                s = s[2:] if head in KEYWORDS_WITH_NAME and len(s) >= 2 else s[1:]
+                continue
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", head):
+                s = s[1:]
+                continue
+            # `> /tmp/log cmd` und `2> /tmp/log cmd`. Der Lexer liefert die
+            # Dateideskriptor-Ziffer als EIGENES Token, deshalb beide Formen.
+            if len(s) >= 2 and head in REDIRECTS:
                 s = s[2:]
-            elif len(s) >= 3 and re.fullmatch(r"\d+", s[0]) and s[1] in REDIRECTS:
+                continue
+            if len(s) >= 3 and re.fullmatch(r"\d+", head) and s[1] in REDIRECTS:
                 s = s[3:]
-            else:
-                break
-        if s:
-            cleaned.append((op, s))
+                continue
+            break
+        # Auch ein Segment OHNE Kommando bleibt drin (`> /etc/passwd` allein):
+        # sein Redirect-Ziel muss weiter geprueft werden.
+        if raw:
+            cleaned.append((op, raw, s))
     return cleaned
 
 
@@ -219,15 +308,21 @@ def check(cmd):
     # `curl … | sh` — nur bei einer echten Pipe. Die fruehere Rohtext-Regex hielt
     # `cat /tmp/a | grep foo.sh` fuer eine Shell-Pipe; die reine Nachbarschaft
     # ohne Operator-Pruefung sperrte `curl -sf http://x/health && bash script.sh`.
-    for i in range(len(segs) - 1):
-        if os.path.basename(segs[i][1][0]) in DOWNLOADERS:
-            nxt_op, nxt = segs[i + 1]
+    # Kommandolose Segmente (reiner Redirect) UNTERBRECHEN eine Pipe nicht.
+    # Sie werden fuer diese Pruefung verdichtet — sonst waere
+    # `curl x | > /tmp/a | bash` allow, obwohl head es deny hat: dort fielen
+    # solche Segmente weg und `curl`/`bash` waren echte Nachbarn.
+    piped = [(op, cmd) for op, _raw, cmd in segs if cmd]
+    for i in range(len(piped) - 1):
+        if os.path.basename(piped[i][1][0]) in DOWNLOADERS:
+            nxt_op, nxt = piped[i + 1]
             if nxt_op == "|" and os.path.basename(nxt[0]) in SHELLS:
                 return "deny", "Download nach Shell-Pipe (`curl|bash`) — nicht auditierbar, gesperrt."
 
-    for _op, toks in segs:
-        base = os.path.basename(toks[0])
-        rest = toks[1:]
+    for _op, toks, cmd_toks in segs:
+        # `toks` = roh (Argument-Scans), `cmd_toks` = gekuerzt (erstes Wort).
+        base = os.path.basename(cmd_toks[0]) if cmd_toks else ""
+        rest = cmd_toks[1:]
 
         if base in BLOCKED_COMMANDS:
             return "deny", BLOCKED_COMMANDS[base]
@@ -319,8 +414,11 @@ def main():
         emit("deny", "Hook-Eingabe ist kein gueltiges JSON — fail-closed.")
     if not isinstance(payload, dict):
         emit("deny", "Hook-Eingabe ist kein JSON-Objekt — fail-closed.")
-    if payload.get("tool_name") != "Bash":
-        emit("deny", "Gate erwartet das Bash-Tool — fail-closed.")
+    # Monitor fuehrt wie Bash ein beliebiges Shell-Kommando aus (gleiches Feld
+    # `tool_input.command`) — es ist KEIN read-only-Werkzeug. Solange der Hook
+    # nur auf Bash lief, war Monitor ein zweites Tor neben dem Zaun.
+    if payload.get("tool_name") not in ("Bash", "Monitor"):
+        emit("deny", "Gate erwartet das Bash- oder Monitor-Tool — fail-closed.")
     cmd = (payload.get("tool_input") or {}).get("command")
     if not isinstance(cmd, str) or not cmd.strip():
         emit("deny", "Kein lesbares `command` in der Hook-Eingabe — fail-closed.")

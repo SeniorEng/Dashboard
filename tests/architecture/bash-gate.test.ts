@@ -181,7 +181,6 @@ const DENY_SELF: Array<[string, string]> = [
 // jemand später eine Zeile von hier nach `DENY`, ist das eine bewusste
 // Erweiterung; verschwindet eine Zeile hier still, fällt es auf.
 const BEWUSST_OFFEN: Array<[string, string]> = [
-  ["echo $(sudo id)", "Command-Substitution wird nicht rekursiv geprüft"],
   ["env sudo -n true", "Präfix-Kommando `env`"],
   ["command sudo -n true", "Präfix-Kommando `command`"],
   ["nohup sudo -n true", "Präfix-Kommando `nohup`"],
@@ -201,7 +200,12 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   ["function f { sudo -n true; }", "Definition ist kein Aufruf"],
   ["time -p sudo -n true", "Flag zwischen Schluesselwort und Kommando"],
   ["/usr/bin/time sudo -n true", "Praefix ueber den absoluten Pfad"],
-  ["echo `sudo id`", "Backtick-Substitution (wie `$(…)`) wird nicht rekursiv geprueft"],
+  // Backticks bleiben offen, `$(…)` NICHT mehr: seit die Klammer-Tiefe gefuehrt
+  // wird, ist der Rumpf von `$(…)` ein eigenes Segment und wird geprueft. Der
+  // Lexer kennt bei Backticks keine Klammern, also greift dort nichts. Die
+  // Grenze laeuft damit zwischen zwei Schreibweisen DERSELBEN Sache — genau
+  // deshalb steht sie hier ausdruecklich und nicht im Verborgenen.
+  ["echo `sudo id`", "Backtick-Substitution — anders als `$(…)` nicht geprueft"],
   ["mv .claude .claude-off", "Selbstschutz greift auf den Pfad, nicht auf das Verzeichnis"],
   ["rm -rf .claude", "dasselbe, als Löschung"],
   // `git` steht in der Lese-Allowlist, weil die Ausnahme nichts schützte
@@ -211,15 +215,6 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   // Stand zurücksetzen.
   ["git checkout -- .claude/hooks/bash-gate.py", "git kann den Hook zurücksetzen"],
   ["git rm .claude/hooks/bash-gate.py", "git kann den Hook löschen"],
-  // VORBESTEHENDE Luecke, im Gate-2-Review zu #81 gefunden und selbst
-  // nachgemessen: ein FUEHRENDER Redirect haengt sich vor das Kommando, der
-  // Redirect-Stripper entfernt ihn aus der gekuerzten Tokenliste, und der
-  // Ziel-Scan sieht ihn nie. Der Selbstschutz des Gates ist damit heute
-  // umgehbar — `DENY_SELF` sah nur deshalb geschlossen aus, weil die anderen
-  // Faelle ueber `sudo`/`docker` unabhaengig greifen.
-  ["> .claude/hooks/bash-gate.py echo pwned", "Selbstschutz per fuehrendem Redirect"],
-  ["> /etc/cron.d/x echo boese", "Systempfad per fuehrendem Redirect"],
-  ["FOO=1 > /etc/cron.d/x echo y", "dasselbe hinter einer ENV-Zuweisung"],
 ];
 
 /**
@@ -262,6 +257,26 @@ const DENY_KONSTRUKTE: Array<[string, string]> = [
   // gepatchten Kopie. Die Fassung muss die Scans deshalb ueber die ROHEN
   // Segment-Tokens fahren, nicht ueber die gekuerzten.
   ["while true; do > /etc/cron.d/x echo boese; done", "Redirect im Schleifenrumpf (darf nicht kippen)"],
+  // VORBESTEHENDE Luecke (P1), im Gate-2-Review zu #81 gefunden und selbst
+  // nachgemessen: ein FUEHRENDER Redirect haengt sich vor das Kommando, der
+  // Redirect-Stripper entfernte ihn aus der gekuerzten Tokenliste, und der
+  // Ziel-Scan sah ihn nie. `DENY_SELF` sah nur deshalb geschlossen aus, weil die
+  // anderen Faelle ueber `sudo`/`docker` unabhaengig greifen.
+  //
+  // Diese drei Zeilen standen bis #81 in BEWUSST_OFFEN. Sie sind hierher
+  // VERSCHOBEN, nicht umgeschrieben: der Waechter-Vertrag sagt, eine Zeile, die
+  // jetzt deny liefert, wandert nach DENY — Entscheidung Alrik („P1 mit rein").
+  // Geschlossen hat sie der Tripel-Hunk (ROH- vs. KOMMANDO-Tokens), der ohnehin
+  // noetig war, damit der Waechter direkt darueber nicht kippt.
+  ["> .claude/hooks/bash-gate.py echo pwned", "Selbstschutz per fuehrendem Redirect"],
+  ["> /etc/cron.d/x echo boese", "Systempfad per fuehrendem Redirect"],
+  ["FOO=1 > /etc/cron.d/x echo y", "dasselbe hinter einer ENV-Zuweisung"],
+  // VIERTE Zeile aus BEWUSST_OFFEN, NICHT in Alriks urspruenglicher Dreierliste:
+  // die Klammer-Tiefe (Gate-2-Befund S1) macht den Rumpf von `$(…)` zu einem
+  // eigenen Segment und prueft ihn damit. Das war nicht das Ziel des Hunks,
+  // sondern seine Nebenwirkung — und es ist eine Verschaerfung, also wandert die
+  // Zeile nach derselben Regel hierher. Backticks bleiben offen (siehe dort).
+  ["echo $(sudo id)", "Command-Substitution mit gesperrtem Kommando im Rumpf"],
 ];
 
 const ALLOW: Array<[string, string]> = [
