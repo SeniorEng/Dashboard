@@ -57,6 +57,20 @@ function payload(command: string): string {
   return JSON.stringify({ tool_name: "Bash", tool_input: { command } });
 }
 
+/**
+ * Dasselbe Kommando, aber als Monitor-Aufruf.
+ *
+ * Monitor fuehrt wie Bash ein beliebiges Shell-Kommando aus (Feld ebenfalls
+ * `tool_input.command`) — es ist KEIN read-only-Werkzeug. Solange der Hook nur
+ * auf `matcher: "Bash"` lief, war Monitor ein zweites Tor neben dem Zaun:
+ * `git push --force` ist als Bash-Kommando gesperrt, waere als Monitor-Aufruf
+ * aber durchgelaufen. Dasselbe gilt fuer die `deny`-Liste in
+ * `settings.local.json` — deren Regeln sind samtlich `Bash(...)`-scoped.
+ */
+function monitorPayload(command: string): string {
+  return JSON.stringify({ tool_name: "Monitor", tool_input: { command } });
+}
+
 const DENY: Array<[string, string]> = [
   ["sudo -n true", "sudo blank"],
   ["echo x && sudo y", "Compound-Falle: sudo im zweiten Segment"],
@@ -294,6 +308,43 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
       const { decision, reason } = decide(payload(cmd));
       expect(decision, `"${cmd}" muss allow sein, Begründung: ${reason}`).toBe("allow");
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // Monitor: dieselbe Handvoll, dieselben Entscheidungen
+  // ---------------------------------------------------------------------
+  describe("Monitor-Tool wird identisch geguardet", () => {
+    it("laesst ein Routine-Kommando durch", () => {
+      expect(decide(monitorPayload("git status")).decision).toBe("allow");
+    });
+
+    it.each([
+      ["sudo -n true", "sudo"],
+      ["docker ps", "docker"],
+      ["git push --force origin feature", "force-push"],
+      ["git push origin main", "Push nach main"],
+      ["gh pr merge 27 --admin", "gh pr merge"],
+      ["rm -rf ~", "rm -rf im Home"],
+    ])("deny: %s (%s)", (cmd) => {
+      const { decision, reason } = decide(monitorPayload(cmd));
+      expect(decision, `"${cmd}" muss auch als Monitor-Aufruf deny sein`).toBe("deny");
+      expect(reason.length, "deny braucht eine Begruendung").toBeGreaterThan(0);
+    });
+
+    // Der eigentliche Waechter: KEINE Drift zwischen den beiden Werkzeugen.
+    // Wer der DENY-/ALLOW-Liste kuenftig einen Fall hinzufuegt, bekommt ihn
+    // fuer Monitor automatisch mitgeprueft — ohne diese Schleife muesste er
+    // daran denken, und genau daran denkt niemand.
+    it.each([...DENY, ...DENY_SELF, ...ALLOW])(
+      "Bash und Monitor entscheiden gleich: %s (%s)",
+      (cmd) => {
+        expect(
+          decide(monitorPayload(cmd)).decision,
+          `"${cmd}" wird als Bash anders entschieden als als Monitor — die ` +
+          `beiden Werkzeuge duerfen nicht auseinanderlaufen.`,
+        ).toBe(decide(payload(cmd)).decision);
+      },
+    );
   });
 
   describe("fail-closed", () => {
