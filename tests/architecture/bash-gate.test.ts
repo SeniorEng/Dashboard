@@ -194,6 +194,13 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   // aufgezaehlt. Hier festgehalten, damit die Grenze vollstaendig sichtbar ist
   // statt nur beispielhaft.
   ["exec sudo -n true", "Praefix-Kommando `exec`"],
+  // Restklasse NACH der geplanten Verschaerfung — gemessen, und bewusst offen:
+  // sie gehoert zur selben Wrapper-Familie. `time sudo` wird gesperrt,
+  // `time -p sudo` nicht: eine ein Zeichen breite Grenze, die niemand von
+  // selbst sieht. Genau deshalb steht sie hier und nicht im Verborgenen.
+  ["function f { sudo -n true; }", "Definition ist kein Aufruf"],
+  ["time -p sudo -n true", "Flag zwischen Schluesselwort und Kommando"],
+  ["/usr/bin/time sudo -n true", "Praefix ueber den absoluten Pfad"],
   ["echo `sudo id`", "Backtick-Substitution (wie `$(…)`) wird nicht rekursiv geprueft"],
   ["mv .claude .claude-off", "Selbstschutz greift auf den Pfad, nicht auf das Verzeichnis"],
   ["rm -rf .claude", "dasselbe, als Löschung"],
@@ -204,6 +211,15 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   // Stand zurücksetzen.
   ["git checkout -- .claude/hooks/bash-gate.py", "git kann den Hook zurücksetzen"],
   ["git rm .claude/hooks/bash-gate.py", "git kann den Hook löschen"],
+  // VORBESTEHENDE Luecke, im Gate-2-Review zu #81 gefunden und selbst
+  // nachgemessen: ein FUEHRENDER Redirect haengt sich vor das Kommando, der
+  // Redirect-Stripper entfernt ihn aus der gekuerzten Tokenliste, und der
+  // Ziel-Scan sieht ihn nie. Der Selbstschutz des Gates ist damit heute
+  // umgehbar — `DENY_SELF` sah nur deshalb geschlossen aus, weil die anderen
+  // Faelle ueber `sudo`/`docker` unabhaengig greifen.
+  ["> .claude/hooks/bash-gate.py echo pwned", "Selbstschutz per fuehrendem Redirect"],
+  ["> /etc/cron.d/x echo boese", "Systempfad per fuehrendem Redirect"],
+  ["FOO=1 > /etc/cron.d/x echo y", "dasselbe hinter einer ENV-Zuweisung"],
 ];
 
 /**
@@ -239,6 +255,13 @@ const DENY_KONSTRUKTE: Array<[string, string]> = [
   // EIN Segment und `sudo` steht auf Position 5. Der Patch muss zusaetzlich
   // `;;` (und/oder `)`) als Trenner behandeln.
   ["case x in a) sudo -n true;; esac", "case-Zweig"],
+  // REGRESSIONS-WAECHTER gegen den eigenen Patch: dieser Fall ist HEUTE deny.
+  // Der erste Patch-Entwurf haette ihn auf allow gedreht — das Abstreifen von
+  // `do` schiebt den fuehrenden Redirect in Abstreif-Reichweite, danach wird
+  // das Ziel nie mehr geprueft. Aufgefallen erst beim AUSFUEHREN einer
+  // gepatchten Kopie. Die Fassung muss die Scans deshalb ueber die ROHEN
+  // Segment-Tokens fahren, nicht ueber die gekuerzten.
+  ["while true; do > /etc/cron.d/x echo boese; done", "Redirect im Schleifenrumpf (darf nicht kippen)"],
 ];
 
 const ALLOW: Array<[string, string]> = [
