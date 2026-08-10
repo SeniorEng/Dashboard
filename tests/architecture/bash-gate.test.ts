@@ -189,6 +189,12 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   ["echo /etc/nginx | xargs rm -rf", "`xargs` baut das Kommando erst zur Laufzeit"],
   ["find /etc -name '*.conf' -exec rm -f {} +", "`find -exec` ebenso"],
   ["eval 'git push origin main'", "`eval` ebenso"],
+  // Zweite Sonde (Wrapper-Klasse): gemessen `allow`, gehoeren zur selben
+  // bereits dokumentierten Klasse wie `env`/`command`/`nohup` — waren nur nicht
+  // aufgezaehlt. Hier festgehalten, damit die Grenze vollstaendig sichtbar ist
+  // statt nur beispielhaft.
+  ["exec sudo -n true", "Praefix-Kommando `exec`"],
+  ["echo `sudo id`", "Backtick-Substitution (wie `$(…)`) wird nicht rekursiv geprueft"],
   ["mv .claude .claude-off", "Selbstschutz greift auf den Pfad, nicht auf das Verzeichnis"],
   ["rm -rf .claude", "dasselbe, als Löschung"],
   // `git` steht in der Lese-Allowlist, weil die Ausnahme nichts schützte
@@ -223,6 +229,16 @@ const DENY_KONSTRUKTE: Array<[string, string]> = [
   ["time sudo -n true", "time als Praefix"],
   ["until docker ps; do sleep 1; done", "docker in der until-Bedingung"],
   ["while sleep 1; do FOO=1 sudo -n true; done", "Schluesselwort + ENV-Zuweisung gestapelt"],
+  // Zweite Sonde (Trenner-Klasse), alle heute `allow` gegen das echte Gate:
+  ["select f in a; do sudo -n true; done", "select-Konstrukt"],
+  ["{ sudo -n true; }", "Gruppierungs-Klammern"],
+  ["while true; do sudo -n true; done &", "Schleife in den Hintergrund geschickt"],
+  // Der HAERTESTE Fall: Schluesselwort-Abstreifen allein reicht hier NICHT.
+  // Tokenisiert als `case x in a ) sudo -n true ;; esac` — `)` wird von
+  // `segments()` uebersprungen und `;;` ist kein Operator, also bleibt alles
+  // EIN Segment und `sudo` steht auf Position 5. Der Patch muss zusaetzlich
+  // `;;` (und/oder `)`) als Trenner behandeln.
+  ["case x in a) sudo -n true;; esac", "case-Zweig"],
 ];
 
 const ALLOW: Array<[string, string]> = [
