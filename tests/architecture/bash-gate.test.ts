@@ -200,12 +200,37 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   ["function f { sudo -n true; }", "Definition ist kein Aufruf"],
   ["time -p sudo -n true", "Flag zwischen Schluesselwort und Kommando"],
   ["/usr/bin/time sudo -n true", "Praefix ueber den absoluten Pfad"],
-  // Backticks bleiben offen, `$(…)` NICHT mehr: seit die Klammer-Tiefe gefuehrt
-  // wird, ist der Rumpf von `$(…)` ein eigenes Segment und wird geprueft. Der
-  // Lexer kennt bei Backticks keine Klammern, also greift dort nichts. Die
-  // Grenze laeuft damit zwischen zwei Schreibweisen DERSELBEN Sache — genau
-  // deshalb steht sie hier ausdruecklich und nicht im Verborgenen.
-  ["echo `sudo id`", "Backtick-Substitution — anders als `$(…)` nicht geprueft"],
+  ["echo `sudo id`", "Backtick-Substitution — wie `$(…)` nicht rekursiv geprueft"],
+  // ---------------------------------------------------------------------
+  // KLAMMER-FAMILIE — offen, und zwar nach drei Review-Runden ABSICHTLICH.
+  //
+  // #81 hat versucht, sie in-band zu schliessen (`)` als Trenner, dann
+  // Klammer-Tiefe, dann Tiefe + Interpunktions-Zerlegung + `saw_case`). Jede
+  // Fassung schloss die genannten Faelle und riss anderswo ein `deny` auf:
+  //   1. `)` blind als Trenner -> `rm -rf $(cat l) /etc/nginx` wurde allow
+  //      (das Argument verlor sein Kommando).
+  //   2. Klammer-Tiefe, die das Innere WEGNAHM -> `rm -rf $(echo /etc/nginx)`
+  //      wurde allow (neun gemessene Kipper).
+  //   3. Tiefe + `saw_case` -> `echo case; sudo -n true ")"` wurde allow:
+  //      posix-`shlex` streift die Quotes, das Token `)` ist von einer echten
+  //      Klammer nicht unterscheidbar, und die Muster-Markierung schaltet ALLE
+  //      basisgestuetzten Regeln des Segments ab. Fail-open an der einen
+  //      Stelle, die fail-closed sein muss.
+  //
+  // Daraus die Regel fuer den naechsten Versuch: Klammer-Semantik gehoert in
+  // einen PARSER, nicht in einen Token-Filter. Wer sie hier wieder aufmacht,
+  // faengt bitte mit diesen drei Gegenbeispielen an — sie sind billig zu
+  // messen und haben jede der drei Fassungen gekippt.
+  // Offen ist die Klammer-Familie nur dort, wo das gesperrte Ding das KOMMANDO
+  // ist. Steht es als ARGUMENT, greifen die Pfad-Regeln auch ohne
+  // Klammer-Semantik — diese Faelle stehen als DENY weiter unten.
+  ["case x in a) sudo -n true;; esac", "case-Zweig"],
+  ["case $x in (a) sudo -n true;; esac", "POSIX-Muster mit fuehrender Klammer"],
+  ["echo $(sudo id)", "gesperrtes Kommando im Substitutions-Rumpf"],
+  ["for f in $(ls); do gh pr merge 81 --admin; done", "`);` ist ein Token — Schleifenform mit Substitution"],
+  ["while (( i < 3 )); do sudo -n true; done", "arithmetische while-Form"],
+  ["for ((i=0;i<3;i++)); do sudo -n true; done", "arithmetische for-Form"],
+  ["x=$(pwd) sudo -n true", "Zuweisungs-Praefix mit Substitution"],
   ["mv .claude .claude-off", "Selbstschutz greift auf den Pfad, nicht auf das Verzeichnis"],
   ["rm -rf .claude", "dasselbe, als Löschung"],
   // `git` steht in der Lese-Allowlist, weil die Ausnahme nichts schützte
@@ -244,12 +269,6 @@ const DENY_KONSTRUKTE: Array<[string, string]> = [
   ["select f in a; do sudo -n true; done", "select-Konstrukt"],
   ["{ sudo -n true; }", "Gruppierungs-Klammern"],
   ["while true; do sudo -n true; done &", "Schleife in den Hintergrund geschickt"],
-  // Der HAERTESTE Fall: Schluesselwort-Abstreifen allein reicht hier NICHT.
-  // Tokenisiert als `case x in a ) sudo -n true ;; esac` — `)` wird von
-  // `segments()` uebersprungen und `;;` ist kein Operator, also bleibt alles
-  // EIN Segment und `sudo` steht auf Position 5. Der Patch muss zusaetzlich
-  // `;;` (und/oder `)`) als Trenner behandeln.
-  ["case x in a) sudo -n true;; esac", "case-Zweig"],
   // REGRESSIONS-WAECHTER gegen den eigenen Patch: dieser Fall ist HEUTE deny.
   // Der erste Patch-Entwurf haette ihn auf allow gedreht — das Abstreifen von
   // `do` schiebt den fuehrenden Redirect in Abstreif-Reichweite, danach wird
@@ -271,12 +290,20 @@ const DENY_KONSTRUKTE: Array<[string, string]> = [
   ["> .claude/hooks/bash-gate.py echo pwned", "Selbstschutz per fuehrendem Redirect"],
   ["> /etc/cron.d/x echo boese", "Systempfad per fuehrendem Redirect"],
   ["FOO=1 > /etc/cron.d/x echo y", "dasselbe hinter einer ENV-Zuweisung"],
-  // VIERTE Zeile aus BEWUSST_OFFEN, NICHT in Alriks urspruenglicher Dreierliste:
-  // die Klammer-Tiefe (Gate-2-Befund S1) macht den Rumpf von `$(…)` zu einem
-  // eigenen Segment und prueft ihn damit. Das war nicht das Ziel des Hunks,
-  // sondern seine Nebenwirkung — und es ist eine Verschaerfung, also wandert die
-  // Zeile nach derselben Regel hierher. Backticks bleiben offen (siehe dort).
-  ["echo $(sudo id)", "Command-Substitution mit gesperrtem Kommando im Rumpf"],
+  // NICHT neu — diese sechs sind schon vor #81 deny, weil das gesperrte Ding
+  // ein ARGUMENT ist und die Pfad-Regeln es auch ohne Klammer-Semantik sehen
+  // (Klammern werden schlicht uebersprungen). Sie stehen hier, weil GENAU sie
+  // von zwei Patch-Fassungen gekippt wurden, ohne dass es jemandem auffiel:
+  // `)` als blinder Trenner riss die ersten drei auf, die Klammer-Tiefe mit
+  // Rumpf-Verlust die naechsten, und `saw_case` machte aus
+  // `echo case; sudo -n true ")"` ein allow. Ungepinnt hat der Waechter
+  // dreimal nacheinander nichts gemerkt.
+  ["echo case; sudo -n true \")\"", "gequotete Klammer + `case` als blosses Wort"],
+  ["rm -rf $(echo /etc/nginx)", "gefaehrlicher Pfad INNERHALB der Substitution"],
+  ["chmod 777 $(echo /etc/passwd)", "dasselbe bei chmod"],
+  ["git push origin $(echo main)", "Ziel-Branch aus der Substitution"],
+  ["rm -rf <(cat liste) /etc/nginx", "Prozess-Substitution `<(` (ein Token)"],
+  ["tee >(cat) /etc/hosts", "Prozess-Substitution `>(` (ein Token)"],
 ];
 
 const ALLOW: Array<[string, string]> = [
@@ -358,6 +385,24 @@ const ALLOW: Array<[string, string]> = [
   // `~` wird aufgelöst; /home/dev/dashboard ist ein sicherer Pfad.
   ["echo x > ~/dashboard/out.log", "Redirect nach ~/dashboard"],
   ["npm run check > ~/dashboard/out.log 2>&1", "Log-Redirect nach ~/dashboard"],
+  // Gate-2-Befund S5: sobald `for`/`select`/`case` abgestreift werden, ist das
+  // naechste Wort — der Schleifen-NAME bzw. das erste Wort der WERTLISTE — das
+  // vermeintliche Kommando. In einem Repo, dessen CLAUDE.md voll von
+  // `docker compose` ist, ist das ein Falsch-Positiv-Generator. Deshalb stehen
+  // diese drei NICHT in `SHELL_KEYWORDS`; ihre Ruempfe werden ueber `do`
+  // erreicht, die Sperre verliert dadurch nichts.
+  ["for svc in docker postgres; do echo $svc; done", "gesperrter Name in der Wertliste"],
+  ["for f in docker; do echo $f; done", "einelementige Wertliste"],
+  ["select o in docker podman; do break; done", "dasselbe bei select"],
+  ['case "$1" in docker) echo ok;; *) echo nix;; esac', "gesperrter Name als case-Muster"],
+  ['case "$x" in sudo) echo a;; docker) echo b;; esac', "ZWEITES case-Muster (eigenes Segment)"],
+  ["for x in sudo; do echo $x; done", "`sudo` als blosser Wert"],
+  // Klammer-Formen der Alltagsarbeit — die Interpunktions-Zerlegung und die
+  // Klammer-Tiefe duerfen sie nicht zerreissen.
+  ["diff <(sort /tmp/a) <(sort /tmp/b)", "Prozess-Substitution, harmlos"],
+  ["echo $((1+2))", "arithmetische Expansion"],
+  ["for ((i=0;i<3;i++)); do echo $i; done", "arithmetische for-Form, harmlos"],
+  ["while (( i < 3 )); do echo $i; done", "arithmetische while-Form, harmlos"],
 ];
 
 // Fail-closed: alles, was nicht sauber interpretierbar ist, MUSS deny sein.

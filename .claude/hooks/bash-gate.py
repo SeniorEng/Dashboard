@@ -6,22 +6,27 @@ Dieses Gate faengt das versehentlich getippte `sudo …`, `docker …`,
 `git push origin main` oder `rm -rf /…`. Es ist ein Kommando-FILTER und als
 solcher grundsaetzlich umgehbar. Die Regel, an der die Grenze verlaeuft:
 **geprueft wird das ERSTE WORT jedes Teilkommandos** — wobei Shell-Syntax, die
-kein Kommando IST, vorher abgestreift wird: Schluesselwoerter (`until`, `do`,
-`then`, `case`-Muster, `{ …; }`, `time`), ENV-Zuweisungen und fuehrende
-Redirects. Geprueft wird ausserdem, was ein Segment als ARGUMENT traegt
-(Redirect-Ziel, Gate-Pfad) — dafuer laufen diese Scans ueber die ROHEN Tokens,
-nicht ueber die gekuerzten. Ein fuehrender Redirect (`> /etc/cron.d/x echo …`)
-ist damit NICHT mehr offen, und der Rumpf von `$(…)` ist ein eigenes Segment
-und wird mitgeprueft.
+kein Kommando IST, vorher abgestreift wird: Schluesselwoerter der
+Schleifen-/Block-Familie (`until`, `while`, `do`, `then`, `{ …; }`, `time`,
+`!`), ENV-Zuweisungen und fuehrende Redirects. Was ein Segment als ARGUMENT
+traegt (Redirect-Ziel, Gate-Pfad), wird ueber die ROHEN Tokens geprueft, nicht
+ueber die gekuerzten — ein fuehrender Redirect (`> /etc/cron.d/x echo …`) ist
+damit NICHT mehr offen.
 
 Offen bleibt, was ein echtes KOMMANDO davorschiebt: Wrapper (`env`, `command`,
 `nohup`, `exec`, `eval`, `xargs`, `find -exec`, `time -p`), Variablen-Expansion
-(`X=sudo; $X …`), Backtick-Substitution (`echo \\`sudo id\\`` — anders als
-`$(…)`, weil der Lexer dort keine Klammern kennt), die arithmetische
-Schleifenform (`while (( i < 3 )); do …`), Schreib-Redirects auf das Gate hinter
-einem Kommando aus `READONLY_CMDS` (`cat x > .claude/hooks/…`), Heredoc-Ruempfe
-an eine Shell, oder ein umbenanntes Verzeichnis (`mv .claude .claude-off`). Das
-ist BEWUSST nicht geschlossen — ein Filter, der all das faengt, blockiert
+(`X=sudo; $X …`), Command-Substitution (`$(sudo id)`, `` `sudo id` ``),
+Heredoc-Ruempfe an eine Shell, oder ein umbenanntes Verzeichnis
+(`mv .claude .claude-off`). Ebenfalls offen: alles, was Klammern zur Tarnung
+nutzt — `case x in a) sudo …;; esac`, `rm -rf $(echo /etc/nginx)`,
+`while (( i < 3 )); do sudo …; done`. Ein Versuch, diese Klammer-Familie
+in-band zu schliessen, wurde nach drei Review-Runden zurueckgenommen: jede
+Fassung, die `)` interpretierte, riss an anderer Stelle ein `deny` auf (zuletzt
+`echo case; sudo -n true ")"` — posix-shlex streift die Quotes, das Token ist
+von einer echten Klammer nicht unterscheidbar). Sie gehoert in einen eigenen
+PR mit einem Parser, nicht in einen Token-Filter.
+
+Das ist BEWUSST nicht geschlossen — ein Filter, der all das faengt, blockiert
 normale Arbeit, und vollstaendig wird er trotzdem nie.
 `tests/architecture/bash-gate.test.ts` haelt diese Grenze als Block
 `BEWUSST_OFFEN` fest, damit sie sichtbar bleibt.
@@ -81,27 +86,26 @@ BLOCKED_COMMANDS = {
 SHELLS = ("bash", "sh", "zsh")
 DOWNLOADERS = ("curl", "wget")
 
-OPERATORS = (";", ";;", ";&", ";;&", "&&", "||", "|", "&")
+OPERATORS = (";", "&&", "||", "|", "&")
 REDIRECTS = (">", ">>", ">|", "&>", "&>>", "<", "<<", "<<<")
 
-# Shell-Schluesselwoerter und Gruppierungs-Token, die VOR dem eigentlichen
+# Schluesselwoerter der Schleifen-/Block-Familie, die VOR dem eigentlichen
 # Kommando stehen duerfen. Sie werden am Segment-Anfang abgestreift, damit
 # `until sudo …`, `do sudo …`, `then sudo …`, `{ sudo …; }` und `time sudo …`
 # nicht das Schluesselwort als „erstes Wort" liefern und damit jede Regel
-# abschalten. Kein Kommando dieses Namens existiert — das Abstreifen kann
-# also nichts Echtes verdecken.
+# abschalten. Kein Kommando dieses Namens existiert — das Abstreifen kann also
+# nichts Echtes verdecken.
+#
+# BEWUSST NICHT drin: `for`, `select`, `case`. Bei ihnen folgt ein NAME bzw.
+# ein WORT, kein Kommando — striche man sie ab, waere das naechste Wort das
+# vermeintliche Kommando und `for docker in a b; do echo $docker; done` wuerde
+# gesperrt, in einem Repo, dessen CLAUDE.md voll von `docker compose` ist.
+# Ihre Ruempfe werden ueber `do` erreicht, also verliert die Sperre nichts.
 SHELL_KEYWORDS = frozenset({
     "if", "then", "elif", "else", "fi",
-    "while", "until", "for", "select", "do", "done",
-    "case", "in", "esac",
+    "while", "until", "do", "done", "in", "esac",
     "function", "coproc", "time", "{", "}", "!",
 })
-
-# Schluesselwoerter, auf die per Shell-Grammatik ein NAME folgt (`for f in …`,
-# `select f in …`, `case $x in …`). Der Name wird mit abgestreift, sonst wird er
-# als „erstes Wort" gelesen — `for docker in a b; do echo $docker; done` waere
-# sonst ein Falsch-Positiv auf `docker`. Ein Kommando kann dort nie stehen.
-KEYWORDS_WITH_NAME = frozenset({"for", "select", "case"})
 
 # git-Flags, die einen WERT nach sich ziehen. Ohne die Liste laese
 # `git -C <dir> push …` das Verzeichnis als Subkommando und alle git-Regeln
@@ -188,17 +192,21 @@ def logical_lines(cmd):
 def segments(cmd):
     """Liste von (vorheriger Operator, ROH-Tokens, KOMMANDO-Tokens).
 
-    Beide Listen werden gebraucht, und sie zu verwechseln war die Ursache
-    der vorbestehenden Redirect-Luecke:
+    Beide Listen werden gebraucht, und sie zu verwechseln war die Ursache der
+    vorbestehenden Redirect-Luecke:
       - KOMMANDO-Tokens sind um alles gekuerzt, was VOR dem Kommando stehen
-        darf (Schluesselwoerter, ENV-Zuweisungen, fuehrende Redirects).
-        Daraus wird das „erste Wort" bestimmt — sonst haette `> /tmp/log
-        sudo -n id` das `>` als Kommando gelesen und jede Regel abgeschaltet.
+        darf (Schluesselwoerter, ENV-Zuweisungen, fuehrende Redirects). Daraus
+        wird das „erste Wort" bestimmt — sonst haette `> /tmp/log sudo -n id`
+        das `>` als Kommando gelesen und jede Regel abgeschaltet.
       - ROH-Tokens sind ungekuerzt. Ueber sie laufen die Scans, die ein
         ARGUMENT irgendwo im Segment suchen (Redirect-Ziel, Gate-Selbstschutz).
         Liefe der Redirect-Scan ueber die gekuerzte Liste, waere genau das
-        abgestreifte `> /etc/cron.d/x` unsichtbar — der Fall, den der
-        Waechter `while true; do > /etc/cron.d/x echo boese; done` festhaelt.
+        abgestreifte `> /etc/cron.d/x` unsichtbar — der Fall, den der Waechter
+        `while true; do > /etc/cron.d/x echo boese; done` festhaelt.
+
+    Das Abstreifen der Schluesselwoerter macht diese Trennung ZWINGEND: ohne
+    sie schiebt ein abgestreiftes `do` den fuehrenden Redirect in
+    Abstreif-Reichweite, und der Waechter oben kippt von deny auf allow.
     """
     out = []
     for line in logical_lines(cmd):
@@ -206,51 +214,22 @@ def segments(cmd):
         if toks is None:
             emit("deny", "Kommando nicht parsebar (unbalancierte Quotes) — fail-closed.")
         cur, prev_op = [], None
-        depth = []
         for t in toks:
             if t in OPERATORS:
                 if cur:
                     out.append((prev_op, cur))
                 cur, prev_op = [], t
                 continue
-            # Klammern werden mit TIEFE gefuehrt, nicht als blinder Trenner.
-            # `)` blind zu trennen war die naheliegende Fassung und ist falsch:
-            # bei `rm -rf $(cat liste) /etc/nginx` landet `/etc/nginx` dann in
-            # einem eigenen Segment ohne Kommando — `rm -rf` sieht sein
-            # gefaehrliches Argument nicht mehr und das Kommando wird `allow`.
-            # (Gemessen: head deny, blinde Fassung allow. Gilt genauso fuer
-            # `chmod 777 $(…) /etc/passwd`, `git push $(…) main`, `tee $(…)
-            # /etc/hosts`.)
-            if t == "(":
-                # Klammer AUF: das bisher Gesammelte wird nur GEPARKT, nicht
-                # abgeschlossen — seine Argumente laufen hinter der
-                # schliessenden Klammer weiter.
-                depth.append((cur, prev_op))
-                cur = []
-                continue
-            if t == ")":
-                if depth:
-                    # Klammer ZU: das Innere ist ein eigenes Segment
-                    # (`(sudo …)` bleibt damit deny), das geparkte Aeussere
-                    # laeuft weiter.
-                    if cur:
-                        out.append((prev_op, cur))
-                    cur, prev_op = depth.pop()
-                    continue
-                # Ohne offene Klammer ist `)` das Ende eines `case`-Musters
-                # (`a) sudo -n true;;`) — dort und nur dort trennt es.
-                if cur:
-                    out.append((prev_op, cur))
-                cur, prev_op = [], ")"
+            # Klammern werden NICHT interpretiert — sie fallen wie bisher weg.
+            # Drei Review-Runden haben gezeigt, dass jede Interpretation von
+            # `)` in einem reinen Token-Filter an anderer Stelle ein `deny`
+            # aufreisst; die Klammer-Familie ist deshalb ausdruecklich offen
+            # (siehe Modul-Docstring), statt halb geschlossen zu wirken.
+            if t in ("(", ")"):
                 continue
             cur.append(t)
         if cur:
             out.append((prev_op, cur))
-        # Unbalancierte Klammern: das Geparkte darf nicht verloren gehen.
-        while depth:
-            parked, parked_op = depth.pop()
-            if parked:
-                out.append((parked_op, parked))
 
     # Alles, was VOR dem eigentlichen Kommando stehen darf, bis zum FIXPUNKT
     # abstreifen: Schluesselwoerter, ENV-Zuweisungen und fuehrende Redirects
@@ -264,9 +243,7 @@ def segments(cmd):
         while s:
             head = s[0]
             if head in SHELL_KEYWORDS:
-                # `for f in …` — den Namen gleich mit abstreifen (siehe
-                # KEYWORDS_WITH_NAME).
-                s = s[2:] if head in KEYWORDS_WITH_NAME and len(s) >= 2 else s[1:]
+                s = s[1:]
                 continue
             if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", head):
                 s = s[1:]
@@ -310,8 +287,9 @@ def check(cmd):
     # ohne Operator-Pruefung sperrte `curl -sf http://x/health && bash script.sh`.
     # Kommandolose Segmente (reiner Redirect) UNTERBRECHEN eine Pipe nicht.
     # Sie werden fuer diese Pruefung verdichtet — sonst waere
-    # `curl x | > /tmp/a | bash` allow, obwohl head es deny hat: dort fielen
-    # solche Segmente weg und `curl`/`bash` waren echte Nachbarn.
+    # `curl x | > /tmp/a | bash` allow, obwohl es vorher deny war: bis zum
+    # Tripel oben fielen solche Segmente weg und `curl`/`bash` waren echte
+    # Nachbarn.
     piped = [(op, cmd) for op, _raw, cmd in segs if cmd]
     for i in range(len(piped) - 1):
         if os.path.basename(piped[i][1][0]) in DOWNLOADERS:
