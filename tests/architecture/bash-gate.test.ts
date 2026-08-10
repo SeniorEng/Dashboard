@@ -62,10 +62,17 @@ function payload(command: string): string {
  *
  * Monitor fuehrt wie Bash ein beliebiges Shell-Kommando aus (Feld ebenfalls
  * `tool_input.command`) — es ist KEIN read-only-Werkzeug. Solange der Hook nur
- * auf `matcher: "Bash"` lief, war Monitor ein zweites Tor neben dem Zaun:
- * `git push --force` ist als Bash-Kommando gesperrt, waere als Monitor-Aufruf
- * aber durchgelaufen. Dasselbe gilt fuer die `deny`-Liste in
- * `settings.local.json` — deren Regeln sind samtlich `Bash(...)`-scoped.
+ * auf `matcher: "Bash"` lief, war Monitor ein zweites Tor neben dem Zaun.
+ *
+ * PRAEZISIERUNG (Gate-2-Review zu diesem PR): die `deny`-Liste greift fuer
+ * Monitor SEHR WOHL mit — Monitors Permission-Pruefung delegiert den
+ * `command`-Zweig an die Bash-Logik, die Regeln werden gegen den fest
+ * verdrahteten Bash-Tool aufgeloest. Gedeckt sind damit die acht dort
+ * gelisteten Muster (`rm -rf /`, `sudo rm *`, `git push --force *` …).
+ * NICHT gedeckt und allein vom Hook abhaengig: `sudo` allgemein, `docker`,
+ * `gh pr merge`, Push nach `main`, `git reset --hard`, `curl|bash`,
+ * Schreib-Redirects auf Systempfade und der Selbstschutz des Gates
+ * (`.claude/hooks/**`). Genau dafuer ist dieser Waechter da.
  */
 function monitorPayload(command: string): string {
   return JSON.stringify({ tool_name: "Monitor", tool_input: { command } });
@@ -274,6 +281,11 @@ const MALFORMED: Array<[string, string]> = [
   ['{"tool_name":"Bash","tool_input":{}}', "kein command"],
   ['{"tool_name":"Bash","tool_input":{"command":""}}', "leeres command"],
   ['{"tool_name":"Write","tool_input":{"command":"x"}}', "falsches Tool"],
+  // Monitors ZWEITER Eingabezweig: statt `command` ein WebSocket. Das Gate
+  // kann reinen Egress nicht beurteilen und verweigert fail-closed — bewusst
+  // so, aber es MUSS sichtbar sein, sonst liest der naechste die Meldung
+  // "Kein lesbares command" bei einem legalen ws-Aufruf als Bug.
+  ['{"tool_name":"Monitor","tool_input":{"ws":{"url":"wss://x"}}}', "Monitor im ws-Modus (kein command)"],
   ['["nicht","objekt"]', "JSON-Array statt Objekt"],
   ['{"tool_name":"Bash","tool_input":{"command":"echo \\"unbalanciert"}}', "unbalancierte Quotes"],
 ];
@@ -332,10 +344,12 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
     });
 
     // Der eigentliche Waechter: KEINE Drift zwischen den beiden Werkzeugen.
-    // Wer der DENY-/ALLOW-Liste kuenftig einen Fall hinzufuegt, bekommt ihn
-    // fuer Monitor automatisch mitgeprueft — ohne diese Schleife muesste er
-    // daran denken, und genau daran denkt niemand.
-    it.each([...DENY, ...DENY_SELF, ...ALLOW])(
+    // Laeuft ueber ALLE VIER Korpus-Listen — auch BEWUSST_OFFEN, sonst driftete
+    // ausgerechnet die dokumentierte Grenzklasse unbemerkt auseinander. Wer
+    // einer Liste kuenftig einen Fall hinzufuegt, bekommt ihn fuer Monitor
+    // automatisch mitgeprueft; ohne die Schleife muesste er daran denken, und
+    // genau daran denkt niemand.
+    it.each([...DENY, ...DENY_SELF, ...ALLOW, ...BEWUSST_OFFEN])(
       "Bash und Monitor entscheiden gleich: %s (%s)",
       (cmd) => {
         expect(
