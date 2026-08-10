@@ -95,14 +95,18 @@ describe("responsibilityRole === die ersetzte getRole()", () => {
     }
   });
 
-  it("auch der Aufruf-Pfad des Endpunkts (Rolle ?? 'backup2') bleibt deckungsgleich", () => {
-    // Der Endpunkt setzt `responsibilityRole(...) ?? "backup2"` ein. Damit ist
-    // die Antwort selbst für nicht-zuständige Kunden byte-identisch zu vorher —
-    // die Umstellung ändert die Response also auch außerhalb der gefilterten
-    // Menge nicht.
-    for (const c of ALL_COVERAGES) {
-      expect({ c, role: responsibilityRole(c, EMP) ?? "backup2" })
-        .toEqual({ c, role: legacyGetRole(c, EMP) });
+  it("die EINZIGE bewusste Abweichung: nicht-zuständige Kunden werden ausgelassen statt als 'backup2' etikettiert", () => {
+    // Auf der gefilterten Menge sind alt und neu identisch (Test darüber) —
+    // hier geht es um die Kunden, die die Bedingung NICHT auswählt. Die alte
+    // getRole() fiel für sie auf "backup2" durch; der Endpunkt lässt sie jetzt
+    // aus (`buildUncoveredEntry` liefert null). Das ist heute unerreichbar,
+    // aber es ist der Unterschied, der zählt, sobald die Query gelockert wird:
+    // sonst zählte ein fremder Kunde still in `vertretungCount` mit.
+    const notResponsible = ALL_COVERAGES.filter((c) => !legacyMatches(c, EMP));
+    expect(notResponsible.length).toBeGreaterThan(0);
+    for (const c of notResponsible) {
+      expect(responsibilityRole(c, EMP)).toBeNull();
+      expect(legacyGetRole(c, EMP)).toBe("backup2");
     }
   });
 });
