@@ -80,10 +80,35 @@ async function pickDate(
   monthIndex: number,
   day: number,
 ): Promise<void> {
-  await page.locator(`[data-testid='${triggerTestId}']`).scrollIntoViewIfNeeded();
+  // Den Trigger gezielt in die OBERE Viewport-Haelfte holen.
+  //
+  // `scrollIntoViewIfNeeded()` liess ihn bei y≈386 im 720px-Default-Viewport
+  // stehen — unterhalb blieben keine ~400px mehr, und weil `PopoverContent`
+  // zwar `side="bottom"` deklariert, Radix aber bei Platzmangel kippt
+  // (`avoidCollisions`), klappte der Kalender nach OBEN. Ein Monat mit sechs
+  // Kalenderzeilen (z.B. August 2026, der 1. faellt auf Samstag) ist dann
+  // hoeher als der Platz darueber: der Popover-Kopf mit
+  // `btn-quick-year-month` landet bei negativem y, und Playwright meldet
+  // „element is outside of the viewport" bis zum Timeout.
+  //
+  // Die Seite hat weder Sticky-Header noch eigenen Scroll-Container, der
+  // Trigger kann also gefahrlos an den oberen Rand — die 80px Abstand halten
+  // ihn nur von der Kante weg.
+  await page.locator(`[data-testid='${triggerTestId}']`).evaluate((el) => {
+    el.scrollIntoView({ block: "start" });
+    window.scrollBy(0, -80);
+  });
   await page.locator(`[data-testid='${triggerTestId}']`).click();
   const pop = page.locator("[data-radix-popper-content-wrapper]").last();
   await expect(pop).toBeVisible();
+  // Der eigentliche Regressions-Wächter: klappt der Popover je wieder nach
+  // oben aus dem Viewport heraus, scheitert der Test HIER mit einer Zahl
+  // statt 30 Sekunden später mit einem nichtssagenden Klick-Timeout.
+  const popBox = await pop.boundingBox();
+  expect(
+    popBox?.y ?? -1,
+    `Datepicker-Popover ragt oben aus dem Viewport (y=${popBox?.y}) — Trigger sitzt zu tief`,
+  ).toBeGreaterThanOrEqual(0);
   // Tage-Ansicht → Jahres-Ansicht
   await pop.locator("[data-testid='btn-quick-year-month']").click();
   // bei Bedarf zu früheren Jahres-Seiten blättern (alle Zieljahre ≤ aktuelles Jahr)
