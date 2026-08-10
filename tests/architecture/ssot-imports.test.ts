@@ -577,6 +577,58 @@ export function detectServiceRecordScopeViolations(files: ScanFile[]): GuardViol
 }
 
 // ---------------------------------------------------------------------------
+// A8 — „Termin zur Re-Dokumentation zurueckgeben"-SSoT (Definitions-Rand)
+// ---------------------------------------------------------------------------
+
+/**
+ * Task #70-FINDING — Der Reopen (Budget reversen, Holds freigeben, Signatur
+ * leeren, Status auf `documenting`) war dreifach geschrieben. Zwei der Kopien
+ * machten nur den halben Weg und liessen die Budget-Buchung stehen; weil der
+ * Dokumentations-Pfad beim erneuten Abschluss eine vorhandene, nicht-stornierte
+ * Buchung UEBERNIMMT statt neu zu buchen, war die Folge eine stille
+ * UNTERbuchung — geld- und GoBD-relevant.
+ *
+ * Erkannt wird die Signatur des halben Wegs: ein Schreibvorgang, der den Status
+ * auf `documenting` setzt UND im selben Zug die Termin-Signatur leert. Das ist
+ * genau das, was die SSoT tut — wer es selbst schreibt, umgeht sie.
+ *
+ * ABGRENZUNG: `status: "documenting"` allein ist NICHT genug (der Start-Pfad
+ * `/appointments/:id/end` setzt ihn ohne jeden Reopen-Charakter, ebenso die
+ * Einmal-Migration fuer `expired_unsigned`). Erst die Kombination mit dem
+ * Leeren von `signatureData` macht es zum Reopen.
+ */
+const APPOINTMENT_REOPEN_ALLOWLIST = new Set<string>(
+  ssotGuardAllowlist("appointment-reopen", "APPOINTMENT_REOPEN_ALLOWLIST"),
+);
+
+/** Fenster um ein `documenting`-Vorkommen — grob ein Update-Objekt. */
+const REOPEN_WINDOW = 400;
+
+export function detectAppointmentReopenViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (APPOINTMENT_REOPEN_ALLOWLIST.has(rel)) continue;
+    const code = stripComments(content).replace(/\s+/g, " ");
+
+    for (const m of code.matchAll(/status:\s*["']documenting["']/g)) {
+      const start = Math.max(0, m.index - REOPEN_WINDOW / 2);
+      const w = code.slice(start, m.index + REOPEN_WINDOW);
+      if (/signatureData:\s*null/.test(w)) {
+        out.push({
+          file: rel,
+          detail:
+            "setzt `status: 'documenting'` und leert die Termin-Signatur selbst, statt " +
+            "`reopenAppointmentForRedocumentation()` zu rufen — die Budget-Rueckbuchung fehlt dabei",
+        });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -828,6 +880,48 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
           "Zusatz-Scope (Kunde, Zeitraum …) daneben, statt „aktiv“ neu zu formulieren.",
       );
     }
+  });
+
+  it("A8: der Reopen wird nur in der Reopen-SSoT geschrieben", () => {
+    const v = detectAppointmentReopenViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Reopen-SSoT verletzt — eigener Reopen (documenting + Signatur leeren) gefunden:\n" +
+          formatViolations(v) +
+          "\n\nDer Reopen gehoert ausschliesslich in `server/lib/appointment-reopen.ts`. " +
+          "Wer ihn selbst schreibt, laesst die Budget-Buchung stehen — und der " +
+          "Dokumentations-Pfad uebernimmt sie beim erneuten Abschluss, statt neu zu " +
+          "buchen: stille Unterbuchung.",
+      );
+    }
+  });
+
+  it("A8 (Negativ): der halbe Reopen wird erkannt, `documenting` ohne Signatur-Leerung und der SSoT-Aufruf nicht", () => {
+    const synthetic: ScanFile[] = [
+      {
+        // Genau die entfernte Kopie -> Verstoss.
+        rel: "server/routes/admin/fake-revoke.ts",
+        content: `await storage.updateAppointment(entityId, {
+          signatureData: null,
+          signatureHash: null,
+          signedAt: null,
+          signedByUserId: null,
+          status: "documenting",
+        } as any);`,
+      },
+      {
+        // `documenting` OHNE Signatur-Leerung (Start-Pfad) -> kein Verstoss.
+        rel: "server/routes/fake-end.ts",
+        content: `await storage.updateAppointment(id, { status: "documenting", actualStart: now });`,
+      },
+      {
+        // SSoT benutzt -> kein Verstoss.
+        rel: "server/routes/fake-caller.ts",
+        content: `const facts = await reopenAppointmentForRedocumentation(appointment, userId, txClient);`,
+      },
+    ];
+    const v = detectAppointmentReopenViolations(synthetic);
+    expect(v.map((h) => h.file)).toEqual(["server/routes/admin/fake-revoke.ts"]);
   });
 
   it("A7: der Leistungsnachweis-Umfang wird nur in der Scope-SSoT formuliert", () => {
