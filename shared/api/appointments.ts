@@ -1,4 +1,5 @@
 import type { Appointment, Customer } from "../schema";
+import type { ResponsibilityRole } from "../domain/customer-responsibility";
 
 export interface AppointmentWithCustomer extends Appointment {
   customer: Customer | null;
@@ -40,18 +41,28 @@ export interface AppointmentBudgetFit {
   shortfallCents: number;
 }
 
-interface CoverageUncoveredCustomer {
+export interface CoverageUncoveredCustomer {
   id: number;
   name: string;
-  role: string;
+  /** Rolle des abfragenden Mitarbeiters bei diesem Kunden — SSoT: `shared/domain/customer-responsibility.ts`. */
+  role: ResponsibilityRole;
+  /** Nur bei Vertretungs-Rollen gesetzt: Name der hauptverantwortlichen Kraft. */
   primaryEmployeeName?: string;
 }
 
-interface CoverageMonthData {
+export interface CoverageMonthData {
   label: string;
   year: number;
   month: number;
   uncoveredCustomers: CoverageUncoveredCustomer[];
+  /**
+   * Zähler-Split für Header/Kachel, die die Liste selbst nicht brauchen:
+   * `hvCount` = Kunden in Hauptverantwortung, `vertretungCount` = als 1./2.
+   * Vertretung. Per Konstruktion gilt
+   * `hvCount + vertretungCount === uncoveredCustomers.length`.
+   */
+  hvCount: number;
+  vertretungCount: number;
 }
 
 export interface CoverageCheckResponse {

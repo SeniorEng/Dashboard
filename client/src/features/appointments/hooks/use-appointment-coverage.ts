@@ -1,25 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
+import type { CoverageCheckResponse } from "@shared/api";
 
-interface UncoveredCustomer {
-  id: number;
-  name: string;
-  role: "primary" | "backup1" | "backup2";
-  primaryEmployeeName?: string;
-}
-
-interface MonthCoverage {
-  label: string;
-  year: number;
-  month: number;
-  uncoveredCustomers: UncoveredCustomer[];
-}
-
-export interface CoverageData {
-  currentMonth: MonthCoverage;
-  nextMonth: MonthCoverage;
-}
+/**
+ * Die Form kommt aus dem Response-Schema (`@shared/api`) statt aus einer lokalen
+ * Kopie — die Kopie hier war ein Zweitbegriff derselben Frage und wäre beim
+ * Zähler-Split still veraltet.
+ */
+export type CoverageData = CoverageCheckResponse;
+export type { CoverageUncoveredCustomer, CoverageMonthData } from "@shared/api";
 
 async function fetchCoverage(employeeId?: number | null): Promise<CoverageData> {
   const params = new URLSearchParams();

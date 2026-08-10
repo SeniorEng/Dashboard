@@ -43,7 +43,7 @@ import { getPlannedHoldInputs } from "../storage/budget/appointment-cost-calcula
 import { rebookAppointmentConsumption, type RebookKmResult } from "../storage/budget/km-rebook";
 import { buildBudgetWarning } from "../lib/budget-warning";
 import type { Response } from "express";
-import type { CoverageCheckResponse } from "@shared/api";
+import type { CoverageCheckResponse, CoverageMonthData, CoverageUncoveredCustomer } from "@shared/api";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
@@ -51,9 +51,10 @@ import { isTeamLead, actorRole } from "../lib/team-lead";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers, users, userRoles } from "@shared/schema";
+import { responsibilityCondition, responsibilityRole } from "@shared/domain/customer-responsibility";
 import { customerContracts } from "@shared/schema/contracts";
 import { customersRepo, appointmentsRepo } from "../repos";
-import { eq, and, or, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
+import { eq, and, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
 import {
   canViewAppointment,
   canCreateAppointment as policyCanCreate,
@@ -280,19 +281,16 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
     and(
       eq(customers.status, "aktiv"),
       customersRepo.activeOnly(),
-      or(
-        eq(customers.primaryEmployeeId, effectiveEmployeeId),
-        eq(customers.backupEmployeeId, effectiveEmployeeId),
-        eq(customers.backupEmployeeId2, effectiveEmployeeId),
-      )
+      responsibilityCondition(effectiveEmployeeId),
     )
   );
 
   if (assignedCustomers.length === 0) {
-    return res.json({
-      currentMonth: { label: `${monthNames[currentMonth - 1]} ${currentYear}`, year: currentYear, month: currentMonth, uncoveredCustomers: [] },
-      nextMonth: { label: `${monthNames[nextMonth - 1]} ${nextMonthYear}`, year: nextMonthYear, month: nextMonth, uncoveredCustomers: [] },
-    });
+    const emptyResponse: CoverageCheckResponse = {
+      currentMonth: { label: `${monthNames[currentMonth - 1]} ${currentYear}`, year: currentYear, month: currentMonth, uncoveredCustomers: [], hvCount: 0, vertretungCount: 0 },
+      nextMonth: { label: `${monthNames[nextMonth - 1]} ${nextMonthYear}`, year: nextMonthYear, month: nextMonth, uncoveredCustomers: [], hvCount: 0, vertretungCount: 0 },
+    };
+    return res.json(emptyResponse);
   }
 
   const primaryEmployeeIds = [...new Set(assignedCustomers.map(c => c.primaryEmployeeId).filter((id): id is number => id !== null && id !== effectiveEmployeeId))];
@@ -354,19 +352,29 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
   const currentCoveredIds = new Set(currentMonthAppts.map(a => a.customerId));
   const nextCoveredIds = new Set(nextMonthAppts.map(a => a.customerId));
 
-  function getRole(c: typeof assignedCustomers[0]): "primary" | "backup1" | "backup2" {
-    if (c.primaryEmployeeId === effectiveEmployeeId) return "primary";
-    if (c.backupEmployeeId === effectiveEmployeeId) return "backup1";
-    return "backup2";
-  }
-
-  function buildUncoveredEntry(c: typeof assignedCustomers[0]) {
-    const role = getRole(c);
-    const entry: { id: number; name: string; role: string; primaryEmployeeName?: string } = { id: c.id, name: c.name, role };
+  function buildUncoveredEntry(c: typeof assignedCustomers[0]): CoverageUncoveredCustomer {
+    // Kann hier nicht null sein — `assignedCustomers` ist bereits über
+    // `responsibilityCondition(effectiveEmployeeId)` gefiltert. Der Fallback ist
+    // nur da, damit eine künftige Query-Lockerung nicht still zu "backup2"
+    // umetikettiert, wie es die frühere `getRole()`-Kette getan hätte.
+    const role = responsibilityRole(c, effectiveEmployeeId) ?? "backup2";
+    const entry: CoverageUncoveredCustomer = { id: c.id, name: c.name, role };
     if (role !== "primary" && c.primaryEmployeeId) {
       entry.primaryEmployeeName = primaryEmployeeNames.get(c.primaryEmployeeId) ?? undefined;
     }
     return entry;
+  }
+
+  /**
+   * Zähler-Split für Header/Kachel: Hauptverantwortung vs. Vertretung. Beide
+   * Zahlen kommen aus derselben Liste, damit `hvCount + vertretungCount`
+   * per Konstruktion `uncoveredCustomers.length` ergibt.
+   */
+  function buildMonthData(
+    label: string, year: number, month: number, uncovered: CoverageUncoveredCustomer[],
+  ): CoverageMonthData {
+    const hvCount = uncovered.filter((c) => c.role === "primary").length;
+    return { label, year, month, uncoveredCustomers: uncovered, hvCount, vertretungCount: uncovered.length - hvCount };
   }
 
   const currentUncovered = assignedCustomers
@@ -378,18 +386,8 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
     .map(buildUncoveredEntry);
 
   const coverageResponse: CoverageCheckResponse = {
-    currentMonth: {
-      label: `${monthNames[currentMonth - 1]} ${currentYear}`,
-      year: currentYear,
-      month: currentMonth,
-      uncoveredCustomers: currentUncovered,
-    },
-    nextMonth: {
-      label: `${monthNames[nextMonth - 1]} ${nextMonthYear}`,
-      year: nextMonthYear,
-      month: nextMonth,
-      uncoveredCustomers: nextUncovered,
-    },
+    currentMonth: buildMonthData(`${monthNames[currentMonth - 1]} ${currentYear}`, currentYear, currentMonth, currentUncovered),
+    nextMonth: buildMonthData(`${monthNames[nextMonth - 1]} ${nextMonthYear}`, nextMonthYear, nextMonth, nextUncovered),
   };
 
   res.json(coverageResponse);
