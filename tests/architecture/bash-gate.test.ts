@@ -57,6 +57,27 @@ function payload(command: string): string {
   return JSON.stringify({ tool_name: "Bash", tool_input: { command } });
 }
 
+/**
+ * Dasselbe Kommando, aber als Monitor-Aufruf.
+ *
+ * Monitor fuehrt wie Bash ein beliebiges Shell-Kommando aus (Feld ebenfalls
+ * `tool_input.command`) — es ist KEIN read-only-Werkzeug. Solange der Hook nur
+ * auf `matcher: "Bash"` lief, war Monitor ein zweites Tor neben dem Zaun.
+ *
+ * PRAEZISIERUNG (Gate-2-Review zu diesem PR): die `deny`-Liste greift fuer
+ * Monitor SEHR WOHL mit — Monitors Permission-Pruefung delegiert den
+ * `command`-Zweig an die Bash-Logik, die Regeln werden gegen den fest
+ * verdrahteten Bash-Tool aufgeloest. Gedeckt sind damit die acht dort
+ * gelisteten Muster (`rm -rf /`, `sudo rm *`, `git push --force *` …).
+ * NICHT gedeckt und allein vom Hook abhaengig: `sudo` allgemein, `docker`,
+ * `gh pr merge`, Push nach `main`, `git reset --hard`, `curl|bash`,
+ * Schreib-Redirects auf Systempfade und der Selbstschutz des Gates
+ * (`.claude/hooks/**`). Genau dafuer ist dieser Waechter da.
+ */
+function monitorPayload(command: string): string {
+  return JSON.stringify({ tool_name: "Monitor", tool_input: { command } });
+}
+
 const DENY: Array<[string, string]> = [
   ["sudo -n true", "sudo blank"],
   ["echo x && sudo y", "Compound-Falle: sudo im zweiten Segment"],
@@ -160,7 +181,6 @@ const DENY_SELF: Array<[string, string]> = [
 // jemand später eine Zeile von hier nach `DENY`, ist das eine bewusste
 // Erweiterung; verschwindet eine Zeile hier still, fällt es auf.
 const BEWUSST_OFFEN: Array<[string, string]> = [
-  ["echo $(sudo id)", "Command-Substitution wird nicht rekursiv geprüft"],
   ["env sudo -n true", "Präfix-Kommando `env`"],
   ["command sudo -n true", "Präfix-Kommando `command`"],
   ["nohup sudo -n true", "Präfix-Kommando `nohup`"],
@@ -168,6 +188,49 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   ["echo /etc/nginx | xargs rm -rf", "`xargs` baut das Kommando erst zur Laufzeit"],
   ["find /etc -name '*.conf' -exec rm -f {} +", "`find -exec` ebenso"],
   ["eval 'git push origin main'", "`eval` ebenso"],
+  // Zweite Sonde (Wrapper-Klasse): gemessen `allow`, gehoeren zur selben
+  // bereits dokumentierten Klasse wie `env`/`command`/`nohup` — waren nur nicht
+  // aufgezaehlt. Hier festgehalten, damit die Grenze vollstaendig sichtbar ist
+  // statt nur beispielhaft.
+  ["exec sudo -n true", "Praefix-Kommando `exec`"],
+  // Restklasse NACH der geplanten Verschaerfung — gemessen, und bewusst offen:
+  // sie gehoert zur selben Wrapper-Familie. `time sudo` wird gesperrt,
+  // `time -p sudo` nicht: eine ein Zeichen breite Grenze, die niemand von
+  // selbst sieht. Genau deshalb steht sie hier und nicht im Verborgenen.
+  ["function f { sudo -n true; }", "Definition ist kein Aufruf"],
+  ["time -p sudo -n true", "Flag zwischen Schluesselwort und Kommando"],
+  ["/usr/bin/time sudo -n true", "Praefix ueber den absoluten Pfad"],
+  ["echo `sudo id`", "Backtick-Substitution — wie `$(…)` nicht rekursiv geprueft"],
+  // ---------------------------------------------------------------------
+  // KLAMMER-FAMILIE — offen, und zwar nach drei Review-Runden ABSICHTLICH.
+  //
+  // #81 hat versucht, sie in-band zu schliessen (`)` als Trenner, dann
+  // Klammer-Tiefe, dann Tiefe + Interpunktions-Zerlegung + `saw_case`). Jede
+  // Fassung schloss die genannten Faelle und riss anderswo ein `deny` auf:
+  //   1. `)` blind als Trenner -> `rm -rf $(cat l) /etc/nginx` wurde allow
+  //      (das Argument verlor sein Kommando).
+  //   2. Klammer-Tiefe, die das Innere WEGNAHM -> `rm -rf $(echo /etc/nginx)`
+  //      wurde allow (neun gemessene Kipper).
+  //   3. Tiefe + `saw_case` -> `echo case; sudo -n true ")"` wurde allow:
+  //      posix-`shlex` streift die Quotes, das Token `)` ist von einer echten
+  //      Klammer nicht unterscheidbar, und die Muster-Markierung schaltet ALLE
+  //      basisgestuetzten Regeln des Segments ab. Fail-open an der einen
+  //      Stelle, die fail-closed sein muss.
+  //
+  // Daraus die Regel fuer den naechsten Versuch: Klammer-Semantik gehoert in
+  // einen PARSER, nicht in einen Token-Filter. Wer sie hier wieder aufmacht,
+  // faengt bitte mit diesen drei Gegenbeispielen an — sie sind billig zu
+  // messen und haben jede der drei Fassungen gekippt.
+  // Offen ist die Klammer-Familie nur dort, wo das gesperrte Ding das KOMMANDO
+  // ist. Steht es als ARGUMENT, greifen die Pfad-Regeln auch ohne
+  // Klammer-Semantik — diese Faelle stehen als DENY weiter unten.
+  ["case x in a) sudo -n true;; esac", "case-Zweig"],
+  ["case $x in (a) sudo -n true;; esac", "POSIX-Muster mit fuehrender Klammer"],
+  ["echo $(sudo id)", "gesperrtes Kommando im Substitutions-Rumpf"],
+  ["for f in $(ls); do gh pr merge 81 --admin; done", "`);` ist ein Token — Schleifenform mit Substitution"],
+  ["while (( i < 3 )); do sudo -n true; done", "arithmetische while-Form"],
+  ["for ((i=0;i<3;i++)); do sudo -n true; done", "arithmetische for-Form"],
+  ["x=$(pwd) sudo -n true", "Zuweisungs-Praefix mit Substitution"],
   ["mv .claude .claude-off", "Selbstschutz greift auf den Pfad, nicht auf das Verzeichnis"],
   ["rm -rf .claude", "dasselbe, als Löschung"],
   // `git` steht in der Lese-Allowlist, weil die Ausnahme nichts schützte
@@ -179,7 +242,79 @@ const BEWUSST_OFFEN: Array<[string, string]> = [
   ["git rm .claude/hooks/bash-gate.py", "git kann den Hook löschen"],
 ];
 
+/**
+ * B1 aus dem Gate-2-Review zu #81 — Shell-Konstrukte als Tarnung.
+ *
+ * Die Segment-Pruefung nimmt `basename(toks[0])`. Solange Schluesselwoerter
+ * nicht abgestreift wurden, hiess das erste Wort `until`/`do`/`then` und die
+ * gesperrte Handvoll stand auf Position 2+ — unsichtbar fuer jede Regel.
+ *
+ * Das wog fuer Bash schon schwer, war aber von der „erstes Wort"-Regel formal
+ * gedeckt. Fuer Monitor ist die Schleifenform die vom Werkzeug SELBST
+ * vorgeschriebene Standardform („use Monitor with an until-loop"), und mit der
+ * Auto-Freigabe faellt die Rueckfrage als letzte Bremse weg. Deshalb sind diese
+ * Faelle jetzt DENY und nicht BEWUSST_OFFEN.
+ */
+const DENY_KONSTRUKTE: Array<[string, string]> = [
+  ["until sudo -n true; do sleep 2; done", "until-Schleife (die kanonische Monitor-Form)"],
+  ["until gh pr merge 81 --admin; do sleep 5; done", "Gate 3 in einer until-Schleife"],
+  ["while true; do git push origin main; done", "Push nach main im while-Rumpf"],
+  ["for f in a; do rm -rf /etc/nginx; done", "rm -rf im for-Rumpf"],
+  ["if true; then sudo -n true; fi", "sudo im then-Zweig"],
+  ["! sudo -n true", "Negation als Praefix"],
+  ["time sudo -n true", "time als Praefix"],
+  ["until docker ps; do sleep 1; done", "docker in der until-Bedingung"],
+  ["while sleep 1; do FOO=1 sudo -n true; done", "Schluesselwort + ENV-Zuweisung gestapelt"],
+  // Zweite Sonde (Trenner-Klasse), alle heute `allow` gegen das echte Gate:
+  ["select f in a; do sudo -n true; done", "select-Konstrukt"],
+  ["{ sudo -n true; }", "Gruppierungs-Klammern"],
+  ["while true; do sudo -n true; done &", "Schleife in den Hintergrund geschickt"],
+  // REGRESSIONS-WAECHTER gegen den eigenen Patch: dieser Fall ist HEUTE deny.
+  // Der erste Patch-Entwurf haette ihn auf allow gedreht — das Abstreifen von
+  // `do` schiebt den fuehrenden Redirect in Abstreif-Reichweite, danach wird
+  // das Ziel nie mehr geprueft. Aufgefallen erst beim AUSFUEHREN einer
+  // gepatchten Kopie. Die Fassung muss die Scans deshalb ueber die ROHEN
+  // Segment-Tokens fahren, nicht ueber die gekuerzten.
+  ["while true; do > /etc/cron.d/x echo boese; done", "Redirect im Schleifenrumpf (darf nicht kippen)"],
+  // VORBESTEHENDE Luecke (P1), im Gate-2-Review zu #81 gefunden und selbst
+  // nachgemessen: ein FUEHRENDER Redirect haengt sich vor das Kommando, der
+  // Redirect-Stripper entfernte ihn aus der gekuerzten Tokenliste, und der
+  // Ziel-Scan sah ihn nie. `DENY_SELF` sah nur deshalb geschlossen aus, weil die
+  // anderen Faelle ueber `sudo`/`docker` unabhaengig greifen.
+  //
+  // Diese drei Zeilen standen bis #81 in BEWUSST_OFFEN. Sie sind hierher
+  // VERSCHOBEN, nicht umgeschrieben: der Waechter-Vertrag sagt, eine Zeile, die
+  // jetzt deny liefert, wandert nach DENY — Entscheidung Alrik („P1 mit rein").
+  // Geschlossen hat sie der Tripel-Hunk (ROH- vs. KOMMANDO-Tokens), der ohnehin
+  // noetig war, damit der Waechter direkt darueber nicht kippt.
+  ["> .claude/hooks/bash-gate.py echo pwned", "Selbstschutz per fuehrendem Redirect"],
+  ["> /etc/cron.d/x echo boese", "Systempfad per fuehrendem Redirect"],
+  ["FOO=1 > /etc/cron.d/x echo y", "dasselbe hinter einer ENV-Zuweisung"],
+  // NICHT neu — diese sechs sind schon vor #81 deny, weil das gesperrte Ding
+  // ein ARGUMENT ist und die Pfad-Regeln es auch ohne Klammer-Semantik sehen
+  // (Klammern werden schlicht uebersprungen). Sie stehen hier, weil GENAU sie
+  // von zwei Patch-Fassungen gekippt wurden, ohne dass es jemandem auffiel:
+  // `)` als blinder Trenner riss die ersten drei auf, die Klammer-Tiefe mit
+  // Rumpf-Verlust die naechsten, und `saw_case` machte aus
+  // `echo case; sudo -n true ")"` ein allow. Ungepinnt hat der Waechter
+  // dreimal nacheinander nichts gemerkt.
+  ["echo case; sudo -n true \")\"", "gequotete Klammer + `case` als blosses Wort"],
+  ["rm -rf $(echo /etc/nginx)", "gefaehrlicher Pfad INNERHALB der Substitution"],
+  ["chmod 777 $(echo /etc/passwd)", "dasselbe bei chmod"],
+  ["git push origin $(echo main)", "Ziel-Branch aus der Substitution"],
+  ["rm -rf <(cat liste) /etc/nginx", "Prozess-Substitution `<(` (ein Token)"],
+  ["tee >(cat) /etc/hosts", "Prozess-Substitution `>(` (ein Token)"],
+];
+
 const ALLOW: Array<[string, string]> = [
+  // Die legitime Monitor-Form MUSS durchlaufen — sonst waere das Werkzeug nach
+  // der Verschaerfung unbenutzbar und der Fix schlimmer als das Problem.
+  [
+    "until gh run view 123 --json status | grep -q completed; do sleep 30; done",
+    "CI-Beobachtung: until-Schleife um gh run view",
+  ],
+  ["while true; do sleep 5; done", "reine Warteschleife"],
+  ["for f in a b; do echo $f; done", "for-Schleife ohne gesperrtes Kommando"],
   ["git status --short", "Routine: git status"],
   ["git diff --stat", "Routine: git diff"],
   ["git push -u origin feature/foo", "Push auf Feature-Branch"],
@@ -250,6 +385,24 @@ const ALLOW: Array<[string, string]> = [
   // `~` wird aufgelöst; /home/dev/dashboard ist ein sicherer Pfad.
   ["echo x > ~/dashboard/out.log", "Redirect nach ~/dashboard"],
   ["npm run check > ~/dashboard/out.log 2>&1", "Log-Redirect nach ~/dashboard"],
+  // Gate-2-Befund S5: sobald `for`/`select`/`case` abgestreift werden, ist das
+  // naechste Wort — der Schleifen-NAME bzw. das erste Wort der WERTLISTE — das
+  // vermeintliche Kommando. In einem Repo, dessen CLAUDE.md voll von
+  // `docker compose` ist, ist das ein Falsch-Positiv-Generator. Deshalb stehen
+  // diese drei NICHT in `SHELL_KEYWORDS`; ihre Ruempfe werden ueber `do`
+  // erreicht, die Sperre verliert dadurch nichts.
+  ["for svc in docker postgres; do echo $svc; done", "gesperrter Name in der Wertliste"],
+  ["for f in docker; do echo $f; done", "einelementige Wertliste"],
+  ["select o in docker podman; do break; done", "dasselbe bei select"],
+  ['case "$1" in docker) echo ok;; *) echo nix;; esac', "gesperrter Name als case-Muster"],
+  ['case "$x" in sudo) echo a;; docker) echo b;; esac', "ZWEITES case-Muster (eigenes Segment)"],
+  ["for x in sudo; do echo $x; done", "`sudo` als blosser Wert"],
+  // Klammer-Formen der Alltagsarbeit — die Interpunktions-Zerlegung und die
+  // Klammer-Tiefe duerfen sie nicht zerreissen.
+  ["diff <(sort /tmp/a) <(sort /tmp/b)", "Prozess-Substitution, harmlos"],
+  ["echo $((1+2))", "arithmetische Expansion"],
+  ["for ((i=0;i<3;i++)); do echo $i; done", "arithmetische for-Form, harmlos"],
+  ["while (( i < 3 )); do echo $i; done", "arithmetische while-Form, harmlos"],
 ];
 
 // Fail-closed: alles, was nicht sauber interpretierbar ist, MUSS deny sein.
@@ -260,6 +413,11 @@ const MALFORMED: Array<[string, string]> = [
   ['{"tool_name":"Bash","tool_input":{}}', "kein command"],
   ['{"tool_name":"Bash","tool_input":{"command":""}}', "leeres command"],
   ['{"tool_name":"Write","tool_input":{"command":"x"}}', "falsches Tool"],
+  // Monitors ZWEITER Eingabezweig: statt `command` ein WebSocket. Das Gate
+  // kann reinen Egress nicht beurteilen und verweigert fail-closed — bewusst
+  // so, aber es MUSS sichtbar sein, sonst liest der naechste die Meldung
+  // "Kein lesbares command" bei einem legalen ws-Aufruf als Bug.
+  ['{"tool_name":"Monitor","tool_input":{"ws":{"url":"wss://x"}}}', "Monitor im ws-Modus (kein command)"],
   ['["nicht","objekt"]', "JSON-Array statt Objekt"],
   ['{"tool_name":"Bash","tool_input":{"command":"echo \\"unbalanciert"}}', "unbalancierte Quotes"],
 ];
@@ -271,7 +429,7 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
   });
 
   describe("gesperrte Handvoll", () => {
-    it.each([...DENY, ...DENY_SELF])("deny: %s (%s)", (cmd) => {
+    it.each([...DENY, ...DENY_SELF, ...DENY_KONSTRUKTE])("deny: %s (%s)", (cmd) => {
       const { decision, reason } = decide(payload(cmd));
       expect(decision, `"${cmd}" muss deny sein, Begründung: ${reason}`).toBe("deny");
       expect(reason.length, "deny braucht eine Begründung").toBeGreaterThan(0);
@@ -294,6 +452,49 @@ describe("Bash-Gate (.claude/hooks/bash-gate.sh)", () => {
       const { decision, reason } = decide(payload(cmd));
       expect(decision, `"${cmd}" muss allow sein, Begründung: ${reason}`).toBe("allow");
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // Monitor: dieselbe Handvoll, dieselben Entscheidungen
+  // ---------------------------------------------------------------------
+  describe("Monitor-Tool wird identisch geguardet", () => {
+    it("laesst ein Routine-Kommando durch", () => {
+      expect(decide(monitorPayload("git status")).decision).toBe("allow");
+    });
+
+    it.each([
+      ["sudo -n true", "sudo"],
+      ["docker ps", "docker"],
+      ["git push --force origin feature", "force-push"],
+      ["git push origin main", "Push nach main"],
+      ["gh pr merge 27 --admin", "gh pr merge"],
+      ["rm -rf ~", "rm -rf im Home"],
+      // Der Fall, um den es bei der Auto-Freigabe wirklich geht: genau diese
+      // Form empfiehlt die Monitor-Doku fuers Warten auf eine Bedingung.
+      ["until sudo -n true; do sleep 2; done", "until-Schleife"],
+      ["until gh pr merge 81 --admin; do sleep 5; done", "Gate 3 in der Schleife"],
+    ])("deny: %s (%s)", (cmd) => {
+      const { decision, reason } = decide(monitorPayload(cmd));
+      expect(decision, `"${cmd}" muss auch als Monitor-Aufruf deny sein`).toBe("deny");
+      expect(reason.length, "deny braucht eine Begruendung").toBeGreaterThan(0);
+    });
+
+    // Der eigentliche Waechter: KEINE Drift zwischen den beiden Werkzeugen.
+    // Laeuft ueber ALLE VIER Korpus-Listen — auch BEWUSST_OFFEN, sonst driftete
+    // ausgerechnet die dokumentierte Grenzklasse unbemerkt auseinander. Wer
+    // einer Liste kuenftig einen Fall hinzufuegt, bekommt ihn fuer Monitor
+    // automatisch mitgeprueft; ohne die Schleife muesste er daran denken, und
+    // genau daran denkt niemand.
+    it.each([...DENY, ...DENY_SELF, ...DENY_KONSTRUKTE, ...ALLOW, ...BEWUSST_OFFEN])(
+      "Bash und Monitor entscheiden gleich: %s (%s)",
+      (cmd) => {
+        expect(
+          decide(monitorPayload(cmd)).decision,
+          `"${cmd}" wird als Bash anders entschieden als als Monitor — die ` +
+          `beiden Werkzeuge duerfen nicht auseinanderlaufen.`,
+        ).toBe(decide(payload(cmd)).decision);
+      },
+    );
   });
 
   describe("fail-closed", () => {
