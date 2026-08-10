@@ -118,11 +118,33 @@ const MODULES: ModuleGate[] = [
     key: "qonto",
     mode: "server",
     target: "server/services/qonto.ts",
-    tests: ["tests/billing/qonto-match-audit.test.ts"],
-    // Ist (Mai 2026): Lines 53.7 % / Branch 68.8 %. Der reine HTTP-Sync-Pfad
-    // (`syncTransactions`) ruft die echte Qonto-API und ist nicht abgedeckt.
-    lines: 48,
-    branches: 60,
+    // Die Liste war STEHENGEBLIEBEN: sie fuehrte genau EINE Datei, waehrend das
+    // Modul um die Sammel-Avis-Logik wuchs und die Tests dafuer in ANDERE
+    // Dateien geschrieben wurden. Gemessen wurden damit 42,5 % — nicht weil der
+    // Code untestet war, sondern weil das Gate sechs von sieben einschlaegigen
+    // Dateien nicht ausfuehrte. Mit der vollstaendigen Liste: 66,0 % / 80,0 %.
+    //
+    // NICHT dabei: `qonto-backfill-lock.test.ts`. Der Gate-Server laeuft mit
+    // `NODE_ENV=development` (siehe `serverEnv` weiter unten), der HTTP-Stub in
+    // `qonto.ts` greift aber nur bei `NODE_ENV === "test"` — die Datei liefe
+    // hier gegen die echte Qonto-API. Im regulaeren `tests`-Job ist sie gruen.
+    tests: [
+      "tests/billing/qonto-match-audit.test.ts",
+      "tests/billing/qonto-amount-match-guard.test.ts",
+      "tests/billing/qonto-bulk-match.test.ts",
+      "tests/billing/qonto-multi-iban-sync.test.ts",
+      // Diese beiden fahren die Sammel-Avis-Pfade an (`tryBulkAdviceMatch`,
+      // `autoCloseAdviceFromTransactions`) — zusammen ~120 Zeilen, die vorher
+      // komplett ungemessen waren.
+      "tests/billing/bulk-advice-match.test.ts",
+      "tests/billing/ambiguous-advice-resolve.test.ts",
+    ],
+    // Ist (10.08.2026): Lines 66,0 % / Branch 80,0 %, kalibriert mit dem in
+    // diesem Datei-Kopf dokumentierten ~5 %-Puffer. Der reine HTTP-Sync-Pfad
+    // (`syncTransactions`, `testConnection`, `backfillTransactions`) ruft die
+    // echte Qonto-API und bleibt unabgedeckt — das ist der Rest bis 100 %.
+    lines: 60,
+    branches: 72,
   },
   {
     key: "consumption-engine",
