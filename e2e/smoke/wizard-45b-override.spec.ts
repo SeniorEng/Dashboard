@@ -80,24 +80,16 @@ async function pickDate(
   monthIndex: number,
   day: number,
 ): Promise<void> {
-  // Den Trigger gezielt in die OBERE Viewport-Haelfte holen.
+  // Kein eigenes Scrollen mehr — `click()` holt den Trigger selbst in den
+  // sichtbaren Bereich. Die Platzfrage loest der hoehere Viewport in
+  // playwright.config.ts.
   //
-  // `scrollIntoViewIfNeeded()` liess ihn bei y≈386 im 720px-Default-Viewport
-  // stehen — unterhalb blieben keine ~400px mehr, und weil `PopoverContent`
-  // zwar `side="bottom"` deklariert, Radix aber bei Platzmangel kippt
-  // (`avoidCollisions`), klappte der Kalender nach OBEN. Ein Monat mit sechs
-  // Kalenderzeilen (z.B. August 2026, der 1. faellt auf Samstag) ist dann
-  // hoeher als der Platz darueber: der Popover-Kopf mit
-  // `btn-quick-year-month` landet bei negativem y, und Playwright meldet
-  // „element is outside of the viewport" bis zum Timeout.
-  //
-  // Die Seite hat weder Sticky-Header noch eigenen Scroll-Container, der
-  // Trigger kann also gefahrlos an den oberen Rand — die 80px Abstand halten
-  // ihn nur von der Kante weg.
-  await page.locator(`[data-testid='${triggerTestId}']`).evaluate((el) => {
-    el.scrollIntoView({ block: "start" });
-    window.scrollBy(0, -80);
-  });
+  // Erster Versuch war, den Trigger per scrollIntoView an den oberen Rand zu
+  // schieben, damit der Popover nach unten aufklappt. Das griff NICHT (CI-Lauf
+  // 31369343726: unveraendert y=-14): der Wizard-Schritt ist kuerzer als der
+  // Viewport, das Dokument also gar nicht scrollbar — jedes Scrollen ist ein
+  // No-op, der Trigger bleibt bei y≈386 stehen. Gegen fehlenden Platz hilft
+  // dann nur mehr Platz.
   await page.locator(`[data-testid='${triggerTestId}']`).click();
   const pop = page.locator("[data-radix-popper-content-wrapper]").last();
   await expect(pop).toBeVisible();
