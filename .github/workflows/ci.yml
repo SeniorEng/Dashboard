@@ -276,7 +276,7 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     runs-on: ubuntu-latest
-    # Hard-Limit (Task #1799): ein Shard-Leg + Architektur-Fitness (+ auf Leg 1
+    # Hard-Limit (Task #1799): ein Shard-Leg + Architektur-Fitness (+ auf Leg 3
     # die Coverage-Gates) gegen den gebooteten App-Server. Großzügig über der
     # beobachteten Laufzeit, aber weit unter dem 6-h-Default — ein hängender
     # Server/Vitest-Prozess wird so nach Minuten gekillt. Von 40 auf 25 gesenkt,
@@ -414,26 +414,35 @@ jobs:
       # damit im CI-Log sofort sichtbar ist, welches Modul unter die Schwelle
       # rutscht). Konfiguration/Schwellen: script/coverage-gate.ts.
       #
-      # NUR auf Leg 1. Die Gates fahren ihre eigene, fest gepinnte Testliste mit
-      # eigener Coverage-Instrumentierung — sie hängen NICHT am Hauptlauf und
+      # NUR auf EINEM Leg. Die Gates fahren ihre eigene, fest gepinnte Testliste
+      # mit eigener Coverage-Instrumentierung — sie hängen NICHT am Hauptlauf und
       # messen deshalb pro Leg exakt dasselbe. Dreimal ausgeführt wäre nur
-      # dreifache Rechenzeit bei identischem Ergebnis. Leg 1 wird dadurch rund
-      # 70 s länger als die anderen; das liegt weit unter der Leg-Laufzeit und
-      # verlängert die Pipeline nicht.
+      # dreifache Rechenzeit bei identischem Ergebnis.
+      #
+      # Warum ausgerechnet Leg 3: `--shard` teilt nach DATEIZAHL auf, nicht nach
+      # Dauer. Gemessen an Lauf 31477641625 ist die Dateiverteilung mit 181/180/180
+      # praktisch perfekt, die Laufzeit des Hauptlaufs aber nicht — 389/369/301 s.
+      # Die ~70 s Gates gehören deshalb auf das SCHNELLSTE Leg, sonst verlängern
+      # sie ausgerechnet den kritischen Pfad. Mit den Gates auf Leg 3 liegen
+      # Leg 1 und Leg 3 bei rund 499 s bzw. 488 s statt 569 s und 418 s.
+      #
+      # Diese Zuordnung ist eine Laufzeit-Beobachtung, keine fachliche Bindung:
+      # verschiebt sich die Verteilung durch neue Testdateien deutlich, gehört
+      # die Zahl hier neu gewählt (Job-Zeiten im Lauf vergleichen).
       - name: Coverage gate (billing)
-        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 1 }}
+        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 3 }}
         run: npx tsx script/coverage-gate.ts billing
 
       - name: Coverage gate (qonto)
-        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 1 }}
+        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 3 }}
         run: npx tsx script/coverage-gate.ts qonto
 
       - name: Coverage gate (consumption-engine)
-        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 1 }}
+        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 3 }}
         run: npx tsx script/coverage-gate.ts consumption-engine
 
       - name: Coverage gate (month-close-scheduler)
-        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 1 }}
+        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 3 }}
         run: npx tsx script/coverage-gate.ts month-close-scheduler
 
       # Nachhaltigkeits-Guard (BUG-18): nach dem vollen Vitest-Lauf darf kein
