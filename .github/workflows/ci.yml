@@ -266,7 +266,9 @@ jobs:
   # CI-Job sich bewusst vom Orchestrator unterscheidet (Cross-Datei-
   # Kontamination, Reihenfolge-Abhängigkeiten) sichtbar — nur eben in drei
   # kleineren Gruppen statt einer großen. Welche Dateien zusammen in einem Leg
-  # landen, ändert sich dadurch; siehe `docs/test-infrastructure.md`.
+  # landen, ändert sich dadurch — und es ändert sich WEITER mit jeder neuen
+  # Testdatei. Topologie: `docs/ci-pipeline.md` → „Test-Gate: drei Shard-Legs";
+  # Triage bei Rot: `docs/flaky-tests.md` → „Wandernde Shard-Zuordnung".
   tests-shard:
     name: tests-shard
     strategy:
@@ -415,9 +417,17 @@ jobs:
       # rutscht). Konfiguration/Schwellen: script/coverage-gate.ts.
       #
       # NUR auf EINEM Leg. Die Gates fahren ihre eigene, fest gepinnte Testliste
-      # mit eigener Coverage-Instrumentierung — sie hängen NICHT am Hauptlauf und
-      # messen deshalb pro Leg exakt dasselbe. Dreimal ausgeführt wäre nur
-      # dreifache Rechenzeit bei identischem Ergebnis.
+      # mit eigener Coverage-Instrumentierung; welches Leg sie trägt, ist für ihr
+      # Ergebnis egal. Dreimal ausgeführt wäre nur dreifache Rechenzeit.
+      #
+      # ACHTUNG, gemessen: „hängen nicht am Hauptlauf" gilt NICHT vollständig.
+      # `qonto` (Modus `server`, HTTP-Tests gegen die geteilte DB) misst den
+      # DB-Reststand des vorangegangenen Hauptlaufs mit — Branches 81,53 % im
+      # alten Einzellauf gegen 80,00 % in beiden Shard-Läufen, unabhängig davon,
+      # ob die Gates auf Leg 1 oder Leg 3 hingen. `consumption-engine` und
+      # `month-close-scheduler` (Modus `vitest`) sind bitgleich. Der Floor liegt
+      # bei 72, die Marge schrumpft also von 9,5 auf 8,0 Punkte — heute
+      # ungefährlich, aber bei einem Re-Balancing mit zu beobachten.
       #
       # Warum ausgerechnet Leg 3: `--shard` teilt nach DATEIZAHL auf, nicht nach
       # Dauer. Gemessen an Lauf 31477641625 ist die Dateiverteilung mit 181/180/180
@@ -517,13 +527,13 @@ jobs:
             success)
               echo "Alle Shard-Legs grün."
               ;;
-            skipped)
-              # Tritt auf, wenn die Legs gar nicht erst starten (z.B. Fork-PR
-              # ohne Secrets, bei dem schon die Matrix entfällt). Der frühere
-              # Einzeljob lief in dem Fall grün durch und gab nur eine Warnung
-              # aus — dieses Verhalten bleibt erhalten.
-              echo "::warning::tests-shard wurde übersprungen — Test-Gate hat nicht gemessen."
-              ;;
+            # `skipped` fällt BEWUSST in den roten Zweig. Ein Fork-PR ohne
+            # Secrets erzeugt diesen Zustand NICHT: `tests-shard` hat kein
+            # Job-`if:`, der Job läuft also, seine Steps überspringen einzeln
+            # über `env.TEST_USER_PASSWORD != ''`, und das Leg endet `success`.
+            # `skipped` kann nur auftreten, wenn jemand später ein `if:` oder
+            # `needs:` an `tests-shard` hängt — und dann wäre grün genau die
+            # falsche Antwort: das Test-Gate hätte nichts gemessen.
             *)
               echo "::error::Mindestens ein tests-shard-Leg ist nicht erfolgreich ($SHARD_RESULT)."
               exit 1
