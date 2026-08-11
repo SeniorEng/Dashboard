@@ -57,6 +57,7 @@ import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { calculateAllocatedCents } from "../storage/budget/allocation-storage";
 import { readBudgetTypeSettings } from "../storage/budget/preferences-storage";
 import { formatEuroDE } from "@shared/utils/money";
+import { computeCarryoverPhantom, computeShortfall } from "./lib/45b-halfyear-math";
 
 const BT = "entlastungsbetrag_45b";
 
@@ -74,14 +75,24 @@ interface Row {
   fehlbetragCents: number;
   fehlbetragGestelltCents: number;
   fehlbetragEntwurfCents: number;
+  fehlbetragNichtZugeordnetCents: number;
 }
 
-/** Netto-Verbrauch (consumption+write_off − reversal) in einem Datumsfenster. */
-async function netConsumedBetween(
+/**
+ * Netto-VERBRAUCH (consumption − reversal) in einem Datumsfenster.
+ *
+ * `write_off` ist bewusst AUSGESCHLOSSEN. Der Verfalls-Write-Off liegt per
+ * `addDays(expiresAt, 1)` auf dem 01.07. und fiel damit ins Jahresfenster,
+ * aber nicht ins Fenster „bis Frist" — die Asymmetrie blähte den
+ * Phantom-Betrag um genau den Write-Off auf (gemessen: 25 % zu viel) und
+ * erfand Fehlbeträge bei Kunden ohne jede Überzahlung. Fachlich ist er auch
+ * kein Verbrauch gegen den eigenen Topf, sondern das Verfallen des Übertrags.
+ */
+async function netConsumptionBetween(
   customerId: number, fromIso: string, toIso: string,
 ): Promise<number> {
   const [row] = await db.select({
-    consumed: sql<number>`COALESCE(SUM(CASE WHEN ${budgetTransactions.transactionType} IN ('consumption','write_off') THEN ABS(${budgetTransactions.amountCents}) ELSE 0 END), 0)`,
+    consumed: sql<number>`COALESCE(SUM(CASE WHEN ${budgetTransactions.transactionType} = 'consumption' THEN ABS(${budgetTransactions.amountCents}) ELSE 0 END), 0)`,
     reversed: sql<number>`COALESCE(SUM(CASE WHEN ${budgetTransactions.transactionType} = 'reversal' THEN ABS(${budgetTransactions.amountCents}) ELSE 0 END), 0)`,
   }).from(budgetTransactions).where(and(
     eq(budgetTransactions.customerId, customerId),
@@ -101,11 +112,15 @@ async function netConsumedBetween(
  * schneiden bei `fehlbetrag` ab. Das ist eine ZUORDNUNGS-Konvention, keine
  * fachliche Wahrheit — ein anderer Schnitt (anteilig, FIFO vorwärts) ergäbe
  * dieselbe Summe, aber eine andere Aufteilung gestellt/Entwurf.
+ *
+ * Der `id`-Tiebreaker ist Pflicht: mehrere Verbrauchszeilen am selben Tag sind
+ * der Normalfall, und ohne ihn koennen zwei Laeufe auf identischen Daten
+ * verschieden aufteilen.
  */
 async function splitShortfallByInvoiceState(
   customerId: number, year: number, fehlbetragCents: number,
-): Promise<{ gestellt: number; entwurf: number }> {
-  if (fehlbetragCents <= 0) return { gestellt: 0, entwurf: 0 };
+): Promise<{ gestellt: number; entwurf: number; nichtZugeordnet: number }> {
+  if (fehlbetragCents <= 0) return { gestellt: 0, entwurf: 0, nichtZugeordnet: 0 };
 
   const rows = await db.select({
     amount: budgetTransactions.amountCents,
@@ -117,7 +132,7 @@ async function splitShortfallByInvoiceState(
     eq(budgetTransactions.transactionType, "consumption"),
     sql`${budgetTransactions.transactionDate} >= ${`${year}-01-01`}`,
     lte(budgetTransactions.transactionDate, `${year}-12-31`),
-  )).orderBy(sql`${budgetTransactions.transactionDate} DESC`);
+  )).orderBy(sql`${budgetTransactions.transactionDate} DESC, ${budgetTransactions.id} DESC`);
 
   const apptIds = rows.map(r => r.appointmentId).filter((x): x is number => x != null);
   const issuedAppts = new Set<number>();
@@ -127,8 +142,18 @@ async function splitShortfallByInvoiceState(
       .innerJoin(invoices, eq(invoices.id, invoiceLineItems.invoiceId))
       .where(and(
         inArray(invoiceLineItems.appointmentId, apptIds),
-        eq(invoices.budgetType, BT),
+        // KEIN `eq(invoices.budgetType, BT)`: `budget_type` ist NULL für
+        // Bestands-Rechnungen vor Task #759 (Schema sagt ausdrücklich: kein
+        // Backfill, GoBD). Eine gestellte Altrechnung wäre damit unsichtbar
+        // geworden und im Eimer „Entwurf — nach vorn korrigierbar" gelandet.
+        // Das ist die GoBD-gefährliche Richtung, deshalb hier NICHT filtern.
         isNotNull(invoices.issuedAt),
+        // Aktiv = beide Bedingungen. `storniert_at` allein reicht nicht: es
+        // wird nur in `billing-storage.ts` mitgesetzt, Altbestand kann
+        // `status='storniert'` bei leerem `storniert_at` tragen und würde
+        // sonst als aktiv gestellt gelten (Storno-Forderung auf einen bereits
+        // stornierten Beleg).
+        sql`${invoices.status} <> 'storniert'`,
         isNull(invoices.storniertAt),
       ));
     for (const r of inv) if (r.appointmentId != null) issuedAppts.add(r.appointmentId);
@@ -137,14 +162,21 @@ async function splitShortfallByInvoiceState(
   let rest = fehlbetragCents;
   let gestellt = 0;
   let entwurf = 0;
+  let nichtZugeordnet = 0;
   for (const r of rows) {
     if (rest <= 0) break;
     const take = Math.min(rest, Math.abs(r.amount));
-    if (r.appointmentId != null && issuedAppts.has(r.appointmentId)) gestellt += take;
+    // Ohne `appointmentId` (Import-Buchungen) ist keine Rechnung auffindbar.
+    // KONSERVATIV als „gestellt" werten: lieber ein GoBD-Vorgang zu viel
+    // geprüft als eine gestellte Rechnung still korrigiert.
+    if (r.appointmentId == null || issuedAppts.has(r.appointmentId)) gestellt += take;
     else entwurf += take;
     rest -= take;
   }
-  return { gestellt, entwurf };
+  // Reicht die Summe der Verbrauchszeilen nicht, verschwand der Rest bisher
+  // stumm und „gestellt + Entwurf" war kleiner als der Fehlbetrag.
+  if (rest > 0) nichtZugeordnet = rest;
+  return { gestellt, entwurf, nichtZugeordnet };
 }
 
 async function main(): Promise<void> {
@@ -172,62 +204,86 @@ async function main(): Promise<void> {
 
   const out: Row[] = [];
 
+  const degenerate: Array<{ customerId: number; sourceYear: number }> = [];
+
   for (const { customerId, targetYear, carryoverIn } of byKey.values()) {
     const sourceYear = targetYear - 1;
-    // Frist aus der SSoT — bewusst nicht hier gerechnet.
     const { expiresAt, validFrom } = carryoverWindowFor(sourceYear);
+    const prevExpiry = carryoverWindowFor(sourceYear - 1).expiresAt;
+    const prevCarryIn = byKey.get(`${customerId}|${sourceYear}`)?.carryoverIn ?? 0;
 
     const typeSettings = await readBudgetTypeSettings(
       customerId, { kind: "forDate", asOfDate: `${targetYear}-12-31` },
     );
 
-    // Anspruch des QUELLJAHRES — bestimmt, wie viel überhaupt rollen konnte.
+    // B1 — OFFEN. `calculateAllocatedCents({ year })` liefert die HEUTIGE
+    // Sicht: der Carryover-`allocStart`-Shift (allocation-storage.ts:770) ist
+    // im `{year}`-Modus nicht geschützt und ergibt 0, sobald die
+    // Zieljahres-Übertragszeile existiert — also genau in unserer
+    // Kandidatenmenge. Eine zustandsunabhängige Quelle bräuchte
+    // `enumerate45bStatutoryMonths` mit eigenem `monthlyAmountFor`, und das
+    // wäre eine zweite Anspruchs-Mathematik neben dem Schreibpfad.
+    // Bis das entschieden ist: den Fall LAUT melden statt still zu
+    // überspringen — ein stiller Null-Befund war der gefährlichste Defekt der
+    // ersten Fassung.
     const sourceYearAllocated = await calculateAllocatedCents(
       customerId, BT, { year: sourceYear }, undefined, undefined, typeSettings,
     );
+    if (sourceYearAllocated <= 0) {
+      degenerate.push({ customerId, sourceYear });
+      continue;
+    }
 
-    // IST: jahresscharf, so wie :1598 heute rechnet.
-    const netSourceYear = await netConsumedBetween(customerId, `${sourceYear}-01-01`, `${sourceYear}-12-31`);
-    // Der Übertrag, der IN das Quelljahr rollte (Vorjahres-Übertrag):
-    const prevCarryIn = byKey.get(`${customerId}|${sourceYear}`)?.carryoverIn ?? 0;
-    const consumedOwnIst = Math.max(0, netSourceYear - prevCarryIn);
-    const unusedIst = Math.max(0, sourceYearAllocated - consumedOwnIst);
+    const netYear = await netConsumptionBetween(customerId, `${sourceYear}-01-01`, `${sourceYear}-12-31`);
+    const netUntil = await netConsumptionBetween(customerId, `${sourceYear}-01-01`, prevExpiry);
 
-    // SOLL: nur Verbrauch BIS zur Frist des Vorjahres-Übertrags darf diesen
-    // absorbieren. Die Frist des Vorjahres-Übertrags ist die des Fensters,
-    // das im Quelljahr endet.
-    const prevExpiry = carryoverWindowFor(sourceYear - 1).expiresAt;
-    const netBisFrist = await netConsumedBetween(customerId, `${sourceYear}-01-01`, prevExpiry);
-    const absorbed = Math.min(prevCarryIn, netBisFrist);
-    const consumedOwnSoll = Math.max(0, netSourceYear - absorbed);
-    const unusedSoll = Math.max(0, sourceYearAllocated - consumedOwnSoll);
+    const ph = computeCarryoverPhantom({
+      sourceYearAllocatedCents: sourceYearAllocated,
+      prevCarryInCents: prevCarryIn,
+      netConsumptionYearCents: netYear,
+      netConsumptionUntilDeadlineCents: netUntil,
+      persistedCarryoverOutCents: carryoverIn,
+    });
 
-    const phantom = unusedIst - unusedSoll;
-
-    // Zieljahr: was wurde geltend gemacht, was wäre korrekt verfügbar gewesen?
-    const geltendGemacht = await netConsumedBetween(customerId, validFrom, `${targetYear}-12-31`);
+    // B4 — beide Fenster MÜSSEN deckungsgleich sein. `calculateAllocatedCents`
+    // reicht im `{year}`-Modus nur bis heute; der Verbrauch wird deshalb
+    // ebenfalls bei heute gekappt statt bis 31.12. zu summieren.
+    const heute = new Date().toISOString().slice(0, 10);
+    const fensterEnde = heute < `${targetYear}-12-31` ? heute : `${targetYear}-12-31`;
+    const claimed = await netConsumptionBetween(customerId, validFrom, fensterEnde);
     const targetYearAllocated = await calculateAllocatedCents(
       customerId, BT, { year: targetYear }, undefined, undefined, typeSettings,
     );
-    // Korrekter Rest = Zieljahres-Anspruch + KORRIGIERTER Übertrag.
-    const korrekterRest = targetYearAllocated + Math.max(0, carryoverIn - Math.max(0, phantom));
-    const fehlbetrag = Math.max(0, geltendGemacht - korrekterRest);
+    const sf = computeShortfall({
+      claimedCents: claimed,
+      targetYearAllocatedCents: targetYearAllocated,
+      carryoverInSollCents: ph.carryoverOutSollCents,
+    });
 
-    if (phantom <= 0 && fehlbetrag <= 0) continue;
-
-    const split = await splitShortfallByInvoiceState(customerId, targetYear, fehlbetrag);
+    if (ph.phantomCents <= 0 && sf.shortfallCents <= 0) continue;
+    const split = await splitShortfallByInvoiceState(customerId, targetYear, sf.shortfallCents);
 
     out.push({
       customerId, sourceYear, targetYear, expiresAt,
       carryoverInIst: carryoverIn,
-      carryoverInSoll: Math.max(0, carryoverIn - Math.max(0, phantom)),
-      phantomCents: Math.max(0, phantom),
-      geltendGemachtCents: geltendGemacht,
-      korrekterRestCents: korrekterRest,
-      fehlbetragCents: fehlbetrag,
+      carryoverInSoll: ph.carryoverOutSollCents,
+      phantomCents: ph.phantomCents,
+      geltendGemachtCents: claimed,
+      korrekterRestCents: sf.availableCents,
+      fehlbetragCents: sf.shortfallCents,
       fehlbetragGestelltCents: split.gestellt,
       fehlbetragEntwurfCents: split.entwurf,
+      fehlbetragNichtZugeordnetCents: split.nichtZugeordnet,
     });
+  }
+
+  if (degenerate.length > 0) {
+    console.error(
+      `\n[B1] ${degenerate.length} Kunden-Jahre NICHT bewertet: der Quelljahres-Anspruch ` +
+      `kam als 0 zurueck (calculateAllocatedCents liefert die Heute-Sicht).\n` +
+      `     Diese Zeilen sind WEDER geprueft NOCH entlastet. Ohne Fix von B1 ist ` +
+      `der Report unvollstaendig.\n`,
+    );
   }
 
   out.sort((a, b) => b.fehlbetragCents - a.fehlbetragCents);
