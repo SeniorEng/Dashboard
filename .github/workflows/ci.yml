@@ -251,16 +251,37 @@ jobs:
   # das Billing-Coverage-Gate. Brauchen Postgres + laufenden App-Server.
   # Gates: 4 (vitest), 5 (architecture), 8 (targeted coverage gates)
   # -------------------------------------------------------------------------
-  tests:
-    # Check-Name == Job-ID, damit Branch-Protection diesen Kontext exakt matcht
-    # (Vitest · Architecture-Fitness · Coverage — Details siehe Steps).
-    name: tests
+  # Shard-Legs des Test-Gates. Der volle Vitest-Lauf lief bis Task-Stand 11.08.
+  # sequenziell in EINEM Job (~19 min von ~22 min Job-Laufzeit) und war damit der
+  # alleinige Wall-Clock-Treiber der gesamten Pipeline — alle anderen Jobs sind
+  # nach ≤4 min fertig und warten. `--shard` verteilt die Dateien auf drei
+  # parallele Legs mit je eigener DB, eigenem Server und eigenem Port-5000.
+  #
+  # WICHTIG — das hier ist NICHT der Required Check. Eine Matrix erzeugt
+  # Kontexte namens `tests-shard (1|2|3)`; Branch-Protection matcht auf `tests`.
+  # Diesen Namen trägt der Aggregator-Job unten, der die drei Legs zusammenfasst.
+  #
+  # Die geteilte DB bleibt pro Leg erhalten: innerhalb eines Shards laufen die
+  # Dateien weiter nacheinander gegen EINE Datenbank. Damit bleibt das, wofür der
+  # CI-Job sich bewusst vom Orchestrator unterscheidet (Cross-Datei-
+  # Kontamination, Reihenfolge-Abhängigkeiten) sichtbar — nur eben in drei
+  # kleineren Gruppen statt einer großen. Welche Dateien zusammen in einem Leg
+  # landen, ändert sich dadurch; siehe `docs/test-infrastructure.md`.
+  tests-shard:
+    name: tests-shard
+    strategy:
+      # Kein fail-fast: ein rotes Leg soll die anderen NICHT abbrechen, sonst
+      # sieht man pro Lauf nur den ersten Fehlschlag statt des vollen Bildes.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     runs-on: ubuntu-latest
-    # Hard-Limit (Task #1799): voller Vitest-Lauf + Architektur-Fitness +
-    # Coverage-Gates gegen den gebooteten App-Server. Großzügig über der
+    # Hard-Limit (Task #1799): ein Shard-Leg + Architektur-Fitness (+ auf Leg 1
+    # die Coverage-Gates) gegen den gebooteten App-Server. Großzügig über der
     # beobachteten Laufzeit, aber weit unter dem 6-h-Default — ein hängender
-    # Server/Vitest-Prozess wird so nach Minuten gekillt.
-    timeout-minutes: 40
+    # Server/Vitest-Prozess wird so nach Minuten gekillt. Von 40 auf 25 gesenkt,
+    # weil ein Leg nur noch rund ein Drittel der Dateien fährt.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
@@ -372,12 +393,19 @@ jobs:
           cat server.log >&2
           exit 1
 
-      # Gate 4: Vitest mit JUnit-Reporter für CI-Tooling.
+      # Gate 4: Vitest mit JUnit-Reporter für CI-Tooling. `--shard=i/N` teilt die
+      # Dateiliste deterministisch auf die Legs auf — jedes Leg fährt seine
+      # Teilmenge komplett, kein Leg überlappt mit einem anderen.
       - name: Run tests (vitest run)
         if: ${{ env.TEST_USER_PASSWORD != '' }}
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=test-results/vitest-junit.xml
+        run: npx vitest run --shard=${{ matrix.shard }}/3 --reporter=default --reporter=junit --outputFile=test-results/vitest-junit.xml
 
       # Gate 5: Architektur-Fitness-Functions als eigenes Gate.
+      # Läuft bewusst in JEDEM Leg, nicht nur in einem: der Gate-Meta-Check unten
+      # verlangt beide JUnit-Reports im selben Arbeitsverzeichnis, und er darf
+      # laut tests/architecture/gate-meta-check.test.ts weder ein `if:` tragen
+      # noch mehrfach im YAML stehen. Die Tests sind reine Datei-Reads (~25 s)
+      # und laufen parallel zu den anderen Legs — Wall-Clock-Kosten: null.
       - name: Run architecture fitness-functions
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx vitest run tests/architecture/ --reporter=default --reporter=junit --outputFile=test-results/architecture-junit.xml
@@ -385,20 +413,27 @@ jobs:
       # Gate 8: Targeted-Per-File-Coverage-Gates (ein eigener Step pro Modul,
       # damit im CI-Log sofort sichtbar ist, welches Modul unter die Schwelle
       # rutscht). Konfiguration/Schwellen: script/coverage-gate.ts.
+      #
+      # NUR auf Leg 1. Die Gates fahren ihre eigene, fest gepinnte Testliste mit
+      # eigener Coverage-Instrumentierung — sie hängen NICHT am Hauptlauf und
+      # messen deshalb pro Leg exakt dasselbe. Dreimal ausgeführt wäre nur
+      # dreifache Rechenzeit bei identischem Ergebnis. Leg 1 wird dadurch rund
+      # 70 s länger als die anderen; das liegt weit unter der Leg-Laufzeit und
+      # verlängert die Pipeline nicht.
       - name: Coverage gate (billing)
-        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 1 }}
         run: npx tsx script/coverage-gate.ts billing
 
       - name: Coverage gate (qonto)
-        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 1 }}
         run: npx tsx script/coverage-gate.ts qonto
 
       - name: Coverage gate (consumption-engine)
-        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 1 }}
         run: npx tsx script/coverage-gate.ts consumption-engine
 
       - name: Coverage gate (month-close-scheduler)
-        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        if: ${{ env.TEST_USER_PASSWORD != '' && matrix.shard == 1 }}
         run: npx tsx script/coverage-gate.ts month-close-scheduler
 
       # Nachhaltigkeits-Guard (BUG-18): nach dem vollen Vitest-Lauf darf kein
@@ -430,17 +465,61 @@ jobs:
 
       # Kosten-Optimierung (Task #1799): Test-/Coverage-Artefakte nur bei
       # Fehlschlag hochladen (auf grünen Läufen ungenutzt) + kurze Retention.
+      # Artefaktname MUSS das Leg enthalten: upload-artifact@v4 bricht ab, wenn
+      # zwei Matrix-Legs denselben Namen hochladen wollen.
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: test-reports-shard-${{ matrix.shard }}
           path: |
             test-results/
             coverage/
             server.log
           if-no-files-found: ignore
           retention-days: 3
+
+  # -------------------------------------------------------------------------
+  # Required Check des Test-Gates. Trägt bewusst den Namen `tests` — genau
+  # diesen Kontext verlangt die Branch-Protection, und Matrix-Legs heißen
+  # `tests-shard (1|2|3)` und würden ihn nicht erfüllen. Der Job führt selbst
+  # nichts aus; er fasst nur das Ergebnis der Legs zu einem Kontext zusammen.
+  #
+  # `needs.tests-shard.result` ist `success` nur, wenn ALLE Legs erfolgreich
+  # waren — ein einzelnes rotes Leg macht den Aggregator rot. `if: always()`
+  # ist Pflicht: ohne ihn würde der Job bei einem roten Leg selbst übersprungen,
+  # und ein übersprungener Required Check blockiert den PR dauerhaft, statt ihn
+  # rot zu stellen.
+  # -------------------------------------------------------------------------
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [tests-shard]
+    if: always()
+    steps:
+      - name: Shard-Ergebnis auswerten
+        env:
+          SHARD_RESULT: ${{ needs.tests-shard.result }}
+        run: |
+          set -euo pipefail
+          echo "Ergebnis aller tests-shard-Legs: $SHARD_RESULT"
+          case "$SHARD_RESULT" in
+            success)
+              echo "Alle Shard-Legs grün."
+              ;;
+            skipped)
+              # Tritt auf, wenn die Legs gar nicht erst starten (z.B. Fork-PR
+              # ohne Secrets, bei dem schon die Matrix entfällt). Der frühere
+              # Einzeljob lief in dem Fall grün durch und gab nur eine Warnung
+              # aus — dieses Verhalten bleibt erhalten.
+              echo "::warning::tests-shard wurde übersprungen — Test-Gate hat nicht gemessen."
+              ;;
+            *)
+              echo "::error::Mindestens ein tests-shard-Leg ist nicht erfolgreich ($SHARD_RESULT)."
+              exit 1
+              ;;
+          esac
 
   # -------------------------------------------------------------------------
   # E2E-Smoke-Gate: Playwright gegen einen laufenden Server + Postgres.
