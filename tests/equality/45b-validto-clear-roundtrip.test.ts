@@ -25,11 +25,12 @@
  * dazwischenkommt. Booking-Pfade nutzen weiterhin
  * `getActiveBudgetTypeSettings(transactionDate)` (separat geprüft).
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { customerBudgetTypeSettings } from "@shared/schema";
 import { todayISO, addDays } from "@shared/utils/datetime";
+import { freezeTime } from "../helpers/frozen-clock";
 import {
   getActiveBudgetTypeSettings,
   getLatestBudgetTypeSettings,
@@ -42,6 +43,32 @@ const ORIGINAL_TZ = process.env.TZ;
 beforeAll(async () => {
   process.env.TZ = "Europe/Berlin";
   await getAuthCookie();
+});
+
+beforeEach(() => {
+  // Die Tagesgrenze aus dem Test heraushalten. `upsertBudgetTypeSettings`
+  // bestimmt sein "heute" selbst im Moment des Schreibens; der Test vergleicht
+  // danach dagegen. Kreuzt ein Lauf dabei Mitternacht, matcht nichts mehr —
+  // so geschehen in CI-Lauf 31435373737 um 00:03 Europe/Berlin.
+  //
+  // Mittags eingefroren ist dieses Rennen strukturell unmöglich, und die
+  // Assertions dürfen exakt bleiben (`validTo === today`) statt eine Toleranz
+  // zu tragen. Bewusst der ECHTE heutige Tag statt eines eingebackenen Datums:
+  // §45b-Logik hängt am Kalenderjahr, ein fixes Datum würde mit der Zeit faulen.
+  // `thawTime()` erledigt der globale afterEach in `tests/setup.ts`.
+  //
+  // VORBEDINGUNG: Der Freeze patcht `Date` nur im TESTPROZESS. Er wirkt hier
+  // ausschließlich, weil `upsertBudgetTypeSettings` per Direktimport in-process
+  // läuft (siehe Datei-Header: "Storage-Round-Trip-Test ohne HTTP"). Würde die
+  // Datei je auf den HTTP-Weg umgestellt, liefe der Produktionscode im Server-
+  // Prozess mit echter Uhr weiter — der Schutz wäre lautlos weg, der Test
+  // bliebe grün. Vgl. `tests/helpers/billing-month.ts:236`, wo genau dieser
+  // Gegenfall dokumentiert ist.
+  //
+  // Zweite Vorbedingung: `todayISO()` muss IM Testkörper stehen. Auf
+  // Modul-Ebene liefe es bei der Modul-Evaluierung, also VOR diesem Hook —
+  // die Race wäre zurück, ohne dass ein Test rot würde.
+  freezeTime(`${todayISO()}T12:00:00`);
 });
 
 afterAll(async () => {
