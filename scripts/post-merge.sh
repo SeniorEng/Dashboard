@@ -33,6 +33,14 @@ psql "$DATABASE_URL" -c "ALTER TABLE invoice_line_items ADD COLUMN IF NOT EXISTS
 timeout --signal=TERM --kill-after=5s 60s npm run db:push 2>/dev/null || \
   echo "[post-merge] db:push skipped/timed out — wird beim nächsten Lauf nachgeholt"
 
+# Task #1900: Karteileichen-Remotes (subrepl-*) aus .git/config entfernen.
+# Jeder Task-Agent-Lauf hinterlässt ein Remote mit toter SSH-URL; ohne Pflege
+# staut sich das auf (1052 Stück / ~215 KB .git/config) und die Git-Oberfläche
+# meldet pauschal „Failed to authenticate with the remote". Best-effort: darf
+# den Merge NIE blockieren. Idempotent: No-op, wenn nichts zu entfernen ist.
+timeout --signal=TERM --kill-after=5s 60s bash scripts/prune-stale-subrepl-remotes.sh --apply || \
+  echo "[post-merge] Remote-Prune übersprungen/fehlgeschlagen — nächster Merge holt es nach"
+
 # Task #1249: GitHub-Sync nach jedem Merge (best-effort). Hält GitHub `main`
 # auf dem Replit-Stand, damit CI nicht alten Code testet. Ein Sync-Fehler darf
 # den Merge NIE blockieren — deshalb `|| true` und ein Timeout. Idempotent:

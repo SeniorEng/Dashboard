@@ -155,6 +155,21 @@ Im Normalbetrieb ist jeder Sync-Push ein Fast-Forward (GitHub `main` ist Vorfahr
 
 > **Hinweis Workflow-Scope-Henne-Ei:** Ein *neues* `.github/workflows/*.yml` würde über den normalen Connector-Sync nie auf GitHub landen (kein `workflow`-Scope). Deshalb wurde der Sync bewusst Replit-seitig als Skript + Scheduled Deployment gebaut, nicht als GitHub-Actions-Workflow. Bestehende Workflow-Dateien werden über den PAT-Fallback des Skripts mitgepusht.
 
+### Karteileichen-Remotes: „Failed to authenticate with the remote" im Git-Pane (Task #1900)
+
+Jeder Task-Agent-Lauf in einem Subrepl hinterlässt im Haupt-Repl ein Remote `subrepl-<id>` mit SSH-URL auf `ssh.worf.replit.dev`. Nach dem Merge existiert das Subrepl nicht mehr, das Remote bleibt aber stehen. Stand Task #1900 hatten sich so **1052** solcher Einträge angesammelt (`.git/config` ~215 KB). Die Git-Oberfläche im Workspace läuft beim Auflisten/Prüfen der Remotes in diese toten SSH-URLs (`Host key verification failed`, kein `ssh-askpass`) und meldet pauschal **„Failed to authenticate with the remote" (UNAUTHENTICATED)** — obwohl die GitHub-Verbindung gesund ist und `git ls-remote origin` funktioniert. Der Fehler ist also ein Remote-Bestands-, kein Verbindungsproblem; ein Neu-Verbinden des GitHub-Kontos behebt ihn nicht.
+
+Aufräumen (idempotent, entfernt nur `subrepl-*`-Remotes, deren URL auf den Subrepl-SSH-Host zeigt; `origin`, `gitsafe-backup` und `main-repl` bleiben unangetastet):
+
+```bash
+bash scripts/prune-stale-subrepl-remotes.sh          # Trockenlauf: nur zählen
+bash scripts/prune-stale-subrepl-remotes.sh --apply  # entfernen (legt vorher .local/git-backups/config.backup-* an)
+```
+
+`main-repl` NICHT entfernen: darüber gleicht ein Task-Environment mit dem Haupt-Repl ab.
+
+Damit sich der Bestand nicht erneut aufstaut, ruft `scripts/post-merge.sh` das Skript nach jedem Merge best-effort mit `--apply` auf (60-s-Timeout, `|| true` — ein Fehlschlag blockiert den Merge nie). Wichtig: Die Bereinigung wirkt immer nur auf die `.git/config` der Umgebung, in der sie läuft — `.git/config` ist kein versionierter Inhalt und wandert nicht über einen Task-Merge mit. Ein Task-Agent kann den Bestand des Haupt-Repls also nur über diesen Post-Merge-Hook (oder der Nutzer manuell in der Shell) aufräumen.
+
 ### Drift früh erkennen
 
 Der lokale `npm run gen:openapi -- --check` ist der schnellste Frühindikator: läuft er grün, ist die committete Spec konsistent mit dem Code, und nach einem Push läuft auch das CI-Gate grün. Geht er lokal rot, liegt echter Drift vor (Spec neu generieren), nicht nur ein Sync-Problem. Bequemer kapselt `bash scripts/github-sync.sh check` denselben Check plus den SHA-Vergleich gegen GitHub.
