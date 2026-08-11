@@ -43,7 +43,7 @@ import { getPlannedHoldInputs } from "../storage/budget/appointment-cost-calcula
 import { rebookAppointmentConsumption, type RebookKmResult } from "../storage/budget/km-rebook";
 import { buildBudgetWarning } from "../lib/budget-warning";
 import type { Response } from "express";
-import type { CoverageCheckResponse } from "@shared/api";
+import type { CoverageCheckResponse, CoverageMonthData, CoverageUncoveredCustomer } from "@shared/api";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
@@ -51,9 +51,10 @@ import { isTeamLead, actorRole } from "../lib/team-lead";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers, users, userRoles } from "@shared/schema";
+import { responsibilityCondition, responsibilityRole } from "@shared/domain/customer-responsibility";
 import { customerContracts } from "@shared/schema/contracts";
 import { customersRepo, appointmentsRepo } from "../repos";
-import { eq, and, or, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
+import { eq, and, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
 import {
   canViewAppointment,
   canCreateAppointment as policyCanCreate,
@@ -280,19 +281,16 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
     and(
       eq(customers.status, "aktiv"),
       customersRepo.activeOnly(),
-      or(
-        eq(customers.primaryEmployeeId, effectiveEmployeeId),
-        eq(customers.backupEmployeeId, effectiveEmployeeId),
-        eq(customers.backupEmployeeId2, effectiveEmployeeId),
-      )
+      responsibilityCondition(effectiveEmployeeId),
     )
   );
 
   if (assignedCustomers.length === 0) {
-    return res.json({
-      currentMonth: { label: `${monthNames[currentMonth - 1]} ${currentYear}`, year: currentYear, month: currentMonth, uncoveredCustomers: [] },
-      nextMonth: { label: `${monthNames[nextMonth - 1]} ${nextMonthYear}`, year: nextMonthYear, month: nextMonth, uncoveredCustomers: [] },
-    });
+    const emptyResponse: CoverageCheckResponse = {
+      currentMonth: { label: `${monthNames[currentMonth - 1]} ${currentYear}`, year: currentYear, month: currentMonth, uncoveredCustomers: [], hvCount: 0, vertretungCount: 0 },
+      nextMonth: { label: `${monthNames[nextMonth - 1]} ${nextMonthYear}`, year: nextMonthYear, month: nextMonth, uncoveredCustomers: [], hvCount: 0, vertretungCount: 0 },
+    };
+    return res.json(emptyResponse);
   }
 
   const primaryEmployeeIds = [...new Set(assignedCustomers.map(c => c.primaryEmployeeId).filter((id): id is number => id !== null && id !== effectiveEmployeeId))];
@@ -354,42 +352,55 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
   const currentCoveredIds = new Set(currentMonthAppts.map(a => a.customerId));
   const nextCoveredIds = new Set(nextMonthAppts.map(a => a.customerId));
 
-  function getRole(c: typeof assignedCustomers[0]): "primary" | "backup1" | "backup2" {
-    if (c.primaryEmployeeId === effectiveEmployeeId) return "primary";
-    if (c.backupEmployeeId === effectiveEmployeeId) return "backup1";
-    return "backup2";
-  }
-
-  function buildUncoveredEntry(c: typeof assignedCustomers[0]) {
-    const role = getRole(c);
-    const entry: { id: number; name: string; role: string; primaryEmployeeName?: string } = { id: c.id, name: c.name, role };
+  /**
+   * `null` ⇒ der Kunde gehört nicht zu diesem Mitarbeiter und hat in DESSEN
+   * "Kunden ohne Termin" nichts verloren.
+   *
+   * Heute unerreichbar, weil `assignedCustomers` bereits über
+   * `responsibilityCondition(effectiveEmployeeId)` gefiltert ist. Bewusst
+   * KEIN `?? "backup2"`-Fallback: der würde bei einer künftigen Lockerung der
+   * Query — wofür der `roles`-Parameter existiert — jeden rollenlosen Kunden
+   * still als "2. Vertretung" etikettieren, in `vertretungCount` zählen und in
+   * der UI-Gruppe "Als Vertretung" zeigen. Genau die Divergenz zwischen
+   * Auswahl- und Beschriftungspfad, die dieses Modul beseitigt.
+   */
+  function buildUncoveredEntry(c: typeof assignedCustomers[0]): CoverageUncoveredCustomer | null {
+    const role = responsibilityRole(c, effectiveEmployeeId);
+    if (role === null) return null;
+    const entry: CoverageUncoveredCustomer = { id: c.id, name: c.name, role };
     if (role !== "primary" && c.primaryEmployeeId) {
       entry.primaryEmployeeName = primaryEmployeeNames.get(c.primaryEmployeeId) ?? undefined;
     }
     return entry;
   }
 
+  /**
+   * Zähler-Split für Header/Kachel: Hauptverantwortung vs. Vertretung. Beide
+   * Zahlen kommen aus derselben Liste, damit `hvCount + vertretungCount`
+   * per Konstruktion `uncoveredCustomers.length` ergibt.
+   */
+  function buildMonthData(
+    label: string, year: number, month: number, uncovered: CoverageUncoveredCustomer[],
+  ): CoverageMonthData {
+    const hvCount = uncovered.filter((c) => c.role === "primary").length;
+    return { label, year, month, uncoveredCustomers: uncovered, hvCount, vertretungCount: uncovered.length - hvCount };
+  }
+
+  const isEntry = (e: CoverageUncoveredCustomer | null): e is CoverageUncoveredCustomer => e !== null;
+
   const currentUncovered = assignedCustomers
     .filter(c => !currentCoveredIds.has(c.id) && hasActiveContractForMonth(c.id, currentMonthStart))
-    .map(buildUncoveredEntry);
+    .map(buildUncoveredEntry)
+    .filter(isEntry);
 
   const nextUncovered = assignedCustomers
     .filter(c => !nextCoveredIds.has(c.id) && hasActiveContractForMonth(c.id, nextMonthStart))
-    .map(buildUncoveredEntry);
+    .map(buildUncoveredEntry)
+    .filter(isEntry);
 
   const coverageResponse: CoverageCheckResponse = {
-    currentMonth: {
-      label: `${monthNames[currentMonth - 1]} ${currentYear}`,
-      year: currentYear,
-      month: currentMonth,
-      uncoveredCustomers: currentUncovered,
-    },
-    nextMonth: {
-      label: `${monthNames[nextMonth - 1]} ${nextMonthYear}`,
-      year: nextMonthYear,
-      month: nextMonth,
-      uncoveredCustomers: nextUncovered,
-    },
+    currentMonth: buildMonthData(`${monthNames[currentMonth - 1]} ${currentYear}`, currentYear, currentMonth, currentUncovered),
+    nextMonth: buildMonthData(`${monthNames[nextMonth - 1]} ${nextMonthYear}`, nextMonthYear, nextMonth, nextUncovered),
   };
 
   res.json(coverageResponse);

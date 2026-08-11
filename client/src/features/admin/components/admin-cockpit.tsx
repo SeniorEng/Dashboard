@@ -217,7 +217,9 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
   const overspendCount = overspendAlert?.count ?? 0;
 
   const todayCount = appointmentsToday?.length ?? 0;
-  const uncoveredCount = coverage?.currentMonth.uncoveredCustomers.length ?? 0;
+  // Zähler-Split direkt aus der Response — die Kachel braucht die Liste nicht.
+  const uncoveredHvCount = coverage?.currentMonth.hvCount ?? 0;
+  const uncoveredVertretungCount = coverage?.currentMonth.vertretungCount ?? 0;
 
   const s = prospectStats ?? {};
   const openProspects = (s.neu ?? 0) + (s.kontaktiert ?? 0) + (s.wiedervorlage ?? 0) + (s.qualifiziert ?? 0);
@@ -287,7 +289,7 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
       iconBg: "bg-teal-100",
       title: "Termine heute",
       value: String(todayCount),
-      subtitle: `${uncoveredCount} Kunden ohne Termin diesen Monat`,
+      subtitle: `${uncoveredHvCount} Kunden ohne Termin diesen Monat${uncoveredVertretungCount > 0 ? ` (+${uncoveredVertretungCount} als Vertretung)` : ""}`,
       href: "/",
       show: can("customers"),
     },
