@@ -42,14 +42,25 @@ betroffenen Codepfaden, verwandten Tests und Zweitdefinitionen.
    Laufen Guards **innerhalb** der Transaktion unter dem passenden Lock, oder
    als check-then-write daneben? Kann ein Rollback eine gewollte Nebenwirkung
    (z. B. einen Audit-Eintrag) mitreißen?
-6. **Test-Baseline** — Gibt es **neue** fehlschlagende Tests gegenüber der
-   bekannt roten main-Baseline (~28 Dateien / ~50 Tests)? Vergleiche **Mengen,
-   nicht Zahlen**, auf Einzeltest-Ebene und in beide Richtungen. Autoritative
-   Quelle ist das JUnit-Artefakt des Laufs (`gh run download <id> -n
-   test-reports`, dann `test-results/vitest-junit.xml`) — `gh run view --log`
-   liefert oft leere Logs. **Datum kontrollieren:** ein main-Lauf von einem
-   anderen Kalendertag erzeugt Phantom-Regressionen, mehrere Fixtures sind
-   datums-fragil.
+6. **Test-Baseline** — Gibt es **neue** fehlschlagende Tests? `main` hat **keinen
+   roten Altbestand mehr** (Stand 08.08.2026): es wird gegen **Grün** gemessen,
+   nicht gegen eine Baseline. Jeder rote Test in CI ist damit ein echter Regress.
+   Vergleiche **Mengen, nicht Zahlen**, auf Einzeltest-Ebene und in beide
+   Richtungen.
+
+   Autoritative Quelle ist das JUnit-Artefakt des Laufs — seit dem Shard-Umbau
+   sind das **drei** Artefakte, eines je Matrix-Leg:
+   `gh run download <id> -n test-reports-shard-1` (analog `-2`, `-3`), darin
+   jeweils `test-results/vitest-junit.xml`. Für eine Gesamtsicht die drei XMLs
+   zusammenführen; einzeln decken sie nur ihr Leg ab.
+
+   **Ein grüner Lauf hat gar kein Artefakt** — der Upload läuft `if: failure()`.
+   Dann sind die `Test Files`/`Tests`-Zeilen im Job-Log der drei
+   `tests-shard (N)`-Jobs die Quelle. `gh run view --log` liefert sonst oft leere
+   Logs.
+
+   **Datum kontrollieren:** ein main-Lauf von einem anderen Kalendertag erzeugt
+   Phantom-Regressionen, mehrere Fixtures sind datums-fragil.
 7. **Nebenbefunde** — Sind aufgefallene Nebenbefunde als `FINDING: … [P1/P2/P3]`
    im PR-Body vermerkt?
 8. **Ersetzungs-Regel** — Benennt jede neue Funktion/Spalte/Tabelle, was sie
