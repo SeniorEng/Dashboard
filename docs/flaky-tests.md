@@ -133,3 +133,33 @@ Artifacts + dieses Register beobachten. Steigt die Flake-Rate über ~1,5 %
 Engine** evaluieren — die Auto-Quarantäne adressiert den größten Schmerzpunkt
 (rote Pipelines durch Flakes) direkt und passt gut zur bestehenden Vitest-Suite.
 **Datadog** nur dann, wenn ohnehin eine Datadog-Observability-Einführung ansteht.
+
+## Wandernde Shard-Zuordnung
+
+Seit dem Shard-Umbau (11.08.2026) läuft das Test-Gate als drei Legs
+(`tests-shard`, `--shard=i/3`). Jedes Leg hat eine eigene DB; innerhalb eines
+Legs laufen die Dateien weiter nacheinander dagegen.
+
+**Die Zuordnung Datei→Leg ist nicht stabil über die Zeit.** Vitest shardet über
+einen SHA1-Sort der root-relativen Dateipfade und schneidet bei ⌊n/3⌋. Jede
+hinzugefügte oder entfernte Testdatei verschiebt die Slice-Grenzen, und Dateien
+wandern zwischen Legs.
+
+Praktische Folge für die Triage: **eine latente Kontaminations-Kopplung kann in
+einem völlig unbeteiligten PR rot werden** — etwa in einem, der nur eine
+Testdatei ergänzt und dadurch zwei bisher getrennte Dateien in dasselbe Leg
+schiebt (oder zwei bisher gemeinsame trennt). Der PR ist dann der Auslöser, nicht
+die Ursache.
+
+Vorgehen, wenn ein Leg rot wird und der Diff nichts damit zu tun hat:
+
+1. Im Job-Log nachsehen, **welches Leg** rot war und welche Dateien darin liefen.
+2. Die rote Datei isoliert über den Orchestrator fahren. Grün allein + rot im Leg
+   ⇒ Kopplung, keine Regression des PRs.
+3. Gegen den letzten grünen `main`-Lauf prüfen, mit **welchen** Dateien die rote
+   Datei dort ein Leg teilte — die Differenz zeigt den neuen Nachbarn.
+4. Die Kopplung selbst beheben (Test-Cleanup-Disziplin), **nicht** das Sharding
+   zurückdrehen. Der sequenzielle Einzeljob hat solche Kopplungen nur verdeckt.
+
+Bekannter Kandidat aus `CLAUDE.md`: `tests/customers.test.ts` (KV-0.2) hängt an
+Daten anderer Dateien.
