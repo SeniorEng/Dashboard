@@ -77,8 +77,13 @@ describe("Task #696 (Bug 1) — §45b Gültig-bis Clear-Roundtrip", () => {
   it("Nach echter Transition liefert getLatestBudgetTypeSettings die NEUE offene Zeile (validTo=null) statt der schließenden Zeile (validTo=heute)", async () => {
     const customerId = await freshCustomer("T696B1-LATEST");
     const userId = await getActorUserId();
-    const today = todayISO();
-    const tomorrow = addDays(today, 1);
+    // Mitternachts-Race (CI-Rotlauf 31435373737, 00:03 Europe/Berlin): `today`
+    // hier einmal einzufrieren und später gegen `validTo` zu vergleichen geht
+    // schief, sobald das Datum zwischen dieser Zeile und dem Schreibvorgang
+    // umrollt — `upsertBudgetTypeSettings` bestimmt sein "heute" selbst, erst
+    // beim Schreiben. Deshalb wird die Grenze BEIDSEITIG eingefangen und die
+    // Erwartung aus der tatsächlich geschriebenen Transition abgeleitet.
+    const todayBeforeWrites = todayISO();
 
     // Erstanlage: §45b ohne Anteil. validFrom künstlich in die Vergangenheit
     // setzen, damit der nächste Upsert eine ECHTE Transition triggert
@@ -101,6 +106,8 @@ describe("Task #696 (Bug 1) — §45b Gültig-bis Clear-Roundtrip", () => {
       userId,
     );
 
+    const todayAfterWrites = todayISO();
+
     // Sanity: zwei Zeilen — alte mit validTo=heute, neue mit validFrom=morgen.
     const allRows = await db.select().from(customerBudgetTypeSettings)
       .where(and(
@@ -108,10 +115,18 @@ describe("Task #696 (Bug 1) — §45b Gültig-bis Clear-Roundtrip", () => {
         eq(customerBudgetTypeSettings.budgetType, "entlastungsbetrag_45b"),
       ));
     expect(allRows).toHaveLength(2);
-    const closing = allRows.find(r => r.validTo === today);
+    const closing = allRows.find(r => r.validTo != null);
     const open = allRows.find(r => r.validTo == null);
     expect(closing).toBeTruthy();
     expect(open).toBeTruthy();
+    // Die schließende Zeile trägt den Schreibtag. Normalfall: beide Messungen
+    // sind identisch, die Prüfung ist dann exakt "== heute" wie zuvor. Nur im
+    // Umroll-Fall sind es zwei Kandidaten — und dann ist der spätere richtig.
+    expect([todayBeforeWrites, todayAfterWrites]).toContain(closing!.validTo);
+    // Das eigentliche Transitions-Invariant, datumsunabhängig: die neue Zeile
+    // beginnt am Tag NACH dem Ende der alten — lückenlos und überschneidungsfrei.
+    const closingDate = closing!.validTo!;
+    const tomorrow = addDays(closingDate, 1);
     expect(open!.validFrom).toBe(tomorrow);
 
     // Read-für-UI (Fix): muss die NEUE offene Zeile liefern, NICHT die
@@ -123,13 +138,15 @@ describe("Task #696 (Bug 1) — §45b Gültig-bis Clear-Roundtrip", () => {
     expect(s45bUI!.validTo).toBeNull();
     expect(s45bUI!.monthlyLimitCents).toBe(6550);
 
-    // Booking-Pfad bleibt unverändert: für `today` ist weiterhin die alte
-    // Zeile in Kraft (validFrom <= today, validTo >= today), morgen kippt
-    // die Konfig auf die neue. Wichtig für GoBD.
-    const forBookingToday = await getActiveBudgetTypeSettings(customerId, today);
+    // Booking-Pfad bleibt unverändert: am Schreibtag ist weiterhin die alte
+    // Zeile in Kraft (validFrom <= Tag, validTo >= Tag), am Folgetag kippt
+    // die Konfig auf die neue. Wichtig für GoBD. Stichtag ist bewusst der
+    // geschriebene `closingDate`, nicht ein neu gelesenes "heute" — sonst
+    // prüfte der Test bei einem Umroll die Grenze des FOLGETAGS.
+    const forBookingToday = await getActiveBudgetTypeSettings(customerId, closingDate);
     const s45bBookToday = forBookingToday.find(s => s.budgetType === "entlastungsbetrag_45b");
     expect(s45bBookToday).toBeTruthy();
-    expect(s45bBookToday!.validTo).toBe(today);
+    expect(s45bBookToday!.validTo).toBe(closingDate);
     expect(s45bBookToday!.monthlyLimitCents).toBeNull();
 
     const forBookingTomorrow = await getActiveBudgetTypeSettings(customerId, tomorrow);
