@@ -56,6 +56,18 @@ beforeEach(() => {
   // zu tragen. Bewusst der ECHTE heutige Tag statt eines eingebackenen Datums:
   // §45b-Logik hängt am Kalenderjahr, ein fixes Datum würde mit der Zeit faulen.
   // `thawTime()` erledigt der globale afterEach in `tests/setup.ts`.
+  //
+  // VORBEDINGUNG: Der Freeze patcht `Date` nur im TESTPROZESS. Er wirkt hier
+  // ausschließlich, weil `upsertBudgetTypeSettings` per Direktimport in-process
+  // läuft (siehe Datei-Header: "Storage-Round-Trip-Test ohne HTTP"). Würde die
+  // Datei je auf den HTTP-Weg umgestellt, liefe der Produktionscode im Server-
+  // Prozess mit echter Uhr weiter — der Schutz wäre lautlos weg, der Test
+  // bliebe grün. Vgl. `tests/helpers/billing-month.ts:236`, wo genau dieser
+  // Gegenfall dokumentiert ist.
+  //
+  // Zweite Vorbedingung: `todayISO()` muss IM Testkörper stehen. Auf
+  // Modul-Ebene liefe es bei der Modul-Evaluierung, also VOR diesem Hook —
+  // die Race wäre zurück, ohne dass ein Test rot würde.
   freezeTime(`${todayISO()}T12:00:00`);
 });
 
