@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeCarryoverPhantom,
   computeShortfall,
+  sourceYearEntitlementCents,
 } from "../../server/scripts/lib/45b-halfyear-math";
 
 const JAHR = 157200;   // 12 × 131 €
@@ -171,5 +172,70 @@ describe("computeShortfall — Golden-Cases", () => {
       carryoverInSollCents: 57200,
     });
     expect(r.shortfallCents).toBe(0);
+  });
+});
+
+describe("sourceYearEntitlementCents — B1: zustandsunabhängiger Quelljahres-Anspruch", () => {
+  const M = 13100;                      // 131 € Monatsanspruch
+  const flat = () => M;
+  const keine = new Set<string>();
+
+  it("volles Jahr, Pflegegrad läuft schon vorher → 12 Monate", () => {
+    expect(sourceYearEntitlementCents({
+      sourceYear: 2025, pgStartIso: "2020-03-01",
+      initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
+    })).toBe(12 * M);
+  });
+
+  it("Pflegegrad beginnt IM Quelljahr → nur ab diesem Monat", () => {
+    // Start im September → Sep..Dez = 4 Monate.
+    expect(sourceYearEntitlementCents({
+      sourceYear: 2025, pgStartIso: "2025-09-15",
+      initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
+    })).toBe(4 * M);
+  });
+
+  it("Pflegegrad beginnt NACH dem Quelljahr → 0", () => {
+    expect(sourceYearEntitlementCents({
+      sourceYear: 2025, pgStartIso: "2026-01-01",
+      initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
+    })).toBe(0);
+  });
+
+  it("ohne Pflegegrad-Beginn → 0", () => {
+    expect(sourceYearEntitlementCents({
+      sourceYear: 2025, pgStartIso: null,
+      initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
+    })).toBe(0);
+  });
+
+  it("Startwert-Monate werden übersprungen", () => {
+    // Jan+Feb 2025 durch einen aktiven Startwert verdrängt → 10 Monate.
+    expect(sourceYearEntitlementCents({
+      sourceYear: 2025, pgStartIso: "2020-01-01",
+      initialBalanceMonthKeys: new Set(["2025-1", "2025-2"]),
+      monthlyAmountFor: flat,
+    })).toBe(10 * M);
+  });
+
+  it("historisierter Monatsbetrag wird pro Monat nachgeschlagen", () => {
+    // Ab Juli 2025 auf 100 € reduziert: 6 × 131 € + 6 × 100 €.
+    const staffel = (y: number, m: number) => (y === 2025 && m >= 7 ? 10000 : M);
+    expect(sourceYearEntitlementCents({
+      sourceYear: 2025, pgStartIso: "2020-01-01",
+      initialBalanceMonthKeys: keine, monthlyAmountFor: staffel,
+    })).toBe(6 * M + 6 * 10000);
+  });
+
+  it("REGRESSION B1: das Ergebnis hängt NICHT vom laufenden Jahr ab", () => {
+    // Der Defekt war, dass der Anspruch aus heutiger Sicht gerechnet wurde und
+    // fuer ein vergangenes Jahr auf 0 kollabierte. Dieselben Eingaben muessen
+    // fuer jedes Quelljahr denselben Wert liefern, egal wann gerechnet wird.
+    for (const jahr of [2023, 2024, 2025, 2026]) {
+      expect(sourceYearEntitlementCents({
+        sourceYear: jahr, pgStartIso: "2019-01-01",
+        initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
+      })).toBe(12 * M);
+    }
   });
 });

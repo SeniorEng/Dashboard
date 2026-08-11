@@ -24,6 +24,7 @@
  *    den eigenen Jahrestopf, sondern das Verfallen des Übertrags. Beide
  *    Eingaben unten sind deshalb `consumption − reversal`, ohne `write_off`.
  */
+import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 
 export interface HalfYearInput {
   /**
@@ -96,4 +97,58 @@ export interface ShortfallInput {
 export function computeShortfall(i: ShortfallInput): { availableCents: number; shortfallCents: number } {
   const availableCents = Math.max(0, i.targetYearAllocatedCents + i.carryoverInSollCents);
   return { availableCents, shortfallCents: Math.max(0, i.claimedCents - availableCents) };
+}
+
+// ---------------------------------------------------------------------------
+// B1 — Quelljahres-Anspruch aus einer ZUSTANDSUNABHÄNGIGEN Quelle.
+// ---------------------------------------------------------------------------
+
+
+export interface SourceYearEntitlementInput {
+  sourceYear: number;
+  /** ROHER Pflegegrad-Beginn (`getEarliestCareLevelStart`), NICHT gebodet. */
+  pgStartIso: string | null;
+  /** Monate, die ein aktiver Startwert verdrängt — Schlüssel `"YYYY-M"`. */
+  initialBalanceMonthKeys: Set<string>;
+  /** Aus `pickEffective45bSettingRow` + `clampToStatutoryMax` komponiert. */
+  monthlyAmountFor: (year: number, month: number) => number;
+}
+
+/**
+ * Summe der §45b-Monatsaufstockungen des Quelljahres.
+ *
+ * ERSETZT `calculateAllocatedCents(customerId, BT, { year })` für diesen
+ * Report. Jener Aufruf liefert die HEUTIGE Sicht: der Carryover-`allocStart`-
+ * Shift (`allocation-storage.ts:770-772`) ist im `{year}`-Modus nicht
+ * geschützt und springt auf das Zieljahr, sobald dessen Übertragszeile
+ * existiert — also genau in der Kandidatenmenge dieses Reports. Ergebnis war 0
+ * und damit ein stiller Null-Befund auf allen echten Daten.
+ *
+ * KEIN Zweitbegriff: die Aufzählung ist `enumerate45bStatutoryMonths` (die
+ * SSoT, die auch der Schreibpfad benutzt), und `monthlyAmountFor` wird vom
+ * Aufrufer aus den exportierten Bausteinen `pickEffective45bSettingRow` +
+ * `clampToStatutoryMax` komponiert. Neu ist AUSSCHLIESSLICH das Fenster:
+ * Beginn = roher Pflegegrad-Start statt des auf das laufende Jahr gebodeten
+ * Ankers (`floorAutoAnchor45bToCurrentYear`), Ende = Dezember des Quelljahres.
+ * Genau dieser Floor ist die Ursache von B1 — für eine Rückschau darf er nicht
+ * greifen.
+ *
+ * Ohne Pflegegrad-Beginn gibt es keinen Anspruch: 0.
+ */
+export function sourceYearEntitlementCents(i: SourceYearEntitlementInput): number {
+  if (!i.pgStartIso) return 0;
+  const [pgY, pgM] = i.pgStartIso.split("-").map(Number);
+  if (!Number.isInteger(pgY) || !Number.isInteger(pgM)) return 0;
+  // Beginnt der Anspruch erst NACH dem Quelljahr, gibt es für dieses nichts.
+  if (pgY > i.sourceYear) return 0;
+
+  const months = enumerate45bStatutoryMonths({
+    allocStartYear: pgY,
+    allocStartMonth: pgM,
+    endYear: i.sourceYear,
+    endMonth: 12,
+    initialBalanceMonthKeys: i.initialBalanceMonthKeys,
+    monthlyAmountFor: i.monthlyAmountFor,
+  });
+  return sum45bStatutoryMonths(months.filter(m => m.year === i.sourceYear));
 }

@@ -57,7 +57,10 @@ import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { calculateAllocatedCents } from "../storage/budget/allocation-storage";
 import { readBudgetTypeSettings } from "../storage/budget/preferences-storage";
 import { formatEuroDE } from "@shared/utils/money";
-import { computeCarryoverPhantom, computeShortfall } from "./lib/45b-halfyear-math";
+import { computeCarryoverPhantom, computeShortfall, sourceYearEntitlementCents } from "./lib/45b-halfyear-math";
+import { pickEffective45bSettingRow } from "../storage/budget/allocation-storage";
+import { clampToStatutoryMax, BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
+import { getEarliestCareLevelStart } from "../storage/customer-mgmt/care-level";
 
 const BT = "entlastungsbetrag_45b";
 
@@ -205,6 +208,7 @@ async function main(): Promise<void> {
   const out: Row[] = [];
 
   const degenerate: Array<{ customerId: number; sourceYear: number }> = [];
+  const crossCheckMismatches: Array<{ customerId: number; sourceYear: number; neu: number; alt: number }> = [];
 
   for (const { customerId, targetYear, carryoverIn } of byKey.values()) {
     const sourceYear = targetYear - 1;
@@ -216,23 +220,54 @@ async function main(): Promise<void> {
       customerId, { kind: "forDate", asOfDate: `${targetYear}-12-31` },
     );
 
-    // B1 — OFFEN. `calculateAllocatedCents({ year })` liefert die HEUTIGE
-    // Sicht: der Carryover-`allocStart`-Shift (allocation-storage.ts:770) ist
-    // im `{year}`-Modus nicht geschützt und ergibt 0, sobald die
-    // Zieljahres-Übertragszeile existiert — also genau in unserer
-    // Kandidatenmenge. Eine zustandsunabhängige Quelle bräuchte
-    // `enumerate45bStatutoryMonths` mit eigenem `monthlyAmountFor`, und das
-    // wäre eine zweite Anspruchs-Mathematik neben dem Schreibpfad.
-    // Bis das entschieden ist: den Fall LAUT melden statt still zu
-    // überspringen — ein stiller Null-Befund war der gefährlichste Defekt der
-    // ersten Fassung.
-    const sourceYearAllocated = await calculateAllocatedCents(
+    // B1 — geschlossen. Der Quelljahres-Anspruch kommt jetzt aus einer
+    // ZUSTANDSUNABHÄNGIGEN Rechnung: `enumerate45bStatutoryMonths` (SSoT, auch
+    // vom Schreibpfad benutzt) über ein explizites Fenster ab dem ROHEN
+    // Pflegegrad-Beginn — ohne `floorAutoAnchor45bToCurrentYear`, dessen Floor
+    // auf das laufende Jahr die Ursache des stillen Null-Befunds war.
+    // `monthlyAmountFor` ist aus den exportierten Bausteinen komponiert, kein
+    // Zweitbegriff.
+    const pgStart = await getEarliestCareLevelStart(customerId, db);
+    const all45b = typeSettings.filter(t => t.budgetType === BT);
+    const monthlyAmountFor = (y: number, m: number): number => {
+      const row = pickEffective45bSettingRow(all45b, y, m);
+      // Gleiche Reihenfolge wie `monthlyAmountFor` in allocation-storage.ts:798:
+      // ohne wirksame Phase bzw. ohne gesetztes Limit gilt der gesetzliche
+      // Höchstbetrag, sonst der auf ihn geklammerte Wert.
+      if (!row || row.monthlyLimitCents == null) return BUDGET_45B_MAX_MONTHLY_CENTS;
+      return clampToStatutoryMax({
+        budgetType: BT, monthlyLimitCents: row.monthlyLimitCents,
+        yearlyLimitCents: null, pflegegrad: null,
+      }).monthlyLimitCents ?? BUDGET_45B_MAX_MONTHLY_CENTS;
+    };
+    const ibRows = await db.select({
+      year: budgetAllocations.year, month: budgetAllocations.month,
+    }).from(budgetAllocations).where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, BT),
+      eq(budgetAllocations.source, "initial_balance"),
+      isNull(budgetAllocations.deletedAt),
+    ));
+    const initialBalanceMonthKeys = new Set(
+      ibRows.filter(r => r.month != null).map(r => `${r.year}-${r.month}`),
+    );
+
+    const sourceYearAllocated = sourceYearEntitlementCents({
+      sourceYear, pgStartIso: pgStart ?? null,
+      initialBalanceMonthKeys, monthlyAmountFor,
+    });
+
+    // GEGENPROBE: in Jahren, in denen `calculateAllocatedCents({year})` NICHT
+    // degeneriert (also kein Carryover-Shift greift), müssen beide Wege
+    // denselben Wert liefern. Weicht es ab, ist die neue Rechnung verdächtig —
+    // dann lieber laut sein als still falsche Zahlen liefern.
+    const viaLegacy = await calculateAllocatedCents(
       customerId, BT, { year: sourceYear }, undefined, undefined, typeSettings,
     );
-    if (sourceYearAllocated <= 0) {
-      degenerate.push({ customerId, sourceYear });
-      continue;
+    if (viaLegacy > 0 && viaLegacy !== sourceYearAllocated) {
+      crossCheckMismatches.push({ customerId, sourceYear, neu: sourceYearAllocated, alt: viaLegacy });
     }
+    if (sourceYearAllocated <= 0) { degenerate.push({ customerId, sourceYear }); continue; }
 
     const netYear = await netConsumptionBetween(customerId, `${sourceYear}-01-01`, `${sourceYear}-12-31`);
     const netUntil = await netConsumptionBetween(customerId, `${sourceYear}-01-01`, prevExpiry);
@@ -281,9 +316,15 @@ async function main(): Promise<void> {
     console.error(
       `\n[B1] ${degenerate.length} Kunden-Jahre NICHT bewertet: der Quelljahres-Anspruch ` +
       `kam als 0 zurueck (calculateAllocatedCents liefert die Heute-Sicht).\n` +
-      `     Diese Zeilen sind WEDER geprueft NOCH entlastet. Ohne Fix von B1 ist ` +
-      `der Report unvollstaendig.\n`,
+      `     Kein Pflegegrad-Beginn oder Anspruch beginnt erst nach dem Quelljahr.\n`,
     );
+  }
+  if (crossCheckMismatches.length > 0) {
+    console.error(`\n[GEGENPROBE] ${crossCheckMismatches.length} Abweichung(en) zur Alt-Rechnung:`);
+    for (const m of crossCheckMismatches) {
+      console.error(`  Kunde ${m.customerId}, ${m.sourceYear}: neu=${m.neu} alt=${m.alt}`);
+    }
+    console.error("  Die Zahlen sind NICHT belastbar, solange das ungeklaert ist.\n");
   }
 
   out.sort((a, b) => b.fehlbetragCents - a.fehlbetragCents);
