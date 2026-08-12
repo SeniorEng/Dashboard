@@ -27,6 +27,12 @@
 
 /** Roher Zustand eines Kunden-Jahres, wie er aus der DB käme. */
 export interface CaseInput {
+  /**
+   * Bewertungs-Stichtag. PFLICHT, weil der Zieljahres-Anspruch bis „heute"
+   * aufläuft: ohne festen Stichtag faulen die Soll-Antworten mit dem Kalender.
+   * Tests frieren die Uhr hierauf ein (`tests/helpers/frozen-clock.ts`).
+   */
+  asOfIso: string;
   sourceYear: number;
   /** Pflegegrad-Beginn; `null` = keine Historie (Anker muss aus Allocations kommen). */
   pgStartIso: string | null;
@@ -39,6 +45,8 @@ export interface CaseInput {
 }
 
 export interface CaseExpectation {
+  /** `true` = Eligibility-Gate greift, der Kunde hat gar keinen §45b-Anspruch. */
+  ineligible?: boolean;
   /** Anspruch des Quelljahres: Monatsaufstockungen + initial_balance. */
   sourceYearEntitlementCents: number;
   /** Übertrag, der ins Folgejahr hätte rollen dürfen. */
@@ -60,6 +68,9 @@ export interface HalfYearCase {
 
 const VOLL = [{ validFrom: "1970-01-01", validTo: null, monthlyLimitCents: null, enabled: true }];
 
+/** Stichtag aller Fälle — derselbe, an dem der Re-Review gemessen hat. */
+export const AS_OF = "2026-08-11";
+
 export const HALFYEAR_CASES: HalfYearCase[] = [
   {
     id: "C1",
@@ -68,6 +79,7 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       "Übertrag 1000 € (Frist 30.06.2025), 800 € Verbrauch am 15.09.2025. Der Schreibpfad " +
       "rollte den vollen Jahresanspruch 1572 € weiter; korrekt sind 772 €.",
     input: {
+      asOfIso: AS_OF,
       sourceYear: 2025,
       pgStartIso: "2020-01-01",
       settings: VOLL,
@@ -84,9 +96,11 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       sourceYearEntitlementCents: 157200,
       carryoverOutSollCents: 77200,
       phantomCents: 80000,
-      // Zieljahr 2026: Anspruch 157200 + korrigierter Übertrag 77200 = 234400
-      // gegen 200000 Verbrauch → gedeckt.
-      shortfallCents: 0,
+      // Zieljahr 2026 zum Stichtag 11.08.: Anspruch Jan–Aug = 8 × 13100 =
+      // 104800. Der Verbrauch (01.03.) liegt VOR dem Verfall des korrigierten
+      // Übertrags am 30.06., darf ihn also aufzehren → verfügbar 104800 +
+      // 77200 = 182000 gegen 200000 → 18000 offen.
+      shortfallCents: 18000,
     },
   },
   {
@@ -97,6 +111,7 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       "228 € Fehlbetrag 'davon gestellt'; korrekt sind 0 €, weil der 2025er Jahresanspruch " +
       "in der Verfügbarkeit fehlte.",
     input: {
+      asOfIso: AS_OF,
       sourceYear: 2024,
       pgStartIso: "2020-01-01",
       settings: VOLL,
@@ -124,6 +139,7 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       "rechnete mit 12 Monaten, kam auf phantom = 0 und ließ den Kunden STILL aus dem " +
       "Report fallen — ohne Eintrag in `degenerate`, ohne Gegenprobe-Meldung.",
     input: {
+      asOfIso: AS_OF,
       sourceYear: 2025,
       pgStartIso: "2020-01-01",
       settings: [{ validFrom: "2025-05-01", validTo: null, monthlyLimitCents: null, enabled: true }],
@@ -148,6 +164,7 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       "+ 2000 € = 3441 €. Das Skript ließ den Startwert weg UND übersprang den Monat, " +
       "meldete deshalb 2500 € Phantom statt 500 €.",
     input: {
+      asOfIso: AS_OF,
       sourceYear: 2025,
       pgStartIso: "2020-01-01",
       settings: VOLL,
@@ -173,6 +190,7 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       "über `initial_balance`/`carryover.validFrom`; das Skript lieferte 0 und übersprang " +
       "den Kunden — er tauchte nur als anonyme Zahl in einer stderr-Zeile auf.",
     input: {
+      asOfIso: AS_OF,
       sourceYear: 2025,
       pgStartIso: null,
       settings: VOLL,
@@ -189,19 +207,99 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       shortfallCents: 0,
     },
   },
+  {
+    id: "C6",
+    guards: "B10 — der korrigierte Übertrag ist im ZIELJAHR nicht ganzjährig verfügbar",
+    beschreibung:
+      "Wie C1, aber der Zieljahres-Verbrauch (2000 €) liegt am 15.07.2026 — nach dem " +
+      "Verfall des Übertrags am 30.06.2026. Das Skript meldete 180 €, denselben Wert wie " +
+      "bei Verbrauch im März, weil es den Übertrag als ganzjährig verfügbar behandelte. " +
+      "Das ist derselbe Denkfehler wie im Produktionscode, gegen den dieser Report " +
+      "geschrieben wurde.",
+    input: {
+      asOfIso: AS_OF,
+      sourceYear: 2025,
+      pgStartIso: "2020-01-01",
+      settings: VOLL,
+      allocations: [
+        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+      ],
+      transactions: [
+        { date: "2025-09-15", type: "consumption", amountCents: -80000 },
+        { date: "2026-07-15", type: "consumption", amountCents: -200000 },
+      ],
+    },
+    expected: {
+      sourceYearEntitlementCents: 157200,
+      carryoverOutSollCents: 77200,
+      phantomCents: 80000,
+      // Verbrauch am 15.07. liegt NACH dem 30.06. → der Übertrag ist bereits
+      // verfallen und darf nichts absorbieren. Verfügbar ist nur der eigene
+      // Anspruch Jan–Aug = 104800 gegen 200000 → 95200 offen.
+      // Die Differenz zu C1 (18000) IST der Befund: gleicher Betrag, anderes
+      // Datum, anderes Ergebnis.
+      shortfallCents: 95200,
+    },
+  },
+  {
+    id: "C7",
+    guards: "B9-Variante — Pflegegrad vorhanden, §45b aber nie eingerichtet",
+    beschreibung:
+      "Das Eligibility-Gate (`allocation-storage.ts:694`) liefert hart 0, wenn keine " +
+      "§45b-Zeile aktiviert ist — 131 €/Monat ist ein fixer statutorischer Betrag, es gibt " +
+      "keinen `monthlyAmount==0`-Schutz wie bei §45a. Das Skript erfand stattdessen 1572 €.",
+    input: {
+      asOfIso: AS_OF,
+      sourceYear: 2025,
+      pgStartIso: "2020-01-01",
+      settings: [{ validFrom: "1970-01-01", validTo: null, monthlyLimitCents: null, enabled: false }],
+      allocations: [],
+      transactions: [],
+    },
+    expected: {
+      ineligible: true,
+      sourceYearEntitlementCents: 0,
+      carryoverOutSollCents: 0,
+      phantomCents: 0,
+      shortfallCents: 0,
+    },
+  },
 ];
 
-/**
- * NOCH ZU ERGÄNZEN, bevor die Extraktion als fertig gilt:
- *
- * - **B10** — Zieljahres-Verbrauch NACH dem 30.06., also nach Verfall des
- *   korrigierten Übertrags. Gemessen wurden 180 € statt 952 €, weil die
- *   Fehlbetrags-Rechnung den Übertrag als ganzjährig verfügbar behandelt —
- *   derselbe Denkfehler wie im Produktionscode. Erwartung: der Übertrag steht
- *   im Zieljahr nur bis zu SEINER Frist zur Verfügung.
- * - **S6** — `reversal` im gestellt/Entwurf-Split. Gemessen: eine vollständig
- *   reversierte, stornierte Zeile saugte den Fehlbetrag auf, während das echte
- *   Geld auf einer aktiven Altrechnung lag.
- * - **B9-Variante** — Kunde MIT Pflegegrad-Historie, aber ohne aktivierte
- *   §45b-Settings: jeder Produktionspfad liefert 0, das Skript erfand 1572 €.
- */
+// ---------------------------------------------------------------------------
+// Split-Fälle: Zuordnung des Fehlbetrags auf gestellte vs. Entwurfs-Rechnungen.
+// Eigene Form, weil hier Rechnungs-Zustand statt Anspruch geprüft wird.
+// ---------------------------------------------------------------------------
+
+export interface SplitCase {
+  id: string;
+  guards: string;
+  beschreibung: string;
+  shortfallCents: number;
+  rows: Array<{ id: number; date: string; type: "consumption" | "reversal"; amountCents: number; appointmentId: number | null }>;
+  /** Termine, die auf einer GESTELLTEN und AKTIVEN Rechnung liegen. */
+  issuedAppointmentIds: number[];
+  expected: { gestellt: number; entwurf: number; nichtZugeordnet: number };
+}
+
+export const SPLIT_CASES: SplitCase[] = [
+  {
+    id: "S6",
+    guards: "S6 — reversierte Zeilen dürfen den Fehlbetrag nicht aufsaugen",
+    beschreibung:
+      "2000 € auf einer aktiven, gestellten Rechnung (Februar) plus 1000 € im Mai, " +
+      "vollständig reversiert und die Rechnung storniert. Gemessen wurde 'davon gestellt " +
+      "0 €, davon Entwurf 180 €': die stornierte Mai-Zeile saugte als jüngste den ganzen " +
+      "Fehlbetrag auf, während das echte Geld auf der Februar-Rechnung liegt. Die " +
+      "Split-Query zählt brutto, der Fehlbetrag wird netto gerechnet — genau die Naht.",
+    shortfallCents: 18000,
+    rows: [
+      { id: 1, date: "2026-02-10", type: "consumption", amountCents: -200000, appointmentId: 101 },
+      { id: 2, date: "2026-05-20", type: "consumption", amountCents: -100000, appointmentId: 102 },
+      { id: 3, date: "2026-05-21", type: "reversal", amountCents: 100000, appointmentId: 102 },
+    ],
+    issuedAppointmentIds: [101],
+    expected: { gestellt: 18000, entwurf: 0, nichtZugeordnet: 0 },
+  },
+];
