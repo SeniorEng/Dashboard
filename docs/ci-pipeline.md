@@ -117,10 +117,12 @@ Der manuelle Push ist fehleranfällig — wird er vergessen, driftet GitHub `mai
 ```bash
 bash scripts/github-sync.sh check   # Drift-Signal (read-only): SHA-Vergleich + OpenAPI-Check, Exit != 0 bei Drift
 bash scripts/github-sync.sh push    # Pusht main nach GitHub, falls Drift; No-op wenn bereits in sync
+bash scripts/github-sync.sh doctor  # Auth-Diagnose (read-only, ohne OpenAPI): Token-Broker + Token-Gesundheit + SHA
 ```
 
 - **Drift-Signal:** `check` vergleicht die lokale `main`-SHA (`git rev-parse HEAD`, Fallback `.git/refs/heads/main`) mit der Remote-SHA (GitHub-API `…/git/refs/heads/main`) und ruft zusätzlich `gen:openapi -- --check`. Exit-Code `0` = in sync + Spec aktuell; `1` = Drift (Sync nötig). Eignet sich als schneller Pre-Push-Check und als Health-Probe in einem Cronjob.
-- **Token-Handling:** Das Skript pusht zuerst mit dem Standard-Connector-Token (`GITHUB_PERSONAL_ACCESS_TOKEN`) für reine Code-/Doku-Pushes. Scheitert der Push am fehlenden `workflow`-Scope (GH013 bei `.github/workflows/*`) **oder** ist kein Connector-Token vorhanden (z.B. im Deployment), fällt es automatisch auf den `GITHUB_WORKFLOW_PAT` (Classic-PAT mit `repo`+`workflow`) zurück.
+- **Token-Handling:** Das Skript geht die Token in fester Vorrangreihenfolge durch — zuerst der Standard-Connector-Token (`GITHUB_PERSONAL_ACCESS_TOKEN`) für reine Code-/Doku-Pushes, dann der `GITHUB_WORKFLOW_PAT` (Classic-PAT mit `repo`+`workflow`). Scheitert der Push am fehlenden `workflow`-Scope (GH013 bei `.github/workflows/*`) **oder** ist kein Connector-Token vorhanden (z.B. im Deployment), greift der PAT-Fallback wie gehabt.
+- **Totes Token wird übersprungen statt probiert (Task #1903):** Vor jedem Push-Versuch prüft das Skript den jeweiligen Token mit **einem** read-only-API-Request. Antwortet GitHub mit `401/403`, ist der Token tot — er wird als solcher benannt (`GITHUB_PERSONAL_ACCESS_TOKEN: TOT (GitHub-API antwortet 401/403) — übersprungen, kein Push-Versuch.`) und übersprungen, statt einen kompletten Push-Versuch inkl. Objekt-Upload daran zu verschwenden. Ein in diesem Lauf als tot erkannter Token wird auch beim Remote-SHA-Lesen nicht erneut probiert. Ist die Vorabprüfung **nicht eindeutig** (Netzwerk/Transport statt 401/403), wird der Push trotzdem versucht — die Prüfung darf nie ein funktionierendes Token aussperren. Die Erfolgszeile benennt immer, **welches** Token gegriffen hat (`Push erfolgreich — verwendetes Token: GITHUB_WORKFLOW_PAT.`). Sind **alle** Token tot, nennt die Fehlerausgabe genau das als Ursache und verweist auf `npm run sync:doctor`.
 - **Token-bewusste Verifikation (Task #1483):** Nach einem erfolgreichen Push liest das Skript die Remote-SHA bevorzugt mit **demselben Token, der den Push authentifiziert hat**, und probiert sonst beide Token durch — es zählt nur ein HTTP-`200`. Ein abgelaufener Connector-Token (401) maskiert damit kein erfolgreiches Lesen mehr und erzeugt keine falsche `WARNUNG: Remote-SHA … unbekannt` nach einem in Wahrheit gelungenen Push. Lässt sich die Remote-SHA mit keinem Token gegenlesen, gibt es einen neutralen `HINWEIS` (Push gilt trotzdem als erfolgreich), keine `WARNUNG`.
 - **Sichtbares Fehlersignal bei totem/abgelaufenem Token (Task #1483):** Ein fehlgeschlagener Push ist kein stiller No-op mehr — das Skript beendet sich mit **Exit-Code `1`** (das Scheduled Deployment markiert den Lauf damit als fehlgeschlagen) und loggt eine actionable Meldung. Bei erkanntem Auth-Fehler (401/403 / „Authentication failed" / „Bad credentials") lautet sie explizit: *„Token ungültig/abgelaufen. GITHUB_WORKFLOW_PAT (Scope repo+workflow) in den Deployment-Secrets erneuern."* — so wird ein abgelaufenes PAT sofort sichtbar, statt dass der Backlog stillschweigend wächst.
 - **Idempotenz:** Ist GitHub bereits auf dem lokalen Stand, ist `push` ein No-op (kein leerer Push, kein Fehler) — gefahrlos beliebig oft ausführbar.
@@ -169,6 +171,32 @@ bash scripts/prune-stale-subrepl-remotes.sh --apply  # entfernen (legt vorher .l
 `main-repl` NICHT entfernen: darüber gleicht ein Task-Environment mit dem Haupt-Repl ab.
 
 Damit sich der Bestand nicht erneut aufstaut, ruft `scripts/post-merge.sh` das Skript nach jedem Merge best-effort mit `--apply` auf (60-s-Timeout, `|| true` — ein Fehlschlag blockiert den Merge nie). Wichtig: Die Bereinigung wirkt immer nur auf die `.git/config` der Umgebung, in der sie läuft — `.git/config` ist kein versionierter Inhalt und wandert nicht über einen Task-Merge mit. Ein Task-Agent kann den Bestand des Haupt-Repls also nur über diesen Post-Merge-Hook (oder der Nutzer manuell in der Shell) aufräumen.
+
+### Token-Broker-Ausfall: Git-Pane wirkungslos, Push über das Skript (Task #1903)
+
+**Symptom.** Die Git-Ansicht im Workspace ist unbenutzbar: Sync/Pull/Push piepen kurz und ändern nichts, die GitHub-Verbindung lässt sich weder aktualisieren noch löschen. Trotzdem sieht die Verbindung „verbunden" aus und die Pane zeigt Zähler wie „10 ↓ 2 ↑".
+
+**Ursache.** Replits Credential-Helper `replit-git-askpass` (der Token-Broker hinter `GIT_ASKPASS`) läuft bei jeder Anfrage in einen **30-Sekunden-Timeout** und liefert statt eines Tokens nichts bzw. den Text `GitHub token request timed out`. Git schickt das als Passwort weiter, GitHub antwortet `remote: Invalid username or token`, die Aktion bricht ab. Das liegt **nicht** am Repository: keine divergierte Historie, kein Hook, keine Lock-Datei — Auth ist die einzige Blockade. Abzugrenzen von der Karteileichen-Remotes-Ursache oben (Task #1900): die meldet `Failed to authenticate with the remote (UNAUTHENTICATED)` sofort, dieser Ausfall **hängt erst ~30 s**.
+
+**Warum die Pane trotzdem halb lebendig wirkt.** `SeniorEng/Dashboard` ist öffentlich, anonyme Lesezugriffe (`git fetch`, `git ls-remote`, ungeauthentifizierte API) funktionieren also weiter. Die angezeigten Ahead/Behind-Zähler stammen dann aus einem veralteten Cache und sind **kein** echter Zustand. Auch die *ungeauthentifizierte* GitHub-API liefert nach einem Push noch minutenlang die alte SHA aus dem CDN-Cache — für ein verlässliches Gegenlesen immer **mit Token** lesen (genau das macht das Sync-Skript).
+
+**Diagnose in einem Befehl** (read-only, ~5 s, kein OpenAPI-Lauf):
+
+```bash
+npm run sync:doctor
+```
+
+Ausgabe: Zustand des Token-Brokers (Timeout → Klartext-Hinweis, dass die Pane deshalb wirkungslos ist), Gesundheit jedes konfigurierten Tokens (`OK` / `TOT` / `nicht gesetzt`) und der SHA-Vergleich lokal ↔ GitHub. Exit `0` nur, wenn mindestens ein Token gültig **und** GitHub auf dem lokalen Stand ist. Token-Werte werden nie ausgegeben, nur klassifiziert.
+
+**Ersatzweg zum Pushen** (umgeht den Broker komplett, authentifiziert direkt über die Secrets):
+
+```bash
+npm run sync:github        # = bash scripts/github-sync.sh push
+```
+
+Der Befehl ist idempotent (No-op, wenn bereits in sync), macht **keinen** Force-Push und schreibt keine Historie um. Vor dem Push meldet er zusätzlich, wenn der Broker ausgefallen ist — inklusive Hinweis, dass die Pane deshalb nichts bewirkt und dieser Befehl der Ersatzweg ist. Diese Vorabprüfung ist rein informativ und blockiert den Sync nie; abschaltbar mit `SKIP_CREDENTIAL_BROKER_CHECK=1`, Timeout über `CREDENTIAL_BROKER_PROBE_TIMEOUT` (Default 5 s).
+
+**Was Replit-seitig bleibt.** Broker und GitHub-Verbindung selbst sind Plattform-Sache und von hier aus nicht reparierbar: Workspace neu laden bzw. das GitHub-Konto in den Account-Einstellungen (Connections) neu verknüpfen, notfalls Replit-Support. Solange der Broker hängt, ist der Skript-Weg oben der verlässliche Push-Pfad — die stündliche Sync-Kadenz (Scheduled Deployment) ist davon ohnehin unberührt, weil sie ebenfalls über die Secrets authentifiziert und den Broker nie anfasst.
 
 ### Drift früh erkennen
 
