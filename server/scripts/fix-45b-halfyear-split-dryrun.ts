@@ -237,8 +237,32 @@ async function gegenprobe(asOfIso: string): Promise<void> {
   );
 }
 
+/**
+ * Stichtag der Auswertung.
+ *
+ * `--as-of=YYYY-MM-DD` ist fuer die 45b-Rueckschau WESENTLICH, nicht bequem:
+ * ein Uebertrag verfaellt zum 30.06. und faellt ab dem 01.07. samt seinem
+ * Verbrauch symmetrisch aus der Verfuegbarkeitsrechnung. An einem H2-Stichtag
+ * ist der Ueber-Ansatz deshalb NICHT sichtbar — gemessen wurde ein Delta von
+ * exakt 0. Wer den Schaden auf H1-Rechnungen sucht, MUSS auf einen H1-Stichtag
+ * stellen (bzw. je Rechnung auf deren Ausstellungszeitpunkt).
+ *
+ * Ohne Angabe: heute — das ist der richtige Default fuer "wie sieht es
+ * gerade aus", aber der falsche fuer die Rueckschau.
+ */
+function stichtag(): string {
+  const arg = process.argv.find(a => a.startsWith("--as-of="));
+  if (!arg) return todayISO();
+  const wert = arg.split("=")[1];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(wert)) {
+    console.error(`[45b-dryrun] --as-of erwartet YYYY-MM-DD, bekam: ${wert}`);
+    process.exit(2);
+  }
+  return wert;
+}
+
 async function main(): Promise<void> {
-  const asOfIso = todayISO();
+  const asOfIso = stichtag();
   if (process.argv.includes("--compare-keying")) return gegenprobe(asOfIso);
 
   const arg = process.argv.find(a => a.startsWith("--keying="));
@@ -247,7 +271,8 @@ async function main(): Promise<void> {
     console.error(
       "[45b-dryrun] --keying=year|window ist PFLICHT (kein Default: die beiden\n" +
       "             Modelle laufen bei den Legacy-Zeilen auseinander), oder\n" +
-      "             --compare-keying fuer beide nebeneinander.",
+      "             --compare-keying fuer beide nebeneinander.\n" +
+      "             --as-of=YYYY-MM-DD setzt den Stichtag (Rueckschau auf H1!).",
     );
     process.exit(2);
   }
