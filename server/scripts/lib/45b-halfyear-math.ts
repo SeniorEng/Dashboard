@@ -112,6 +112,7 @@ import {
 import { clampToStatutoryMax, BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import type { CustomerBudgetTypeSetting } from "@shared/schema";
+import { BUDGET_ALLOCATION_SOURCES } from "@shared/schema/budget";
 
 export interface TxRow { date: string; type: "consumption" | "reversal" | "write_off"; amountCents: number }
 export interface AllocRow { year: number; month: number | null; amountCents: number; source: string; validFrom: string; expiresAt: string | null }
@@ -214,7 +215,20 @@ export function entitlementForYear(
       monthlyAmountFor,
     }).filter(m => m.year === jahr),
   );
-  // ALLE Nicht-Uebertrags-Quellen, nicht eine Liste bekannter Summanden.
+  // POSITIV aus dem Enum abgeleitet, nicht als Negation von `carryover`.
+  //
+  // Die fruehere Blacklist (`source !== "carryover"`) war strukturell falsch
+  // herum: sie zog auch Quellen mit, die GAR NICHT im Enum stehen — allen
+  // voran die zurueckgezogene Altlast-Quelle, von der laut Prod-Report noch
+  // 470 aktive §45b-Zeilen bei 89 Kunden existieren. Deren Betraege wanderten
+  // in den Anspruch, wodurch der Soll-Uebertrag zu hoch und das Phantom zu
+  // NIEDRIG wurde, haeufig auf 0 — genau die Kunden mit der laengsten
+  // Altlast-Historie fielen still aus dem Report.
+  //
+  // Der Schreibpfad zaehlt im {year}-Modus exakt `initial_balance` und
+  // `manual_adjustment`. Die Ableitung aus dem Enum trifft das, bleibt aber
+  // strukturell: eine kuenftige vierte LEGITIME Quelle faellt automatisch
+  // hinein, eine Altlast-Quelle per Definition nicht.
   // Der Schreibpfad addiert im {year}-Modus `initial_balance` UND
   // `manual_adjustment`; das Auflisten einzelner Quellen liess letztere fallen
   // und meldete 500 EUR Phantom, die es nicht gab — samt Fehlbetrag "davon
@@ -224,8 +238,11 @@ export function entitlementForYear(
   // `carryover` ist ausgenommen, weil der Uebertrag nicht Teil des EIGENEN
   // Jahresanspruchs ist, sondern der Zufluss aus dem Vorjahr — er wird
   // getrennt behandelt (`carryoverIn`).
+  const anspruchsQuellen = new Set<string>(
+    BUDGET_ALLOCATION_SOURCES.filter(q => q !== "carryover"),
+  );
   const weitereQuellen = i.allocations
-    .filter(a => a.source !== "carryover" && a.year === jahr)
+    .filter(a => anspruchsQuellen.has(a.source) && a.year === jahr)
     .reduce((s, a) => s + a.amountCents, 0);
   return monatlich + weitereQuellen;
 }

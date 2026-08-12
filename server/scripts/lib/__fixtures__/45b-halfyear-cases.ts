@@ -416,6 +416,38 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       shortfallCents: 0,
     },
   },
+  {
+    id: "C14",
+    guards: "B-1 — Quellen AUSSERHALB des Enums gehoeren nicht in den Anspruch",
+    beschreibung:
+      "Datengleich zu C1, plus eine Allocation mit einer Quelle, die NICHT in " +
+      "BUDGET_ALLOCATION_SOURCES steht (zurueckgezogene Altlast; laut Prod-Report existieren " +
+      "davon noch 470 aktive §45b-Zeilen bei 89 Kunden). Die frueher benutzte Blacklist " +
+      "`source !== 'carryover'` zog sie in den Anspruch: Soll-Uebertrag zu hoch, Phantom zu " +
+      "NIEDRIG, haeufig auf 0 — gerade die Kunden mit der laengsten Altlast-Historie fielen " +
+      "still aus dem Report. Der Fall nennt bewusst KEINEN konkreten Altlast-Bezeichner: " +
+      "geprueft wird die strukturelle Eigenschaft, dass alles ausserhalb des Enums " +
+      "draussen bleibt.",
+    input: {
+      asOfIso: AS_OF,
+      sourceYear: 2025,
+      pgStartIso: "2020-01-01",
+      settings: VOLL,
+      allocations: [
+        { year: 2025, month: 6, amountCents: 13100, source: "zurueckgezogene_altlast_quelle", validFrom: "2025-06-01", expiresAt: null },
+        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+      ],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000 }],
+    },
+    // Identisch zu C1: die Altlast-Zeile darf NICHTS aendern.
+    expected: {
+      sourceYearEntitlementCents: 157200,   // NICHT 170300
+      carryoverOutSollCents: 77200,
+      phantomCents: 80000,                  // mit Blacklist waeren es 66900
+      shortfallCents: 0,
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

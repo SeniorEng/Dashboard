@@ -68,7 +68,7 @@ describe("§45b-Halbjahres-Vertrag — reine Funktion gegen bekannte Antworten",
     // Reihenfolge-unabhaengig: der Test soll stilles SCHRUMPFEN fangen, nicht
     // die Deklarationsreihenfolge festschreiben.
     expect([...HALFYEAR_CASES.map(c => c.id)].sort())
-      .toEqual(["C1", "C11", "C12", "C13", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]);
+      .toEqual(["C1", "C11", "C12", "C13", "C14", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]);
   });
 });
 
