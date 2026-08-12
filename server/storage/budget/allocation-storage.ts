@@ -12,7 +12,7 @@ import { eq, and, sql, lt, lte, gte, isNull, isNotNull, desc, asc, inArray, or }
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth, addDays } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
-import { resolve45bAnchor, initialBalanceMonthKeys, pickEffective45bSettingRow } from "@shared/domain/budget/anchor-45b";
+import { resolve45bAnchor, initialBalanceMonthKeys, pickEffective45bSettingRow, effective45bSettingsWindow, shiftStartToSettings, clampEndToSettings } from "@shared/domain/budget/anchor-45b";
 // Re-Export: Bestands-Aufrufer (summary-queries) importieren die Funktion
 // weiterhin von hier. Die Definition liegt jetzt in der SSoT.
 export { pickEffective45bSettingRow };
@@ -759,19 +759,12 @@ async function calculateAllocated45b(
   // komplett, weil neue Zeile validFrom=Mai war). Korrekt ist die FRÜHESTE
   // `validFrom` aller §45b-Zeilen für diesen Kunden.
   // Liegt nur eine Zeile vor, fällt das auf das alte Verhalten zurück.
-  const effectiveS45bValidFrom = all45bSettings.length > 0
-    ? all45bSettings[0].validFrom // selectFrom oben asc sortiert
-    : (s45b?.validFrom ?? null);
-
-  if (effectiveS45bValidFrom) {
-    const vfDate = parseLocalDate(effectiveS45bValidFrom);
-    const vfYear = vfDate.getFullYear();
-    const vfMonth = vfDate.getMonth() + 1;
-    if (vfYear > allocStartYear || (vfYear === allocStartYear && vfMonth > allocStartMonth)) {
-      allocStartYear = vfYear;
-      allocStartMonth = vfMonth;
-    }
-  }
+  // Fenster-Shift: SSoT in `anchor-45b.ts`. Verhalten unverändert.
+  const s45bWindow = effective45bSettingsWindow(all45bSettings, s45b ?? null);
+  ({ year: allocStartYear, month: allocStartMonth } = shiftStartToSettings(
+    { year: allocStartYear, month: allocStartMonth },
+    s45bWindow.validFrom,
+  ));
 
   let horizonYear = curYear;
   let horizonMonth = curMonth;
@@ -815,31 +808,10 @@ async function calculateAllocated45b(
 
   let endYear = horizonYear;
   let endMonth = horizonMonth;
-  // Analog zum validFrom-Shift: bei mehreren §45b-Zeilen die SPÄTESTE
-  // `validTo` heranziehen. Eine offene Zeile (`validTo = null`) bedeutet
-  // unbegrenzte Geltung — dann kein End-Shift.
-  let effectiveS45bValidTo: string | null = null;
-  if (all45bSettings.length > 0) {
-    const hasOpenEnd = all45bSettings.some(r => r.validTo == null);
-    if (!hasOpenEnd) {
-      effectiveS45bValidTo = all45bSettings.reduce<string | null>(
-        (max, r) => (max == null || (r.validTo != null && r.validTo > max) ? r.validTo : max),
-        null,
-      );
-    }
-  } else {
-    effectiveS45bValidTo = s45b?.validTo ?? null;
-  }
-
-  if (effectiveS45bValidTo) {
-    const vtDate = parseLocalDate(effectiveS45bValidTo);
-    const vtYear = vtDate.getFullYear();
-    const vtMonth = vtDate.getMonth() + 1;
-    if (vtYear < endYear || (vtYear === endYear && vtMonth < endMonth)) {
-      endYear = vtYear;
-      endMonth = vtMonth;
-    }
-  }
+  ({ year: endYear, month: endMonth } = clampEndToSettings(
+    { year: endYear, month: endMonth },
+    s45bWindow.validTo,
+  ));
 
   // Task #1812 — §45b-Startwert = Reset/Re-Baseline. Der SPÄTESTE zum Stichtag
   // (`ibDateLimit`) bereits wirksame Startwert-Monat M ist die neue Basis: er

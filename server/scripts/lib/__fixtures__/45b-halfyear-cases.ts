@@ -25,6 +25,8 @@
  * Schreibpfad gerechnet, nicht geschätzt. 13100 ct = 131 € Monatsanspruch.
  */
 
+import { SETTINGS_VALID_FROM_EPOCH } from "@shared/domain/budget-settings-sentinel";
+
 /** Roher Zustand eines Kunden-Jahres, wie er aus der DB käme. */
 export interface CaseInput {
   /**
@@ -66,7 +68,7 @@ export interface HalfYearCase {
   expected: CaseExpectation;
 }
 
-const VOLL = [{ validFrom: "1970-01-01", validTo: null, monthlyLimitCents: null, enabled: true }];
+const VOLL = [{ validFrom: SETTINGS_VALID_FROM_EPOCH, validTo: null, monthlyLimitCents: null, enabled: true }];
 
 /** Stichtag aller Fälle — derselbe, an dem der Re-Review gemessen hat. */
 export const AS_OF = "2026-08-11";
@@ -253,7 +255,7 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       asOfIso: AS_OF,
       sourceYear: 2025,
       pgStartIso: "2020-01-01",
-      settings: [{ validFrom: "1970-01-01", validTo: null, monthlyLimitCents: null, enabled: false }],
+      settings: [{ validFrom: SETTINGS_VALID_FROM_EPOCH, validTo: null, monthlyLimitCents: null, enabled: false }],
       allocations: [],
       transactions: [],
     },

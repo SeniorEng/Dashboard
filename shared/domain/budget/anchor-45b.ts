@@ -161,3 +161,78 @@ export function initialBalanceMonthKeys(
       .map(a => `${a.year}-${a.month}`),
   );
 }
+
+// ---------------------------------------------------------------------------
+// Settings-Fenster: welcher Zeitraum ist durch die §45b-Einrichtung gedeckt?
+// ---------------------------------------------------------------------------
+
+export interface SettingsWindowRow {
+  validFrom: string | null;
+  validTo: string | null;
+}
+
+/**
+ * Das wirksame §45b-Einrichtungs-Fenster über ALLE Phasen-Zeilen.
+ *
+ * Wichtig und nicht intuitiv: das Fenster wirkt NICHT über den Monatsbetrag
+ * (`monthlyAmountFor` liefert für nicht abgedeckte Monate weiterhin den
+ * gesetzlichen Satz), sondern über eine Verschiebung der Enumerations-Grenzen.
+ * Wer das Fenster ignoriert, zählt Monate vor der Einrichtung mit — für einen
+ * ab Mai eingerichteten Kunden also 12 statt 8 Monate.
+ *
+ *  - `validFrom` = die FRÜHESTE über alle Zeilen. Die einzelne „aktuell
+ *    wirksame" Zeile zu nehmen wäre falsch: das ist üblicherweise die letzte
+ *    Phase, und alle Monate vor dem Phasenwechsel fielen aus der Iteration
+ *    (Repro: Jan–Apr fehlten komplett, weil die neue Zeile validFrom=Mai trug).
+ *  - `validTo` = die SPÄTESTE über alle Zeilen — aber eine offene Zeile
+ *    (`validTo = null`) bedeutet unbegrenzte Geltung und hebt jede Begrenzung
+ *    auf.
+ *
+ * `fallback` bildet das Bestandsverhalten für den Fall ab, dass gar keine
+ * Zeilen vorliegen.
+ */
+export function effective45bSettingsWindow(
+  settings: ReadonlyArray<SettingsWindowRow>,
+  fallback?: SettingsWindowRow | null,
+): { validFrom: string | null; validTo: string | null } {
+  if (settings.length === 0) {
+    return { validFrom: fallback?.validFrom ?? null, validTo: fallback?.validTo ?? null };
+  }
+  const validFrom = settings.reduce<string | null>(
+    (min, r) => (r.validFrom != null && (min == null || r.validFrom < min) ? r.validFrom : min),
+    null,
+  );
+  const hasOpenEnd = settings.some(r => r.validTo == null);
+  const validTo = hasOpenEnd
+    ? null
+    : settings.reduce<string | null>(
+        (max, r) => (max == null || (r.validTo != null && r.validTo > max) ? r.validTo : max),
+        null,
+      );
+  return { validFrom, validTo };
+}
+
+export interface YearMonth { year: number; month: number }
+
+/** `${iso}` → `{year, month}`; `null` bleibt `null`. */
+function toYearMonth(iso: string | null): YearMonth | null {
+  if (!iso) return null;
+  const [y, m] = iso.split("-").map(Number);
+  return Number.isInteger(y) && Number.isInteger(m) ? { year: y, month: m } : null;
+}
+
+/** Schiebt den Start NACH HINTEN, wenn die Einrichtung später beginnt. */
+export function shiftStartToSettings(start: YearMonth, validFromIso: string | null): YearMonth {
+  const vf = toYearMonth(validFromIso);
+  if (!vf) return start;
+  const später = vf.year > start.year || (vf.year === start.year && vf.month > start.month);
+  return später ? vf : start;
+}
+
+/** Zieht das Ende NACH VORNE, wenn die Einrichtung früher endet. */
+export function clampEndToSettings(end: YearMonth, validToIso: string | null): YearMonth {
+  const vt = toYearMonth(validToIso);
+  if (!vt) return end;
+  const früher = vt.year < end.year || (vt.year === end.year && vt.month < end.month);
+  return früher ? vt : end;
+}
