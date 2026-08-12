@@ -214,14 +214,43 @@ export function entitlementForYear(
       monthlyAmountFor,
     }).filter(m => m.year === jahr),
   );
-  const startwerte = i.allocations
-    .filter(a => a.source === "initial_balance" && a.year === jahr)
+  // ALLE Nicht-Uebertrags-Quellen, nicht eine Liste bekannter Summanden.
+  // Der Schreibpfad addiert im {year}-Modus `initial_balance` UND
+  // `manual_adjustment`; das Auflisten einzelner Quellen liess letztere fallen
+  // und meldete 500 EUR Phantom, die es nicht gab — samt Fehlbetrag "davon
+  // gestellt", also Storno auf eine korrekte Rechnung. Eine kuenftige vierte
+  // Quelle faellt hier nicht mehr durch.
+  //
+  // `carryover` ist ausgenommen, weil der Uebertrag nicht Teil des EIGENEN
+  // Jahresanspruchs ist, sondern der Zufluss aus dem Vorjahr — er wird
+  // getrennt behandelt (`carryoverIn`).
+  const weitereQuellen = i.allocations
+    .filter(a => a.source !== "carryover" && a.year === jahr)
     .reduce((s, a) => s + a.amountCents, 0);
-  return monatlich + startwerte;
+  return monatlich + weitereQuellen;
 }
 
 /** Kleineres der beiden ISO-Daten. */
 function minIso(a: string, b: string): string { return a < b ? a : b; }
+
+/**
+ * Das Jahr, in das eine Übertragszeile rollte — abgeleitet aus dem FENSTER,
+ * nicht aus der Spalte `year`.
+ *
+ * `year` trägt zwei Konventionen nebeneinander: der Auto-Pfad schreibt das
+ * ZIELjahr, der Wizard-Pfad vor #601 das QUELLjahr, und der #601-Backfill
+ * normalisiert `year` nicht (er dedupliziert über das Fenster und behält
+ * bevorzugt die Wizard-Zeile). Auf Prod sind 26 Zeilen betroffen — eine
+ * Auswertung über `year` fand dort GAR KEINE Paare mehr und maß damit nichts,
+ * statt nichts zu finden.
+ *
+ * `validFrom` trägt dagegen immer den 01.01. des Zieljahres, unabhängig von
+ * der Konvention. Es ist derselbe drift-sichere Schlüssel, den auch die
+ * Dedup-SSoT (`shared/domain/budget-carryover-dedup.ts`) benennt.
+ */
+function carryoverTargetYear(a: AllocRow): number {
+  return Number(a.validFrom.slice(0, 4));
+}
 
 /**
  * Die gemeinsame Bewertung eines Kunden-Quelljahres.
@@ -260,9 +289,12 @@ export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
   }
 
   const targetYear = i.sourceYear + 1;
-  const carryoverIn = (jahr: number) => i.allocations
-    .filter(a => a.source === "carryover" && a.year === jahr)
-    .reduce((s, a) => s + a.amountCents, 0);
+  // Betrag UND Frist über DIESELBE Zeilenmenge — sonst summiert die eine
+  // Seite Zeilen, die die andere nicht sieht.
+  const uebertragsZeilen = (jahr: number) =>
+    i.allocations.filter(a => a.source === "carryover" && carryoverTargetYear(a) === jahr);
+  const carryoverIn = (jahr: number) =>
+    uebertragsZeilen(jahr).reduce((s, a) => s + a.amountCents, 0);
   /**
    * Die Frist des Uebertrags, der in `jahr` hereinrollte.
    *
@@ -277,8 +309,8 @@ export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
    * laesst und den Phantom-Betrag damit nicht kuenstlich klein rechnet.
    */
   const fristFuer = (jahr: number) => {
-    const fristen = i.allocations
-      .filter(a => a.source === "carryover" && a.year === jahr && a.expiresAt)
+    const fristen = uebertragsZeilen(jahr)
+      .filter(a => a.expiresAt)
       .map(a => a.expiresAt!)
       .sort();
     return fristen[0] ?? carryoverWindowFor(jahr - 1).expiresAt;

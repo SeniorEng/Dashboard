@@ -67,8 +67,13 @@ async function main(): Promise<void> {
   const asJson = process.argv.includes("--json");
   const asOfIso = todayISO();
 
+  // Kandidaten über das FENSTER, nicht über `year` — siehe
+  // `carryoverTargetYear` in lib/45b-halfyear-math.ts. Auf Prod tragen 26
+  // Zeilen die Legacy-Konvention `year = sourceYear`; eine `year`-basierte
+  // Auswertung bildete dort gar keine Paare mehr.
   const carryovers = await db.select({
     customerId: budgetAllocations.customerId,
+    validFrom: budgetAllocations.validFrom,
     year: budgetAllocations.year,
   }).from(budgetAllocations).where(and(
     eq(budgetAllocations.budgetType, BT),
@@ -77,8 +82,11 @@ async function main(): Promise<void> {
   ));
 
   const kandidaten = new Map<string, { customerId: number; targetYear: number }>();
+  let legacyYearZeilen = 0;
   for (const c of carryovers) {
-    kandidaten.set(`${c.customerId}|${c.year}`, { customerId: c.customerId, targetYear: c.year });
+    const targetYear = Number(c.validFrom.slice(0, 4));
+    if (c.year !== targetYear) legacyYearZeilen++;
+    kandidaten.set(`${c.customerId}|${targetYear}`, { customerId: c.customerId, targetYear });
   }
 
   const out: Row[] = [];
@@ -209,6 +217,13 @@ async function main(): Promise<void> {
       `vorhandenen Daten nicht rekonstruierbar.\n` +
       `Diese Zeilen sind WEDER geprueft NOCH entlastet: ` +
       nichtBewertbar.map(n => `${n.customerId}/${n.sourceYear}`).join(", "),
+    );
+  }
+  if (legacyYearZeilen > 0) {
+    console.log(
+      `\nHinweis: ${legacyYearZeilen} Uebertragszeile(n) tragen die Legacy-Konvention\n` +
+      `\`year = sourceYear\`. Die Auswertung schluesselt ueber \`valid_from\` und erfasst sie;\n` +
+      `eine \`year\`-basierte Auswertung haette sie verfehlt.`,
     );
   }
   if (ineligible.size > 0) {

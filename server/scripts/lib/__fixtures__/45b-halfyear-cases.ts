@@ -322,6 +322,100 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       shortfallCents: 0,
     },
   },
+  {
+    id: "C12",
+    guards: "BL-2 — Legacy-Konvention `year = sourceYear` darf das Ergebnis nicht aendern",
+    beschreibung:
+      "Datengleich zu C1, aber beide Uebertragszeilen tragen die Wizard-Konvention vor #601: " +
+      "`year` ist das QUELLjahr, das Fenster (validFrom/expiresAt) unveraendert das Zieljahr. " +
+      "Der #601-Backfill normalisiert `year` nicht — er behaelt bevorzugt genau diese Zeile. " +
+      "Auf Prod tragen 26 Zeilen diese Konvention; eine `year`-basierte Auswertung fand dort " +
+      "GAR KEINE Paare mehr und mass damit nichts, statt nichts zu finden. Ueber das Fenster " +
+      "geschluesselt muss C12 Zeichen fuer Zeichen dasselbe liefern wie C1.",
+    input: {
+      asOfIso: AS_OF,
+      sourceYear: 2025,
+      pgStartIso: "2020-01-01",
+      settings: VOLL,
+      allocations: [
+        // year = 2024 statt 2025, Fenster aber unveraendert das Jahr 2025:
+        { year: 2024, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        // year = 2025 statt 2026, Fenster unveraendert 2026:
+        { year: 2025, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+      ],
+      transactions: [
+        { date: "2025-09-15", type: "consumption", amountCents: -80000 },
+        { date: "2026-03-01", type: "consumption", amountCents: -200000 },
+      ],
+    },
+    // identisch zu C1
+    expected: {
+      sourceYearEntitlementCents: 157200,
+      carryoverOutSollCents: 77200,
+      phantomCents: 80000,
+      shortfallCents: 18000,
+    },
+  },
+  {
+    id: "C13",
+    guards: "BL-2 — Doppel-Uebertraege: Betrag SUMMIEREN, Frist ueber DIESELBE Zeilenmenge",
+    beschreibung:
+      "Zwei lebende Uebertragszeilen im selben Zielfenster. Der #601-Backfill ueberspringt " +
+      "Duplikate mit verlinkten Transaktionen ausdruecklich ('manuelle Aufloesung noetig'), " +
+      "sie sind also real. Beide gewaehren Budget, der persistierte Uebertrag ist ihre SUMME. " +
+      "Frueher wurde der Betrag summiert, die Frist aber ueber `.find` aus einer ungeordneten " +
+      "Menge gezogen — zwei Behandlungen derselben Zeilen.",
+    input: {
+      asOfIso: AS_OF,
+      sourceYear: 2025,
+      pgStartIso: "2020-01-01",
+      settings: VOLL,
+      allocations: [
+        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+      ],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000 }],
+    },
+    expected: {
+      sourceYearEntitlementCents: 157200,
+      carryoverOutSollCents: 77200,
+      // persistiert = 157200 + 157200 = 314400 gegen Soll 77200.
+      // Wuerde nur EINE Zeile zaehlen, waeren es 80000 — der Fall trennt das.
+      phantomCents: 237200,
+      shortfallCents: 0,
+    },
+  },
+  {
+    id: "C11",
+    guards: "BL-1 — manual_adjustment gehoert in den Anspruch (strukturell: alle source != carryover)",
+    beschreibung:
+      "Datengleich zu C1, plus eine manuelle Budget-Anpassung von 500 EUR in 2025. Der " +
+      "Schreibpfad addiert `manual_adjustment` im {year}-Modus mit (allocation-storage.ts:446-466); " +
+      "die Komposition listete nur `initial_balance` auf und liess sie fallen. Folge: 500 EUR " +
+      "Phantom, die es nicht gibt, plus 180 EUR Fehlbetrag 'davon gestellt' — Storno auf eine " +
+      "KORREKTE Rechnung, die einzige Richtung, die der Vertrag als unzulaessig benennt. " +
+      "Der persistierte Uebertrag hier ist genau das, was der Schreibpfad korrekt errechnet.",
+    input: {
+      asOfIso: AS_OF,
+      sourceYear: 2025,
+      pgStartIso: "2020-01-01",
+      settings: VOLL,
+      allocations: [
+        { year: 2025, month: null, amountCents: 50000, source: "manual_adjustment", validFrom: "2025-04-01", expiresAt: null },
+        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        // 157200 + 50000 - 80000 = 127200 — der korrekte Roll.
+        { year: 2026, month: null, amountCents: 127200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+      ],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000 }],
+    },
+    expected: {
+      sourceYearEntitlementCents: 207200,   // 12 x 13100 + 50000
+      carryoverOutSollCents: 127200,
+      phantomCents: 0,                      // frueher: 50000
+      shortfallCents: 0,
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------

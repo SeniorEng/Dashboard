@@ -56,7 +56,10 @@ describe("§45b-Halbjahres-Vertrag — reine Funktion gegen bekannte Antworten",
   }
 
   it("deckt alle Vertragsfälle ab (Selbsttest gegen stilles Schrumpfen)", () => {
-    expect(HALFYEAR_CASES.map(c => c.id)).toEqual(["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]);
+    // Reihenfolge-unabhaengig: der Test soll stilles SCHRUMPFEN fangen, nicht
+    // die Deklarationsreihenfolge festschreiben.
+    expect([...HALFYEAR_CASES.map(c => c.id)].sort())
+      .toEqual(["C1", "C11", "C12", "C13", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]);
   });
 });
 
