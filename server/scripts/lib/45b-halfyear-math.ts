@@ -152,3 +152,261 @@ export function sourceYearEntitlementCents(i: SourceYearEntitlementInput): numbe
   });
   return sum45bStatutoryMonths(months.filter(m => m.year === i.sourceYear));
 }
+
+// ---------------------------------------------------------------------------
+// KOMPOSITION — die eine Funktion, die Dry-Run und Produktions-Fix teilen.
+// Setzt ausschliesslich exportierte Produktionsteile zusammen; sie baut nichts
+// nach. Rein und DB-frei: der Aufrufer liefert den rohen Zustand.
+// ---------------------------------------------------------------------------
+
+import {
+  resolve45bAnchor, initialBalanceMonthKeys, pickEffective45bSettingRow,
+  effective45bSettingsWindow, shiftStartToSettings, clampEndToSettings,
+} from "@shared/domain/budget/anchor-45b";
+import { clampToStatutoryMax, BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
+import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
+import type { CustomerBudgetTypeSetting } from "@shared/schema";
+
+export interface TxRow { date: string; type: "consumption" | "reversal" | "write_off"; amountCents: number }
+export interface AllocRow { year: number; month: number | null; amountCents: number; source: string; validFrom: string; expiresAt: string | null }
+export interface SettingRow { validFrom: string; validTo: string | null; monthlyLimitCents: number | null; enabled: boolean }
+
+/**
+ * Netto-VERBRAUCH aus rohen Transaktionszeilen: `consumption − reversal`.
+ *
+ * DIE NAHT, an der B2/B3 sassen. `write_off` wird hier ausgeschlossen — und
+ * zwar an der Stelle, an der die Zahlen ENTSTEHEN, nicht erst dort, wo sie
+ * verrechnet werden. Die frueheren Golden-Cases reichten der Arithmetik
+ * bereits bereinigte Summen hinein und konnten den Fehler deshalb nie fangen.
+ *
+ * Fachlich: der Verfalls-Write-Off liegt per `addDays(expiresAt, 1)` auf dem
+ * 01.07. Er fiele damit in ein Jahresfenster, aber nicht in ein Fenster „bis
+ * Frist" — die Asymmetrie blaehte den Phantom-Betrag um genau ihn auf. Und er
+ * ist ohnehin kein Verbrauch gegen den eigenen Topf, sondern das Verfallen des
+ * Uebertrags.
+ */
+export function netConsumptionFromRows(rows: ReadonlyArray<TxRow>, fromIso: string, toIso: string): number {
+  let netto = 0;
+  for (const r of rows) {
+    if (r.date < fromIso || r.date > toIso) continue;
+    if (r.type === "consumption") netto += Math.abs(r.amountCents);
+    else if (r.type === "reversal") netto -= Math.abs(r.amountCents);
+    // write_off: bewusst ignoriert (siehe Docblock)
+  }
+  return Math.max(0, netto);
+}
+
+export interface HalfYearEvalInput {
+  /** Bewertungs-Stichtag. Anspruch UND Verbrauch werden hierauf gekappt. */
+  asOfIso: string;
+  sourceYear: number;
+  pgStartIso: string | null;
+  settings: ReadonlyArray<SettingRow>;
+  allocations: ReadonlyArray<AllocRow>;
+  transactions: ReadonlyArray<TxRow>;
+}
+
+export interface HalfYearEvalResult {
+  ineligible?: boolean;
+  /**
+   * Das Quelljahr liegt vollständig VOR dem Anspruchsfenster — der Übertrag
+   * stammt aus einer Zeit, die sich aus den vorhandenen Daten nicht
+   * rekonstruieren lässt. Dann ist der Anspruch 0, aber daraus folgt NICHT,
+   * dass der ganze Übertrag Phantom ist. Diese Zeilen werden ausgewiesen,
+   * nicht bewertet — sonst meldete der Report jeden solchen Übertrag als
+   * vollständig erfunden.
+   */
+  notEvaluable?: boolean;
+  sourceYearEntitlementCents: number;
+  carryoverOutSollCents: number;
+  phantomCents: number;
+  shortfallCents: number;
+}
+
+function ymOf(iso: string): { year: number; month: number } {
+  const [y, m] = iso.split("-").map(Number);
+  return { year: y, month: m };
+}
+
+/**
+ * Anspruch eines Jahres = Monatsaufstockungen (im gedeckten Fenster) PLUS die
+ * Startwerte dieses Jahres. Der zweite Summand fehlte und war B7: der
+ * Schreibpfad rechnet `yearMonthlyTotal + sumInitialBalancesForYear`.
+ */
+function entitlementForYear(
+  i: HalfYearEvalInput, jahr: number, anchorIso: string, endYm: { year: number; month: number },
+): number {
+  const window = effective45bSettingsWindow(i.settings, null);
+  const start = shiftStartToSettings(ymOf(anchorIso), window.validFrom);
+  const end = clampEndToSettings(endYm, window.validTo);
+  if (end.year < start.year || (end.year === start.year && end.month < start.month)) return 0;
+
+  const rows = i.settings as unknown as CustomerBudgetTypeSetting[];
+  const monthlyAmountFor = (y: number, m: number): number => {
+    const row = pickEffective45bSettingRow(rows, y, m);
+    if (!row || row.monthlyLimitCents == null) return BUDGET_45B_MAX_MONTHLY_CENTS;
+    return clampToStatutoryMax({
+      budgetType: "entlastungsbetrag_45b", monthlyLimitCents: row.monthlyLimitCents,
+      yearlyLimitCents: null, pflegegrad: null,
+    }).monthlyLimitCents ?? BUDGET_45B_MAX_MONTHLY_CENTS;
+  };
+
+  const monatlich = sum45bStatutoryMonths(
+    enumerate45bStatutoryMonths({
+      allocStartYear: start.year, allocStartMonth: start.month,
+      endYear: end.year, endMonth: end.month,
+      initialBalanceMonthKeys: initialBalanceMonthKeys(i.allocations),
+      monthlyAmountFor,
+    }).filter(m => m.year === jahr),
+  );
+  const startwerte = i.allocations
+    .filter(a => a.source === "initial_balance" && a.year === jahr)
+    .reduce((s, a) => s + a.amountCents, 0);
+  return monatlich + startwerte;
+}
+
+/** Kleineres der beiden ISO-Daten. */
+function minIso(a: string, b: string): string { return a < b ? a : b; }
+
+/**
+ * Die gemeinsame Bewertung eines Kunden-Quelljahres.
+ *
+ * Der Halbjahres-Split greift ZWEIMAL, und das ist der Kern:
+ *  - im QUELLJAHR entscheidet er, wieviel der hereingerollte Uebertrag
+ *    rechtmaessig absorbieren durfte (nur Verbrauch bis zu seiner Frist),
+ *  - im ZIELJAHR entscheidet er, ob der korrigierte Uebertrag ueberhaupt noch
+ *    zur Verfuegung stand. Er ist NICHT ganzjaehrig verfuegbar (B10): ein
+ *    Verbrauch nach dem 30.06. kann ihn nicht mehr aufzehren.
+ */
+export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
+  const leer = { sourceYearEntitlementCents: 0, carryoverOutSollCents: 0, phantomCents: 0, shortfallCents: 0 };
+  const s45bEnabled = i.settings.some(s => s.enabled);
+
+  const anchor = resolve45bAnchor({
+    pgStartIso: i.pgStartIso,
+    s45bEnabled,
+    activeAllocations: i.allocations,
+    deletedInitialBalanceValidFroms: [],
+    fallbackYear: i.sourceYear,
+    // Rueckschau: KEIN Erden auf das laufende Jahr (das war B1).
+    floorPgAnchor: (iso) => iso,
+  });
+  if (anchor.kind === "ineligible") return { ineligible: true, ...leer };
+
+  // Deckt das Anspruchsfenster das Quelljahr überhaupt ab?
+  const fenster = effective45bSettingsWindow(i.settings, null);
+  const startYm = shiftStartToSettings(ymOf(anchor.anchorIso), fenster.validFrom);
+  if (startYm.year > i.sourceYear) return { notEvaluable: true, ...leer };
+
+  const targetYear = i.sourceYear + 1;
+  const carryoverIn = (jahr: number) => i.allocations
+    .filter(a => a.source === "carryover" && a.year === jahr)
+    .reduce((s, a) => s + a.amountCents, 0);
+  const fristFuer = (jahr: number) => i.allocations
+    .find(a => a.source === "carryover" && a.year === jahr && a.expiresAt)?.expiresAt
+    ?? carryoverWindowFor(jahr - 1).expiresAt;
+
+  // ── Quelljahr ──────────────────────────────────────────────────────────
+  const sourceYearEntitlementCents = entitlementForYear(
+    i, i.sourceYear, anchor.anchorIso, { year: i.sourceYear, month: 12 },
+  );
+  const prevFrist = fristFuer(i.sourceYear);
+  const ph = computeCarryoverPhantom({
+    sourceYearAllocatedCents: sourceYearEntitlementCents,
+    prevCarryInCents: carryoverIn(i.sourceYear),
+    netConsumptionYearCents: netConsumptionFromRows(i.transactions, `${i.sourceYear}-01-01`, `${i.sourceYear}-12-31`),
+    netConsumptionUntilDeadlineCents: netConsumptionFromRows(i.transactions, `${i.sourceYear}-01-01`, prevFrist),
+    persistedCarryoverOutCents: carryoverIn(targetYear),
+  });
+
+  // ── Zieljahr ───────────────────────────────────────────────────────────
+  // Anspruch und Verbrauch teilen dasselbe Fenster (bis Stichtag) — die
+  // Asymmetrie war B4.
+  const asOf = ymOf(i.asOfIso);
+  const endYm = asOf.year > targetYear ? { year: targetYear, month: 12 } : { year: targetYear, month: asOf.month };
+  const targetEntitlement = entitlementForYear(i, targetYear, anchor.anchorIso, endYm);
+  const fensterEnde = minIso(`${targetYear}-12-31`, i.asOfIso);
+  const claimed = netConsumptionFromRows(i.transactions, `${targetYear}-01-01`, fensterEnde);
+  const claimedBisFrist = netConsumptionFromRows(
+    i.transactions, `${targetYear}-01-01`, minIso(fristFuer(targetYear), fensterEnde),
+  );
+  const absorbed = Math.min(ph.carryoverOutSollCents, claimedBisFrist);
+  const sf = computeShortfall({
+    claimedCents: claimed,
+    targetYearAllocatedCents: targetEntitlement,
+    carryoverInSollCents: absorbed,
+  });
+
+  return {
+    sourceYearEntitlementCents,
+    carryoverOutSollCents: ph.carryoverOutSollCents,
+    phantomCents: ph.phantomCents,
+    shortfallCents: sf.shortfallCents,
+  };
+}
+
+export interface SplitRow {
+  id: number;
+  date: string;
+  type: "consumption" | "reversal";
+  amountCents: number;
+  appointmentId: number | null;
+}
+
+/**
+ * Verteilt den Fehlbetrag auf gestellte vs. Entwurfs-Rechnungen.
+ *
+ * NETTO pro Termin, nicht brutto pro Zeile — das war S6. Eine vollstaendig
+ * reversierte Buchung hat kein Geld bewegt und darf den Fehlbetrag nicht
+ * aufsaugen; sonst wandert er von einer aktiven, gestellten Rechnung auf eine
+ * stornierte und wird als „nach vorn korrigierbar" ausgewiesen. Das ist die
+ * GoBD-gefaehrliche Richtung.
+ *
+ * Zuordnungs-Konvention: der Fehlbetrag sind die ZULETZT verbrauchten Cent.
+ * Wir laufen die Netto-Posten rueckwaerts nach Datum, `id` als Tiebreaker
+ * (mehrere Buchungen am selben Tag sind der Normalfall — ohne ihn koennen zwei
+ * Laeufe verschieden aufteilen). Eine andere Konvention (anteilig, FIFO
+ * vorwaerts) ergaebe dieselbe Summe, aber eine andere Aufteilung; das gehoert
+ * fachlich bestaetigt, bevor daraus Stornos abgeleitet werden.
+ *
+ * Ohne `appointmentId` ist keine Rechnung auffindbar — konservativ als
+ * „gestellt" gewertet: lieber ein GoBD-Vorgang zu viel geprueft als eine
+ * gestellte Rechnung still korrigiert.
+ */
+export function splitShortfall(
+  rows: ReadonlyArray<SplitRow>,
+  shortfallCents: number,
+  issuedAppointmentIds: ReadonlySet<number>,
+): { gestellt: number; entwurf: number; nichtZugeordnet: number } {
+  if (shortfallCents <= 0) return { gestellt: 0, entwurf: 0, nichtZugeordnet: 0 };
+
+  // Netting: Zeilen mit Termin werden pro Termin verrechnet, terminlose je Zeile.
+  const posten = new Map<string, { netto: number; date: string; id: number; appointmentId: number | null }>();
+  for (const r of rows) {
+    const key = r.appointmentId != null ? `a${r.appointmentId}` : `r${r.id}`;
+    const vorz = r.type === "consumption" ? 1 : -1;
+    const cur = posten.get(key);
+    if (cur) {
+      cur.netto += vorz * Math.abs(r.amountCents);
+      if (r.date > cur.date || (r.date === cur.date && r.id > cur.id)) { cur.date = r.date; cur.id = r.id; }
+    } else {
+      posten.set(key, { netto: vorz * Math.abs(r.amountCents), date: r.date, id: r.id, appointmentId: r.appointmentId });
+    }
+  }
+
+  const sortiert = [...posten.values()]
+    .filter(p => p.netto > 0)
+    .sort((a, b) => (a.date === b.date ? b.id - a.id : (a.date < b.date ? 1 : -1)));
+
+  let rest = shortfallCents;
+  let gestellt = 0;
+  let entwurf = 0;
+  for (const p of sortiert) {
+    if (rest <= 0) break;
+    const nimm = Math.min(rest, p.netto);
+    if (p.appointmentId == null || issuedAppointmentIds.has(p.appointmentId)) gestellt += nimm;
+    else entwurf += nimm;
+    rest -= nimm;
+  }
+  return { gestellt, entwurf, nichtZugeordnet: Math.max(0, rest) };
+}

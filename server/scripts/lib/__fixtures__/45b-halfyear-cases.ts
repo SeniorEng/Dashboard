@@ -47,6 +47,8 @@ export interface CaseInput {
 }
 
 export interface CaseExpectation {
+  /** `true` = Quelljahr liegt vor dem Anspruchsfenster, nicht bewertbar. */
+  notEvaluable?: boolean;
   /** `true` = Eligibility-Gate greift, der Kunde hat gar keinen §45b-Anspruch. */
   ineligible?: boolean;
   /** Anspruch des Quelljahres: Monatsaufstockungen + initial_balance. */
@@ -261,6 +263,33 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
     },
     expected: {
       ineligible: true,
+      sourceYearEntitlementCents: 0,
+      carryoverOutSollCents: 0,
+      phantomCents: 0,
+      shortfallCents: 0,
+    },
+  },
+  {
+    id: "C8",
+    guards: "Quelljahr VOR dem Anspruchsfenster — nicht bewertbar, nicht 'alles Phantom'",
+    beschreibung:
+      "Kunde ohne Pflegegrad-Historie: der Anker kommt aus der Übertragszeile 2025, das " +
+      "Quelljahr 2024 liegt also komplett vor dem Fenster. Der Anspruch ist dort 0 — daraus " +
+      "folgt aber NICHT, dass der Übertrag erfunden ist, sondern dass seine Herkunft aus " +
+      "den vorhandenen Daten nicht rekonstruierbar ist. Im eigenen Seed-Lauf meldete der " +
+      "Report solche Zeilen mit dem VOLLEN Übertrag als Phantom.",
+    input: {
+      asOfIso: AS_OF,
+      sourceYear: 2024,
+      pgStartIso: null,
+      settings: VOLL,
+      allocations: [
+        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+      ],
+      transactions: [],
+    },
+    expected: {
+      notEvaluable: true,
       sourceYearEntitlementCents: 0,
       carryoverOutSollCents: 0,
       phantomCents: 0,
