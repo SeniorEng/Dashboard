@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeCarryoverPhantom,
   computeShortfall,
-  sourceYearEntitlementCents,
+  entitlementForYear,
 } from "../../server/scripts/lib/45b-halfyear-math";
 
 const JAHR = 157200;   // 12 × 131 €
@@ -175,67 +175,54 @@ describe("computeShortfall — Golden-Cases", () => {
   });
 });
 
-describe("sourceYearEntitlementCents — B1: zustandsunabhängiger Quelljahres-Anspruch", () => {
-  const M = 13100;                      // 131 € Monatsanspruch
-  const flat = () => M;
-  const keine = new Set<string>();
+describe("entitlementForYear — Jahresanspruch (ersetzt sourceYearEntitlementCents)", () => {
+  const M = 13100;                      // 131 EUR Monatsanspruch
+  const VOLL = [{ validFrom: "1970-01-01", validTo: null, monthlyLimitCents: null, enabled: true }];
+  const basis = (over: Partial<Parameters<typeof entitlementForYear>[0]> = {}) => ({
+    asOfIso: "2026-08-11", sourceYear: 2025, pgStartIso: "2020-01-01",
+    settings: VOLL, allocations: [], transactions: [], ...over,
+  });
+  const dez = (y: number) => ({ year: y, month: 12 });
 
-  it("volles Jahr, Pflegegrad läuft schon vorher → 12 Monate", () => {
-    expect(sourceYearEntitlementCents({
-      sourceYear: 2025, pgStartIso: "2020-03-01",
-      initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
-    })).toBe(12 * M);
+  it("volles Jahr, Anker liegt davor → 12 Monate", () => {
+    expect(entitlementForYear(basis(), 2025, "2020-01-01", dez(2025))).toBe(12 * M);
   });
 
-  it("Pflegegrad beginnt IM Quelljahr → nur ab diesem Monat", () => {
-    // Start im September → Sep..Dez = 4 Monate.
-    expect(sourceYearEntitlementCents({
-      sourceYear: 2025, pgStartIso: "2025-09-15",
-      initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
-    })).toBe(4 * M);
+  it("Anker liegt IM Jahr → nur ab diesem Monat", () => {
+    expect(entitlementForYear(basis(), 2025, "2025-09-15", dez(2025))).toBe(4 * M);
   });
 
-  it("Pflegegrad beginnt NACH dem Quelljahr → 0", () => {
-    expect(sourceYearEntitlementCents({
-      sourceYear: 2025, pgStartIso: "2026-01-01",
-      initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
-    })).toBe(0);
+  it("REGRESSION B7: Startwert wird ADDIERT und sein Monat uebersprungen", () => {
+    // Der frueher exportierte sourceYearEntitlementCents liess beides weg und
+    // meldete deshalb 2500 EUR Phantom statt 500 EUR.
+    const i = basis({
+      allocations: [{ year: 2025, month: 3, amountCents: 200000, source: "initial_balance", validFrom: "2025-03-01", expiresAt: null }],
+    });
+    expect(entitlementForYear(i, 2025, "2020-01-01", dez(2025))).toBe(11 * M + 200000);
   });
 
-  it("ohne Pflegegrad-Beginn → 0", () => {
-    expect(sourceYearEntitlementCents({
-      sourceYear: 2025, pgStartIso: null,
-      initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
-    })).toBe(0);
-  });
-
-  it("Startwert-Monate werden übersprungen", () => {
-    // Jan+Feb 2025 durch einen aktiven Startwert verdrängt → 10 Monate.
-    expect(sourceYearEntitlementCents({
-      sourceYear: 2025, pgStartIso: "2020-01-01",
-      initialBalanceMonthKeys: new Set(["2025-1", "2025-2"]),
-      monthlyAmountFor: flat,
-    })).toBe(10 * M);
+  it("REGRESSION B8: das Settings-Fenster verkuerzt den Zeitraum", () => {
+    // Ab Mai eingerichtet → 8 Monate. Der alte Export ignorierte das Fenster
+    // und kam auf 12 Monate.
+    const i = basis({ settings: [{ validFrom: "2025-05-01", validTo: null, monthlyLimitCents: null, enabled: true }] });
+    expect(entitlementForYear(i, 2025, "2020-01-01", dez(2025))).toBe(8 * M);
   });
 
   it("historisierter Monatsbetrag wird pro Monat nachgeschlagen", () => {
-    // Ab Juli 2025 auf 100 € reduziert: 6 × 131 € + 6 × 100 €.
-    const staffel = (y: number, m: number) => (y === 2025 && m >= 7 ? 10000 : M);
-    expect(sourceYearEntitlementCents({
-      sourceYear: 2025, pgStartIso: "2020-01-01",
-      initialBalanceMonthKeys: keine, monthlyAmountFor: staffel,
-    })).toBe(6 * M + 6 * 10000);
+    const i = basis({ settings: [
+      { validFrom: "1970-01-01", validTo: "2025-06-30", monthlyLimitCents: null, enabled: true },
+      { validFrom: "2025-07-01", validTo: null, monthlyLimitCents: 10000, enabled: true },
+    ] });
+    expect(entitlementForYear(i, 2025, "2020-01-01", dez(2025))).toBe(6 * M + 6 * 10000);
   });
 
-  it("REGRESSION B1: das Ergebnis hängt NICHT vom laufenden Jahr ab", () => {
-    // Der Defekt war, dass der Anspruch aus heutiger Sicht gerechnet wurde und
-    // fuer ein vergangenes Jahr auf 0 kollabierte. Dieselben Eingaben muessen
-    // fuer jedes Quelljahr denselben Wert liefern, egal wann gerechnet wird.
+  it("REGRESSION B1: das Ergebnis haengt NICHT vom laufenden Jahr ab", () => {
     for (const jahr of [2023, 2024, 2025, 2026]) {
-      expect(sourceYearEntitlementCents({
-        sourceYear: jahr, pgStartIso: "2019-01-01",
-        initialBalanceMonthKeys: keine, monthlyAmountFor: flat,
-      })).toBe(12 * M);
+      expect(entitlementForYear(basis(), jahr, "2019-01-01", dez(jahr))).toBe(12 * M);
     }
+  });
+
+  it("Ende vor Beginn → 0", () => {
+    expect(entitlementForYear(basis(), 2025, "2026-01-01", dez(2025))).toBe(0);
   });
 });

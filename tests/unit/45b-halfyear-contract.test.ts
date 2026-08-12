@@ -56,14 +56,14 @@ describe("§45b-Halbjahres-Vertrag — reine Funktion gegen bekannte Antworten",
   }
 
   it("deckt alle Vertragsfälle ab (Selbsttest gegen stilles Schrumpfen)", () => {
-    expect(HALFYEAR_CASES.map(c => c.id)).toEqual(["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]);
+    expect(HALFYEAR_CASES.map(c => c.id)).toEqual(["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]);
   });
 });
 
 describe("§45b-Split-Vertrag — gestellt vs. Entwurf", () => {
   for (const c of SPLIT_CASES) {
     it(`${c.id} — ${c.guards}`, () => {
-      const r = splitShortfall(c.rows, c.shortfallCents, new Set(c.issuedAppointmentIds));
+      const r = splitShortfall(c.rows, c.shortfallCents, new Set(c.issuedAppointmentIds), c.cutoffIso);
       expect({ id: c.id, ...r }).toEqual({ id: c.id, ...c.expected });
     });
   }

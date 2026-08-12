@@ -152,6 +152,7 @@ async function main(): Promise<void> {
       })),
       r.shortfallCents,
       gestellteTermine,
+      asOfIso,
     );
 
     out.push({
@@ -203,8 +204,9 @@ async function main(): Promise<void> {
   }
   if (nichtBewertbar.length > 0) {
     console.log(
-      `\nNICHT BEWERTBAR: ${nichtBewertbar.length} Kunden-Jahr(e) — das Quelljahr liegt vor dem\n` +
-      `Anspruchsfenster, die Herkunft des Uebertrags ist aus den Daten nicht rekonstruierbar.\n` +
+      `\nNICHT BEWERTBAR: ${nichtBewertbar.length} Kunden-Jahr(e) — das Quelljahr liegt ausserhalb des\n` +
+      `Anspruchsfensters (davor ODER dahinter); die Herkunft des Uebertrags ist aus den\n` +
+      `vorhandenen Daten nicht rekonstruierbar.\n` +
       `Diese Zeilen sind WEDER geprueft NOCH entlastet: ` +
       nichtBewertbar.map(n => `${n.customerId}/${n.sourceYear}`).join(", "),
     );

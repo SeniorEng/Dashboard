@@ -100,60 +100,6 @@ export function computeShortfall(i: ShortfallInput): { availableCents: number; s
 }
 
 // ---------------------------------------------------------------------------
-// B1 — Quelljahres-Anspruch aus einer ZUSTANDSUNABHÄNGIGEN Quelle.
-// ---------------------------------------------------------------------------
-
-
-export interface SourceYearEntitlementInput {
-  sourceYear: number;
-  /** ROHER Pflegegrad-Beginn (`getEarliestCareLevelStart`), NICHT gebodet. */
-  pgStartIso: string | null;
-  /** Monate, die ein aktiver Startwert verdrängt — Schlüssel `"YYYY-M"`. */
-  initialBalanceMonthKeys: Set<string>;
-  /** Aus `pickEffective45bSettingRow` + `clampToStatutoryMax` komponiert. */
-  monthlyAmountFor: (year: number, month: number) => number;
-}
-
-/**
- * Summe der §45b-Monatsaufstockungen des Quelljahres.
- *
- * ERSETZT `calculateAllocatedCents(customerId, BT, { year })` für diesen
- * Report. Jener Aufruf liefert die HEUTIGE Sicht: der Carryover-`allocStart`-
- * Shift (`allocation-storage.ts:770-772`) ist im `{year}`-Modus nicht
- * geschützt und springt auf das Zieljahr, sobald dessen Übertragszeile
- * existiert — also genau in der Kandidatenmenge dieses Reports. Ergebnis war 0
- * und damit ein stiller Null-Befund auf allen echten Daten.
- *
- * KEIN Zweitbegriff: die Aufzählung ist `enumerate45bStatutoryMonths` (die
- * SSoT, die auch der Schreibpfad benutzt), und `monthlyAmountFor` wird vom
- * Aufrufer aus den exportierten Bausteinen `pickEffective45bSettingRow` +
- * `clampToStatutoryMax` komponiert. Neu ist AUSSCHLIESSLICH das Fenster:
- * Beginn = roher Pflegegrad-Start statt des auf das laufende Jahr gebodeten
- * Ankers (`floorAutoAnchor45bToCurrentYear`), Ende = Dezember des Quelljahres.
- * Genau dieser Floor ist die Ursache von B1 — für eine Rückschau darf er nicht
- * greifen.
- *
- * Ohne Pflegegrad-Beginn gibt es keinen Anspruch: 0.
- */
-export function sourceYearEntitlementCents(i: SourceYearEntitlementInput): number {
-  if (!i.pgStartIso) return 0;
-  const [pgY, pgM] = i.pgStartIso.split("-").map(Number);
-  if (!Number.isInteger(pgY) || !Number.isInteger(pgM)) return 0;
-  // Beginnt der Anspruch erst NACH dem Quelljahr, gibt es für dieses nichts.
-  if (pgY > i.sourceYear) return 0;
-
-  const months = enumerate45bStatutoryMonths({
-    allocStartYear: pgY,
-    allocStartMonth: pgM,
-    endYear: i.sourceYear,
-    endMonth: 12,
-    initialBalanceMonthKeys: i.initialBalanceMonthKeys,
-    monthlyAmountFor: i.monthlyAmountFor,
-  });
-  return sum45bStatutoryMonths(months.filter(m => m.year === i.sourceYear));
-}
-
-// ---------------------------------------------------------------------------
 // KOMPOSITION — die eine Funktion, die Dry-Run und Produktions-Fix teilen.
 // Setzt ausschliesslich exportierte Produktionsteile zusammen; sie baut nichts
 // nach. Rein und DB-frei: der Aufrufer liefert den rohen Zustand.
@@ -233,7 +179,16 @@ function ymOf(iso: string): { year: number; month: number } {
  * Startwerte dieses Jahres. Der zweite Summand fehlte und war B7: der
  * Schreibpfad rechnet `yearMonthlyTotal + sumInitialBalancesForYear`.
  */
-function entitlementForYear(
+/**
+ * Anspruch eines Jahres = Monatsaufstockungen im gedeckten Fenster PLUS die
+ * Startwerte dieses Jahres.
+ *
+ * ERSETZT den frueheren Export `sourceYearEntitlementCents`. Der war der
+ * Vor-B7/B8-Stand: ohne `initial_balance`-Summand und ohne Settings-Fenster —
+ * exportiert, testgruen und trotzdem falsch. Wer ihn wiederverwendet haette,
+ * haette sich zwei bereits geschlossene Blocker zurueckgeholt.
+ */
+export function entitlementForYear(
   i: HalfYearEvalInput, jahr: number, anchorIso: string, endYm: { year: number; month: number },
 ): number {
   const window = effective45bSettingsWindow(i.settings, null);
@@ -296,15 +251,38 @@ export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
   // Deckt das Anspruchsfenster das Quelljahr überhaupt ab?
   const fenster = effective45bSettingsWindow(i.settings, null);
   const startYm = shiftStartToSettings(ymOf(anchor.anchorIso), fenster.validFrom);
-  if (startYm.year > i.sourceYear) return { notEvaluable: true, ...leer };
+  const endYmSource = clampEndToSettings({ year: i.sourceYear, month: 12 }, fenster.validTo);
+  // BEIDE Kanten pruefen. Nur den Anfang zu pruefen liess das Quelljahr HINTER
+  // dem Fenster durchrutschen: `entitlementForYear` lieferte dort glatt 0 und
+  // der volle Uebertrag wurde als Phantom gemeldet (B-3).
+  if (startYm.year > i.sourceYear || endYmSource.year < i.sourceYear) {
+    return { notEvaluable: true, ...leer };
+  }
 
   const targetYear = i.sourceYear + 1;
   const carryoverIn = (jahr: number) => i.allocations
     .filter(a => a.source === "carryover" && a.year === jahr)
     .reduce((s, a) => s + a.amountCents, 0);
-  const fristFuer = (jahr: number) => i.allocations
-    .find(a => a.source === "carryover" && a.year === jahr && a.expiresAt)?.expiresAt
-    ?? carryoverWindowFor(jahr - 1).expiresAt;
+  /**
+   * Die Frist des Uebertrags, der in `jahr` hereinrollte.
+   *
+   * DETERMINISTISCHES MINIMUM ueber die Nicht-NULL-Fristen, nicht `.find`.
+   * Die Query liefert ohne `orderBy` keine garantierte Reihenfolge, und
+   * Doppel-Uebertraege sind real (siehe `scripts/cleanup-duplicate-carryovers.ts`,
+   * Task #102). Mit `.find` kippte derselbe Datenstand je nach Zeilenreihenfolge
+   * zwischen 800 EUR Phantom und 0 EUR.
+   *
+   * Warum das MINIMUM: mehrere Zeilen bedeuten mehrere Fristen; die frueheste
+   * ist die konservative Wahl, weil sie am wenigsten Verbrauch absorbieren
+   * laesst und den Phantom-Betrag damit nicht kuenstlich klein rechnet.
+   */
+  const fristFuer = (jahr: number) => {
+    const fristen = i.allocations
+      .filter(a => a.source === "carryover" && a.year === jahr && a.expiresAt)
+      .map(a => a.expiresAt!)
+      .sort();
+    return fristen[0] ?? carryoverWindowFor(jahr - 1).expiresAt;
+  };
 
   // ── Quelljahr ──────────────────────────────────────────────────────────
   const sourceYearEntitlementCents = entitlementForYear(
@@ -369,7 +347,7 @@ export interface SplitRow {
  * vorwaerts) ergaebe dieselbe Summe, aber eine andere Aufteilung; das gehoert
  * fachlich bestaetigt, bevor daraus Stornos abgeleitet werden.
  *
- * Ohne `appointmentId` ist keine Rechnung auffindbar — konservativ als
+ * Zeilen NACH `cutoffIso` sind ausgeschlossen (siehe unten).\n *\n * Ohne `appointmentId` ist keine Rechnung auffindbar — konservativ als
  * „gestellt" gewertet: lieber ein GoBD-Vorgang zu viel geprueft als eine
  * gestellte Rechnung still korrigiert.
  */
@@ -377,8 +355,15 @@ export function splitShortfall(
   rows: ReadonlyArray<SplitRow>,
   shortfallCents: number,
   issuedAppointmentIds: ReadonlySet<number>,
+  cutoffIso: string,
 ): { gestellt: number; entwurf: number; nichtZugeordnet: number } {
   if (shortfallCents <= 0) return { gestellt: 0, entwurf: 0, nichtZugeordnet: 0 };
+  // Der Stichtag gehoert IN diese Funktion, nicht in den Aufrufer: der
+  // Fehlbetrag wird auf Verbrauch bis zum Stichtag gerechnet, also darf auch
+  // nur solcher Verbrauch ihn tragen. Ein vorgebuchter Termin danach war
+  // sonst der juengste Posten und saugte ihn auf (B-1) — mit dem Ergebnis,
+  // dass eine gestellte Rechnung als "Entwurf, nach vorn korrigierbar" galt.
+  rows = rows.filter(r => r.date <= cutoffIso);
 
   // Netting: Zeilen mit Termin werden pro Termin verrechnet, terminlose je Zeile.
   const posten = new Map<string, { netto: number; date: string; id: number; appointmentId: number | null }>();

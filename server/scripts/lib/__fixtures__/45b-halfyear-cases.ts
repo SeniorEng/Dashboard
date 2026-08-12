@@ -296,6 +296,32 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       shortfallCents: 0,
     },
   },
+  {
+    id: "C9",
+    guards: "B-3 — Quelljahr HINTER dem Anspruchsfenster ist ebenfalls nicht bewertbar",
+    beschreibung:
+      "§45b lief nur bis Ende 2023, das Quelljahr 2025 liegt komplett dahinter. Die " +
+      "notEvaluable-Pruefung sah bisher nur den ANFANG des Fensters; am hinteren Ende " +
+      "lieferte `entitlementForYear` glatt 0 und der volle Uebertrag (1572 EUR) wurde als " +
+      "Phantom gemeldet — ohne jede Warnung. Dieselbe Fehlerklasse wie C8, andere Kante.",
+    input: {
+      asOfIso: AS_OF,
+      sourceYear: 2025,
+      pgStartIso: "2020-01-01",
+      settings: [{ validFrom: SETTINGS_VALID_FROM_EPOCH, validTo: "2023-12-31", monthlyLimitCents: null, enabled: true }],
+      allocations: [
+        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+      ],
+      transactions: [],
+    },
+    expected: {
+      notEvaluable: true,
+      sourceYearEntitlementCents: 0,
+      carryoverOutSollCents: 0,
+      phantomCents: 0,
+      shortfallCents: 0,
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -307,6 +333,11 @@ export interface SplitCase {
   id: string;
   guards: string;
   beschreibung: string;
+  /**
+   * Stichtag der Zuordnung. Zeilen NACH ihm haben den Fehlbetrag nicht
+   * verursacht und dürfen ihn nicht tragen (C10).
+   */
+  cutoffIso: string;
   shortfallCents: number;
   rows: Array<{ id: number; date: string; type: "consumption" | "reversal"; amountCents: number; appointmentId: number | null }>;
   /** Termine, die auf einer GESTELLTEN und AKTIVEN Rechnung liegen. */
@@ -324,6 +355,7 @@ export const SPLIT_CASES: SplitCase[] = [
       "0 €, davon Entwurf 180 €': die stornierte Mai-Zeile saugte als jüngste den ganzen " +
       "Fehlbetrag auf, während das echte Geld auf der Februar-Rechnung liegt. Die " +
       "Split-Query zählt brutto, der Fehlbetrag wird netto gerechnet — genau die Naht.",
+    cutoffIso: AS_OF,
     shortfallCents: 18000,
     rows: [
       { id: 1, date: "2026-02-10", type: "consumption", amountCents: -200000, appointmentId: 101 },
@@ -331,6 +363,30 @@ export const SPLIT_CASES: SplitCase[] = [
       { id: 3, date: "2026-05-21", type: "reversal", amountCents: 100000, appointmentId: 102 },
     ],
     issuedAppointmentIds: [101],
+    expected: { gestellt: 18000, entwurf: 0, nichtZugeordnet: 0 },
+  },
+  {
+    id: "C10",
+    guards: "B-1 — die Zuordnung endet am STICHTAG (formale Zuordnungs-Konvention)",
+    beschreibung:
+      "Der Fehlbetrag wird auf Verbrauch bis zum Stichtag gerechnet; die Zuordnung lief " +
+      "aber über die Zeilen des ganzen Zieljahres. Ein VORGEBUCHTER Termin nach dem " +
+      "Stichtag ist damit der jüngste Posten und saugt den Fehlbetrag auf, obwohl er ihn " +
+      "nicht verursacht hat. Gemessen: 'gestellt 0 / Entwurf 180 €' statt umgekehrt — die " +
+      "GoBD-gefährliche Richtung, die derselbe Docblock als unzulässig benennt.\n\n" +
+      "Die Konvention lautet damit vollständig: der Fehlbetrag sind die zuletzt " +
+      "verbrauchten Cent BIS ZUM STICHTAG, netto pro Termin, Datum absteigend mit " +
+      "`id` als Tiebreaker.",
+    cutoffIso: AS_OF,
+    shortfallCents: 18000,
+    rows: [
+      // 2000 € am 01.03. auf einer gestellten, aktiven Rechnung.
+      { id: 1, date: "2026-03-01", type: "consumption", amountCents: -200000, appointmentId: 201 },
+      // Vorgebuchter Termin NACH dem Stichtag — noch keine Rechnung, hat den
+      // Fehlbetrag nicht verursacht.
+      { id: 2, date: "2026-09-20", type: "consumption", amountCents: -100000, appointmentId: 202 },
+    ],
+    issuedAppointmentIds: [201],
     expected: { gestellt: 18000, entwurf: 0, nichtZugeordnet: 0 },
   },
 ];
