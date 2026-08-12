@@ -172,6 +172,63 @@ bash scripts/prune-stale-subrepl-remotes.sh --apply  # entfernen (legt vorher .l
 
 Damit sich der Bestand nicht erneut aufstaut, ruft `scripts/post-merge.sh` das Skript nach jedem Merge best-effort mit `--apply` auf (60-s-Timeout, `|| true` — ein Fehlschlag blockiert den Merge nie). Wichtig: Die Bereinigung wirkt immer nur auf die `.git/config` der Umgebung, in der sie läuft — `.git/config` ist kein versionierter Inhalt und wandert nicht über einen Task-Merge mit. Ein Task-Agent kann den Bestand des Haupt-Repls also nur über diesen Post-Merge-Hook (oder der Nutzer manuell in der Shell) aufräumen.
 
+### Aufgeblähtes `.git`: hängende Hintergrundwartung erkennen (Task #1904)
+
+**Symptom.** Git-Operationen der Workspace-Oberfläche (Status, Refs auflisten, Diff) werden zäh bis zu Timeouts, `.git` wächst in den dreistelligen MB-Bereich.
+
+**Ursache.** Gits automatische Hintergrundwartung (`git maintenance`) legt vor dem Lauf `.git/objects/maintenance.lock` an und entfernt sie danach wieder. Bricht ein Lauf hart ab (Container-Kill, Workspace-Neustart), **bleibt die Sperre liegen — und jeder weitere Wartungslauf beendet sich ab da sofort und still**. Lose Objekte werden nie mehr zusammengepackt. Stand Task #1904 lag die Sperre seit dem 02.06.2026 im Objektspeicher: `.git` = 494 MB, davon 463 MiB in **39.705 losen** Objekten (gepackt waren nur 7.928 Objekte / 22 MiB), dazu **1.054 tote `subrepl-*`-Branches** aus früheren Task-Agent-Läufen (1.089 Refs gesamt) und ein Garbage-Temp-Objekt.
+
+**Wiedererkennen (read-only, ein Befehl):**
+
+```bash
+git count-objects -vH        # count: > ~5.000 lose Objekte = Wartung läuft nicht mehr
+ls -l .git/objects/maintenance.lock   # existiert + monatealt = verwaiste Sperre
+```
+
+**Aufräumen (idempotent, Trockenlauf ist der Default):**
+
+```bash
+bash scripts/prune-git-object-bloat.sh                    # nur messen + klassifizieren
+bash scripts/prune-git-object-bloat.sh --list-unverified  # zusätzlich die Friedhof-Kandidaten zeigen
+bash scripts/prune-git-object-bloat.sh --apply            # Sperre lösen, Branches abräumen, gc
+```
+
+Das Skript (1) entfernt die Sperre nur, wenn **kein** Wartungsprozess läuft und sie älter als 60 min ist, (2) räumt `subrepl-*`-Branches ab — nach der unten beschriebenen Beweis-Regel, nie allein nach Alter, (3) fährt `git gc` mit dem **Default-Prune-Fenster von 2 Wochen** (kein `--prune=now`, unerreichbare Objekte jünger als zwei Wochen bleiben als Netz liegen) und (4) prüft anschließend mit `git fsck --connectivity-only`. `main`, `replit-agent`, `replit-safety-*`, jedes andere nicht-`subrepl-*`-Local-Branch, alle Remote-Refs, Tags und Notes werden nie angefasst; es wird **keine** Historie umgeschrieben (kein Rewrite, kein Shallow-Clone, kein Force-Push).
+
+#### Branches: löschen nur mit Beweis, sonst Friedhof
+
+Ein altes Commit-Datum belegt **nicht**, dass die Arbeit eines Branches gemergt ist — ein lange ruhender, aber noch relevanter Branch sieht genauso aus. Deshalb wird jeder Kandidat klassifiziert:
+
+| Klasse | Kriterium | Aktion |
+| --- | --- | --- |
+| **integriert** | Spitze ist von einem erhaltenen Ref aus erreichbar **oder** ihr Baum (der komplette Dateistand) kommt in dessen Historie vor | Branch wird gelöscht — der Inhalt liegt nachweislich schon woanders |
+| **ungeprüft** | alles andere | Branch wird **nicht** gelöscht, sondern als echter Backup-Ref nach `refs/subrepl-graveyard/<name>` verschoben und aus `refs/heads/` entfernt |
+
+Der Friedhofs-Ref hält die Objekte dauerhaft am Leben — `git gc` fasst sie nicht an (verifiziert gegen `git gc --prune=now`). Aus der Branch-Liste und damit aus der Git-Oberfläche sind die Einträge trotzdem raus. Wiederherstellen ist ein Einzeiler:
+
+```bash
+git branch <name> refs/subrepl-graveyard/<name>
+```
+
+Der Friedhof läuft **nicht von selbst ab**. Ein Eintrag verschwindet nur, wenn er bei einem späteren Lauf inzwischen nachweislich integriert ist (Beweis, nicht Zeit) — oder wenn jemand bewusst `--apply --expire-graveyard` aufruft (entfernt Einträge älter als `GRAVEYARD_TTL_DAYS`, Default 180). Der Post-Merge-Hook ruft das **nie** auf; der einzige unumkehrbare Schritt bleibt eine bewusste Handlung.
+
+Zwei weitere Gates greifen vor der Klassifikation:
+
+- **Ausgecheckte Branches sind tabu** — der HEAD des Verzeichnisses *und* jeder in einem verlinkten Worktree ausgecheckte Branch, unabhängig von Alter und Klassifikation. Sonst zöge ein Lauf der laufenden Arbeitskopie den Branch unter den Füßen weg und HEAD zeigte ins Leere.
+- **Alters-Gate**: Branches, deren Spitze jünger als `PRUNE_AGE_DAYS` (Default 14) ist, werden gar nicht erst angefasst.
+
+Jeder `--apply`-Lauf protokolliert die Klassifikation zusätzlich nach `.local/git-backups/subrepl-branches.backup-*.tsv`. Abgesichert ist das Ganze durch `tests/architecture/git-object-bloat-guard.test.ts`: der Test spannt ein Wegwerf-Repository auf und weist nach, dass ein uralter *ausgecheckter* `subrepl-*`-Branch (HEAD wie verlinkter Worktree) unangetastet bleibt, ein integrierter gelöscht und ein ungeprüfter auf den Friedhof gerettet und von dort wiederherstellbar ist. Er ist DB- und server-frei und läuft im `unit`-Project in jedem CI-Fork mit.
+
+Klassifikation der 1.054 Branches in Task #1904: **571 nachweislich integriert**, **483 ungeprüft** (davon 3 zu jung und damit unangetastet). Dass fast die Hälfte keinen exakten Baum-Treffer hat, ist erwartbar und kein Alarmsignal: Agent-Branches enden auf Zwischenständen („Saved your changes before starting work"), deren Inhalt beim Merge unter anderer SHA und leicht verändert in `main` landet. Genau deshalb werden sie aufbewahrt statt gelöscht.
+
+#### Ergebnis und Grenzen
+
+Gemessen in Task #1904 (voller Lauf in einem Task-Environment): `.git` **494 MB → 240 MB**, lose Objekte **39.705 → 0**, Packs 12 → 2, Garbage 1 → 0, Refs **1.089 → 38**; `git fsck` sauber, HEAD/Historie/Remotes unverändert. Dieser Lauf hat alle Kandidaten gelöscht. Mit der ausgelieferten, vorsichtigen Variante bleiben die 483 ungeprüften Spitzen im Friedhof erreichbar — die Refs sinken dann auf ~518 (davon nur 6 in `refs/heads/`) und die Endgröße liegt entsprechend etwas über 240 MB. Der entscheidende Gewinn ist davon unberührt: die 39.705 losen Objekte landen in Packs, und die Branch-Liste ist wieder kurz.
+
+**Warum nicht kleiner?** Die 22 MiB des alten Packs waren nur ein Teilstand (7.928 von 39.473 Objekten) — der große Rest der *erreichbaren* Historie lag lose herum. Gepackt sind es 238 MiB, und die stecken fast vollständig in `attached_assets/` (~274 MB allein im HEAD-Baum: Screenshots, XLSX-, PDF-Anhänge, ein 24-MB-Coverage-JSON). Binärdateien lassen sich nicht wegdelta-komprimieren; weiter schrumpfen ginge nur über einen History-Rewrite — bewusst nicht gemacht. Fürs Deployment-Image ist das ohnehin irrelevant: `.replitignore` schließt `.git/` bereits aus.
+
+**Damit es sich nicht erneut aufstaut** ruft `scripts/post-merge.sh` das Skript nach jedem Merge best-effort mit `--apply` auf (300-s-Timeout, `|| true` — ein Fehlschlag blockiert den Merge nie; unterhalb von 5.000 losen Objekten ist der Lauf ein schneller No-Op). Wichtig, gleiche Einschränkung wie beim Remote-Prune oben: Die Bereinigung wirkt immer nur auf das `.git` der Umgebung, in der sie läuft — der Objektspeicher ist kein versionierter Inhalt und wandert nicht über einen Task-Merge mit. Ein Task-Agent kann das Haupt-Repl also nur über diesen Post-Merge-Hook (oder der Nutzer manuell in der Shell) entschlacken.
+
 ### Token-Broker-Ausfall: Git-Pane wirkungslos, Push über das Skript (Task #1903)
 
 **Symptom.** Die Git-Ansicht im Workspace ist unbenutzbar: Sync/Pull/Push piepen kurz und ändern nichts, die GitHub-Verbindung lässt sich weder aktualisieren noch löschen. Trotzdem sieht die Verbindung „verbunden" aus und die Pane zeigt Zähler wie „10 ↓ 2 ↑".

@@ -48,3 +48,16 @@ timeout --signal=TERM --kill-after=5s 60s bash scripts/prune-stale-subrepl-remot
 # (Scheduled Deployment) fängt zusätzlich aus, was hier ausfällt.
 timeout --signal=TERM --kill-after=5s 60s bash scripts/github-sync.sh push || \
   echo "[post-merge] github-sync übersprungen/fehlgeschlagen — Kadenz/nächster Merge holt es nach"
+
+# Task #1904: aufgeblähtes .git entschlacken. Eine verwaiste
+# `.git/objects/maintenance.lock` legt Gits Hintergrundwartung still — lose
+# Objekte werden dann nie gepackt (Stand #1904: 494 MB .git, 39.705 lose
+# Objekte, 1.054 subrepl-*-Branches). Best-effort NACH dem Sync, damit ein
+# langer Packlauf den Push nicht verzögert; darf den Merge NIE blockieren.
+# Idempotent + selbst-gegatet: unterhalb der Bloat-Schwelle ein schneller No-Op.
+# Bewusst OHNE --expire-graveyard: hier wird nur gelöscht, was nachweislich in
+# einem erhaltenen Ref liegt; alles Ungeprüfte wandert nach
+# refs/subrepl-graveyard/* und bleibt wiederherstellbar. Der einzige
+# unumkehrbare Schritt bleibt eine bewusste manuelle Handlung.
+timeout --signal=TERM --kill-after=10s 300s bash scripts/prune-git-object-bloat.sh --apply || \
+  echo "[post-merge] git-Entschlackung übersprungen/fehlgeschlagen — nächster Merge holt es nach"
