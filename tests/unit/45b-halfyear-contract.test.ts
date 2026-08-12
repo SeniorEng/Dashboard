@@ -45,6 +45,7 @@ describe("§45b-Halbjahres-Vertrag — reine Funktion gegen bekannte Antworten",
         settings: c.input.settings,
         allocations: c.input.allocations,
         transactions: c.input.transactions,
+        carryoverKeying: "window" as const,
       });
 
       if (c.expected.notEvaluable) {
@@ -122,6 +123,7 @@ describe("Uhr-Unabhaengigkeit — der Stichtag ist Parameter, nicht Umgebung", (
         settings: c.input.settings,
         allocations: c.input.allocations,
         transactions: c.input.transactions,
+        carryoverKeying: "window" as const,
       };
 
       // Bewusst weit auseinander UND auf der anderen Seite des Stichtags:
@@ -145,5 +147,43 @@ describe("Uhr-Unabhaengigkeit — der Stichtag ist Parameter, nicht Umgebung", (
     const b = splitShortfall(c.rows, c.shortfallCents, new Set(c.issuedAppointmentIds), c.cutoffIso);
     thawTime();
     expect(a).toEqual(b);
+  });
+});
+
+describe("C12 — die beiden Schlüssel-Modelle gegeneinander", () => {
+  const c12 = HALFYEAR_CASES.find(c => c.id === "C12")!;
+  const eingabe = (keying: "year" | "window") => ({
+    asOfIso: c12.input.asOfIso,
+    sourceYear: c12.input.sourceYear,
+    pgStartIso: c12.input.pgStartIso,
+    settings: c12.input.settings,
+    allocations: c12.input.allocations,
+    transactions: c12.input.transactions,
+    carryoverKeying: keying,
+  });
+
+  it("Fenster-Modell liefert die Vertrags-Antwort", () => {
+    expect(evaluate45bHalfYear(eingabe("window")).phantomCents).toBe(c12.expected.phantomCents);
+  });
+
+  it("year-Modell liefert bei Legacy-Zeilen ETWAS ANDERES — das ist der Befund", () => {
+    // C12 trägt beide Übertragszeilen mit `year = sourceYear`. Im year-Modell
+    // greift die Zuordnung deshalb ein Jahr daneben. Der Test setzt KEINES der
+    // Modelle als richtig; er hält fest, DASS sie auseinanderlaufen — genau die
+    // Menge, über die die Gegenprobe auf Prod entscheidet.
+    const yearModell = evaluate45bHalfYear(eingabe("year"));
+    const windowModell = evaluate45bHalfYear(eingabe("window"));
+    expect(yearModell.phantomCents).not.toBe(windowModell.phantomCents);
+  });
+
+  it("ohne Legacy-Konvention sind beide Modelle deckungsgleich (C1)", () => {
+    const c1 = HALFYEAR_CASES.find(c => c.id === "C1")!;
+    const basis = {
+      asOfIso: c1.input.asOfIso, sourceYear: c1.input.sourceYear,
+      pgStartIso: c1.input.pgStartIso, settings: c1.input.settings,
+      allocations: c1.input.allocations, transactions: c1.input.transactions,
+    };
+    expect(evaluate45bHalfYear({ ...basis, carryoverKeying: "year" }))
+      .toEqual(evaluate45bHalfYear({ ...basis, carryoverKeying: "window" }));
   });
 });

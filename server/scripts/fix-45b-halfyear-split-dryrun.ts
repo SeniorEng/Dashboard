@@ -47,7 +47,8 @@ import { formatEuroDE } from "@shared/utils/money";
 import { todayISO } from "@shared/utils/datetime";
 import {
   evaluate45bHalfYear, splitShortfall,
-  type AllocRow, type SettingRow, type SplitRow, type TxRow,
+  carryoverTargetYear,
+  type AllocRow, type CarryoverKeying, type SettingRow, type SplitRow, type TxRow,
 } from "./lib/45b-halfyear-math";
 
 const BT = "entlastungsbetrag_45b";
@@ -63,9 +64,11 @@ interface Row {
   nichtZugeordnetCents: number;
 }
 
-async function main(): Promise<void> {
-  const asJson = process.argv.includes("--json");
-  const asOfIso = todayISO();
+/**
+ * Ein Lauf in EINEM Schluessel-Modell. Aufgerufen wird die Funktion pro Modus;
+ * die Rechenlogik ist identisch, nur die Zuordnung Uebertrag->Zieljahr nicht.
+ */
+async function lauf(keying: CarryoverKeying, asOfIso: string): Promise<Row[]> {
 
   // Kandidaten über das FENSTER, nicht über `year` — siehe
   // `carryoverTargetYear` in lib/45b-halfyear-math.ts. Auf Prod tragen 26
@@ -82,10 +85,13 @@ async function main(): Promise<void> {
   ));
 
   const kandidaten = new Map<string, { customerId: number; targetYear: number }>();
-  let legacyYearZeilen = 0;
   for (const c of carryovers) {
-    const targetYear = Number(c.validFrom.slice(0, 4));
-    if (c.year !== targetYear) legacyYearZeilen++;
+    // Kandidatenbildung im SELBEN Modell wie die Bewertung — sonst bewertet
+    // der Lauf Jahre, die er gar nicht als Kandidat gebildet hat.
+    const targetYear = carryoverTargetYear(
+      { ...c, month: null, amountCents: 0, source: "carryover", expiresAt: null } as AllocRow,
+      keying,
+    );
     kandidaten.set(`${c.customerId}|${targetYear}`, { customerId: c.customerId, targetYear });
   }
 
@@ -124,6 +130,7 @@ async function main(): Promise<void> {
         type: t.transactionType as TxRow["type"],
         amountCents: t.amountCents,
       })),
+      carryoverKeying: keying,
     });
 
     if (r.ineligible) { ineligible.add(customerId); continue; }
@@ -174,78 +181,78 @@ async function main(): Promise<void> {
   }
 
   out.sort((a, b) => b.shortfallCents - a.shortfallCents || b.phantomCents - a.phantomCents);
+  return out;
+}
 
-  if (asJson) {
-    // Warnungen gehören MIT in die maschinenlesbare Ausgabe — sonst sieht ein
-    // Konsument „belastbare" Zahlen ohne jeden Hinweis.
-    console.log(JSON.stringify({ asOfIso, rows: out, ineligibleCustomerIds: [...ineligible], nichtBewertbar }, null, 2));
-    return;
-  }
+const KEY = (r: Row) => `${r.customerId}|${r.targetYear}`;
 
-  console.log(`\n§45b — halbjahresscharfe Gegenrechnung (DRY-RUN, nur lesend), Stichtag ${asOfIso}\n`);
-  if (out.length === 0) {
-    console.log("Keine Abweichung gefunden.\n");
-  } else {
-    console.log(
-      "Kunde".padStart(6), "Jahr".padStart(6), "Phantom".padStart(12),
-      "Fehlbetrag".padStart(12), "gestellt".padStart(12), "Entwurf".padStart(12), "offen".padStart(10),
-    );
-    for (const r of out) {
+/**
+ * GEGENPROBE: beide Schluessel-Modelle nebeneinander, Differenz je Kunde.
+ *
+ * Die Produktion schluesselt den hereinrollenden Uebertrag ueber die SPALTE
+ * `year` (`allocation-storage.ts:1569`). Das Werkzeug wurde auf das FENSTER
+ * (`valid_from`) umgestellt. Bei den Legacy-Zeilen (`year = sourceYear`)
+ * fallen beide auseinander: die Produktion sieht so eine Zeile beim Roll des
+ * Quelljahres als Zufluss, das Fenster-Modell erst ein Jahr spaeter.
+ *
+ * Welches Modell dem tatsaechlichen Produktions-Roll entspricht, ist OFFEN.
+ * Diese Ausgabe setzt deshalb keines als richtig — sie zeigt, WO und WIE STARK
+ * sie auseinanderlaufen, damit die Frage an den Daten entschieden werden kann.
+ */
+async function gegenprobe(asOfIso: string): Promise<void> {
+  const [wYear, wWindow] = [await lauf("year", asOfIso), await lauf("window", asOfIso)];
+  const mYear = new Map(wYear.map(r => [KEY(r), r]));
+  const mWindow = new Map(wWindow.map(r => [KEY(r), r]));
+  const alle = [...new Set([...mYear.keys(), ...mWindow.keys()])].sort();
+
+  console.log(`\n§45b — GEGENPROBE der Schluessel-Modelle, Stichtag ${asOfIso}\n`);
+  console.log(`Modell "year"   (wie Produktion): ${wYear.length} Kunden-Jahre`);
+  console.log(`Modell "window" (Werkzeug)      : ${wWindow.length} Kunden-Jahre`);
+
+  const diff = alle.filter(k => {
+    const a = mYear.get(k), b = mWindow.get(k);
+    return !a || !b || a.phantomCents !== b.phantomCents || a.shortfallCents !== b.shortfallCents;
+  });
+  console.log(`Abweichende Kunden-Jahre        : ${diff.length}\n`);
+
+  if (diff.length > 0) {
+    console.log("Kunde/Jahr".padEnd(14), "Phantom year".padStart(14), "Phantom window".padStart(15),
+                "Fehlb. year".padStart(13), "Fehlb. window".padStart(14));
+    for (const k of diff) {
+      const a = mYear.get(k), b = mWindow.get(k);
       console.log(
-        String(r.customerId).padStart(6), String(r.targetYear).padStart(6),
-        formatEuroDE(r.phantomCents).padStart(12),
-        formatEuroDE(r.shortfallCents).padStart(12),
-        formatEuroDE(r.gestelltCents).padStart(12),
-        formatEuroDE(r.entwurfCents).padStart(12),
-        formatEuroDE(r.nichtZugeordnetCents).padStart(10),
+        k.padEnd(14),
+        (a ? formatEuroDE(a.phantomCents) : "—").padStart(14),
+        (b ? formatEuroDE(b.phantomCents) : "—").padStart(15),
+        (a ? formatEuroDE(a.shortfallCents) : "—").padStart(13),
+        (b ? formatEuroDE(b.shortfallCents) : "—").padStart(14),
       );
     }
-    const sum = (f: (r: Row) => number) => out.reduce((s, r) => s + f(r), 0);
-    console.log("\n--- Summen ---");
-    console.log(`Betroffene Kunden-Jahre : ${out.length}`);
-    console.log(`Betroffene Kunden       : ${new Set(out.map(r => r.customerId)).size}`);
-    console.log(`Phantom-Übertrag gesamt : ${formatEuroDE(sum(r => r.phantomCents))}`);
-    console.log(`Fehlbetrag gesamt       : ${formatEuroDE(sum(r => r.shortfallCents))}`);
-    console.log(`  davon gestellt        : ${formatEuroDE(sum(r => r.gestelltCents))}  ← GoBD: Storno + Neuausstellung`);
-    console.log(`  davon Entwurf         : ${formatEuroDE(sum(r => r.entwurfCents))}  ← nach vorn korrigierbar`);
-    console.log(`  nicht zugeordnet      : ${formatEuroDE(sum(r => r.nichtZugeordnetCents))}`);
   }
-  if (nichtBewertbar.length > 0) {
-    console.log(
-      `\nNICHT BEWERTBAR: ${nichtBewertbar.length} Kunden-Jahr(e) — das Quelljahr liegt ausserhalb des\n` +
-      `Anspruchsfensters (davor ODER dahinter); die Herkunft des Uebertrags ist aus den\n` +
-      `vorhandenen Daten nicht rekonstruierbar.\n` +
-      `Diese Zeilen sind WEDER geprueft NOCH entlastet: ` +
-      nichtBewertbar.map(n => `${n.customerId}/${n.sourceYear}`).join(", "),
-    );
-  }
-  // LEGENDE — bekannte Verzerrungen. Ohne sie liest sich "wenig gefunden" als
-  // Entwarnung, obwohl beide Systematiken die Treffermenge nach UNTEN druecken.
   console.log(
-    "\n--- Legende: bekannte Verzerrungen (beide nach unten) ---\n" +
-    "  * Settings-Luecke: deckt keine Phasenzeile einen Monat ab, rechnet dieses\n" +
-    "    Werkzeug mit dem gesetzlichen Hoechstbetrag, der Schreibpfad dagegen mit\n" +
-    "    dem konfigurierten Kundensatz. Bei reduziertem Satz ist der Anspruch\n" +
-    "    hier zu hoch -> Phantom und Fehlbetrag zu NIEDRIG (S-4).\n" +
-    "  * Zieljahres-Verfuegbarkeit wird gegen den KORRIGIERTEN Uebertrag\n" +
-    "    gerechnet, nicht gegen den persistierten. Liegt der persistierte\n" +
-    "    darunter (Unterdeckung), ist der Fehlbetrag zu niedrig und die\n" +
-    "    Unterdeckung wird gar nicht ausgewiesen (S-5).\n" +
-    "  * 'Nicht bewertbar' heisst WEDER geprueft NOCH entlastet.\n" +
-    "  Ein kleines Ergebnis ist damit keine Entwarnung.",
+    "\nHINWEIS: Keines der Modelle ist als richtig gesetzt. Ein '—' heisst, dass\n" +
+    "das jeweilige Modell dieses Kunden-Jahr gar nicht als Kandidat bildet.\n" +
+    "Welches dem Produktions-Roll 2025->2026 entspricht, entscheidet der\n" +
+    "Abgleich mit den tatsaechlich persistierten Uebertraegen.",
   );
+}
 
-  if (legacyYearZeilen > 0) {
-    console.log(
-      `\nHinweis: ${legacyYearZeilen} Uebertragszeile(n) tragen die Legacy-Konvention\n` +
-      `\`year = sourceYear\`. Die Auswertung schluesselt ueber \`valid_from\` und erfasst sie;\n` +
-      `eine \`year\`-basierte Auswertung haette sie verfehlt.`,
+async function main(): Promise<void> {
+  const asOfIso = todayISO();
+  if (process.argv.includes("--compare-keying")) return gegenprobe(asOfIso);
+
+  const arg = process.argv.find(a => a.startsWith("--keying="));
+  const keying = arg?.split("=")[1];
+  if (keying !== "year" && keying !== "window") {
+    console.error(
+      "[45b-dryrun] --keying=year|window ist PFLICHT (kein Default: die beiden\n" +
+      "             Modelle laufen bei den Legacy-Zeilen auseinander), oder\n" +
+      "             --compare-keying fuer beide nebeneinander.",
     );
+    process.exit(2);
   }
-  if (ineligible.size > 0) {
-    console.log(`\nOhne §45b-Anspruch (Eligibility-Gate), nicht bewertet: ${ineligible.size} Kunde(n).`);
-  }
-  console.log("");
+  const out = await lauf(keying, asOfIso);
+  console.log(JSON.stringify({ asOfIso, keying, rows: out }, null, 2));
 }
 
 main().then(() => process.exit(0)).catch((err) => {

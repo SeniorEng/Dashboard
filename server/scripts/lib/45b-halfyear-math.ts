@@ -151,6 +151,14 @@ export interface HalfYearEvalInput {
   settings: ReadonlyArray<SettingRow>;
   allocations: ReadonlyArray<AllocRow>;
   transactions: ReadonlyArray<TxRow>;
+  /**
+   * Wie der Uebertrag seinem Zieljahr zugeordnet wird. PFLICHT, kein Default:
+   *  - `"year"`   = wie die Produktion (`allocation-storage.ts:1569`,
+   *                 `carryoverAllocations.filter(a => a.year === year)`)
+   *  - `"window"` = ueber `valid_from`, konventionsunabhaengig
+   * Bei den 26 Legacy-Zeilen (`year = sourceYear`) fallen beide auseinander.
+   */
+  carryoverKeying: CarryoverKeying;
 }
 
 export interface HalfYearEvalResult {
@@ -265,8 +273,13 @@ function minIso(a: string, b: string): string { return a < b ? a : b; }
  * der Konvention. Es ist derselbe drift-sichere Schlüssel, den auch die
  * Dedup-SSoT (`shared/domain/budget-carryover-dedup.ts`) benennt.
  */
-function carryoverTargetYear(a: AllocRow): number {
-  return Number(a.validFrom.slice(0, 4));
+export type CarryoverKeying = "window" | "year";
+
+export function carryoverTargetYear(a: AllocRow, modus: CarryoverKeying): number {
+  // KEIN Default. Die beiden Modelle laufen bei den Legacy-Zeilen auseinander,
+  // und welches dem Produktions-Roll entspricht, ist offen — ein Default waere
+  // eine stille Antwort auf eine ungeklaerte Frage.
+  return modus === "window" ? Number(a.validFrom.slice(0, 4)) : a.year;
 }
 
 /**
@@ -309,7 +322,7 @@ export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
   // Betrag UND Frist über DIESELBE Zeilenmenge — sonst summiert die eine
   // Seite Zeilen, die die andere nicht sieht.
   const uebertragsZeilen = (jahr: number) =>
-    i.allocations.filter(a => a.source === "carryover" && carryoverTargetYear(a) === jahr);
+    i.allocations.filter(a => a.source === "carryover" && carryoverTargetYear(a, i.carryoverKeying) === jahr);
   const carryoverIn = (jahr: number) =>
     uebertragsZeilen(jahr).reduce((s, a) => s + a.amountCents, 0);
   /**
