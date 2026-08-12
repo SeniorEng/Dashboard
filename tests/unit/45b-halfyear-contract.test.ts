@@ -12,8 +12,8 @@
  * Uhr eingefroren auf den Stichtag des Vertrags — ohne das wandern die
  * Zieljahres-Erwartungen mit dem Kalender.
  */
-import { describe, it, expect, beforeEach } from "vitest";
-import { freezeTime } from "../helpers/frozen-clock";
+import { describe, it, expect } from "vitest";
+import { freezeTime, thawTime } from "../helpers/frozen-clock";
 import {
   HALFYEAR_CASES, SPLIT_CASES, AS_OF,
 } from "../../server/scripts/lib/__fixtures__/45b-halfyear-cases";
@@ -21,10 +21,19 @@ import {
   evaluate45bHalfYear, splitShortfall, netConsumptionFromRows,
 } from "../../server/scripts/lib/45b-halfyear-math";
 
-beforeEach(() => {
-  // `thawTime()` erledigt der globale afterEach in `tests/setup.ts`.
-  freezeTime(`${AS_OF}T12:00:00`);
-});
+/**
+ * KEIN pauschales Einfrieren mehr.
+ *
+ * `evaluate45bHalfYear` und `entitlementForYear` lesen gar keine Uhr — der
+ * Stichtag ist Parameter. Ein `freezeTime` im `beforeEach` maskierte damit
+ * genau die Regression, die es zu verhindern schien: wer `todayISO()` in die
+ * reine Funktion zurueckholt, waere gruen geblieben, weil die eingefrorene
+ * Uhr zufaellig auf denselben Stichtag zeigte.
+ *
+ * Der Waechter dafuer ist der Zwei-Uhren-Test unten: derselbe Input unter
+ * ZWEI verschiedenen Uhren muss dasselbe Ergebnis liefern. `thawTime()`
+ * erledigt der globale afterEach in `tests/setup.ts`.
+ */
 
 describe("§45b-Halbjahres-Vertrag — reine Funktion gegen bekannte Antworten", () => {
   for (const c of HALFYEAR_CASES) {
@@ -100,5 +109,41 @@ describe("netConsumptionFromRows — die Naht, an der B2/B3 saßen", () => {
     expect(netConsumptionFromRows(
       [{ date: "2025-01-01", type: "reversal", amountCents: 5000 }], "2025-01-01", "2025-12-31",
     )).toBe(0);
+  });
+});
+
+describe("Uhr-Unabhaengigkeit — der Stichtag ist Parameter, nicht Umgebung", () => {
+  for (const c of HALFYEAR_CASES) {
+    it(`${c.id} liefert unter zwei verschiedenen Uhren dasselbe`, () => {
+      const eingabe = {
+        asOfIso: c.input.asOfIso,
+        sourceYear: c.input.sourceYear,
+        pgStartIso: c.input.pgStartIso,
+        settings: c.input.settings,
+        allocations: c.input.allocations,
+        transactions: c.input.transactions,
+      };
+
+      // Bewusst weit auseinander UND auf der anderen Seite des Stichtags:
+      // ein zurueckgeholtes `todayISO()` wuerde hier zwangslaeufig
+      // auseinanderlaufen.
+      freezeTime("2026-02-03T09:00:00");
+      const frueh = evaluate45bHalfYear(eingabe);
+      freezeTime("2027-11-29T21:00:00");
+      const spaet = evaluate45bHalfYear(eingabe);
+      thawTime();
+
+      expect({ id: c.id, ...frueh }).toEqual({ id: c.id, ...spaet });
+    });
+  }
+
+  it("der Split ist ebenfalls uhr-unabhaengig", () => {
+    const c = SPLIT_CASES[0];
+    freezeTime("2026-02-03T09:00:00");
+    const a = splitShortfall(c.rows, c.shortfallCents, new Set(c.issuedAppointmentIds), c.cutoffIso);
+    freezeTime("2027-11-29T21:00:00");
+    const b = splitShortfall(c.rows, c.shortfallCents, new Set(c.issuedAppointmentIds), c.cutoffIso);
+    thawTime();
+    expect(a).toEqual(b);
   });
 });

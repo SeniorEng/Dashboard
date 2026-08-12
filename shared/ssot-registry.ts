@@ -411,11 +411,23 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
   {
     id: "budget-anchor",
     question: "Ab wann läuft ein Budget-Topf? (Anker — laufzeit-abgeleitet aus der Pflegegrad-Historie, NICHT persistiert)",
-    // Absenz-Invariante (Task #1204): es gibt bewusst KEINE persistierte
-    // `budget_start_date`-Spalte und damit kein einzelnes kanonisches Symbol —
-    // der Anker wird pro Topf zur Laufzeit abgeleitet. Der Guard erzwingt die
-    // Abwesenheit der Spalte im Prod-Code.
-    canonical: [],
+    // ZWEI Aussagen in einem Eintrag:
+    //
+    // 1. Absenz-Invariante (Task #1204): es gibt bewusst KEINE persistierte
+    //    `budget_start_date`-Spalte — der Anker wird zur Laufzeit abgeleitet.
+    //    Der Guard erzwingt die Abwesenheit der Spalte im Prod-Code.
+    // 2. Die Ableitung selbst hat inzwischen sehr wohl kanonische Symbole.
+    //    Sie lagen bis zur §45b-Uebertrags-Diagnose nur INTERN in
+    //    `calculateAllocated45b` und wurden dort dupliziert — die zweite
+    //    Kopie in `ensureYearlyCarryover45b` steht noch (eigener Produktions-
+    //    PR) und wich in drei Punkten ab. Ohne Registrierung bewacht nichts
+    //    eine dritte Kopie.
+    canonical: [
+      { symbol: "resolve45bAnchor", module: "shared/domain/budget/anchor-45b.ts" },
+      { symbol: "initialBalanceMonthKeys", module: "shared/domain/budget/anchor-45b.ts" },
+      { symbol: "pickEffective45bSettingRow", module: "shared/domain/budget/anchor-45b.ts" },
+      { symbol: "effective45bSettingsWindow", module: "shared/domain/budget/anchor-45b.ts" },
+    ],
     ownedLiterals: [],
     guards: [
       {

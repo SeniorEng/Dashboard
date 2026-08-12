@@ -219,6 +219,22 @@ async function main(): Promise<void> {
       nichtBewertbar.map(n => `${n.customerId}/${n.sourceYear}`).join(", "),
     );
   }
+  // LEGENDE — bekannte Verzerrungen. Ohne sie liest sich "wenig gefunden" als
+  // Entwarnung, obwohl beide Systematiken die Treffermenge nach UNTEN druecken.
+  console.log(
+    "\n--- Legende: bekannte Verzerrungen (beide nach unten) ---\n" +
+    "  * Settings-Luecke: deckt keine Phasenzeile einen Monat ab, rechnet dieses\n" +
+    "    Werkzeug mit dem gesetzlichen Hoechstbetrag, der Schreibpfad dagegen mit\n" +
+    "    dem konfigurierten Kundensatz. Bei reduziertem Satz ist der Anspruch\n" +
+    "    hier zu hoch -> Phantom und Fehlbetrag zu NIEDRIG (S-4).\n" +
+    "  * Zieljahres-Verfuegbarkeit wird gegen den KORRIGIERTEN Uebertrag\n" +
+    "    gerechnet, nicht gegen den persistierten. Liegt der persistierte\n" +
+    "    darunter (Unterdeckung), ist der Fehlbetrag zu niedrig und die\n" +
+    "    Unterdeckung wird gar nicht ausgewiesen (S-5).\n" +
+    "  * 'Nicht bewertbar' heisst WEDER geprueft NOCH entlastet.\n" +
+    "  Ein kleines Ergebnis ist damit keine Entwarnung.",
+  );
+
   if (legacyYearZeilen > 0) {
     console.log(
       `\nHinweis: ${legacyYearZeilen} Uebertragszeile(n) tragen die Legacy-Konvention\n` +
