@@ -45,6 +45,30 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------
+-- GoBD-/Append-only-Trigger für die Dauer des Scrubs stilllegen.
+--
+-- Mehrere Ledger-Tabellen tragen Trigger, die JEDES `UPDATE` blocken —
+-- `budget_transactions_prevent_update()` ist der, an dem der dritte echte Lauf
+-- abbrach; gleichartige Guards liegen auf weiteren Tabellen (`invoices`,
+-- `budget_allocations`, …). Sie einzeln zu umgehen hieße, sie einzeln zu
+-- finden — und die Liste veraltet mit dem nächsten Trigger.
+--
+-- `session_replication_role = replica` legt sie für DIESE Session still. Das
+-- ist hier legitim: wir bereinigen eine Wegwerf-KOPIE zum Zweck der
+-- Pseudonymisierung, nicht das echte Ledger. Auf der lokalen Wegwerf-PG haben
+-- wir Superuser; auf Prod würde dieser Befehl scheitern, was zusätzlich
+-- verhindert, dass das Skript dort je durchläuft.
+--
+-- ACHTUNG — es schaltet auch die FREMDSCHLÜSSEL-Prüfung ab. Für diesen Scrub
+-- geprüft und unkritisch: die einzigen Löschungen treffen `sessions`,
+-- `password_reset_tokens` und `document_signing_tokens`, und auf keine dieser
+-- Tabellen zeigt ein eingehender Fremdschlüssel (`pg_constraint`-Abfrage,
+-- leeres Ergebnis). Dieser Nachweis ist damit TRAGEND, nicht nur beruhigend:
+-- ohne ihn würde eine Verletzung hier stillschweigend durchgehen.
+-- ---------------------------------------------------------------------
+SET session_replication_role = replica;
+
+-- ---------------------------------------------------------------------
 -- 1. AUTH-SECRETS — dürfen so wenig auf die Box wie die WhatsApp-Tokens.
 --
 -- `token_hash` ist in allen drei Token-Tabellen NOT NULL: dort wird gelöscht
@@ -239,6 +263,8 @@ UPDATE payment_advices SET
 -- 9. TECHNISCHE SPUREN
 -- ---------------------------------------------------------------------
 UPDATE audit_log SET ip_address = NULL;
+
+SET session_replication_role = DEFAULT;
 
 COMMIT;
 

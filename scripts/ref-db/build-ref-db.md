@@ -58,6 +58,20 @@ psql ref_build -f scripts/ref-db/scrub-pii.sql
 Läuft in **einer Transaktion**: entweder alles oder nichts. Idempotent —
 mehrfaches Ausführen ändert nichts mehr.
 
+**Braucht Superuser** auf der Wegwerf-DB: der Scrub setzt
+`session_replication_role = replica`, um die GoBD-/Append-only-Trigger auf den
+Ledger-Tabellen (`budget_transactions`, `invoices`, `budget_allocations`, …)
+für die Dauer der Session stillzulegen. Ohne das blockt
+`budget_transactions_prevent_update()` jedes `UPDATE` und die Transaktion
+rollt zurück.
+
+Das ist zugleich eine **Schutzwirkung**: auf Prod fehlt dieses Recht, der
+Befehl scheitert, und das Skript kann dort gar nicht durchlaufen.
+
+> **Nebenwirkung:** `replica` schaltet auch die Fremdschlüssel-Prüfung ab. Für
+> diesen Scrub geprüft und unkritisch (siehe „Geprüft" unten) — der FK-Nachweis
+> ist dadurch aber **tragend** geworden, nicht bloß beruhigend.
+
 Was bereinigt wird und was bewusst bleibt, steht im Kopf von `scrub-pii.sql`.
 Kurzfassung: Personen, Freitext, Sozialdaten, Signatur-**Daten**, Bank,
 Auth-Secrets raus — IDs, Fremdschlüssel, Beträge, Zeitstempel, `pflegegrad`,
@@ -160,7 +174,9 @@ laut statt still.
 - **Kein eingehender Fremdschlüssel** auf `sessions`, `password_reset_tokens`
   oder `document_signing_tokens` (`pg_constraint`-Abfrage, leeres Ergebnis).
   Das `DELETE` in Schritt 2 kann also keine Integrität verletzen und keine
-  behaltene Tabelle mitreißen.
+  behaltene Tabelle mitreißen. **Tragend**, weil
+  `session_replication_role = replica` die FK-Prüfung während des Scrubs
+  abschaltet — eine Verletzung würde hier stillschweigend durchgehen.
 - `scrub-pii.sql` läuft fehlerfrei gegen eine Schema-Kopie; die
   „muss 0"-Richtung der Verifikation ist dort bestätigt.
 - **NOT NULL / CHECK vorab geprüft**: `information_schema` gegen
@@ -170,7 +186,8 @@ laut statt still.
   und bekommen den Platzhalter `'SCRUBBED'`. Der einzige CHECK-Constraint auf
   den berührten Tabellen (`qonto_transactions_match_xor`) betrifft keine
   Scrub-Spalte.
-- **Idempotenz ausgeführt**: zweiter Lauf fehlerfrei.
+- **Idempotenz ausgeführt**: zweiter Lauf fehlerfrei; `session_replication_role`
+  steht danach wieder auf `origin`.
 - **Offen:** die „muss > 0"-Richtung gegen echte Daten. Die Schema-Kopie ist
   leer, deshalb ist der erste Lauf nach Schritt 3 das eigentliche Gate.
 
