@@ -24,9 +24,20 @@
 --   Namen        → "Kunde <id>" / "Mitarbeiter <id>"  (Listen bleiben lesbar)
 --   E-Mail/Tel.  → deterministisch aus der Zeilen-ID (Unique-Constraints und
 --                  Gruppierungen bleiben funktionsfähig)
---   Freitext     → NULL
+--   Freitext     → NULL, bzw. 'SCRUBBED' wo die Spalte NOT NULL ist
 --   Geburtsdatum → 01.01. des Geburtsjahres (Alters-/Geburtstagslogik bleibt)
 --   Auth-Secrets → gelöscht bzw. unbrauchbarer Platzhalter
+--
+-- ── NOT NULL / CHECK ────────────────────────────────────────────────
+-- Alle Ziel-Spalten wurden per `information_schema` gegen `is_nullable='NO'`
+-- und per `pg_constraint` gegen CHECK-Constraints geprüft. Drei Spalten sind
+-- NOT NULL und bekommen deshalb den Platzhalter 'SCRUBBED' statt NULL:
+--   customers.address · customer_insurance_history.versichertennummer
+--   · prospect_notes.note_text
+-- Der erste echte Lauf brach an der ersten davon ab; die anderen beiden wären
+-- als Nächstes gefolgt. CHECK-Constraints gibt es auf den berührten Tabellen
+-- nur einen (`qonto_transactions_match_xor`), und er betrifft keine
+-- Scrub-Spalte — die Platzhalter können ihn nicht verletzen.
 --
 -- IDEMPOTENT: mehrfaches Ausführen ändert nichts mehr.
 -- =====================================================================
@@ -76,7 +87,8 @@ UPDATE customers SET
   nr           = (id % 200 + 1)::text,   -- Hausnummer (heisst hier `nr`)
   plz          = '10115',
   stadt        = 'Berlin',
-  address      = NULL,
+  -- NOT NULL: Platzhalter statt NULL (erster echter Lauf brach hier ab).
+  address      = 'SCRUBBED',
   telefon      = '+49301000' || lpad(id::text, 4, '0'),
   email        = 'kunde-' || id::text || '@example.invalid',
   -- Gate-2-Entscheidung (1): Jahr bleibt, Tag/Monat auf den 01.01.
@@ -118,7 +130,7 @@ UPDATE prospects SET
   raw_email_content = NULL,   -- eingehende Mails: Freitext mit Personenbezug
   status_notiz      = NULL;
 
-UPDATE prospect_notes    SET note_text = NULL;
+UPDATE prospect_notes    SET note_text = 'SCRUBBED';   -- NOT NULL
 UPDATE scheduled_calls   SET lead_name = 'Lead ' || id::text,
                              lead_phone = '+49305000' || lpad(id::text, 4, '0');
 
@@ -136,7 +148,7 @@ UPDATE customer_budget_recipients SET
   notes              = NULL;
 
 UPDATE customer_insurance_history SET
-  versichertennummer = NULL,
+  versichertennummer = 'SCRUBBED',   -- NOT NULL
   notes              = NULL;
 
 -- ---------------------------------------------------------------------

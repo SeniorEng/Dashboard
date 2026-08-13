@@ -80,7 +80,7 @@ UNION ALL SELECT 'user_mail',      count(*) FROM users     WHERE email NOT LIKE 
 UNION ALL SELECT 'appt_freitext',  count(*) FROM appointments
                                    WHERE signature_data IS NOT NULL OR notes IS NOT NULL
 UNION ALL SELECT 'versichertennr', count(*) FROM customer_insurance_history
-                                   WHERE versichertennummer IS NOT NULL
+                                   WHERE versichertennummer <> 'SCRUBBED'
 UNION ALL SELECT 'secrets',        count(*) FROM company_settings
   WHERE COALESCE(iban, bic, whatsapp_access_token, qonto_secret_key,
                  twilio_auth_token, letterxpress_api_key, graph_client_secret) IS NOT NULL;
@@ -92,7 +92,9 @@ enthalten, das keine Spalte verrät:
 ```sql
 -- Erkennbare Muster in verbliebenem Freitext: Mail, Telefon, IBAN
 SELECT 'restfreitext', count(*) FROM prospect_notes
-WHERE note_text ~* '@|\+49|\d{4}\s?\d{4}|DE\d{20}';
+WHERE note_text <> 'SCRUBBED' AND note_text ~* '@|\+49|\d{4}\s?\d{4}|DE\d{20}'
+UNION ALL
+SELECT 'restadresse', count(*) FROM customers WHERE address <> 'SCRUBBED';
 ```
 
 **(b) Analyse-Daten intakt — jede Zeile MUSS `> 0` liefern:**
@@ -161,6 +163,14 @@ laut statt still.
   behaltene Tabelle mitreißen.
 - `scrub-pii.sql` läuft fehlerfrei gegen eine Schema-Kopie; die
   „muss 0"-Richtung der Verifikation ist dort bestätigt.
+- **NOT NULL / CHECK vorab geprüft**: `information_schema` gegen
+  `is_nullable='NO'` und `pg_constraint` gegen CHECK-Constraints über alle 57
+  Scrub-Ziel-Spalten. Drei sind NOT NULL (`customers.address`,
+  `customer_insurance_history.versichertennummer`, `prospect_notes.note_text`)
+  und bekommen den Platzhalter `'SCRUBBED'`. Der einzige CHECK-Constraint auf
+  den berührten Tabellen (`qonto_transactions_match_xor`) betrifft keine
+  Scrub-Spalte.
+- **Idempotenz ausgeführt**: zweiter Lauf fehlerfrei.
 - **Offen:** die „muss > 0"-Richtung gegen echte Daten. Die Schema-Kopie ist
   leer, deshalb ist der erste Lauf nach Schritt 3 das eigentliche Gate.
 
