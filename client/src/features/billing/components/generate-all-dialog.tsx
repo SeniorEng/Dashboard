@@ -16,7 +16,7 @@ import type { UseMutationResult } from "@tanstack/react-query";
 import type { BillingCustomerItem } from "@shared/api";
 import {
   hasOpenAppointments,
-  classifyBillingMaturity,
+  isFullyBillableIgnoringOpen,
 } from "@shared/domain/billing-eligibility";
 import { MONTH_NAMES } from "../constants";
 import { getCustomerName } from "../utils";
@@ -77,9 +77,10 @@ export function GenerateAllDialog({
   const isSelectionRun = selectedCustomerIds !== undefined;
 
   const totalCount = scopedCustomers.length;
-  // Task #1905 (absorbiert #1895) — die Vorab-Zähler leiten sich jetzt aus DER
-  // EINEN Reife-SSoT `classifyBillingMaturity` ab, nicht mehr aus einer eigenen
-  // Kombination von `hasOpenAppointments` + `eligibility.status`.
+  // Task #1905 (absorbiert #1895) — die Vorab-Zähler leiten sich jetzt aus den
+  // geteilten SSoT-Prädikaten (`hasOpenAppointments`, `isFullyBillableIgnoringOpen`)
+  // ab, nicht mehr aus einer eigenen Kombination von `hasOpenAppointments` +
+  // `eligibility.status`.
   //
   // Die frühere Formel zählte einen Mischkunden (kundensignierter LN für einen
   // Teil, nur mitarbeiter-signierter für den Rest) als „wird erstellt": er hat
@@ -101,14 +102,12 @@ export function GenerateAllDialog({
     return candidates.filter((c) => {
       // Nichts abzurechnen ⇒ der Server überspringt, egal was sonst gilt.
       if ((c.unbilledAppointmentCount ?? 0) <= 0) return false;
-      // Ist ALLES Dokumentierte abrechenbar? Die Frage stellen wir der Reife-SSoT
-      // selbst — kontrafaktisch ohne die offenen Termine, denn offene (noch nicht
-      // durchgeführte) Termine lösen den Teil-Abrechnungs-Guard nicht aus: er
-      // betrachtet nur dokumentierte Termine. Damit bleibt es EINE Regel; es
-      // entsteht keine zweite Kopie der „ist der Nachweis vollständig?"-Frage.
-      const fullyBillable =
-        classifyBillingMaturity({ ...c, openAppointments: 0 }) === "ready";
-      return fullyBillable || confirmPartial;
+      // Ist ALLES Dokumentierte abrechenbar? Das beantwortet die benannte SSoT
+      // `isFullyBillableIgnoringOpen` — dieselbe, aus der sich auch die
+      // Cluster-Zuordnung speist. Offene (noch nicht durchgeführte) Termine
+      // spielen dabei bewusst keine Rolle: der Teil-Abrechnungs-Guard betrachtet
+      // ausschließlich dokumentierte Termine (Herleitung im Docstring der SSoT).
+      return isFullyBillableIgnoringOpen(c) || confirmPartial;
     }).length;
   }, [scopedCustomers, readyOnly, confirmPartial]);
   const willSkip = totalCount - willCreate;

@@ -176,9 +176,9 @@ export function isAwaitingCustomerSignature(
  * Kunde gilt als „noch offen", wenn im gewählten Monat mindestens ein offener
  * (geplanter) Termin verbleibt. Die Zahl der offenen Termine liefert der Server
  * aus DER EINEN `FINAL_APPOINTMENT_STATUSES`-SSoT
- * (`getOpenAppointmentCountByCustomer`); hier wird nur die Schwelle (> 0)
+ * (`getClusterAmountAppointmentsByCustomer`); hier wird nur die Schwelle (> 0)
  * angewandt. Dieselbe Regel nutzen die Karte „Noch zu erstellen" (Gruppierung
- * „Bereit zum Abrechnen" vs. „Noch offene Termine") UND der Reife-Scope im
+ * „Bereit zum Abrechnen" vs. „Dokumentation ausstehend") UND der Reife-Scope im
  * Split-Knopf „Alle erstellen", damit beide nie auseinanderlaufen.
  */
 export function hasOpenAppointments(c: { openAppointments?: number | null }): boolean {
@@ -346,6 +346,33 @@ export interface BillingMaturityFacts {
  * bereit. Ein Kunde, bei dem beides offen ist, wird als Dokumentations-Fall
  * gemeldet — das ist der Schritt, der zuerst dran ist.
  */
+/**
+ * Task #1905 — PURE SSoT: „Ist ALLES Dokumentierte dieses Kunden abrechenbar?"
+ * — also vollständig in einem Leistungsnachweis erfasst UND gültig signiert,
+ * OHNE die noch offenen Termine zu betrachten.
+ *
+ * Das ist genau die Frage, die der #1883-Guard beim Erstellen stellt: er bildet
+ * seine Ausschluss-Menge ausschließlich aus `completed`-Terminen
+ * (`buildInvoiceDraft` → `completedRows`), ein noch nicht durchgeführter Termin
+ * kann ihn also nie auslösen. Deshalb ist sie von `hasOpenAppointments`
+ * unabhängig — und deshalb braucht der Sammel-Dialog sie getrennt von der
+ * Cluster-Zuordnung, um vorherzusagen, ob ein Lauf ohne Bestätigung durchgeht.
+ *
+ * ERSETZT den kontrafaktischen Aufruf `classifyBillingMaturity({ ...c,
+ * openAppointments: 0 }) === "ready"` im Dialog. Der war zwar korrekt, hing aber
+ * still an der internen Präzedenz von `classifyBillingMaturity`: käme dort ein
+ * weiterer Faktor in den Dokumentations-Zweig, hätte der Dialog klammheimlich
+ * seine Bedeutung geändert, ohne dass ein Test darauf zeigt. Als benanntes
+ * Prädikat ist die Regel sichtbar und wird von BEIDEN Seiten importiert.
+ */
+export function isFullyBillableIgnoringOpen(c: BillingMaturityFacts): boolean {
+  return (
+    !isPartiallyDocumented(c) &&
+    !isAwaitingCustomerSignature(c) &&
+    c.eligibility.status === "eligible"
+  );
+}
+
 export function classifyBillingMaturity(c: BillingMaturityFacts): BillingMaturityGroup {
   // 1. Dokumentation ausstehend: noch offene Termine ODER nicht alle
   //    dokumentierten Termine in einem aktiven LN erfasst. `isPartiallyDocumented`
@@ -354,7 +381,11 @@ export function classifyBillingMaturity(c: BillingMaturityFacts): BillingMaturit
   //    aber nicht dokumentierter Termin ist ein Dokumentations-Rückstand, kein
   //    Nachweis-Rückstand.
   if (hasOpenAppointments(c) || isPartiallyDocumented(c)) return "documentation_pending";
-  // 2. Nachweis ausstehend: vollständig dokumentiert, aber kein gültiger
+  // 2./3. Ab hier ist alles dokumentiert erfasst; es entscheidet nur noch der
+  //    Nachweis — dieselbe Frage, die `isFullyBillableIgnoringOpen` beantwortet
+  //    (dort auch die Herleitung, warum sie von offenen Terminen unabhängig ist).
+  //
+  //    Nachweis ausstehend: vollständig dokumentiert, aber kein gültiger
   //    (= abrechenbar signierter) Leistungsnachweis.
   //
   //    `isAwaitingCustomerSignature` ist hier der Kern-Fix von #1905. Ein
@@ -368,8 +399,5 @@ export function classifyBillingMaturity(c: BillingMaturityFacts): BillingMaturit
   //
   //    Alle übrigen Block-Gründe (not_signed/no_appointments/already_billed) fallen
   //    ebenfalls hierher: nicht bereit, Grund per Inline-Label.
-  if (isAwaitingCustomerSignature(c) || c.eligibility.status !== "eligible") {
-    return "proof_pending";
-  }
-  return "ready";
+  return isFullyBillableIgnoringOpen(c) ? "ready" : "proof_pending";
 }

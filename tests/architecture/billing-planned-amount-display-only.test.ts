@@ -22,6 +22,15 @@
  * Der Detektor ist PUR und wird vom Real-Tree-Scan UND vom Negativ-Test mit
  * DERSELBEN Funktion aufgerufen — der Negativ-Test beweist, dass eine bewusste
  * Verletzung CI bricht.
+ *
+ * GRENZE DIESES WÄCHTERS (bewusst, damit das grüne Gate nicht stärker gelesen
+ * wird, als es ist): Er ist ein Namens-Stolperdraht, KEINE Taint-Analyse. Er
+ * sucht das Literal `plannedAmountCents`. Ein `{ ...customer }`-Spread in einen
+ * Schreibpfad, oder eine Zwischenvariable, die den Wert innerhalb einer
+ * ALLOWED-Datei aus dem Feld heraushebt, sähe er NICHT. Heute existiert kein
+ * solcher Weg — an die Erstellung geht ausschließlich `c.id` bzw. `customerIds`,
+ * nie das Kunden-Item selbst. Wer das ändert, muss diesen Wächter mit ändern; er
+ * fängt den Fall nicht von allein.
  */
 import { describe, it, expect } from "vitest";
 import {

@@ -1,5 +1,5 @@
 import { badRequest, notFound, AppError } from "../lib/errors";
-import { splitLineItemsAcrossPots, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
+import { splitLineItemsAcrossPots, summarizePotAmounts, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
 import { isPrivatePaymentAllowed } from "@shared/domain/budget-selbstzahler-validator";
 import {
   BILLING_BLOCK_MESSAGES,
@@ -83,6 +83,51 @@ export function splitLineItemsByPot(
 export type GenerateInvoiceResult =
   | Invoice
   | { splitInvoices: true; invoices: Invoice[]; message: string };
+
+/**
+ * Task #1905 — Brutto-IST einer Termin-Menge für die ANZEIGE (Karte „Noch zu
+ * erstellen"), gerechnet über exakt denselben Weg wie die echte Rechnung:
+ * Zeilen-Bauer → Topf-Split → `summarizePotAmounts`. Damit entspricht die
+ * angezeigte Ist-Zahl dem, was tatsächlich abgerechnet würde.
+ *
+ * Zwei bewusste Abweichungen vom Erstellungs-Pfad, beide weil dies ein reiner
+ * Lesepfad über Termine ist, die (noch) NICHT abgerechnet werden:
+ *  1. `allowPrivatePot: true` — der #1353-Backstop wirft beim Erstellen hart,
+ *     wenn für einen reinen Kassen-Kunden ein Privatanteil entstünde. Hier darf
+ *     eine Anzeige die Abrechnungsseite nicht abschießen.
+ *  2. `allowPrivateReclassification` folgt derselben SSoT
+ *     (`isPrivatePaymentAllowed`): ohne erlaubte Privatzahlung wird NICHT auf
+ *     19 % umgerechnet (siehe `summarizePotAmounts`).
+ *
+ * Fehlt ein Katalogpreis, wirft der Zeilen-Bauer — bewusst NICHT gefangen: ein
+ * verschluckter Preis-Fehler würde hier eine zu kleine Geldsumme anzeigen, und
+ * genau das darf eine Geld-Spalte nicht. Der Erstellungs-Pfad verhält sich
+ * bereits so.
+ */
+export async function computeDocumentedGrossCents(args: {
+  customerId: number;
+  appointmentIds: number[];
+  billingType: string;
+  acceptsPrivatePayment: boolean | null | undefined;
+}): Promise<number> {
+  if (args.appointmentIds.length === 0) return 0;
+  const { lineItems, totalNetCents, totalVatCents } =
+    await buildLineItemsFromAppointments(args.appointmentIds, args.customerId, args.billingType);
+  if (lineItems.length === 0) return 0;
+  const budgetSplit = await getBudgetSplitForAppointments(args.customerId, args.appointmentIds);
+  const privateAllowed = isPrivatePaymentAllowed({
+    billingType: args.billingType,
+    acceptsPrivatePayment: args.acceptsPrivatePayment ?? false,
+  });
+  const potItems = splitLineItemsByPot(lineItems, budgetSplit, { allowPrivatePot: true });
+  return summarizePotAmounts({
+    potItems,
+    billingType: args.billingType,
+    builderNetCents: totalNetCents,
+    builderVatCents: totalVatCents,
+    allowPrivateReclassification: privateAllowed,
+  }).grossCents;
+}
 
 /**
  * Task #750: Pure read-only Helper, der dieselbe Build-Logik liefert wie
@@ -423,22 +468,20 @@ export async function buildInvoiceDraft(input: {
   // Single-Invoice-Pfad wie vor #759, billingType=`selbstzahler`.
   // Reine Kassen-Kunden ohne acceptsPrivatePayment: identisch — nur ein
   // Kasse-Pot belegt (z.B. `entlastungsbetrag_45b`) → 1 Rechnung.
-  const hasPrivateShare = potItems.has("private");
-  const needsBudgetSplit = potItems.size > 1;
+  // Task #1905 — Netto/USt/Brutto kommen aus DER EINEN Aggregation
+  // `summarizePotAmounts` (oben), die auch die IST-Beträge der Karte „Noch zu
+  // erstellen" speist. Die USt-Regel steht damit nur noch an einer Stelle.
+  const amounts = summarizePotAmounts({
+    potItems,
+    billingType,
+    builderNetCents: singleNetCents,
+    builderVatCents: singleVatCents,
+  });
+  const { hasPrivateShare, needsBudgetSplit } = amounts;
 
   if (!needsBudgetSplit) {
-    // Wenn der einzige belegte Pot „private" ist (z.B. Kassen-Kunde mit
-    // §45b-Limit = 0 und acceptsPrivatePayment → alle Kosten landen privat),
-    // muss die Single-Invoice genauso wie der Privat-Anteil eines Mehrtopf-
-    // Splits als Selbstzahler-Rechnung mit 19% USt ausgewiesen werden.
-    // `buildLineItemsFromAppointments` rechnete die USt mit dem Kunden-
-    // billingType (USt-befreit) → 0; deshalb hier auf den Privat-Satz
-    // umrechnen (spiegelt den Split-Pfad, Aggregat-Rundung wie dort).
-    const singlePotIsPrivate = hasPrivateShare && potItems.size === 1;
-    const reclassifyToSelbstzahler = singlePotIsPrivate && billingType !== "selbstzahler";
-    const effectiveVatCents = reclassifyToSelbstzahler
-      ? Math.round((singleNetCents * STANDARD_VAT_RATE_BP) / 10000)
-      : singleVatCents;
+    const { singlePotIsPrivate } = amounts;
+    const effectiveVatCents = amounts.vatCents;
     return {
       customer,
       customerName,
@@ -467,18 +510,15 @@ export async function buildInvoiceDraft(input: {
     };
   }
 
-  // Multi-Pot — Σ Netto + Σ USt über alle Folge-Rechnungen.
-  // Kasse-Pots VAT 0, Privat-Pot VAT 19% (spiegelt Bestand vor #759 + den
-  // Insert-Pfad in `generateInvoiceCore`).
-  let totalNet = 0;
-  let totalVat = 0;
+  // Multi-Pot — Σ Netto + Σ USt über alle Folge-Rechnungen (Kasse-Pots 0 %,
+  // Privat-Pot 19 %) kommen aus `summarizePotAmounts`; hier bleibt nur die
+  // Aufteilung der Legacy-Item-Listen für `/preview`.
+  const totalNet = amounts.netCents;
+  const totalVat = amounts.vatCents;
   const legacyKasseItems: BuildLineItem[] = [];
   const legacyPrivateItems: BuildLineItem[] = [];
   for (const [pot, items] of potItems) {
-    const net = items.reduce((s, i) => s + i.totalCents, 0);
-    totalNet += net;
     if (pot === "private") {
-      totalVat += Math.round((net * STANDARD_VAT_RATE_BP) / 10000);
       legacyPrivateItems.push(...items);
     } else {
       legacyKasseItems.push(...items);

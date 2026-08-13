@@ -87,8 +87,8 @@ import {
     storedInvoicePdfContainsLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
-import { getAlreadyInvoicedAppointmentIds, getBlockingDraftInvoices, getClusterAmountAppointmentsByCustomer, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer, getUnbilledSignedAppointmentFactsByCustomer, buildLineItemsFromAppointments, type UnbilledSignedFacts } from "../services/invoice-data";
-import { buildInvoiceDraft, generateInvoiceCore, PartialBillingConfirmationRequiredError } from "../services/invoice-calc";
+import { getAlreadyInvoicedAppointmentIds, getBlockingDraftInvoices, getClusterAmountAppointmentsByCustomer, getDocumentationCoverageByCustomer, getUnbilledSignedAppointmentFactsByCustomer, buildLineItemsFromAppointments, type UnbilledSignedFacts } from "../services/invoice-data";
+import { buildInvoiceDraft, computeDocumentedGrossCents, generateInvoiceCore, PartialBillingConfirmationRequiredError } from "../services/invoice-calc";
 import { reduceInvoice45bToPaidAmount } from "../services/invoice-45b-reduction";
 import {
   MONTH_NAMES_DE,
@@ -491,10 +491,16 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   const dateFromQ = typeof req.query.dateFrom === "string" && isoDateRe.test(req.query.dateFrom) ? req.query.dateFrom : undefined;
   const dateToQ = typeof req.query.dateTo === "string" && isoDateRe.test(req.query.dateTo) ? req.query.dateTo : undefined;
 
-  const [coverageByCustomer, openByCustomer] = await Promise.all([
+  // Task #1905 — EINE Termin-Mengen-Abfrage speist Gruppierung UND Beträge
+  // (`getClusterAmountAppointmentsByCustomer`); die Zahl der offenen Termine ist
+  // `openIds.length`. Ersetzt den früheren separaten Zähl-Reader.
+  const [coverageByCustomer, apptScopeByCustomer] = await Promise.all([
     getDocumentationCoverageByCustomer(uniqueCustomerIds, year, month),
-    getOpenAppointmentCountByCustomer(uniqueCustomerIds, year, month, { dateFrom: dateFromQ, dateTo: dateToQ }),
+    getClusterAmountAppointmentsByCustomer(uniqueCustomerIds, year, month, { dateFrom: dateFromQ, dateTo: dateToQ }),
   ]);
+  const openByCustomer = new Map<number, number>(
+    [...apptScopeByCustomer].map(([id, sets]) => [id, sets.openIds.length]),
+  );
 
   const customerRows = await db.select({
     id: customersTable.id,
@@ -664,12 +670,23 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   // bereits im Scope (`finalIds` gefiltert, `dateFromQ`/`dateToQ` durchgereicht).
   const actualByCustomer = new Map<number, number>();
   const plannedByCustomer = new Map<number, number>();
-  const clusterAppts = await getClusterAmountAppointmentsByCustomer(
-    finalIds,
-    year,
-    month,
-    { dateFrom: dateFromQ, dateTo: dateToQ },
-  );
+  const clusterAppts = apptScopeByCustomer;
+  // Task #1905 — `acceptsPrivatePayment` entscheidet, ob ein privater Überhang
+  // überhaupt zulässig ist (SSoT `isPrivatePaymentAllowed`) und damit, ob der
+  // IST-Betrag auf 19 % umgerechnet wird. Bewusst eine EIGENE, schmale Abfrage
+  // statt einer weiteren Spalte in `customerRows`: deren Zeilen werden unten per
+  // `...c` in die API-Antwort gespreadet, ein zusätzliches Feld landete also
+  // ungewollt im öffentlichen Response-Schema.
+  const acceptsPrivateById = new Map<number, boolean>();
+  if (finalIds.length > 0) {
+    const rows = await db.select({
+      id: customersTable.id,
+      acceptsPrivatePayment: customersTable.acceptsPrivatePayment,
+    })
+      .from(customersTable)
+      .where(inArray(customersTable.id, finalIds));
+    for (const r of rows) acceptsPrivateById.set(r.id, r.acceptsPrivatePayment ?? false);
+  }
   const AMOUNT_CONCURRENCY = 8;
   for (let i = 0; i < finalIds.length; i += AMOUNT_CONCURRENCY) {
     const chunk = finalIds.slice(i, i + AMOUNT_CONCURRENCY);
@@ -696,25 +713,40 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
         // 2. Rest = dokumentiert + unabgerechnet, aber nicht im Draft.
         const draftSet = new Set(draftApptIds);
         const restIds = (sets?.documentedUnbilledIds ?? []).filter((a) => !draftSet.has(a));
-        // Ein Katalog-Loch (fehlender Preis) lässt den Zeilen-Bauer werfen. Das
-        // darf die LISTE nicht abschießen — der betroffene Betrag bleibt 0 und
-        // wird protokolliert, statt die ganze Abrechnungsseite auf 400 zu setzen.
-        const grossOf = async (ids: number[]): Promise<number> => {
-          if (ids.length === 0) return 0;
-          try {
-            const { totalNetCents, totalVatCents } =
-              await buildLineItemsFromAppointments(ids, id, billingType);
-            return totalNetCents + totalVatCents;
-          } catch (err) {
-            log(
-              `eligible-customers Betrag nicht berechenbar customer=${id} month=${month}/${year}: ${err instanceof Error ? err.message : String(err)}`,
-              "billing",
-            );
-            return 0;
-          }
-        };
-        actualByCustomer.set(id, actualCents + (await grossOf(restIds)));
-        plannedByCustomer.set(id, await grossOf(sets?.openIds ?? []));
+        const openIds = sets?.openIds ?? [];
+
+        // IST-Rest über DENSELBEN Weg wie die echte Rechnung (Zeilen-Bauer →
+        // Topf-Split → `summarizePotAmounts`), damit die angezeigte Ist-Zahl dem
+        // entspricht, was tatsächlich abgerechnet würde — inklusive der 19 % auf
+        // einen privaten Überhang (Pflegekasse mit `acceptsPrivatePayment` und
+        // ausgeschöpftem Topf). Vorher las die Liste die Bauer-Summen roh und lag
+        // in genau diesem Fall bis zu 19 % zu niedrig.
+        //
+        // PLAN dagegen bewusst KONSERVATIV: für offene, noch nicht durchgeführte
+        // Termine ist die Topf-Lage zum Abrechnungszeitpunkt offen, ein
+        // spekulativer Privat-Aufschlag wäre erfundene Genauigkeit. PLAN nimmt
+        // deshalb die Bauer-Summen (Selbstzahler tragen dort ohnehin ihre 19 %,
+        // das ist keine Spekulation) und wird über `SHOW_PROVISIONAL_MARKER` als
+        // vorläufig kenntlich gemacht.
+        //
+        // Fehlender Katalogpreis: NICHT gefangen. Ein verschluckter Preis-Fehler
+        // hätte hier eine zu kleine Geldsumme angezeigt; der Erstellungs-Pfad
+        // (Draft, oben) scheitert in derselben Lage ebenfalls laut.
+        const [restCents, plannedCents] = await Promise.all([
+          computeDocumentedGrossCents({
+            customerId: id,
+            appointmentIds: restIds,
+            billingType: billingType ?? "selbstzahler",
+            acceptsPrivatePayment: acceptsPrivateById.get(id),
+          }),
+          openIds.length === 0
+            ? Promise.resolve(0)
+            : buildLineItemsFromAppointments(openIds, id, billingType).then(
+                (r) => r.totalNetCents + r.totalVatCents,
+              ),
+        ]);
+        actualByCustomer.set(id, actualCents + restCents);
+        plannedByCustomer.set(id, plannedCents);
       }),
     );
   }
@@ -3476,7 +3508,7 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     // Task #1771: Wenn gesetzt, werden NUR Kunden ohne offene (geplante) Termine
     // abgerechnet („Bereit zum Abrechnen") — Kunden mit noch offenen Terminen
     // werden als „übersprungen" gemeldet. Nutzt DIESELBE „offene Termine"-SSoT
-    // (getOpenAppointmentCountByCustomer, FINAL_APPOINTMENT_STATUSES) wie
+    // (getClusterAmountAppointmentsByCustomer, FINAL_APPOINTMENT_STATUSES) wie
     // /eligible-customers und die Karten-Gruppierung „Bereit zum Abrechnen" —
     // keine zweite Berechnung. Weggelassen/false = alle berechtigten Kunden.
     readyOnly: z.boolean().optional(),
@@ -3557,19 +3589,19 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
   // Task #1771: Wenn `readyOnly` gesetzt ist, werden NUR Kunden ohne offene
   // (geplante) Termine abgerechnet — Kunden mit noch offenen Terminen werden aus
   // der Erstellung genommen und als „übersprungen" gemeldet. Nutzt DIESELBE
-  // „offene Termine"-SSoT (getOpenAppointmentCountByCustomer,
+  // „offene Termine"-SSoT (getClusterAmountAppointmentsByCustomer,
   // FINAL_APPOINTMENT_STATUSES) mit demselben Datumsbereich wie
   // /eligible-customers und die Karten-Gruppierung „Bereit zum Abrechnen" —
   // keine zweite Berechnung, damit Dialog-Auswahl und Liste nie divergieren.
   let openSkippedIds: number[] = [];
   if (readyOnly && customerIds.length > 0) {
-    const openByCustomer = await getOpenAppointmentCountByCustomer(
+    const scope = await getClusterAmountAppointmentsByCustomer(
       customerIds,
       billingYear,
       billingMonth,
       { dateFrom, dateTo },
     );
-    openSkippedIds = customerIds.filter((id) => (openByCustomer.get(id) ?? 0) > 0);
+    openSkippedIds = customerIds.filter((id) => (scope.get(id)?.openIds.length ?? 0) > 0);
     const skipSet = new Set(openSkippedIds);
     customerIds = customerIds.filter((id) => !skipSet.has(id));
   }

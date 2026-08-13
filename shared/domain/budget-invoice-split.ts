@@ -24,6 +24,7 @@
 import type { BudgetType } from "./budgets";
 import { BUDGET_TYPES } from "./budgets";
 import { parseStornoReference } from "./budget/phantom-storno";
+import { STANDARD_VAT_RATE_BP } from "./invoice-vat";
 
 export type InvoicePotKey = BudgetType | "private";
 
@@ -288,4 +289,102 @@ export function sumSharesByPot<T extends SplitInputItem>(
     out[s.potKey] = (out[s.potKey] ?? 0) + s.totalCents;
   }
   return out;
+}
+
+// ============================================
+// BETRAGS-AGGREGATION (Task #1905)
+// ============================================
+
+/** Minimal-Sicht einer Rechnungszeile für die Betrags-Aggregation. */
+export interface PotAmountItem {
+  totalCents: number;
+}
+
+export interface PotAmountsResult {
+  netCents: number;
+  vatCents: number;
+  grossCents: number;
+  hasPrivateShare: boolean;
+  needsBudgetSplit: boolean;
+  singlePotIsPrivate: boolean;
+}
+
+/**
+ * Task #1905 — DIE EINE Aggregation „Topf-Zeilen → Netto/USt/Brutto".
+ *
+ * ERSETZT die zuvor zweimal ausgeschriebene Rechnung in `buildInvoiceDraft`
+ * (Single-Pot-Zweig + Multi-Pot-Schleife) und ist zugleich die Quelle für die
+ * IST-Beträge der Karte „Noch zu erstellen". Vorher las die Liste nur
+ * `totalNetCents + totalVatCents` aus `buildLineItemsFromAppointments` und
+ * verfehlte damit die Reklassifizierung unten — der angezeigte Betrag konnte um
+ * bis zu 19 % unter dem liegen, was tatsächlich abgerechnet wird.
+ *
+ * Die USt-Regel (unverändert, nur an EINE Stelle gezogen):
+ *  • Multi-Pot: Kassen-Töpfe 0 %, Privat-Topf 19 % — je Topf gerundet, wie es
+ *    die Folge-Rechnungen ausweisen.
+ *  • Single-Pot: die zeilenweise gerechnete USt des Zeilen-Bauers, AUSSER der
+ *    einzige belegte Topf ist „private" und der Kunde ist kein Selbstzahler
+ *    (z. B. Pflegekasse mit `acceptsPrivatePayment` und ausgeschöpftem Topf) —
+ *    dann wird auf den Privat-Satz umgerechnet, weil die Rechnung als
+ *    Selbstzahler-Rechnung ausgestellt wird.
+ *
+ * `allowPrivateReclassification` trennt den Rechnungs- vom Anzeige-Pfad: beim
+ * Erstellen ist ein Privat-Anteil für einen reinen Kassen-Kunden schon vorher
+ * hart gesperrt (`splitLineItemsByPot`, Task #1353), dort ist der Wert also
+ * immer `true`. Auf dem Anzeige-Pfad über noch nicht gebuchte Termine kann ein
+ * Privat-Topf dagegen allein aus der fehlenden Buchung entstehen — ihm 19 %
+ * aufzuschlagen wäre falsch, denn eine fehlende Buchung ist kein Privatanteil.
+ *
+ * Geld ist ausnahmslos Integer-Cents.
+ */
+export function summarizePotAmounts(args: {
+  potItems: Map<InvoicePotKey, PotAmountItem[]>;
+  billingType: string;
+  /** Netto-Summe aus dem Zeilen-Bauer (Single-Pot-Basis). */
+  builderNetCents: number;
+  /** USt-Summe aus dem Zeilen-Bauer (Single-Pot-Basis). */
+  builderVatCents: number;
+  /** Default `true` (Rechnungs-Pfad). Siehe Docstring. */
+  allowPrivateReclassification?: boolean;
+}): PotAmountsResult {
+  const { potItems, billingType, builderNetCents, builderVatCents } = args;
+  const hasPrivateShare = potItems.has("private");
+  const needsBudgetSplit = potItems.size > 1;
+
+  if (!needsBudgetSplit) {
+    const singlePotIsPrivate = hasPrivateShare && potItems.size === 1;
+    const reclassifyToSelbstzahler =
+      singlePotIsPrivate &&
+      billingType !== "selbstzahler" &&
+      (args.allowPrivateReclassification ?? true);
+    const vatCents = reclassifyToSelbstzahler
+      ? Math.round((builderNetCents * STANDARD_VAT_RATE_BP) / 10000)
+      : builderVatCents;
+    return {
+      netCents: builderNetCents,
+      vatCents,
+      grossCents: builderNetCents + vatCents,
+      hasPrivateShare,
+      needsBudgetSplit: false,
+      singlePotIsPrivate,
+    };
+  }
+
+  let netCents = 0;
+  let vatCents = 0;
+  for (const [pot, items] of potItems) {
+    const net = items.reduce((s, i) => s + i.totalCents, 0);
+    netCents += net;
+    if (pot === "private") {
+      vatCents += Math.round((net * STANDARD_VAT_RATE_BP) / 10000);
+    }
+  }
+  return {
+    netCents,
+    vatCents,
+    grossCents: netCents + vatCents,
+    hasPrivateShare,
+    needsBudgetSplit: true,
+    singlePotIsPrivate: false,
+  };
 }

@@ -191,6 +191,14 @@ describe("GenerateAllDialog — „werden erstellt“-Zähler (Task #1780/#1905)
     expect(
       screen.getByTestId("text-generate-all-will-skip").textContent,
     ).toBe("1");
+    // Bewusst: ein Lauf, der 0 Rechnungen erzeugen würde, ist nicht startbar.
+    // Wer den signierten Teil dieser Kunden abrechnen will, setzt das Häkchen —
+    // also genau die Option mit Abrechnungsfolge. Die Information, WELCHE Termine
+    // fehlen, steht unabhängig davon in der Liste (Cluster „Leistungsnachweis
+    // fehlt") und im Einzel-Dialog (`excludedAppointments`).
+    expect(
+      screen.getByTestId("button-confirm-generate-all").getAttribute("disabled"),
+    ).not.toBeNull();
   });
 
   it("Mischkunde zählt MIT confirmPartial als „wird erstellt“", () => {

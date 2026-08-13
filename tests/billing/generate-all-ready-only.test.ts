@@ -12,7 +12,7 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  *
  * Damit trifft die Massenerstellung DIESELBE Menge wie die Karten-Gruppierung
  * „Bereit zum Abrechnen" auf der Abrechnungsseite — beide leiten „offen?" aus
- * DERSELBEN SSoT ab (`getOpenAppointmentCountByCustomer` bzw.
+ * DERSELBEN SSoT ab (`getClusterAmountAppointmentsByCustomer` bzw.
  * `hasOpenAppointments`, FINAL_APPOINTMENT_STATUSES). Dieser Test sichert ab:
  *   (a) ein READY-Kunde (dokumentiert+signiert, KEIN offener Termin) wird bei
  *       readyOnly=true trotzdem abgerechnet,

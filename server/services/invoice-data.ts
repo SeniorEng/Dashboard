@@ -367,69 +367,16 @@ export async function getDocumentationCoverageByCustomer(
 }
 
 /**
- * Task #1743 — Anzahl der noch OFFENEN (geplanten) Termine pro Kunde im
- * abzurechnenden Fenster. „Offen" = jeder aktive Termin, dessen Status NICHT
- * terminal ist — exakt die Definition der `FINAL_APPOINTMENT_STATUSES`-SSoT,
- * die auch die Monatsabschluss-Readiness nutzt (offene vs. abgeschlossene
- * Termine). Damit kann die Abrechnungs-Übersicht („Noch zu erstellen") Kunden
- * mit noch offenen Terminen getrennt ausweisen, ohne eine zweite „offener
- * Termin"-Regel zu definieren.
+ * Task #1905 — DIE EINE Termin-Mengen-SSoT des Abrechnungs-Fensters pro Kunde.
  *
- * Task #1317 — Der Zähl-Scope spiegelt EXAKT den Eligibility-Scope von
- * `GET /billing/eligible-customers`: Ohne Datumsbereich der ganze Monat
- * (`gte periodStart` … `lt nextMonth`); mit optionalem `dateFrom`/`dateTo`
- * (ISO) NUR das gewählte Fenster (inklusiver `lte dateTo`, wie der
- * Eligibility-Filter). Sonst würde die Gruppierung „bereit vs. offen" bei
- * Teil-Abrechnung nicht zum gefilterten Fenster passen.
- */
-export async function getOpenAppointmentCountByCustomer(
-  customerIds: number[],
-  billingYear: number,
-  billingMonth: number,
-  range?: { dateFrom?: string; dateTo?: string },
-): Promise<Map<number, number>> {
-  const result = new Map<number, number>();
-  if (customerIds.length === 0) return result;
-  for (const id of customerIds) result.set(id, 0);
-
-  // Fenster identisch zur Eligibility-Logik in `/eligible-customers`:
-  // gesetzter Datumsbereich verengt (nur die vorhandenen Grenzen), sonst Monat.
-  const dateConds = range?.dateFrom || range?.dateTo
-    ? [
-        ...(range.dateFrom ? [gte(appointments.date, range.dateFrom)] : []),
-        ...(range.dateTo ? [lte(appointments.date, range.dateTo)] : []),
-      ]
-    : (() => {
-        const mm = String(billingMonth).padStart(2, "0");
-        const periodStartStr = `${billingYear}-${mm}-01`;
-        const nextMonth = billingMonth === 12 ? 1 : billingMonth + 1;
-        const nextYear = billingMonth === 12 ? billingYear + 1 : billingYear;
-        const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
-        return [gte(appointments.date, periodStartStr), lt(appointments.date, periodEndStr)];
-      })();
-
-  const openRows = await appointmentsRepo.selectColumnsFrom({
-    customerId: appointments.customerId,
-    count: sql<number>`COUNT(*)::int`,
-  })
-    .where(and(
-      inArray(appointments.customerId, customerIds),
-      notInArray(appointments.status, [...FINAL_APPOINTMENT_STATUSES]),
-      appointmentsRepo.activeOnly(),
-      ...dateConds,
-    ))
-    .groupBy(appointments.customerId);
-
-  for (const r of openRows) {
-    if (r.customerId == null) continue;
-    result.set(r.customerId, Number(r.count));
-  }
-  return result;
-}
-
-/**
- * Task #1905 — Termin-Mengen je Kunde für die Cluster-Beträge der Karte „Noch zu
- * erstellen". Liefert pro Kunde die zwei disjunkten Mengen, aus denen IST und
+ * ERSETZT `getOpenAppointmentCountByCustomer` (Task #1743): dessen einzige
+ * Antwort — die Zahl der offenen Termine — ist hier `openIds.length`. Zwei
+ * Funktionen mit demselben Fenster, derselben `FINAL_APPOINTMENT_STATUSES`-SSoT
+ * und einem wortgleich kopierten `dateConds`-Block nebeneinander hätten
+ * garantiert auseinanderdriften können; die Erstberatungs-Abweichung (unten) war
+ * bereits der Anfang davon.
+ *
+ * Liefert pro Kunde die zwei disjunkten Mengen, aus denen Gruppierung, IST und
  * PLAN gebildet werden:
  *
  *  • `documentedUnbilledIds` — dokumentierte (`completed`) Termine im Zeitraum,
@@ -444,13 +391,20 @@ export async function getOpenAppointmentCountByCustomer(
  * Status, `openIds` ist dessen Komplement über `FINAL_APPOINTMENT_STATUSES`) —
  * kein Termin trägt zu IST und PLAN gleichzeitig bei.
  *
- * Zeitfenster und Offen-Definition sind identisch zu
- * `getOpenAppointmentCountByCustomer` (dieselbe `FINAL_APPOINTMENT_STATUSES`-SSoT,
- * dieselbe Datumsbereich-Verengung), damit die Beträge zur Gruppierung passen.
- * Der `Erstberatung`-Ausschluss ist wie in `buildInvoiceDraft` explizit gesetzt:
- * Erstberatungen sind kundenseitig nie abrechenbar (CLAUDE.md), tragen regulär
- * `customer_id = NULL` und fielen schon über den Kunden-Filter raus — der
- * Typ-Filter macht die Regel guard-fest.
+ * „Offen" = jeder aktive Termin, dessen Status NICHT terminal ist — exakt die
+ * `FINAL_APPOINTMENT_STATUSES`-SSoT, die auch die Monatsabschluss-Readiness
+ * nutzt. Das Fenster spiegelt den Eligibility-Scope von
+ * `GET /billing/eligible-customers`: ohne Datumsbereich der ganze Monat, mit
+ * `dateFrom`/`dateTo` nur das gewählte Fenster (inklusiver `lte dateTo`).
+ *
+ * Der `Erstberatung`-Ausschluss gilt für BEIDE Mengen und ist damit die
+ * Korrektur einer echten Abweichung: `getOpenAppointmentCountByCustomer` hatte
+ * ihn nicht. Ein Erstberatungs-Termin mit gesetzter `customer_id` zählte dort
+ * als offener Termin (Kunde in „Dokumentation ausstehend"), steuerte aber nichts
+ * zum PLAN-Betrag bei — Gruppierung und Betrag sagten Verschiedenes über
+ * denselben Termin. Erstberatungen sind kundenseitig nie abrechenbar
+ * (CLAUDE.md); mitarbeiterseitig (Lohn/Stunden/km) bleiben sie unberührt, dieser
+ * Reader liegt ausschließlich auf dem Kundenpfad.
  */
 export async function getClusterAmountAppointmentsByCustomer(
   customerIds: number[],
