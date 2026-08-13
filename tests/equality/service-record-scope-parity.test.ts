@@ -60,8 +60,19 @@ beforeAll(async () => {
   const cust = await createTestCustomer({ nachname: `Privat-T1896P-${uniqueId()}` });
   customerId = cust.id as number;
 
+  // Kalender-Anker: `heute + 30` kann auf ein Wochenende fallen, und die
+  // Termin-Route lehnt Sa/So hart ab („Termine können nicht an Samstagen oder
+  // Sonntagen erstellt werden"). Ohne den Roll war diese Datei an rund zwei von
+  // sieben Tagen rot, ohne dass sich am Produktivcode etwas geändert hätte —
+  // zuletzt am 13.08.2026 (Do), wo +30 auf Samstag, den 12.09.2026 fiel und die
+  // GANZE Suite im `beforeAll` abbrach (CI-Shard 1, Required Check `tests`).
+  //
+  // Vorwärts rollen, nicht rückwärts: der Test braucht ein Datum in der Zukunft.
   const day = new Date();
   day.setDate(day.getDate() + 30);
+  const dow = day.getDay();
+  if (dow === 6) day.setDate(day.getDate() + 2);
+  else if (dow === 0) day.setDate(day.getDate() + 1);
   const dateStr = ymd(day);
 
   // Angelegt über die Route (damit alle NOT-NULL-Spalten stimmen), Status und
