@@ -10,13 +10,19 @@ import { GenerateAllDialog } from "@/features/billing/components/generate-all-di
  * GenerateAllDialog darf niemals mehr versprechen als tatsächlich abgerechnet
  * wird.
  *
- * Task #1775 hat den Zähler an `eligibility.status === "eligible"` UND
- * „keine offenen Termine" gekoppelt (= Karten-Gruppe „Bereit zum Abrechnen").
- * Dieser Test zementiert die Kopplung mit gemischten Kunden:
- *   • eligible & keine offenen Termine  → zählt mit
- *   • blocked (customer_signature_required), keine offenen Termine → zählt NICHT
- *   • eligible, aber offene Termine → zählt NICHT (bei readyOnly=true)
- * Abgedeckt für readyOnly=true (Default) und readyOnly=false.
+ * Task #1905 (absorbiert #1895) — der Zähler leitet sich jetzt aus DER EINEN
+ * Reife-SSoT `classifyBillingMaturity` ab statt aus einer eigenen Kombination
+ * von `hasOpenAppointments` + `eligibility.status`. Die alte Formel zählte einen
+ * MISCHKUNDEN (ein Teil kundensigniert, der Rest nur mitarbeiter-signiert) als
+ * „wird erstellt": er hat keine offenen Termine und ist `eligible`. Der Server
+ * rechnet ihn aber nur mit gesetztem `confirmPartial` ab — sonst meldet er ihn
+ * als „übersprungen mit Ausweis" (#1883). Der Zähler versprach also eine
+ * Rechnung, die nicht entsteht, und zwar UNABHÄNGIG vom Häkchen.
+ *
+ * Gespiegeltes Server-Verhalten (`POST /billing/generate-all`):
+ *   • `readyOnly` überspringt nur Kunden mit OFFENEN Terminen.
+ *   • kein abrechenbarer Anteil (`unbilledAppointmentCount === 0`) → übersprungen.
+ *   • dokumentierte Termine ohne gültigen Nachweis → `confirmPartial` entscheidet.
  */
 
 const BASE_CUSTOMER: Omit<BillingCustomerItem, "id"> = {
@@ -31,7 +37,21 @@ const BASE_CUSTOMER: Omit<BillingCustomerItem, "id"> = {
   eligibility: { status: "eligible", reason: null },
   signedAppointmentCount: 0,
   unbilledAppointmentCount: 0,
+  actualAmountCents: 0,
+  plannedAmountCents: 0,
 };
+
+/** Vollständig dokumentiert, vollständig signiert, ein offener Rechnungsposten. */
+function readyCustomer(id: number, extra: Partial<BillingCustomerItem> = {}) {
+  return makeCustomer({
+    id,
+    completedAppointments: 1,
+    coveredAppointments: 1,
+    signedAppointmentCount: 1,
+    unbilledAppointmentCount: 1,
+    ...extra,
+  });
+}
 
 function makeCustomer(
   overrides: Partial<BillingCustomerItem> & { id: number },
@@ -65,20 +85,22 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("GenerateAllDialog — „werden erstellt“-Zähler (Task #1780)", () => {
-  // 2 eligible ohne offene Termine, 1 signatur-blockiert, 1 mit offenen Terminen.
+describe("GenerateAllDialog — „werden erstellt“-Zähler (Task #1780/#1905)", () => {
+  // 2 bereit, 1 ohne gültigen Nachweis (nichts abrechenbar), 1 mit offenen Terminen.
   const MIXED: BillingCustomerItem[] = [
-    makeCustomer({ id: 1 }), // eligible, ready
-    makeCustomer({ id: 2 }), // eligible, ready
+    readyCustomer(1),
+    readyCustomer(2),
     makeCustomer({
-      id: 3, // blocked: Kundenunterschrift fehlt, KEINE offenen Termine
+      id: 3, // kein signierter LN ⇒ nichts abrechenbar, KEINE offenen Termine
       billingType: "pflegekasse_gesetzlich",
+      completedAppointments: 1,
+      coveredAppointments: 1,
       eligibility: { status: "blocked", reason: "customer_signature_required" },
     }),
-    makeCustomer({ id: 4, openAppointments: 2 }), // eligible, aber offene Termine
+    readyCustomer(4, { openAppointments: 2 }), // abrechenbar, aber offene Termine
   ];
 
-  it("readyOnly=true: zählt nur eligible-und-nicht-offene Kunden", () => {
+  it("readyOnly=true: zählt nur bereite Kunden ohne offene Termine", () => {
     render(<Harness customers={MIXED} />);
 
     // Default ist readyOnly=true.
@@ -127,6 +149,8 @@ describe("GenerateAllDialog — „werden erstellt“-Zähler (Task #1780)", () 
       makeCustomer({
         id: 10,
         billingType: "pflegekasse_gesetzlich",
+        completedAppointments: 1,
+        coveredAppointments: 1,
         eligibility: { status: "blocked", reason: "customer_signature_required" },
       }),
     ];
@@ -138,5 +162,68 @@ describe("GenerateAllDialog — „werden erstellt“-Zähler (Task #1780)", () 
     expect(
       screen.getByTestId("text-generate-all-will-skip").textContent,
     ).toBe("1");
+  });
+
+  // ── Task #1905 (absorbiert #1895) — die Vorschau-Lüge ─────────────────────
+  // Der Mischkunde aus den echten Juli-2026-Daten: 5 dokumentiert, 5 abgedeckt,
+  // 4 kundensigniert. Er ist `eligible` (der signierte Teil ist abrechenbar) und
+  // hat KEINE offenen Termine — die alte Formel zählte ihn deshalb als „wird
+  // erstellt", obwohl der Server ihn ohne `confirmPartial` überspringt.
+  const MISCHKUNDE = makeCustomer({
+    id: 96,
+    billingType: "pflegekasse_gesetzlich",
+    completedAppointments: 5,
+    coveredAppointments: 5,
+    signedAppointmentCount: 4,
+    unbilledAppointmentCount: 4,
+    eligibility: { status: "eligible", reason: null },
+  });
+
+  it("Mischkunde zählt OHNE confirmPartial NICHT als „wird erstellt“", () => {
+    render(<Harness customers={[MISCHKUNDE]} />);
+
+    expect(
+      screen.getByTestId("checkbox-confirm-partial-bulk").getAttribute("data-state"),
+    ).toBe("unchecked");
+    expect(
+      screen.getByTestId("text-generate-all-will-create").textContent,
+    ).toBe("0");
+    expect(
+      screen.getByTestId("text-generate-all-will-skip").textContent,
+    ).toBe("1");
+  });
+
+  it("Mischkunde zählt MIT confirmPartial als „wird erstellt“", () => {
+    render(<Harness customers={[MISCHKUNDE]} />);
+
+    fireEvent.click(screen.getByTestId("checkbox-confirm-partial-bulk"));
+
+    expect(
+      screen.getByTestId("text-generate-all-will-create").textContent,
+    ).toBe("1");
+    expect(
+      screen.getByTestId("text-generate-all-will-skip").textContent,
+    ).toBe("0");
+  });
+
+  it("confirmPartial macht einen Kunden OHNE abrechenbaren Anteil nicht erstellbar", () => {
+    // Ohne signierten LN gibt es nichts zu berechnen — auch die bewusste
+    // Teil-Abrechnung erzeugt hier keine Rechnung (der Server überspringt).
+    const nothingBillable = [
+      makeCustomer({
+        id: 20,
+        billingType: "pflegekasse_gesetzlich",
+        completedAppointments: 2,
+        coveredAppointments: 2,
+        eligibility: { status: "blocked", reason: "customer_signature_required" },
+      }),
+    ];
+    render(<Harness customers={nothingBillable} />);
+
+    fireEvent.click(screen.getByTestId("checkbox-confirm-partial-bulk"));
+
+    expect(
+      screen.getByTestId("text-generate-all-will-create").textContent,
+    ).toBe("0");
   });
 });
