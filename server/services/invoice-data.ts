@@ -427,6 +427,91 @@ export async function getOpenAppointmentCountByCustomer(
   return result;
 }
 
+/**
+ * Task #1905 — Termin-Mengen je Kunde für die Cluster-Beträge der Karte „Noch zu
+ * erstellen". Liefert pro Kunde die zwei disjunkten Mengen, aus denen IST und
+ * PLAN gebildet werden:
+ *
+ *  • `documentedUnbilledIds` — dokumentierte (`completed`) Termine im Zeitraum,
+ *    die noch auf KEINER aktiven Rechnung liegen. Basis des IST-Betrags
+ *    (geleistete, noch nicht abgerechnete Arbeit) — unabhängig davon, ob sie
+ *    bereits abrechenbar signiert sind. Genau das füllt in der Gruppe
+ *    „Leistungsnachweis fehlt" die heutigen „—".
+ *  • `openIds` — offene (noch nicht finale) Termine im Zeitraum. Basis des
+ *    PLAN-Betrags (geplante, noch nicht geleistete Arbeit).
+ *
+ * Beide Mengen sind per Status-Definition disjunkt (`completed` ist ein finaler
+ * Status, `openIds` ist dessen Komplement über `FINAL_APPOINTMENT_STATUSES`) —
+ * kein Termin trägt zu IST und PLAN gleichzeitig bei.
+ *
+ * Zeitfenster und Offen-Definition sind identisch zu
+ * `getOpenAppointmentCountByCustomer` (dieselbe `FINAL_APPOINTMENT_STATUSES`-SSoT,
+ * dieselbe Datumsbereich-Verengung), damit die Beträge zur Gruppierung passen.
+ * Der `Erstberatung`-Ausschluss ist wie in `buildInvoiceDraft` explizit gesetzt:
+ * Erstberatungen sind kundenseitig nie abrechenbar (CLAUDE.md), tragen regulär
+ * `customer_id = NULL` und fielen schon über den Kunden-Filter raus — der
+ * Typ-Filter macht die Regel guard-fest.
+ */
+export async function getClusterAmountAppointmentsByCustomer(
+  customerIds: number[],
+  billingYear: number,
+  billingMonth: number,
+  range?: { dateFrom?: string; dateTo?: string },
+): Promise<Map<number, { documentedUnbilledIds: number[]; openIds: number[] }>> {
+  const result = new Map<number, { documentedUnbilledIds: number[]; openIds: number[] }>();
+  if (customerIds.length === 0) return result;
+  for (const id of customerIds) result.set(id, { documentedUnbilledIds: [], openIds: [] });
+
+  const dateConds = range?.dateFrom || range?.dateTo
+    ? [
+        ...(range.dateFrom ? [gte(appointments.date, range.dateFrom)] : []),
+        ...(range.dateTo ? [lte(appointments.date, range.dateTo)] : []),
+      ]
+    : (() => {
+        const mm = String(billingMonth).padStart(2, "0");
+        const periodStartStr = `${billingYear}-${mm}-01`;
+        const nextMonth = billingMonth === 12 ? 1 : billingMonth + 1;
+        const nextYear = billingMonth === 12 ? billingYear + 1 : billingYear;
+        const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+        return [gte(appointments.date, periodStartStr), lt(appointments.date, periodEndStr)];
+      })();
+
+  const rows = await appointmentsRepo.selectColumnsFrom({
+    id: appointments.id,
+    customerId: appointments.customerId,
+    status: appointments.status,
+  })
+    .where(and(
+      inArray(appointments.customerId, customerIds),
+      ne(appointments.appointmentType, "Erstberatung"),
+      appointmentsRepo.activeOnly(),
+      ...dateConds,
+    ));
+
+  const completedIds: number[] = [];
+  for (const r of rows) {
+    if (r.customerId == null) continue;
+    if (r.status === "completed") completedIds.push(r.id);
+  }
+  // Zeitraum-blind, identisch zur Engine-Sperre in `buildInvoiceDraft`: ein
+  // Termin auf einer Rechnung eines ANDEREN Abrechnungszeitraums ist abgerechnet
+  // und darf nicht noch einmal als offener IST-Betrag erscheinen.
+  const invoicedIds = new Set(await getAlreadyInvoicedAppointmentIds(completedIds));
+
+  const finalStatuses = new Set<string>(FINAL_APPOINTMENT_STATUSES);
+  for (const r of rows) {
+    if (r.customerId == null) continue;
+    const entry = result.get(r.customerId);
+    if (!entry) continue;
+    if (r.status === "completed") {
+      if (!invoicedIds.has(r.id)) entry.documentedUnbilledIds.push(r.id);
+    } else if (!finalStatuses.has(r.status)) {
+      entry.openIds.push(r.id);
+    }
+  }
+  return result;
+}
+
 export async function buildLineItemsFromAppointments(apptIds: number[], customerId?: number, billingType?: string) {
   // #1886: Erstberatungen erreichen die Kunden-Abrechnung nicht — die `apptIds`
   // stammen ausschließlich aus kunden-signierten Leistungsnachweisen

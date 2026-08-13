@@ -12,8 +12,6 @@ import {
   ClipboardList,
   ChevronDown,
   CalendarClock,
-  ChevronRight,
-  PenLine,
 } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
 import type { MissingSignatureItem } from "../types";
@@ -21,7 +19,6 @@ import { formatEuroDE } from "@shared/utils/money";
 import {
   isPartiallyDocumented,
   isServiceRecordMissing,
-  hasOpenAppointments,
   classifyBillingMaturity,
   isLateSignedFollowUp,
   lateSignedFollowUpCount,
@@ -33,14 +30,26 @@ import { getCustomerName } from "../utils";
 import { useRowCap } from "../hooks/use-row-cap";
 import type { Selection } from "../hooks/use-selection";
 
+/**
+ * Task #1905 — Schalter für die optische Kennzeichnung des PLAN-Anteils
+ * („vorläufig"). Der Betrag einer Zeile/Gruppe ist IST + PLAN; ist der Schalter
+ * an, wird ein Betrag mit PLAN-Anteil zusätzlich als vorläufig markiert.
+ *
+ * Default AUS (fachlich so entschieden) — bewusst EINE Konstante, damit das
+ * Ein-/Ausschalten eine Zeile bleibt und weder Berechnung noch Feldnamen
+ * berührt.
+ */
+const SHOW_PROVISIONAL_MARKER = false;
+
+/** IST + PLAN eines Kunden (Brutto-Cent). PLAN ist Prognose, siehe `@shared/api`. */
+function rowTotalCents(c: BillingCustomerItem): number {
+  return (c.actualAmountCents ?? 0) + (c.plannedAmountCents ?? 0);
+}
+
 interface PendingInvoicesCardProps {
   customers: BillingCustomerItem[] | undefined;
   isLoading: boolean;
   onCreateForCustomer: (customerId: number) => void;
-  // Task #1744: gewählter Abrechnungsmonat/-jahr, damit der Absprung „noch X
-  // geplante Termine" die Kundendetail-Terminliste auf denselben Monat scopt.
-  selectedMonth: number;
-  selectedYear: number;
   // Task #1889 — termingenaue „fehlende Unterschrift nach Abschluss"-Einträge je
   // Kunde (ersetzt die separate obere Box). Wird unter dem jeweiligen Kunden in der
   // Liste gerendert, sodass die Unterschrift direkt nachgeholt werden kann.
@@ -53,41 +62,34 @@ interface PendingInvoicesCardProps {
   createSelectedPending?: boolean;
 }
 
-// Task #1743: Ein Kunde gilt als „bereit zum Abrechnen", wenn er im gewählten
-// Monat KEINE offenen (geplanten) Termine mehr hat — sonst sollte man mit der
-// Rechnung warten, bis alle Termine dokumentiert sind. Die Zahl der offenen
-// Termine liefert der Server aus der `FINAL_APPOINTMENT_STATUSES`-SSoT
-// (identisch zur Monatsabschluss-Readiness); die „offen?"-Regel selbst ist die
-// gemeinsame SSoT `hasOpenAppointments` (@shared/domain/billing-eligibility),
-// die auch der „Alle erstellen"-Dialog und der Server-`readyOnly`-Skip nutzen.
-
-// Task #1743: Eine einzelne Kundenzeile. Der „noch X geplante Termine"-Hinweis
-// ist datengetrieben (erscheint nur bei offenen Terminen), sodass beide
-// Sektionen dieselbe Zeilenkomponente nutzen.
+// Task #1905: Eine einzelne Kundenzeile — für alle drei Gruppen dieselbe
+// Komponente. Die Begründungs-Hinweise sind datengetrieben und werden in der
+// Gruppe „Dokumentation ausstehend" über `showReasonNotes` abgeschaltet (dort
+// erklärt die Sektion den Zustand bereits).
 function PendingCustomerRow({
   customer: c,
   onCreateForCustomer,
-  canCreate,
   missingSignatures,
   selectable,
   selected,
   onToggleSelect,
-  selectedMonth,
-  selectedYear,
+  showReasonNotes,
 }: {
   customer: BillingCustomerItem;
   onCreateForCustomer: (customerId: number) => void;
-  // Task #1885: Nicht-abrechenbare Kunden (Gruppe „Leistungsnachweis fehlt noch")
-  // bekommen KEINE „Erstellen"-Aktion — eine Rechnung ist ohne LN nicht möglich.
-  canCreate: boolean;
   // Task #1889 — „fehlende Unterschrift nach Abschluss"-Termine dieses Kunden.
   missingSignatures?: MissingSignatureItem[];
   // Task #1888 — Auswahl-Checkbox nur in erstellbaren („Bereit")-Zeilen.
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number, checked: boolean) => void;
-  selectedMonth: number;
-  selectedYear: number;
+  // Task #1905 — Inline-Begründungen („nur X/Y dokumentiert", „Kundenunterschrift
+  // fehlt", „noch N geplante Termine", …) erklären, WARUM ein Kunde nicht bereit
+  // ist. In der Gruppe „Dokumentation ausstehend" sagt das schon die Sektion —
+  // dort bleiben sie weg (fachlich so entschieden). Die #1889-Unterschriften-Liste
+  // ist davon NICHT betroffen: sie ist eine Handlungs-Möglichkeit (Unterschrift
+  // nachholen), keine Cluster-Begründung.
+  showReasonNotes: boolean;
 }) {
   // Task #1885: Dokumentierte Termine, aber noch gar kein Leistungsnachweis
   // (`coveredAppointments === 0`). Gemeinsame SSoT `isServiceRecordMissing`.
@@ -138,7 +140,7 @@ function PendingCustomerRow({
   // er unabhängig von der Eligibilität, sobald awaiting-signature-Termine vorliegen
   // (und weder offene Termine noch ein fehlender LN die Zeile dominieren).
   const showAwaitingSignatureNote =
-    awaitingSignature && openCount === 0 && !serviceRecordMissing;
+    showReasonNotes && awaitingSignature && openCount === 0 && !serviceRecordMissing;
   const awaitingSignatureLabel = awaitingSignatureCount > 0
     ? `${BILLING_BLOCK_SHORT_LABELS.customer_signature_required} (${awaitingSignatureCount} ${awaitingSignatureCount === 1 ? "Termin" : "Termine"})`
     : BILLING_BLOCK_SHORT_LABELS.customer_signature_required;
@@ -147,7 +149,7 @@ function PendingCustomerRow({
   // Zeile nicht bereits über den Awaiting-, Partial- oder „LN fehlt"-Hinweis erklärt
   // wird (keine zweite, widersprüchliche Begründung).
   const blockLabel =
-    !serviceRecordMissing && !showAwaitingSignatureNote && openCount === 0 && !partial
+    showReasonNotes && !serviceRecordMissing && !showAwaitingSignatureNote && openCount === 0 && !partial
       && c.eligibility.status !== "eligible" && c.eligibility.reason
       ? BILLING_BLOCK_SHORT_LABELS[c.eligibility.reason]
       : null;
@@ -186,7 +188,7 @@ function PendingCustomerRow({
             </span>
           )}
         </div>
-        {partial && (
+        {showReasonNotes && partial && (
           <div
             className="mt-0.5 text-xs text-amber-700"
             data-testid={`text-pending-partial-${c.id}`}
@@ -194,7 +196,7 @@ function PendingCustomerRow({
             Nur {c.coveredAppointments}/{c.completedAppointments} dokumentierte Termine im Leistungsnachweis
           </div>
         )}
-        {serviceRecordMissing && (
+        {showReasonNotes && serviceRecordMissing && (
           <div
             className="mt-0.5 text-xs text-amber-700"
             data-testid={`text-pending-ln-missing-${c.id}`}
@@ -227,16 +229,6 @@ function PendingCustomerRow({
             Nachberechnung — {followUpCount} {followUpCount === 1 ? "Termin" : "Termine"} nachträglich unterschrieben
           </div>
         )}
-        {openCount > 0 && (
-          <Link
-            href={`/service-records/open?customerId=${c.id}&year=${selectedYear}&month=${selectedMonth}`}
-            className="mt-0.5 inline-flex items-center gap-0.5 text-xs text-amber-700 underline-offset-2 hover:text-amber-900 hover:underline"
-            data-testid={`text-pending-open-note-${c.id}`}
-          >
-            noch {openCount} {openCount === 1 ? "geplanter Termin" : "geplante Termine"}
-            <ChevronRight className={iconSize.xs} />
-          </Link>
-        )}
         {/* Task #1889 — termingenaue „fehlende Unterschrift nach Abschluss"-Einträge
             direkt unter dem Kunden (ersetzt die separate obere Box). Der
             Monatsabschluss-Kontext bleibt als Hinweis erhalten; jeder Eintrag
@@ -263,19 +255,50 @@ function PendingCustomerRow({
           </div>
         )}
       </div>
-      {/* Task #1887 — voraussichtlicher Betrag des aktuell abrechenbaren Teils
-          (dieselbe SSoT wie die Erstellung). 0 → „—" (noch nicht abrechenbar). */}
+      {/* Task #1905 — Betrag der Zeile = IST + PLAN. IST ist geleistete, noch
+          nicht abgerechnete Arbeit (dieselbe SSoT wie die Erstellung), PLAN die
+          Prognose der noch offenen Termine. Dadurch trägt JEDE Gruppe einen
+          Betrag — die früheren „—" in den Nicht-Bereit-Gruppen entfielen nur
+          deshalb, weil der alte Wert ausschließlich den abrechenbaren Teil kannte.
+          „—" bleibt für den echten Nullfall (nichts zu zeigen). */}
       <div
         className="shrink-0 text-right text-sm tabular-nums"
         data-testid={`text-pending-amount-${c.id}`}
       >
-        {(c.estimatedAmountCents ?? 0) > 0 ? (
-          <span className="font-medium text-gray-900">{formatEuroDE(c.estimatedAmountCents)}</span>
+        {rowTotalCents(c) > 0 ? (
+          <span
+            className="font-medium text-gray-900"
+            title={
+              (c.plannedAmountCents ?? 0) > 0
+                ? `davon ${formatEuroDE(c.plannedAmountCents)} geplant (noch nicht geleistet)`
+                : undefined
+            }
+          >
+            {formatEuroDE(rowTotalCents(c))}
+            {SHOW_PROVISIONAL_MARKER && (c.plannedAmountCents ?? 0) > 0 && (
+              <span
+                className="ml-1 text-xs font-normal text-gray-500"
+                data-testid={`text-pending-provisional-${c.id}`}
+              >
+                vorl.
+              </span>
+            )}
+          </span>
         ) : (
-          <span className="text-gray-400" title="Aktuell nicht abrechenbar">—</span>
+          <span className="text-gray-400" title="Kein Betrag im Zeitraum">—</span>
         )}
       </div>
-      {canCreate && (
+      {/* Task #1905 — „Erstellen" erscheint, wenn es tatsächlich etwas
+          abzurechnen gibt: mindestens ein Termin unter einem abrechenbar
+          signierten Leistungsnachweis, der noch auf keiner Rechnung liegt. Das
+          ist dieselbe Menge, die `buildInvoiceDraft` in Rechnung stellen würde.
+          ERSETZT das frühere Flag pro Sektion (`canCreate`), das mit dem
+          Zusammenlegen von „Leistungsnachweis fehlt noch" (nie abrechenbar) und
+          „Wartet auf Kundenunterschrift" (Mischkunde mit abrechenbarem Teil) in
+          EINE Gruppe nicht mehr aufgehen konnte: pauschal an hätte einen Knopf
+          gezeigt, der nur scheitern kann, pauschal aus hätte dem Mischkunden die
+          bewusste Teil-Abrechnung (#1883, mit Bestätigung) genommen. */}
+      {(c.unbilledAppointmentCount ?? 0) > 0 && (
         <Button
           variant="outline"
           size="sm"
@@ -301,30 +324,24 @@ function PendingSection({
   headerClassName,
   customers,
   onCreateForCustomer,
-  canCreate = true,
   missingSignaturesByCustomer,
   selectable = false,
   selection,
   testIdKey,
-  selectedMonth,
-  selectedYear,
+  showReasonNotes = true,
 }: {
   title: string;
   icon: ReactNode;
   headerClassName: string;
   customers: BillingCustomerItem[];
   onCreateForCustomer: (customerId: number) => void;
-  // Task #1885: false in der Gruppe „Leistungsnachweis fehlt noch" — dort ist keine
-  // Rechnung möglich, also keine „Erstellen"-Aktion. Default true (alle übrigen
-  // Sektionen unverändert).
-  canCreate?: boolean;
   missingSignaturesByCustomer?: Map<number, MissingSignatureItem[]>;
   // Task #1888 — nur erstellbare Sektionen („Bereit zum Abrechnen") sind auswählbar.
   selectable?: boolean;
   selection?: Selection;
   testIdKey: string;
-  selectedMonth: number;
-  selectedYear: number;
+  // Task #1905 — siehe `PendingCustomerRow`: in „Dokumentation ausstehend" aus.
+  showReasonNotes?: boolean;
 }) {
   const { visible, showAll, setShowAll, hiddenCount, capped, total } =
     useRowCap(customers);
@@ -332,11 +349,14 @@ function PendingSection({
   // als Toggle, der Zähler bleibt auch im eingeklappten Zustand sichtbar.
   // Standard: aufgeklappt.
   const [open, setOpen] = useState(true);
-  // Task #1887 — kumulierte Gruppensumme des aktuell abrechenbaren Betrags (Σ der
-  // Kundenbeträge dieser Gruppe, dieselbe SSoT). Nicht-abrechenbare Gruppen (LN
-  // fehlt / offen / wartet) summieren zu 0 → „—" statt irreführender Zahl.
-  const groupTotalCents = customers.reduce(
-    (sum, c) => sum + (c.estimatedAmountCents ?? 0),
+  // Task #1905 — Cluster-Summe = Σ (IST + PLAN) der Kunden dieser Gruppe. Die
+  // Summe wird GENAU HIER gebildet (eine Stelle, dieselbe wie die Auswahl-Summe
+  // unten) — der Server liefert die beiden Beträge pro Kunde, nicht pro Gruppe.
+  // „Bereit" und „Leistungsnachweis fehlt" tragen per Konstruktion nur IST (beide
+  // Gruppen haben keine offenen Termine); „Dokumentation ausstehend" ist gemischt.
+  const groupTotalCents = customers.reduce((sum, c) => sum + rowTotalCents(c), 0);
+  const groupPlannedCents = customers.reduce(
+    (sum, c) => sum + (c.plannedAmountCents ?? 0),
     0,
   );
   // Task #1888 — Gruppen-Auswahlzustand (alle/teils/keine) für die Header-Checkbox
@@ -380,13 +400,25 @@ function PendingSection({
         >
           {customers.length}
         </span>
-        {/* Task #1887 — kumulierte Gruppensumme (analog „Avis ausstehend … €").
-            Nicht-abrechenbare Gruppe → „—". */}
+        {/* Task #1905 — Cluster-Summe (analog „Avis ausstehend … €"). */}
         <span
           className="ml-auto text-xs font-semibold tabular-nums text-gray-900"
           data-testid={`text-pending-${testIdKey}-total`}
+          title={
+            groupPlannedCents > 0
+              ? `davon ${formatEuroDE(groupPlannedCents)} geplant (noch nicht geleistet)`
+              : undefined
+          }
         >
           {groupTotalCents > 0 ? formatEuroDE(groupTotalCents) : "—"}
+          {SHOW_PROVISIONAL_MARKER && groupPlannedCents > 0 && (
+            <span
+              className="ml-1 text-xs font-normal text-gray-500"
+              data-testid={`text-pending-${testIdKey}-provisional`}
+            >
+              vorl.
+            </span>
+          )}
         </span>
       </button>
       </div>
@@ -406,13 +438,11 @@ function PendingSection({
                 key={c.id}
                 customer={c}
                 onCreateForCustomer={onCreateForCustomer}
-                canCreate={canCreate}
                 missingSignatures={missingSignaturesByCustomer?.get(c.id)}
                 selectable={selectable}
                 selected={selection?.has(c.id)}
                 onToggleSelect={selection?.toggle}
-                selectedMonth={selectedMonth}
-                selectedYear={selectedYear}
+                showReasonNotes={showReasonNotes}
               />
             ))}
           </ul>
@@ -441,15 +471,13 @@ function PendingSection({
 // unterschriebenem Leistungsnachweis, aber ohne Rechnung). Nutzt dieselbe
 // Datenquelle (`useEligibleCustomers`) wie der `(N)`-Zähler und die
 // Sammelaktion „Alle offenen erstellen", damit die Zahlen nie auseinanderlaufen.
-// Task #1743: zweigeteilt in „Bereit zum Abrechnen" (keine offenen Termine mehr)
-// und „Noch offene Termine" (im Monat sind noch Termine geplant/undokumentiert)
-// — ALLE Kunden bleiben sichtbar, nur nach Reife gruppiert.
+// Task #1905: dreigeteilt in „Bereit zum Abrechnen", „Dokumentation ausstehend"
+// und „Leistungsnachweis fehlt" — ALLE Kunden bleiben sichtbar, nur nach Reife
+// gruppiert.
 export function PendingInvoicesCard({
   customers,
   isLoading,
   onCreateForCustomer,
-  selectedMonth,
-  selectedYear,
   missingSignaturesByCustomer,
   selection,
   onCreateSelected,
@@ -461,39 +489,30 @@ export function PendingInvoicesCard({
   const [open, setOpen] = useState(false);
 
   const all = customers ?? [];
-  // Task #1774: Reihenfolge der Reifegruppen —
-  //  1. „Noch offene Termine": im Monat sind noch geplante Termine offen.
-  //  2. „Wartet auf Kundenunterschrift": keine offenen Termine mehr, aber das
-  //     kassen-/zahlerabhängige Unterschrifts-Gate ist NICHT erfüllt (Pflegekasse
-  //     ohne Kundenunterschrift, nur `employee_signed`). Kommt aus DERSELBEN SSoT
-  //     wie der Erstellungs-Pfad (`classifyBillingEligibility`), sodass Anzeige
-  //     und tatsächliche Erstellung nicht auseinanderdriften.
-  //  3. „Bereit zum Abrechnen": tatsächlich abrechenbar (eligible) UND keine
-  //     offenen Termine mehr.
-  // Task #1786: Reifegruppierung über die EINE SSoT `classifyBillingMaturity`
-  // (@shared/domain/billing-eligibility) — genau eine Gruppe pro Kunde. Damit
-  // enthält „Bereit zum Abrechnen" nur wirklich abrechenbare UND vollständig
-  // dokumentierte Kunden; unvollständig dokumentierte wandern in eine eigene
-  // Gruppe, unterschrifts-blockierte in „Wartet auf Kundenunterschrift".
-  const openCustomers: BillingCustomerItem[] = [];
-  const serviceRecordMissingCustomers: BillingCustomerItem[] = [];
-  const signatureBlockedCustomers: BillingCustomerItem[] = [];
-  const partiallyDocumentedCustomers: BillingCustomerItem[] = [];
+  // Task #1905 — DREI Gruppen statt fünf, über die EINE SSoT
+  // `classifyBillingMaturity` (@shared/domain/billing-eligibility) — genau eine
+  // Gruppe pro Kunde:
+  //  1. „Bereit zum Abrechnen": vollständig dokumentiert UND vollständig
+  //     signiert. Nachberechnungen bleiben hier.
+  //  2. „Dokumentation ausstehend": noch offene Termine ODER nicht alle
+  //     dokumentierten Termine in einem Leistungsnachweis erfasst.
+  //  3. „Leistungsnachweis fehlt": vollständig dokumentiert, aber ohne gültigen
+  //     (kundenseitig unterschriebenen) Nachweis.
+  //
+  // ERSETZT die frühere Fünf-Sektionen-Aufteilung. Tragend dabei: ein Kunde, der
+  // noch auf eine Kundenunterschrift wartet, steht nicht mehr unter „Bereit" —
+  // vorher tat er das und zeigte dort gleichzeitig inline „Kundenunterschrift
+  // fehlt" (Widerspruch + Unterberechnungs-Risiko beim Erstellen).
+  const documentationPendingCustomers: BillingCustomerItem[] = [];
+  const proofPendingCustomers: BillingCustomerItem[] = [];
   const readyCustomers: BillingCustomerItem[] = [];
   for (const c of all) {
     switch (classifyBillingMaturity(c)) {
-      case "has_open_appointments":
-        openCustomers.push(c);
+      case "documentation_pending":
+        documentationPendingCustomers.push(c);
         break;
-      // Task #1885: dokumentierte Termine, aber noch gar kein Leistungsnachweis.
-      case "service_record_missing":
-        serviceRecordMissingCustomers.push(c);
-        break;
-      case "signature_blocked":
-        signatureBlockedCustomers.push(c);
-        break;
-      case "partially_documented":
-        partiallyDocumentedCustomers.push(c);
+      case "proof_pending":
+        proofPendingCustomers.push(c);
         break;
       case "ready":
         readyCustomers.push(c);
@@ -508,8 +527,12 @@ export function PendingInvoicesCard({
   const readyIds = readyCustomers.map((c) => c.id);
   const selectedReadyCount = selection ? readyIds.filter((id) => selection.has(id)).length : 0;
   const allReadySelected = selectedReadyCount === readyIds.length && readyIds.length > 0;
+  // Task #1905 — Auswahl-Summe bleibt bewusst IST-only: sie beziffert, was die
+  // Sammelaktion tatsächlich in Rechnung stellt. „Bereit"-Kunden haben ohnehin
+  // keinen PLAN-Anteil (keine offenen Termine) — die Einschränkung ist die
+  // Absicherung gegen den Fall, dass sich das je ändert.
   const selectedTotalCents = selection
-    ? readyCustomers.filter((c) => selection.has(c.id)).reduce((s, c) => s + (c.estimatedAmountCents ?? 0), 0)
+    ? readyCustomers.filter((c) => selection.has(c.id)).reduce((s, c) => s + (c.actualAmountCents ?? 0), 0)
     : 0;
 
   return (
@@ -618,55 +641,30 @@ export function PendingInvoicesCard({
                   selectable={selectionEnabled}
                   selection={selection}
                   testIdKey="ready"
-                  selectedMonth={selectedMonth}
-                  selectedYear={selectedYear}
                 />
+                {/* Task #1905 — die Sektion selbst ist die Begründung; die
+                    Kundenzeilen bleiben ohne Inline-Detail (`showReasonNotes`). */}
                 <PendingSection
-                  title="Unvollständig dokumentiert"
-                  icon={<FileText className={`${iconSize.sm} text-amber-600`} />}
-                  headerClassName="text-amber-700"
-                  customers={partiallyDocumentedCustomers}
-                  onCreateForCustomer={onCreateForCustomer}
-                  missingSignaturesByCustomer={missingSignaturesByCustomer}
-                  testIdKey="partial"
-                  selectedMonth={selectedMonth}
-                  selectedYear={selectedYear}
-                />
-                {/* Task #1885: dokumentierte Termine, aber noch gar kein LN. NICHT
-                    abrechenbar → keine „Erstellen"-Aktion (canCreate=false). */}
-                <PendingSection
-                  title="Leistungsnachweis fehlt noch"
-                  icon={<FilePlus className={`${iconSize.sm} text-amber-600`} />}
-                  headerClassName="text-amber-700"
-                  customers={serviceRecordMissingCustomers}
-                  onCreateForCustomer={onCreateForCustomer}
-                  missingSignaturesByCustomer={missingSignaturesByCustomer}
-                  canCreate={false}
-                  testIdKey="ln-missing"
-                  selectedMonth={selectedMonth}
-                  selectedYear={selectedYear}
-                />
-                <PendingSection
-                  title="Wartet auf Kundenunterschrift"
-                  icon={<PenLine className={`${iconSize.sm} text-amber-600`} />}
-                  headerClassName="text-amber-700"
-                  customers={signatureBlockedCustomers}
-                  onCreateForCustomer={onCreateForCustomer}
-                  missingSignaturesByCustomer={missingSignaturesByCustomer}
-                  testIdKey="signature"
-                  selectedMonth={selectedMonth}
-                  selectedYear={selectedYear}
-                />
-                <PendingSection
-                  title="Noch offene Termine"
+                  title="Dokumentation ausstehend"
                   icon={<CalendarClock className={`${iconSize.sm} text-amber-600`} />}
                   headerClassName="text-amber-700"
-                  customers={openCustomers}
+                  customers={documentationPendingCustomers}
                   onCreateForCustomer={onCreateForCustomer}
                   missingSignaturesByCustomer={missingSignaturesByCustomer}
-                  testIdKey="open"
-                  selectedMonth={selectedMonth}
-                  selectedYear={selectedYear}
+                  testIdKey="documentation"
+                  showReasonNotes={false}
+                />
+                {/* Task #1905: vollständig dokumentiert, aber ohne gültigen
+                    (kundensignierten) Nachweis. NICHT abrechenbar → keine
+                    „Erstellen"-Aktion (canCreate=false). */}
+                <PendingSection
+                  title="Leistungsnachweis fehlt"
+                  icon={<FilePlus className={`${iconSize.sm} text-amber-600`} />}
+                  headerClassName="text-amber-700"
+                  customers={proofPendingCustomers}
+                  onCreateForCustomer={onCreateForCustomer}
+                  missingSignaturesByCustomer={missingSignaturesByCustomer}
+                  testIdKey="proof"
                 />
               </>
             )}

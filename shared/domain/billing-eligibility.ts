@@ -291,63 +291,85 @@ export function isServiceRecordMissing(c: DocumentationCoverage): boolean {
 }
 
 /**
- * Task #1786 — Reifegruppe eines Kunden in der Karte „Noch zu erstellen".
- * Genau EINE Gruppe pro Kunde:
- *  • `has_open_appointments` — im Monat sind noch offene (geplante) Termine.
- *  • `service_record_missing` — dokumentierte Termine, aber noch gar kein
- *                              Leistungsnachweis (Task #1885, „Leistungsnachweis
- *                              fehlt noch"). NICHT abrechenbar — kein „Erstellen".
- *  • `signature_blocked`     — keine offenen Termine mehr, aber Pflegekasse ohne
- *                              Kundenunterschrift (nur `employee_signed`).
- *  • `partially_documented`  — abrechenbar, aber weniger Termine durch aktive
- *                              Leistungsnachweise abgedeckt als dokumentiert.
- *  • `ready`                 — tatsächlich abrechenbar, vollständig dokumentiert,
- *                              keine offenen Termine mehr.
+ * Task #1905 — Reifegruppe eines Kunden in der Karte „Noch zu erstellen". Genau
+ * EINE Gruppe pro Kunde, jetzt DREI statt fünf:
+ *  • `documentation_pending` — die Arbeit des Monats ist noch nicht vollständig
+ *                              dokumentiert: es sind noch offene (geplante)
+ *                              Termine da ODER weniger Termine durch einen
+ *                              aktiven Leistungsnachweis abgedeckt als
+ *                              dokumentiert (`covered < completed`, inklusive
+ *                              „noch gar kein LN", `covered === 0`).
+ *  • `proof_pending`         — vollständig dokumentiert (`covered === completed`),
+ *                              aber es fehlt der GÜLTIGE Nachweis: kein
+ *                              abrechenbar signierter Leistungsnachweis. Umfasst
+ *                              ausdrücklich „dokumentiert, aber vom Kunden nicht
+ *                              unterschrieben" (Pflegekasse mit nur
+ *                              `employee_signed`) — ohne Kundenunterschrift ist
+ *                              der Nachweis nicht gültig. NICHT abrechenbar.
+ *  • `ready`                 — vollständig dokumentiert UND vollständig signiert,
+ *                              keine offenen Termine mehr. Nachberechnungen
+ *                              (nachträglich signierte Nachzügler) bleiben hier.
+ *
+ * ERSETZT die frühere Fünf-Wert-Gruppierung (`has_open_appointments`,
+ * `service_record_missing`, `partially_documented`, `signature_blocked`,
+ * `ready`). Die Abbildung ist vollständig: offene Termine, „kein LN" und
+ * teildokumentiert fallen zusammen nach `documentation_pending`;
+ * `signature_blocked` nach `proof_pending`; `ready` bleibt `ready`, AUSSER der
+ * Kunde wartet noch auf eine Kundenunterschrift — genau dieser Fall ist der Bug,
+ * den #1905 schließt (siehe `classifyBillingMaturity`).
  */
-export type BillingMaturityGroup =
-  | "ready"
-  | "partially_documented"
-  | "signature_blocked"
-  | "service_record_missing"
-  | "has_open_appointments";
+export type BillingMaturityGroup = "ready" | "documentation_pending" | "proof_pending";
 
 /** Eingangsfakten der Reifegruppierung — schon vom Server gelieferte Felder. */
 export interface BillingMaturityFacts {
   openAppointments?: number | null;
   completedAppointments: number;
   coveredAppointments: number;
+  /**
+   * Task #1905 — für `isAwaitingCustomerSignature` nötig (Zahler-Typ entscheidet,
+   * ob die Kundenunterschrift verlangt wird). Der Server liefert das Feld auf
+   * `BillingCustomerItem` bereits mit; die Gruppierung liest es nur zusätzlich.
+   */
+  billingType: string | null | undefined;
+  /** Termine unter ABRECHENBAR-signierten LNs (dito, bereits geliefert). */
+  signedAppointmentCount: number;
   eligibility: { status: BillingEligibilityStatus; reason: BillingBlockReason | null };
 }
 
 /**
- * PURE SSoT der Reifegruppierung. Verwendet dieselben Helfer wie Anzeige und
+ * PURE SSoT der Reifegruppierung. Komponiert dieselben Prädikate wie Anzeige und
  * Server-Skip (`hasOpenAppointments`, `isPartiallyDocumented`,
- * `eligibility.reason/status`) — KEINE zweite parallele Regel, damit Anzeige und
- * Erstellungs-Pfad nie auseinanderlaufen. Reihenfolge = Schwere/Blockierung:
- * offene Termine → fehlende Kundenunterschrift → unvollständig dokumentiert →
- * bereit.
+ * `isAwaitingCustomerSignature`, `eligibility.status`) — KEINE zweite parallele
+ * Regel, damit Anzeige und Erstellungs-Pfad nie auseinanderlaufen.
+ *
+ * Präzedenz (fachlich entschieden, Task #1905): Dokumentation VOR Nachweis VOR
+ * bereit. Ein Kunde, bei dem beides offen ist, wird als Dokumentations-Fall
+ * gemeldet — das ist der Schritt, der zuerst dran ist.
  */
 export function classifyBillingMaturity(c: BillingMaturityFacts): BillingMaturityGroup {
-  if (hasOpenAppointments(c)) return "has_open_appointments";
-  // Task #1885 — VOR `partially_documented`: dokumentierte Termine ganz ohne LN
-  // (`covered === 0`) sind „Leistungsnachweis fehlt noch", nicht „unvollständig
-  // dokumentiert". `isPartiallyDocumented` (`covered < completed`) bliebe sonst für
-  // `covered === 0` wahr und würde diese Kunden fälschlich als teildokumentiert
-  // einsortieren. Kunden mit vorhandenem LN haben `covered ≥ 1` und sind davon nicht
-  // betroffen — die bestehende „Unvollständig dokumentiert"-Gruppe bleibt unverändert.
-  if (isServiceRecordMissing(c)) return "service_record_missing";
-  // Task #1881 — Sektion muss zum Inline-Label passen: Ein nur teildokumentierter
-  // Kunde (weniger Termine abgedeckt als dokumentiert) zeigt inline „nur X/Y
-  // dokumentiert" und gehört daher unter „Unvollständig dokumentiert" — auch wenn
-  // er zusätzlich signaturblockiert ist. Deshalb wird `partially_documented` VOR
-  // `signature_blocked` geprüft, sonst landet er unter „Wartet auf Kunden-
-  // unterschrift" und zeigt zwei widersprüchliche Begründungen gleichzeitig.
-  if (isPartiallyDocumented(c)) return "partially_documented";
-  // Blockierte Kunden dürfen NIE unter „ready" landen. Fehlende Kundenunterschrift
-  // ist der Regelfall und bekommt eine eigene Gruppe; alle übrigen Block-Gründe
-  // (not_signed/no_appointments/already_billed) werden pragmatisch ebenfalls in
-  // „signature_blocked" (= „nicht bereit, Grund per Inline-Label") einsortiert,
-  // damit sie sichtbar bleiben und nicht als abrechenbar erscheinen.
-  if (c.eligibility.status !== "eligible") return "signature_blocked";
+  // 1. Dokumentation ausstehend: noch offene Termine ODER nicht alle
+  //    dokumentierten Termine in einem aktiven LN erfasst. `isPartiallyDocumented`
+  //    (`covered < completed`) deckt beide Unterfälle ab — auch „noch gar kein LN"
+  //    (`covered === 0`), der bis #1905 eine eigene Gruppe hatte. Ein durchgeführter,
+  //    aber nicht dokumentierter Termin ist ein Dokumentations-Rückstand, kein
+  //    Nachweis-Rückstand.
+  if (hasOpenAppointments(c) || isPartiallyDocumented(c)) return "documentation_pending";
+  // 2. Nachweis ausstehend: vollständig dokumentiert, aber kein gültiger
+  //    (= abrechenbar signierter) Leistungsnachweis.
+  //
+  //    `isAwaitingCustomerSignature` ist hier der Kern-Fix von #1905. Ein
+  //    Pflegekassen-Kunde mit einem kundensignierten UND einem nur
+  //    mitarbeiter-signierten LN ist insgesamt `eligible` (der signierte Teil ist
+  //    abrechenbar) und landete deshalb unter „Bereit zum Abrechnen" — während die
+  //    Zeile gleichzeitig inline „Kundenunterschrift fehlt" meldete. Beim Erstellen
+  //    fiel der nicht kundensignierte Termin aus der Rechnung (Unterberechnung; nur
+  //    der #1883-Guard hielt sie auf). Die fehlende Kundenunterschrift schlägt
+  //    `ready` jetzt ausdrücklich.
+  //
+  //    Alle übrigen Block-Gründe (not_signed/no_appointments/already_billed) fallen
+  //    ebenfalls hierher: nicht bereit, Grund per Inline-Label.
+  if (isAwaitingCustomerSignature(c) || c.eligibility.status !== "eligible") {
+    return "proof_pending";
+  }
   return "ready";
 }

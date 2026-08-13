@@ -44,14 +44,31 @@ export interface BillingCustomerItem {
   // Helper `isLateSignedFollowUp`/`lateSignedFollowUpCount`.
   signedAppointmentCount: number;
   unbilledAppointmentCount: number;
-  // Task #1887 — voraussichtlicher Brutto-Betrag des AKTUELL abrechenbaren Teils
-  // dieses Kunden (Cent), berechnet über `buildInvoiceDraft` im preview-Modus —
-  // DIESELBE SSoT wie `/billing/preview` und die echte Erstellung, inkl. der
-  // #1883-Ausschlüsse (nicht-kundensignierte / LN-lose Termine tragen nicht bei).
-  // 0 bei nicht-abrechenbaren Kunden (LN fehlt / nur offene Termine / nur
-  // employee_signed). Das Frontend zeigt den Betrag je Zeile + die Gruppensumme;
-  // 0 wird als „—" (noch nicht abrechenbar) dargestellt.
-  estimatedAmountCents: number;
+  // Task #1905 — Zwei Brutto-Beträge (Cent) statt des früheren einen
+  // `estimatedAmountCents`, das NUR den abrechenbaren Teil kannte und bei allen
+  // übrigen Kunden 0 war (die Liste zeigte dort „—"). Regel: dokumentiert → Ist,
+  // nicht dokumentiert → Plan.
+  //
+  // `actualAmountCents` (IST) — geleistete, noch nicht abgerechnete Arbeit:
+  //   Brutto über die dokumentierten (`completed`) Termine des Zeitraums, die noch
+  //   auf keiner aktiven Rechnung liegen. Der abrechenbare Anteil kommt weiterhin
+  //   aus `buildInvoiceDraft` im preview-Modus (DIESELBE SSoT wie `/billing/preview`
+  //   und die echte Erstellung, damit die „Bereit"-Summe exakt der späteren
+  //   Rechnungssumme entspricht); der Rest — dokumentierte Termine ohne gültigen
+  //   signierten LN — wird über DENSELBEN Zeilen-Bauer
+  //   (`buildLineItemsFromAppointments`) ergänzt. Jeder Termin zählt genau einmal.
+  //
+  // `plannedAmountCents` (PLAN) — geplante, noch nicht geleistete Arbeit:
+  //   Brutto über die offenen (`scheduled`/`documenting`) Termine des Zeitraums,
+  //   bepreist über die Preis-SSoT `priceFor`. PROGNOSE, kein Buchungswert: dieser
+  //   Betrag darf NIE in einen Rechnungs-, Buchungs- oder Nachweis-Pfad einfließen
+  //   (GoBD). Er existiert ausschließlich für die Anzeige der Cluster-Summen.
+  //
+  // Cluster-Erwartung: „Bereit" und „Leistungsnachweis fehlt" tragen nur IST
+  // (`plannedAmountCents === 0`, da beide keine offenen Termine haben);
+  // „Dokumentation ausstehend" ist gemischt.
+  actualAmountCents: number;
+  plannedAmountCents: number;
 }
 
 export interface InvoiceItem {

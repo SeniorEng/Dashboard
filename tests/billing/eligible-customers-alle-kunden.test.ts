@@ -5,8 +5,10 @@
  * (mitarbeiter-/kunden-)signierten LN im Monat. Kunden mit dokumentierten oder noch
  * offenen Terminen, aber ganz ohne LN, waren unsichtbar. #1885 erweitert die
  * Kandidatenmenge auf ALLE Kunden mit noch nicht vollständig abgerechneter
- * Termin-Aktivität und ergänzt die Gruppe „Leistungsnachweis fehlt noch"
- * (`classifyBillingMaturity === "service_record_missing"`).
+ * Termin-Aktivität. Task #1905 ordnet diese Kunden dem Cluster
+ * „Dokumentation ausstehend" zu (`classifyBillingMaturity ===
+ * "documentation_pending"`): durchgeführt, aber gar nicht dokumentiert, ist ein
+ * Dokumentations- und kein Nachweis-Rückstand.
  *
  * KRITISCH (#1885 Punkt 4): Sichtbarkeit ≠ Abrechenbarkeit. Die Sammel-Erstellung
  * `POST /generate-all` leitet ihre Menge weiterhin eigenständig aus signierten LNs
@@ -156,21 +158,21 @@ afterAll(async () => {
 });
 
 describe("Task #1885 — Rechnungsliste zeigt alle Kunden, auch ohne Leistungsnachweis", () => {
-  it("Kunde mit dokumentiertem Termin OHNE LN erscheint als 'Leistungsnachweis fehlt noch' und ist nicht abrechenbar", async () => {
+  it("Kunde mit dokumentiertem Termin OHNE LN erscheint als 'Dokumentation ausstehend' und ist nicht abrechenbar", async () => {
     const row = await rowFor(lnMissingId);
     expect(row).toBeDefined();
     expect(row!.completedAppointments).toBe(1);
     expect(row!.coveredAppointments).toBe(0);
     expect(row!.eligibility.status).toBe("blocked");
-    expect(classifyBillingMaturity(row!)).toBe("service_record_missing");
+    expect(classifyBillingMaturity(row!)).toBe("documentation_pending");
   });
 
-  it("Kunde mit nur offenem (geplantem) Termin erscheint als 'Noch offene Termine'", async () => {
+  it("Kunde mit nur offenem (geplantem) Termin erscheint als 'Dokumentation ausstehend'", async () => {
     const row = await rowFor(openOnlyId);
     expect(row).toBeDefined();
     expect(row!.completedAppointments).toBe(0);
     expect(row!.openAppointments).toBe(1);
-    expect(classifyBillingMaturity(row!)).toBe("has_open_appointments");
+    expect(classifyBillingMaturity(row!)).toBe("documentation_pending");
   });
 
   it("vollständig abgerechneter Kunde verschwindet aus der Liste", async () => {
@@ -210,6 +212,6 @@ describe("Task #1885 — Rechnungsliste zeigt alle Kunden, auch ohne Leistungsna
     // gelistet (er wurde nicht abgerechnet).
     const stillListed = await rowFor(lnMissingId);
     expect(stillListed).toBeDefined();
-    expect(classifyBillingMaturity(stillListed!)).toBe("service_record_missing");
+    expect(classifyBillingMaturity(stillListed!)).toBe("documentation_pending");
   });
 });

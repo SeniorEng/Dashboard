@@ -122,80 +122,137 @@ describe("classifyBillingEligibility — Prüf-Reihenfolge spiegelt buildInvoice
   });
 });
 
-describe("classifyBillingMaturity — genau eine Reifegruppe pro Kunde", () => {
+describe("classifyBillingMaturity — genau eine von DREI Reifegruppen pro Kunde (Task #1905)", () => {
   const eligible = { status: "eligible" as const, reason: null };
+  /** Selbstzahler-Basis: kein Kundenunterschrifts-Gate, isoliert die Doku-Frage. */
+  const base = { billingType: "selbstzahler", signedAppointmentCount: 0 };
 
-  it("offene Termine ⇒ has_open_appointments (schlägt alles andere)", () => {
+  it("offene Termine ⇒ documentation_pending (schlägt den Nachweis-Cluster)", () => {
     expect(
       classifyBillingMaturity({
+        ...base,
         openAppointments: 2,
         completedAppointments: 3,
         coveredAppointments: 1,
         eligibility: { status: "blocked", reason: "customer_signature_required" },
       }),
-    ).toBe("has_open_appointments");
+    ).toBe("documentation_pending");
   });
 
-  it("keine offenen Termine + Kundenunterschrift fehlt ⇒ signature_blocked", () => {
+  it("teildokumentiert (0 < covered < completed) ⇒ documentation_pending", () => {
     expect(
       classifyBillingMaturity({
+        ...base,
+        openAppointments: 0,
+        completedAppointments: 3,
+        coveredAppointments: 2,
+        eligibility: eligible,
+      }),
+    ).toBe("documentation_pending");
+  });
+
+  it("gar kein Leistungsnachweis (covered === 0) ⇒ documentation_pending", () => {
+    // Task #1905 (Alrik-Entscheid): durchgeführt, aber gar nicht dokumentiert, ist
+    // ein Dokumentations-Rückstand — NICHT der Nachweis-Cluster. Das ist die
+    // bewusste Abkehr von der früheren Gruppe `service_record_missing`.
+    expect(
+      classifyBillingMaturity({
+        ...base,
+        openAppointments: 0,
+        completedAppointments: 4,
+        coveredAppointments: 0,
+        eligibility: { status: "blocked", reason: "not_signed" },
+      }),
+    ).toBe("documentation_pending");
+  });
+
+  it("vollständig dokumentiert + Kundenunterschrift fehlt ⇒ proof_pending", () => {
+    expect(
+      classifyBillingMaturity({
+        ...base,
         openAppointments: 0,
         completedAppointments: 2,
         coveredAppointments: 2,
         eligibility: { status: "blocked", reason: "customer_signature_required" },
       }),
-    ).toBe("signature_blocked");
+    ).toBe("proof_pending");
   });
 
   it("blockiert (not_signed/no_appointments/already_billed) ⇒ nie ready", () => {
     for (const reason of ["not_signed", "no_appointments", "already_billed"] as const) {
       expect(
         classifyBillingMaturity({
+          ...base,
           openAppointments: 0,
           completedAppointments: 2,
           coveredAppointments: 2,
           eligibility: { status: "blocked", reason },
         }),
-      ).not.toBe("ready");
+      ).toBe("proof_pending");
     }
   });
 
-  it("abrechenbar, aber nur teilweise abgedeckt ⇒ partially_documented", () => {
+  it("vollständig dokumentiert + vollständig signiert + nichts offen ⇒ ready", () => {
     expect(
       classifyBillingMaturity({
-        openAppointments: 0,
-        completedAppointments: 3,
-        coveredAppointments: 2,
-        eligibility: eligible,
-      }),
-    ).toBe("partially_documented");
-  });
-
-  it("teildokumentiert UND signaturblockiert ⇒ partially_documented (Sektion == Inline-Label, Task #1881)", () => {
-    // Silke/Pia-Fall: weniger Termine abgedeckt als dokumentiert (teildokumentiert)
-    // UND zusätzlich signaturblockiert. Der Kunde zeigt inline „nur X/Y
-    // dokumentiert" und muss daher unter „Unvollständig dokumentiert" stehen —
-    // NICHT unter „Wartet auf Kundenunterschrift" (sonst zwei widersprüchliche
-    // Begründungen). `partially_documented` schlägt `signature_blocked`.
-    expect(
-      classifyBillingMaturity({
-        openAppointments: 0,
-        completedAppointments: 2,
-        coveredAppointments: 1,
-        eligibility: { status: "blocked", reason: "customer_signature_required" },
-      }),
-    ).toBe("partially_documented");
-  });
-
-  it("abrechenbar + vollständig abgedeckt + keine offenen Termine ⇒ ready", () => {
-    expect(
-      classifyBillingMaturity({
+        ...base,
         openAppointments: 0,
         completedAppointments: 3,
         coveredAppointments: 3,
+        signedAppointmentCount: 3,
         eligibility: eligible,
       }),
     ).toBe("ready");
+  });
+
+  // ── Der Kern-Fix von #1905 ────────────────────────────────────────────────
+  // Regressionsanker gegen das dokumentierte Geld-Leck: ein Pflegekassen-Kunde
+  // mit einem kundensignierten UND einem nur mitarbeiter-signierten LN ist
+  // insgesamt `eligible` (der signierte Teil ist abrechenbar) und stand deshalb
+  // unter „Bereit zum Abrechnen" — während dieselbe Zeile inline
+  // „Kundenunterschrift fehlt" meldete. Beim Erstellen fiel der nicht
+  // kundensignierte Termin aus der Rechnung (Unterberechnung).
+  //
+  // Die drei Formen stammen 1:1 aus echten Juli-2026-Daten (read-only an der
+  // pseudonymisierten Referenz-DB erhoben): completed/covered/signiert.
+  describe("Kundenunterschrift fehlt schlägt ready (Geld-Leck, Juli-2026-Formen)", () => {
+    const formen = [
+      { name: "5/5/4", completed: 5, covered: 5, signed: 4 },
+      { name: "3/3/2", completed: 3, covered: 3, signed: 2 },
+      { name: "2/2/1", completed: 2, covered: 2, signed: 1 },
+    ];
+    for (const f of formen) {
+      it(`Pflegekasse ${f.name}: eligible, aber wartet auf Kundenunterschrift ⇒ proof_pending`, () => {
+        expect(
+          classifyBillingMaturity({
+            billingType: "pflegekasse_gesetzlich",
+            openAppointments: 0,
+            completedAppointments: f.completed,
+            coveredAppointments: f.covered,
+            signedAppointmentCount: f.signed,
+            // Genau der Punkt: die Eligibilitäts-SSoT sagt „abrechenbar" (der
+            // signierte Teil ist es ja) — die Reifegruppe darf trotzdem nicht
+            // `ready` sein.
+            eligibility: eligible,
+          }),
+        ).toBe("proof_pending");
+      });
+    }
+
+    it("Selbstzahler mit derselben Form bleibt ready (kein Kundenunterschrifts-Gate)", () => {
+      // Gegenprobe: `employee_signed` genügt beim Selbstzahler, dort ist
+      // covered > signed kein Nachweis-Mangel.
+      expect(
+        classifyBillingMaturity({
+          billingType: "selbstzahler",
+          openAppointments: 0,
+          completedAppointments: 5,
+          coveredAppointments: 5,
+          signedAppointmentCount: 4,
+          eligibility: eligible,
+        }),
+      ).toBe("ready");
+    });
   });
 });
 
