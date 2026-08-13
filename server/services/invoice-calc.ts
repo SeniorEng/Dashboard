@@ -1,5 +1,6 @@
 import { badRequest, notFound, AppError } from "../lib/errors";
-import { splitLineItemsAcrossPots, summarizePotAmounts, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
+import { splitLineItemsAcrossPots, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
+import { summarizePotAmounts } from "@shared/domain/invoice-amounts";
 import { isPrivatePaymentAllowed } from "@shared/domain/budget-selbstzahler-validator";
 import {
   BILLING_BLOCK_MESSAGES,
@@ -95,9 +96,10 @@ export type GenerateInvoiceResult =
  *  1. `allowPrivatePot: true` — der #1353-Backstop wirft beim Erstellen hart,
  *     wenn für einen reinen Kassen-Kunden ein Privatanteil entstünde. Hier darf
  *     eine Anzeige die Abrechnungsseite nicht abschießen.
- *  2. `allowPrivateReclassification` folgt derselben SSoT
- *     (`isPrivatePaymentAllowed`): ohne erlaubte Privatzahlung wird NICHT auf
- *     19 % umgerechnet (siehe `summarizePotAmounts`).
+ *  2. `privatePotIsTaxable` folgt derselben SSoT (`isPrivatePaymentAllowed`):
+ *     ohne erlaubte Privatzahlung wird ein Privat-Topf NICHT besteuert — er
+ *     stammt dann aus der fehlenden Buchung, nicht aus einem echten
+ *     Privatanteil (siehe `summarizePotAmounts`).
  *
  * Fehlt ein Katalogpreis, wirft der Zeilen-Bauer — bewusst NICHT gefangen: ein
  * verschluckter Preis-Fehler würde hier eine zu kleine Geldsumme anzeigen, und
@@ -125,7 +127,7 @@ export async function computeDocumentedGrossCents(args: {
     billingType: args.billingType,
     builderNetCents: totalNetCents,
     builderVatCents: totalVatCents,
-    allowPrivateReclassification: privateAllowed,
+    privatePotIsTaxable: privateAllowed,
   }).grossCents;
 }
 

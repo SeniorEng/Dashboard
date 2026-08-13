@@ -41,9 +41,37 @@ import type { Selection } from "../hooks/use-selection";
  */
 const SHOW_PROVISIONAL_MARKER = false;
 
-/** IST + PLAN eines Kunden (Brutto-Cent). PLAN ist Prognose, siehe `@shared/api`. */
-function rowTotalCents(c: BillingCustomerItem): number {
+/**
+ * IST + PLAN eines Kunden (Brutto-Cent). PLAN ist Prognose, siehe `@shared/api`.
+ *
+ * `null` bedeutet NICHT BERECHENBAR (fehlender Katalogpreis) — das reicht die
+ * Funktion durch, statt es zu 0 zu glätten: eine 0 in einer Geld-Spalte liest
+ * sich wie „nichts offen" und wäre eine stille Falschaussage.
+ */
+function rowTotalCents(c: BillingCustomerItem): number | null {
+  if (c.actualAmountCents === null || c.plannedAmountCents === null) return null;
   return (c.actualAmountCents ?? 0) + (c.plannedAmountCents ?? 0);
+}
+
+/** Summe einer Gruppe + ob darin ein nicht berechenbarer Betrag steckt. */
+function groupTotals(customers: BillingCustomerItem[]): {
+  totalCents: number;
+  plannedCents: number;
+  hasUnknown: boolean;
+} {
+  let totalCents = 0;
+  let plannedCents = 0;
+  let hasUnknown = false;
+  for (const c of customers) {
+    const row = rowTotalCents(c);
+    if (row === null) {
+      hasUnknown = true;
+      continue;
+    }
+    totalCents += row;
+    plannedCents += c.plannedAmountCents ?? 0;
+  }
+  return { totalCents, plannedCents, hasUnknown };
 }
 
 interface PendingInvoicesCardProps {
@@ -108,6 +136,7 @@ function PendingCustomerRow({
   // (@shared/domain/billing-eligibility), dieselbe, die der Vorschau-Dialog
   // nutzt. Neutrale Kennzeichnung (kein amber) — es ist KEIN Fehler und KEINE
   // Doppelabrechnung.
+  const rowTotal = rowTotalCents(c);
   const followUp = isLateSignedFollowUp(c);
   const followUpCount = lateSignedFollowUpCount(c);
   // Task #1786: Kurz-Hinweis für unterschrifts-blockierte Zeilen (z.B.
@@ -265,16 +294,26 @@ function PendingCustomerRow({
         className="shrink-0 text-right text-sm tabular-nums"
         data-testid={`text-pending-amount-${c.id}`}
       >
-        {rowTotalCents(c) > 0 ? (
+        {rowTotal === null ? (
+          // Nicht berechenbar (fehlender Katalogpreis). Bewusst KEINE Zahl: eine
+          // 0 oder ein Teilbetrag wäre hier still falsch.
+          <span
+            className="text-amber-700"
+            title="Betrag nicht berechenbar — für eine Dienstleistung dieses Kunden ist am Termindatum kein Preis hinterlegt. Bitte den Dienstleistungskatalog prüfen."
+            data-testid={`text-pending-amount-unknown-${c.id}`}
+          >
+            ?
+          </span>
+        ) : rowTotal > 0 ? (
           <span
             className="font-medium text-gray-900"
             title={
               (c.plannedAmountCents ?? 0) > 0
-                ? `davon ${formatEuroDE(c.plannedAmountCents)} geplant (noch nicht geleistet)`
+                ? `davon ${formatEuroDE(c.plannedAmountCents ?? 0)} geplant (noch nicht geleistet)`
                 : undefined
             }
           >
-            {formatEuroDE(rowTotalCents(c))}
+            {formatEuroDE(rowTotal)}
             {SHOW_PROVISIONAL_MARKER && (c.plannedAmountCents ?? 0) > 0 && (
               <span
                 className="ml-1 text-xs font-normal text-gray-500"
@@ -354,11 +393,8 @@ function PendingSection({
   // unten) — der Server liefert die beiden Beträge pro Kunde, nicht pro Gruppe.
   // „Bereit" und „Leistungsnachweis fehlt" tragen per Konstruktion nur IST (beide
   // Gruppen haben keine offenen Termine); „Dokumentation ausstehend" ist gemischt.
-  const groupTotalCents = customers.reduce((sum, c) => sum + rowTotalCents(c), 0);
-  const groupPlannedCents = customers.reduce(
-    (sum, c) => sum + (c.plannedAmountCents ?? 0),
-    0,
-  );
+  const { totalCents: groupTotalCents, plannedCents: groupPlannedCents, hasUnknown } =
+    groupTotals(customers);
   // Task #1888 — Gruppen-Auswahlzustand (alle/teils/keine) für die Header-Checkbox
   // „ganze Gruppe auswählen" (analog Cluster-Auswahl der Rechnungs-Liste).
   const groupIds = customers.map((c) => c.id);
@@ -411,6 +447,17 @@ function PendingSection({
           }
         >
           {groupTotalCents > 0 ? formatEuroDE(groupTotalCents) : "—"}
+          {/* Mindestens ein Kunde der Gruppe ist nicht berechenbar — die Summe
+              ist damit unvollständig und sagt das auch. */}
+          {hasUnknown && (
+            <span
+              className="ml-1 font-normal text-amber-700"
+              title="Mindestens ein Betrag in dieser Gruppe ist nicht berechenbar (fehlender Preis im Dienstleistungskatalog) — die Summe ist unvollständig."
+              data-testid={`text-pending-${testIdKey}-incomplete`}
+            >
+              + ?
+            </span>
+          )}
           {SHOW_PROVISIONAL_MARKER && groupPlannedCents > 0 && (
             <span
               className="ml-1 text-xs font-normal text-gray-500"

@@ -69,6 +69,7 @@
       "BillingCustomerItem": {
         "properties": {
           "actualAmountCents": {
+            "nullable": true,
             "type": "integer"
           },
           "billingType": {
@@ -120,6 +121,7 @@
             "type": "integer"
           },
           "plannedAmountCents": {
+            "nullable": true,
             "type": "integer"
           },
           "signedAppointmentCount": {

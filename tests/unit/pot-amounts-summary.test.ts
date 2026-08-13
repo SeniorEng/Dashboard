@@ -13,7 +13,7 @@
  * dieselbe Funktion.
  */
 import { describe, it, expect } from "vitest";
-import { summarizePotAmounts } from "@shared/domain/budget-invoice-split";
+import { summarizePotAmounts } from "@shared/domain/invoice-amounts";
 import type { InvoicePotKey } from "@shared/domain/budget-invoice-split";
 
 function pots(
@@ -72,7 +72,7 @@ describe("summarizePotAmounts — Single-Pot", () => {
       billingType: "pflegekasse_gesetzlich",
       builderNetCents: 10000,
       builderVatCents: 0,
-      allowPrivateReclassification: false,
+      privatePotIsTaxable: false,
     });
     expect(r.vatCents).toBe(0);
     expect(r.grossCents).toBe(10000);
@@ -103,24 +103,65 @@ describe("summarizePotAmounts — Multi-Pot", () => {
       builderVatCents: 999999,
     });
     expect(r.netCents).toBe(15833);
-    expect(r.vatCents).toBe(Math.round((3333 * 1900) / 10000)); // 633
-    expect(r.grossCents).toBe(15833 + 633);
+    // Literal statt nachgerechneter Implementierungsformel: eine Änderung an
+    // `STANDARD_VAT_RATE_BP` oder am Rundungsmodus MUSS hier rot werden.
+    expect(r.vatCents).toBe(633);
+    expect(r.grossCents).toBe(16466);
     expect(r.needsBudgetSplit).toBe(true);
     expect(r.singlePotIsPrivate).toBe(false);
   });
 
-  it("USt wird je Topf gerundet, nicht auf der Gesamtsumme", () => {
-    // Zwei Privat-Zeilen in EINEM Topf ⇒ eine Rundung auf deren Summe.
+  it("USt wird je TOPF gerundet — nicht je Zeile und nicht auf der Gesamtsumme", () => {
+    // Diskriminierende Beträge: die drei denkbaren Rundungs-Skopen liefern hier
+    // DREI verschiedene Ergebnisse, der Test kann also wirklich rot werden.
+    //   • je Zeile:        round(0,57) + round(0,57) = 1 + 1 = 2
+    //   • je Topf (Soll):  round(6 * 0,19)           = round(1,14) = 1
+    //   • auf Gesamtsumme: round(10006 * 0,19)       = 1901
     const r = summarizePotAmounts({
       potItems: pots([
-        ["umwandlung_45a", [1]],
-        ["private", [5, 5]],
+        ["entlastungsbetrag_45b", [10000]],
+        ["private", [3, 3]],
       ]),
       billingType: "pflegekasse_gesetzlich",
-      builderNetCents: 11,
+      builderNetCents: 10006,
       builderVatCents: 0,
     });
-    expect(r.netCents).toBe(11);
-    expect(r.vatCents).toBe(Math.round((10 * 1900) / 10000)); // 2
+    expect(r.netCents).toBe(10006);
+    expect(r.vatCents).toBe(1);
+    expect(r.grossCents).toBe(10007);
+  });
+
+  it("Multi-Pot ohne erlaubte Privatzahlung: Privat-Topf wird NICHT besteuert", () => {
+    // Gate-2-Befund (Delta-Runde): das Flag wirkte nur im Single-Pot-Zweig. Ein
+    // reiner Kassen-Kunde mit Kassen-Topf PLUS Fallback-Überhang bekam damit USt
+    // ausgewiesen, die keine Rechnung je ausweisen kann — die Erstellung bricht
+    // für ihn am #1353-Backstop ab.
+    const r = summarizePotAmounts({
+      potItems: pots([
+        ["entlastungsbetrag_45b", [10000]],
+        ["private", [5000]],
+      ]),
+      billingType: "pflegekasse_gesetzlich",
+      builderNetCents: 15000,
+      builderVatCents: 0,
+      privatePotIsTaxable: false,
+    });
+    expect(r.netCents).toBe(15000);
+    expect(r.vatCents).toBe(0);
+    expect(r.grossCents).toBe(15000);
+  });
+
+  it("Multi-Pot MIT erlaubter Privatzahlung: Privat-Topf trägt 19 %", () => {
+    const r = summarizePotAmounts({
+      potItems: pots([
+        ["entlastungsbetrag_45b", [10000]],
+        ["private", [5000]],
+      ]),
+      billingType: "pflegekasse_gesetzlich",
+      builderNetCents: 15000,
+      builderVatCents: 0,
+    });
+    expect(r.vatCents).toBe(950);
+    expect(r.grossCents).toBe(15950);
   });
 });

@@ -668,8 +668,9 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   // Begrenzt parallel (Chunks), damit die Liste bei vielen Kunden nicht spürbar
   // langsamer wird und der DB-Pool nicht überlastet. Datums-/Kassenfilter sind
   // bereits im Scope (`finalIds` gefiltert, `dateFromQ`/`dateToQ` durchgereicht).
-  const actualByCustomer = new Map<number, number>();
-  const plannedByCustomer = new Map<number, number>();
+  // `null` = nicht berechenbar (fehlender Katalogpreis), siehe `grossOrNull`.
+  const actualByCustomer = new Map<number, number | null>();
+  const plannedByCustomer = new Map<number, number | null>();
   const clusterAppts = apptScopeByCustomer;
   // Task #1905 — `acceptsPrivatePayment` entscheidet, ob ein privater Überhang
   // überhaupt zulässig ist (SSoT `isPrivatePaymentAllowed`) und damit, ob der
@@ -692,7 +693,11 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     const chunk = finalIds.slice(i, i + AMOUNT_CONCURRENCY);
     await Promise.all(
       chunk.map(async (id) => {
-        const billingType = billingTypeById.get(id) ?? undefined;
+        // Ein aufgelöster Zahler-Typ für BEIDE Betrags-Pfade — vorher nutzte der
+        // IST-Pfad `?? "selbstzahler"` (nullish) und der PLAN-Pfad den rohen
+        // Wert, `buildInvoiceDraft` wiederum `|| "selbstzahler"` (falsy). Heute
+        // folgenlos, bei einem leeren String wären die Pfade auseinandergelaufen.
+        const billingType = billingTypeById.get(id) || "selbstzahler";
         const sets = clusterAppts.get(id);
         // 1. Abrechenbarer Anteil (nur wo es ihn gibt — sonst wirft/liefert der
         //    Draft ohnehin nichts Zählbares).
@@ -729,23 +734,45 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
         // das ist keine Spekulation) und wird über `SHOW_PROVISIONAL_MARKER` als
         // vorläufig kenntlich gemacht.
         //
-        // Fehlender Katalogpreis: NICHT gefangen. Ein verschluckter Preis-Fehler
-        // hätte hier eine zu kleine Geldsumme angezeigt; der Erstellungs-Pfad
-        // (Draft, oben) scheitert in derselben Lage ebenfalls laut.
+        // Fehlender Katalogpreis (`priceFor` ist zeitversioniert — z.B. ein
+        // rückdatierter Termin vor dem `validFrom` seines Katalog-Eintrags):
+        // weder verschlucken noch die Seite abschießen.
+        //  • Verschlucken (früher: `catch → 0`) zeigte eine zu kleine Geldsumme
+        //    ohne jeden Hinweis. Das darf eine Geld-Spalte nicht.
+        //  • Durchwerfen setzt `GET /eligible-customers` auf 400 — die Liste
+        //    wäre für den GANZEN Monat leer, auch für alle unbetroffenen Kunden.
+        //    Ein einzelner Katalog-Fehler legt damit die Abrechnung still.
+        // Stattdessen `null` = „nicht berechenbar": der betroffene Kunde zeigt
+        // ein „?" statt einer Zahl, alle anderen bleiben rechenbar.
+        const grossOrNull = async (compute: () => Promise<number>): Promise<number | null> => {
+          try {
+            return await compute();
+          } catch (err) {
+            log(
+              `eligible-customers Betrag nicht berechenbar customer=${id} month=${month}/${year}: ${err instanceof Error ? err.message : String(err)}`,
+              "billing",
+            );
+            return null;
+          }
+        };
         const [restCents, plannedCents] = await Promise.all([
-          computeDocumentedGrossCents({
-            customerId: id,
-            appointmentIds: restIds,
-            billingType: billingType ?? "selbstzahler",
-            acceptsPrivatePayment: acceptsPrivateById.get(id),
-          }),
+          grossOrNull(() =>
+            computeDocumentedGrossCents({
+              customerId: id,
+              appointmentIds: restIds,
+              billingType,
+              acceptsPrivatePayment: acceptsPrivateById.get(id),
+            }),
+          ),
           openIds.length === 0
             ? Promise.resolve(0)
-            : buildLineItemsFromAppointments(openIds, id, billingType).then(
-                (r) => r.totalNetCents + r.totalVatCents,
+            : grossOrNull(() =>
+                buildLineItemsFromAppointments(openIds, id, billingType).then(
+                  (r) => r.totalNetCents + r.totalVatCents,
+                ),
               ),
         ]);
-        actualByCustomer.set(id, actualCents + restCents);
+        actualByCustomer.set(id, restCents === null ? null : actualCents + restCents);
         plannedByCustomer.set(id, plannedCents);
       }),
     );
@@ -773,8 +800,9 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
       unbilledAppointmentCount: facts?.unbilledAppointmentCount ?? 0,
       // Task #1905 — IST (dokumentiert, noch nicht abgerechnet) und PLAN
       // (offene Termine, Prognose). Ersetzt `estimatedAmountCents`.
-      actualAmountCents: actualByCustomer.get(c.id) ?? 0,
-      plannedAmountCents: plannedByCustomer.get(c.id) ?? 0,
+      // `null` = nicht berechenbar; `undefined` (Kunde ohne Betrags-Lauf) → 0.
+      actualAmountCents: actualByCustomer.has(c.id) ? actualByCustomer.get(c.id)! : 0,
+      plannedAmountCents: plannedByCustomer.has(c.id) ? plannedByCustomer.get(c.id)! : 0,
     };
   });
 

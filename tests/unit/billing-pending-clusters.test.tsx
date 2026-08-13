@@ -173,6 +173,35 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
     expect(screen.getByTestId("text-pending-documentation-total").textContent).toContain("40,00");
   });
 
+  it("nicht berechenbarer Betrag zeigt Fragezeichen statt 0 (fehlender Katalogpreis)", () => {
+    // `null` statt 0: eine 0 in einer Geld-Spalte liest sich wie „nichts offen"
+    // und wäre eine stille Falschaussage. Die Gruppensumme weist sich zusätzlich
+    // als unvollständig aus, statt still zu klein zu sein.
+    const known = makeCustomer({
+      id: 700,
+      completedAppointments: 1,
+      coveredAppointments: 1,
+      signedAppointmentCount: 1,
+      unbilledAppointmentCount: 1,
+      actualAmountCents: 5000,
+    });
+    const unknown = makeCustomer({
+      id: 701,
+      completedAppointments: 1,
+      coveredAppointments: 1,
+      signedAppointmentCount: 1,
+      unbilledAppointmentCount: 1,
+      actualAmountCents: null,
+    });
+    renderCard([known, unknown]);
+
+    expect(screen.getByTestId(`text-pending-amount-unknown-${unknown.id}`).textContent).toBe("?");
+    expect(screen.queryByTestId(`text-pending-amount-unknown-${known.id}`)).toBeNull();
+    // Summe = nur der bekannte Betrag, aber sichtbar als unvollständig markiert.
+    expect(screen.getByTestId("text-pending-ready-total").textContent).toContain("50,00");
+    expect(screen.getByTestId("text-pending-ready-incomplete")).not.toBeNull();
+  });
+
   it("„vorläufig“-Marker ist standardmäßig aus", () => {
     const c = makeCustomer({ id: 600, openAppointments: 1, plannedAmountCents: 1000 });
     renderCard([c]);

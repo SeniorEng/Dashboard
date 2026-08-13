@@ -67,8 +67,13 @@ export interface BillingCustomerItem {
   // Cluster-Erwartung: „Bereit" und „Leistungsnachweis fehlt" tragen nur IST
   // (`plannedAmountCents === 0`, da beide keine offenen Termine haben);
   // „Dokumentation ausstehend" ist gemischt.
-  actualAmountCents: number;
-  plannedAmountCents: number;
+  // `null` = NICHT BERECHENBAR (ein Termin trägt eine Dienstleistung ohne
+  // auflösbaren Preis am Termindatum). Bewusst nicht 0: eine 0 wäre eine stille
+  // Falschaussage in einer Geld-Spalte. Das Frontend zeigt dafür „?" statt einer
+  // Zahl; alle übrigen Kunden bleiben rechenbar (ein einzelner Katalog-Fehler
+  // darf die Abrechnungsliste nicht leeren).
+  actualAmountCents: number | null;
+  plannedAmountCents: number | null;
 }
 
 export interface InvoiceItem {

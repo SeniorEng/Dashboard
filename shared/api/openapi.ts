@@ -364,8 +364,9 @@ export const BillingCustomerItemSchema = component(
     // denselben Zeilen-Bauer); `plannedAmountCents` = Brutto-PROGNOSE der noch
     // offenen Termine. PLAN ist reiner Anzeigewert und darf nie in einen
     // Rechnungs-/Buchungs-/Nachweis-Pfad einfließen (GoBD).
-    actualAmountCents: z.number().int(),
-    plannedAmountCents: z.number().int(),
+    // `null` = nicht berechenbar (fehlender Katalogpreis) — bewusst nicht 0.
+    actualAmountCents: z.number().int().nullable(),
+    plannedAmountCents: z.number().int().nullable(),
     eligibility: z.object({
       status: z.enum(["eligible", "blocked"]),
       reason: z

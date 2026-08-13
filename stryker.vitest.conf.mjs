@@ -38,6 +38,7 @@ export default {
     "shared/utils/money.ts",
     "shared/domain/import-cutoff.ts",
     "shared/utils/month-close-cutoff.ts",
+    "shared/domain/invoice-amounts.ts",
   ],
   incrementalFile: "reports/stryker-incremental-vitest.json",
   htmlReporter: {
