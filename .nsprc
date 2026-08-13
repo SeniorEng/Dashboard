@@ -7,6 +7,10 @@
     "active": true,
     "notes": "esbuild Dev-Server Arbitrary File Read auf WINDOWS (GHSA-g7r4-m6w7-qqqr), low. Betrifft nur vite>esbuild / tsx>esbuild@0.27.7; Fix 0.28.1 wuerde ein Force-Override von vites gepinntem esbuild erzwingen (Build-Risiko). Nur Dev-Server, nur Windows, Prod-Build/Container nicht betroffen. Nicht CI-blockierend."
   },
+  "1139346": {
+    "active": true,
+    "notes": "extract-zip unvalidated symlink path traversal (GHSA-jmr9-qjv8-65gv), HIGH. NICHT laufzeit-erreichbar: einzige Instanz ist puppeteer-core>@puppeteer/browsers>extract-zip@2.0.1, und die entpackt ausschliesslich beim CHROMIUM-DOWNLOAD. Unser Image bringt Chromium vorinstalliert mit (CHROMIUM_PATH, siehe CLAUDE.md + Dockerfile); der Download-Pfad laeuft weder im Build noch zur Laufzeit. Kein Angreifer-kontrolliertes Archiv erreicht den Code. Erneut pruefen: 2026-11-13 (bzw. frueher, sobald @puppeteer/browsers ein Update mit gepatchtem extract-zip liefert) — Task 6hGcXpcc7cjQJWMG."
+  },
   "1123977": {
     "active": true,
     "notes": "body-parser DoS bei invalidem limit-Wert (GHSA-v422-hmwv-36x6), low. Transitive; unsere Express-Bootstrap setzt limit nicht dynamisch aus Untrusted-Input. Nicht CI-blockierend (audit --level high)."
