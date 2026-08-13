@@ -1,15 +1,19 @@
 import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
- * Task #1887 — Beträge in der „Noch zu erstellen"-Liste.
+ * Task #1905 — Beträge in der „Noch zu erstellen"-Liste: IST und PLAN.
  *
- * `GET /billing/eligible-customers` liefert je Kunde `estimatedAmountCents` = der
- * voraussichtliche Brutto-Betrag des AKTUELL abrechenbaren Teils, berechnet über
- * `buildInvoiceDraft` im preview-Modus — DIESELBE SSoT wie `/billing/preview` und
- * die echte Erstellung, inkl. der #1883-Ausschlüsse. Kein zweiter Rechenweg.
+ * `GET /billing/eligible-customers` liefert je Kunde ZWEI Brutto-Beträge
+ * (ERSETZT das frühere einzelne `estimatedAmountCents` aus #1887):
+ *  • `actualAmountCents` (IST)  — dokumentierte, noch nicht abgerechnete Termine.
+ *    Der abrechenbare Anteil kommt weiterhin aus `buildInvoiceDraft` (preview) —
+ *    DIESELBE SSoT wie `/billing/preview` und die echte Erstellung, inkl. der
+ *    #1883-Ausschlüsse; der nicht abrechenbare Rest über denselben Zeilen-Bauer.
+ *  • `plannedAmountCents` (PLAN) — Prognose der noch offenen Termine.
  *
- * Kern-Assertion: `estimatedAmountCents === /billing/preview.totalCents` (beide aus
- * demselben Draft). Beim Mischkunden ist das genau der Teilbetrag des signierten
- * Teils; nicht-abrechenbare Kunden sind 0. Reiner Lesepfad — kein Schreiben/PDF.
+ * Kern-Assertionen: beim Bereit-Kunden ist IST == `/billing/preview.totalCents`
+ * (ein Rechenweg, keine Drift); der dokumentierte-aber-nicht-abrechenbare Anteil
+ * erscheint im IST (früher 0 → „—" in der Liste); offene Termine erscheinen NUR
+ * im PLAN. Reiner Lesepfad — kein Schreiben/PDF.
  *
  * ISOLATION: nur eigene Kunden per `customerId`; vergangener Vormonat (3-Monats-
  * Grenze). `/eligible-customers` + `/preview` sind Reads → keine globalen Effekte.
@@ -115,6 +119,7 @@ async function previewTotalCents(customerId: number): Promise<number> {
 let readyId: number;
 let partialId: number;
 let lnMissingId: number;
+let openOnlyId: number;
 
 beforeAll(async () => {
   auth = await getAuthCookie();
@@ -143,6 +148,11 @@ beforeAll(async () => {
   lnMissingId = await createSelbstzahler("lnmissing");
   const lA = await createApptInMonth(lnMissingId, "lnmiss");
   await documentAppointment(lA.id, lA.time);
+
+  // Task #1905 — nur ein OFFENER (geplanter, nicht dokumentierter) Termin:
+  // reiner PLAN-Fall, IST muss 0 bleiben.
+  openOnlyId = await createSelbstzahler("openonly");
+  await createApptInMonth(openOnlyId, "openonly");
 });
 
 afterAll(async () => {
@@ -151,33 +161,55 @@ afterAll(async () => {
   await deactivateTestEmployee(testEmployeeId);
 });
 
-describe("Task #1887 — Beträge je Kunde in der Rechnungsliste", () => {
-  it("Bereit zum Abrechnen: estimatedAmountCents == Vorschau-/Erstellungsbetrag, > 0", async () => {
+describe("Task #1905 — IST/PLAN-Beträge je Kunde in der Rechnungsliste", () => {
+  it("Bereit zum Abrechnen: IST == Vorschau-/Erstellungsbetrag (> 0), PLAN == 0", async () => {
     const row = await eligibleRowFor(readyId);
     expect(row).toBeDefined();
     const preview = await previewTotalCents(readyId);
     expect(preview).toBeGreaterThan(0);
-    expect(row.estimatedAmountCents).toBe(preview);
+    // Ein Rechenweg: die „Bereit"-Summe ist exakt die spätere Rechnungssumme.
+    expect(row.actualAmountCents).toBe(preview);
+    // Keine offenen Termine ⇒ kein Prognose-Anteil.
+    expect(row.plannedAmountCents).toBe(0);
   });
 
-  it("Mischkunde: estimatedAmountCents == nur der abrechenbare (signierte) Teil (#1883-konsistent)", async () => {
+  it("Mischkunde: IST enthält den signierten UND den dokumentiert-unsignierten Termin", async () => {
     const row = await eligibleRowFor(partialId);
     expect(row).toBeDefined();
     // teil-dokumentiert: 2 completed, 1 abgedeckt.
     expect(row.completedAppointments).toBe(2);
     expect(row.coveredAppointments).toBe(1);
+
     const preview = await previewTotalCents(partialId);
-    // Betrag == Vorschau (= nur appt1) und == Betrag des Ready-Kunden mit 1 Termin.
-    expect(row.estimatedAmountCents).toBe(preview);
-    expect(row.estimatedAmountCents).toBeGreaterThan(0);
     const readyRow = await eligibleRowFor(readyId);
-    expect(row.estimatedAmountCents).toBe(readyRow.estimatedAmountCents);
+    // Die Vorschau (= was JETZT abgerechnet würde) bleibt der signierte Teil …
+    expect(preview).toBe(readyRow.actualAmountCents);
+    // … das IST zeigt die geleistete Arbeit BEIDER Termine. Genau hier lag der
+    // frühere Informationsverlust: der zweite, dokumentierte Termin war im
+    // Listen-Betrag unsichtbar.
+    expect(row.actualAmountCents).toBe(2 * readyRow.actualAmountCents);
+    expect(row.plannedAmountCents).toBe(0);
   });
 
-  it("Nicht abrechenbar (LN fehlt): estimatedAmountCents == 0", async () => {
+  it("dokumentiert, aber kein LN: IST > 0 (füllt das frühere Gedankenstrich-Feld), PLAN == 0", async () => {
     const row = await eligibleRowFor(lnMissingId);
     expect(row).toBeDefined();
-    expect(row.estimatedAmountCents).toBe(0);
+    const readyRow = await eligibleRowFor(readyId);
+    // Vor #1905 stand hier 0 → die Liste zeigte „—", obwohl Arbeit geleistet war.
+    expect(row.actualAmountCents).toBe(readyRow.actualAmountCents);
+    expect(row.plannedAmountCents).toBe(0);
+  });
+
+  it("nur offener Termin: PLAN > 0, IST == 0 (Prognose zählt nie als geleistet)", async () => {
+    const row = await eligibleRowFor(openOnlyId);
+    expect(row).toBeDefined();
+    expect(row.openAppointments).toBe(1);
+    expect(row.completedAppointments).toBe(0);
+    expect(row.actualAmountCents).toBe(0);
+    const readyRow = await eligibleRowFor(readyId);
+    // Gleiche Leistung/Dauer wie der dokumentierte Termin ⇒ gleicher Betrag,
+    // nur eben als PLAN statt IST.
+    expect(row.plannedAmountCents).toBe(readyRow.actualAmountCents);
   });
 
   it("Preview-only: der Ready-Kunde bleibt nach der Betrags-Abfrage gelistet (kein Schreibpfad)", async () => {

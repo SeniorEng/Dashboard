@@ -230,9 +230,10 @@ describe("PSV: Teil-signierte Kunden bleiben in der Abrechnungsliste sichtbar (T
     expect(item.completedAppointments).toBeGreaterThan(item.coveredAppointments);
 
     // ... und landet NICHT unter „Bereit zum Abrechnen".
+    // Task #1905: zwei dokumentierte, einer abgedeckt ⇒ Dokumentations-Cluster.
     const group = classifyBillingMaturity(item);
     expect(group).not.toBe("ready");
-    expect(["partially_documented", "signature_blocked"]).toContain(group);
+    expect(group).toBe("documentation_pending");
   });
 
   it("PSV-2 — vollständig abgerechneter Kunde (alles dokumentierte abgedeckt + abgerechnet) fällt weiterhin heraus", async () => {

@@ -2,7 +2,7 @@
 /**
  * Stryker-Profil "vitest" (Task #804) — DETERMINISTISCHE Berechnungs-Module.
  *
- * Diese sechs Module werden vom nativen `@stryker-mutator/vitest-runner`
+ * Die unten gelisteten Module werden vom nativen `@stryker-mutator/vitest-runner`
  * mutiert. Ihre Tests sind deterministisch (KEINE fast-check-Property-Tests),
  * d.h. keine Mutation erzeugt eine synchrone Endlosschleife — der native
  * Runner mit Per-Mutant-Test-Selektion läuft hier sauber und deutlich schneller
@@ -38,6 +38,7 @@ export default {
     "shared/utils/money.ts",
     "shared/domain/import-cutoff.ts",
     "shared/utils/month-close-cutoff.ts",
+    "shared/domain/invoice-amounts.ts",
   ],
   incrementalFile: "reports/stryker-incremental-vitest.json",
   htmlReporter: {

@@ -91,7 +91,16 @@ export const PIPELINE_SIDE_STATE_LABELS: Record<PipelineSideState, string> = {
   // (`employee_signed`) — die Kundenunterschrift auf dem Leistungsnachweis fehlt,
   // daher NOCH nicht abrechenbar. Sein € ist sichtbar, zählt aber NICHT in die
   // Stufe „Unterschrieben" (= bereit zum Abrechnen).
-  wartet_auf_kundenunterschrift: "Wartet auf Kundenunterschrift",
+  //
+  // Task #1905 — Beschriftung wortgleich zum Cluster „Leistungsnachweis fehlt"
+  // der Karte „Noch zu erstellen": Ohne Kundenunterschrift ist der
+  // Leistungsnachweis nicht gültig, und beide Ansichten beantworten hier
+  // dieselbe fachliche Frage. Der Schlüssel (`wartet_auf_kundenunterschrift`)
+  // und die €-Zuordnung bleiben unverändert — er ist über
+  // `EXPECTED_REVENUE_SIDE_STATES` an die Umsatz-Sicht gebunden; nur die
+  // Beschriftung wird angeglichen, damit Karte und Liste dieselbe Sprache
+  // sprechen.
+  wartet_auf_kundenunterschrift: "Leistungsnachweis fehlt",
 };
 
 /**

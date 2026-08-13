@@ -68,6 +68,10 @@
       },
       "BillingCustomerItem": {
         "properties": {
+          "actualAmountCents": {
+            "nullable": true,
+            "type": "integer"
+          },
           "billingType": {
             "type": "string"
           },
@@ -103,9 +107,6 @@
             ],
             "type": "object"
           },
-          "estimatedAmountCents": {
-            "type": "integer"
-          },
           "id": {
             "type": "integer"
           },
@@ -117,6 +118,10 @@
             "type": "string"
           },
           "openAppointments": {
+            "type": "integer"
+          },
+          "plannedAmountCents": {
+            "nullable": true,
             "type": "integer"
           },
           "signedAppointmentCount": {
@@ -145,7 +150,8 @@
           "openAppointments",
           "signedAppointmentCount",
           "unbilledAppointmentCount",
-          "estimatedAmountCents",
+          "actualAmountCents",
+          "plannedAmountCents",
           "eligibility"
         ],
         "type": "object"
