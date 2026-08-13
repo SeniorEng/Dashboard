@@ -25,6 +25,12 @@ const ACTION_LABELS: Record<string, string> = {
   appointment_revoked: "Termin storniert",
   appointment_updated: "Termin bearbeitet",
   appointment_deleted: "Termin gelöscht",
+  // Task #1906 — ohne Eintrag hier wäre der eigene Audit-Typ weder filterbar
+  // noch lesbar (die Liste fällt auf den Roh-Key zurück). Der Typ existiert
+  // gerade deshalb, damit im Verlauf unterscheidbar bleibt, ob ein
+  // Zwei-Kräfte-Einsatz AUFGELÖST oder ein Einzeltermin gelöscht wurde.
+  appointment_decoupled: "Zwei-Kräfte-Einsatz entkoppelt",
+  appointment_decouple_blocked: "Entkopplung abgelehnt",
   import_trim_reconciled: "Import-Reparatur (Termin)",
   import_trim_reconciled_batch: "Import-Reparatur (Sitzung)",
   customer_hard_deleted: "Kunde gelöscht (hart)",

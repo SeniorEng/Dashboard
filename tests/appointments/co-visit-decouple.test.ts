@@ -41,7 +41,7 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  * von den Slots der Schwester-Datei):
  *
  *   00:00 D-1 · 01:00 D-2 · 02:00 D-3 · 03:00 D-4
- *   04:00 D-5 · 05:00 D-6 · 06:00 D-7 · 07:00 D-8
+ *   04:00 D-5 · 05:00 D-6 · 06:00 D-7 · 07:00 D-8 · 08:00 D-5b · 09:00 D-9
  *
  * Die Termine dauern 60 Minuten — die Slots stehen deshalb eine VOLLE Stunde
  * auseinander. Mit 15-Minuten-Abständen überlappten sie sich gegenseitig und
@@ -171,7 +171,10 @@ describe("Task #1906 — Co-Visit entkoppeln", () => {
     const res = await apiPost<any>(`/api/appointments/${legB.id}/decouple`, {});
     expect(res.status, JSON.stringify(res.data)).toBe(200);
     expect(res.data.removedLegId).toBe(legB.id);
-    expect(res.data.survivingLegId).toBe(legA.id);
+    // Die Antwort nennt die Partner-ID BEWUSST nicht: der Client kennt sie
+    // nicht und soll sie nicht kennen (Privacy-Invariante der Gruppen-Spalte).
+    expect(res.data.survivingLegId).toBeUndefined();
+    expect(res.data.decoupledGroupId).toBeUndefined();
 
     // Weichendes Leg ist weg …
     expect(await fetchAppointment(legB.id)).toBeNull();
@@ -221,7 +224,10 @@ describe("Task #1906 — Co-Visit entkoppeln", () => {
     // ihr das Löschen trotzdem nicht (`isLocked && !adminLike`).
     const asEmpA = await loginAs(empA.email, empA.password);
     const res = await apiPostAs<any>(asEmpA, `/api/appointments/${legA.id}/decouple`, {});
-    expect([403, 409]).toContain(res.status);
+    // Deterministisch 403: die POLICY lehnt ab (`isLocked && !adminLike`), noch
+    // vor der Transaktion. Würde hier 409 kommen, hätte die Policy versagt und
+    // nur die transaktionale zweite Linie gegriffen — das soll auffallen.
+    expect(res.status, JSON.stringify(res.data)).toBe(403);
 
     // Nichts darf sich bewegt haben — insbesondere ist der PARTNER noch gekoppelt.
     const stillThere = await fetchAppointment(legA.id);
@@ -254,13 +260,33 @@ describe("Task #1906 — Co-Visit entkoppeln", () => {
     }
   });
 
-  it("D-5 – verwaiste Gruppe (Partner längst weg): sauber abgelehnt, kein 500", async () => {
-    const { legA, legB } = await createCoVisit(64, "04:00");
-    // Erst regulär entkoppeln — legA trägt danach keine Gruppe mehr.
-    const first = await apiPost<any>(`/api/appointments/${legB.id}/decouple`, {});
-    expect(first.status).toBe(200);
+  it("D-5 – VERWAISTE Gruppe (Leg trägt die Gruppe, Partner soft-gelöscht): abgelehnt, kein 500", async () => {
+    // Der echte Verwaisten-Zustand — nicht der entkoppelte Survivor. Er
+    // entsteht über den Kaskaden-Skip im Löschpfad: ein Partner mit EIGENEM
+    // Ausgang (hier `completed`) bleibt beim Löschen stehen, und
+    // `co_visit_group_id` wird dabei nirgends genullt. Genau diesen Zustand
+    // beschreibt der Code-Kommentar als in Prod vorhanden.
+    const { legA, legB, serviceId } = await createCoVisit(64, "04:00");
+    await documentLeg(legA.id, serviceId, "04:00");
 
-    // Ein zweiter Versuch auf dem Survivor: er ist kein Co-Visit mehr.
+    // legB löschen: legA ist `completed`, wird also NICHT mitkaskadiert und
+    // behält seine Gruppen-ID — ohne lebenden Partner.
+    const del = await apiDelete(`/api/appointments/${legB.id}`);
+    expect(del.status, JSON.stringify(del.data)).toBe(200);
+
+    const orphan = await fetchAppointment(legA.id);
+    expect(orphan).not.toBeNull();
+    expect(orphan.coVisitGroupId, "Vorbedingung: Gruppe bleibt am Waisen").not.toBeNull();
+
+    // Entkoppeln muss hier sauber ablehnen — es gibt nichts zu entkoppeln.
+    const res = await apiPost<any>(`/api/appointments/${legA.id}/decouple`, {});
+    expect([400, 409]).toContain(res.status);
+    expect(res.status).not.toBe(500);
+  });
+
+  it("D-5b – entkoppelter Survivor ist kein Co-Visit mehr", async () => {
+    const { legA, legB } = await createCoVisit(68, "08:00");
+    expect((await apiPost<any>(`/api/appointments/${legB.id}/decouple`, {})).status).toBe(200);
     const second = await apiPost<any>(`/api/appointments/${legA.id}/decouple`, {});
     expect(second.status).toBe(400);
   });
@@ -309,6 +335,50 @@ describe("Task #1906 — Co-Visit entkoppeln", () => {
     expect(await fetchAppointment(legA.id)).not.toBeNull();
     const partner = await fetchAppointment(legB.id);
     expect(partner.coVisitGroupId).not.toBeNull();
+  });
+
+  it("D-9 – GoBD: abgerechnet, aber NICHT mehr versiegelt → trotzdem abgelehnt", async () => {
+    // Der Zustand, den der Versiegelungs-Zweig NICHT abdeckt: Rechnung aktiv,
+    // Leistungsnachweis aber über die Admin-Route zurückgesetzt. Läge der
+    // Storno-first-Guard (wie im Löschpfad) INNERHALB der Versiegelungs-
+    // Prüfung, würde hier das Budget zurückgebucht, während die gestellte
+    // Rechnung den Verbrauch weiter ausweist. Der Guard steht deshalb
+    // unbedingt davor — das hält dieser Test fest.
+    const { customerId, legA, legB, date, serviceId } = await createCoVisit(69, "09:00");
+    await documentLeg(legA.id, serviceId, "09:00");
+    const srId = await signLnForLeg(customerId, empA.id, legA.id, date);
+
+    const d = new Date(date);
+    const gen = await apiPost<any>("/api/billing/generate", {
+      customerId,
+      billingMonth: d.getMonth() + 1,
+      billingYear: d.getFullYear(),
+    });
+    expect(gen.status, `generate failed: ${JSON.stringify(gen.data)}`).toBe(200);
+
+    // Versiegelung VOLLSTÄNDIG aufheben — die Rechnung bleibt bestehen.
+    // Beide Unterschriften müssen weg: `lockAndCheckAppointmentLocked` wertet
+    // `employee_signed` UND `completed` als versiegelt, ein Zurücknehmen nur
+    // der Kundenunterschrift lässt den Nachweis also gesperrt (und der Test
+    // wäre auch mit dem alten, bedingten Guard grün gewesen — gemessen).
+    for (const signerType of ["customer", "employee"] as const) {
+      const revoke = await apiPost<any>(`/api/admin/revoke-signature/service_record/${srId}`, {
+        signerType,
+        reason: "D-9: Versiegelung aufheben, Rechnung bleibt",
+      });
+      expect(revoke.status, `revoke(${signerType}) failed: ${JSON.stringify(revoke.data)}`).toBe(200);
+    }
+    const srAfter = await apiGet<any>(`/api/service-records/${srId}`);
+    expect(srAfter.data.status, "Vorbedingung: Nachweis darf NICHT mehr versiegelt sein")
+      .not.toMatch(/^(employee_signed|completed)$/);
+
+    const res = await apiPost<any>(`/api/appointments/${legA.id}/decouple`, {});
+    expect(res.status, JSON.stringify(res.data)).toBe(409);
+    expect(String(res.data?.code ?? "")).toBe("APPOINTMENT_INVOICED");
+
+    // Nichts bewegt: Leg da, Partner weiter gekoppelt.
+    expect(await fetchAppointment(legA.id)).not.toBeNull();
+    expect((await fetchAppointment(legB.id)).coVisitGroupId).not.toBeNull();
   });
 
   it("D-8 – zwei gleichzeitige Entkopplungen aus entgegengesetzter Richtung: genau eine gewinnt", async () => {

@@ -1859,10 +1859,6 @@ router.use(appointmentDocumentationRouter);
  * formal ein Co-Visit und läuft weiter in den Guard. Dieser Pfad ist der erste,
  * der die Gruppe wieder auflöst.
  */
-const decoupleCoVisitSchema = z.object({
-  reason: z.string().max(500).optional(),
-});
-
 router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden", async (req, res) => {
   // `:id` ist das WEICHENDE Leg; der Survivor wird server-seitig aufgelöst.
   //
@@ -1882,34 +1878,12 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
   const removeLegId = requireIntParam(req.params.id, res);
   if (removeLegId === null) return;
 
-  const parsed = decoupleCoVisitSchema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    return sendBadRequest(res, "Ungültige Anfrage.");
-  }
-  const { reason } = parsed.data;
-
   const removeLeg = await storage.getAppointment(removeLegId);
   if (!removeLeg) return sendNotFound(res, ErrorMessages.appointmentNotFound);
 
   // Der Aufruf ist NUR auf ein echtes Paar anwendbar — nicht auf einen
   // beliebigen Termin. Ohne diese Prüfung wäre `/decouple` ein zweiter
   // Löschpfad mit eigener (schwächerer) Guard-Kette.
-  if (removeLeg.coVisitGroupId == null) {
-    return sendBadRequest(res, "Dieser Termin ist kein Zwei-Kräfte-Einsatz.");
-  }
-  // Vor-Prüfung NUR für die Policy und die frühen 400er. Die verbindliche
-  // Auflösung des Survivors passiert INNERHALB der Transaktion hinter der
-  // Gruppen-Sperre (siehe unten) — hier gelesen, ist sie ein
-  // check-then-write-Race: zwei gleichzeitige Aufrufe aus entgegengesetzter
-  // Richtung sähen beide einen Partner und löschten am Ende BEIDE Legs.
-  const preflightPartners = await storage.getCoVisitPartnerAppointments(removeLeg.coVisitGroupId, removeLegId);
-  if (preflightPartners.length === 0) {
-    return sendBadRequest(
-      res,
-      "Zu diesem Termin gibt es keinen aktiven Partner-Termin mehr — es gibt nichts zu entkoppeln.",
-    );
-  }
-
   const user = req.user!;
   const ip = req.ip || req.socket.remoteAddress;
   const policyUser = toPolicyUser(user);
@@ -1937,6 +1911,16 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
     }
   }
 
+  // ERST HINTER der Berechtigung: ob ein Termin zu einem Zwei-Kräfte-Einsatz
+  // gehört, ist selbst eine Auskunft. Stünde die Prüfung davor, könnte jeder
+  // angemeldete Nutzer für eine beliebige Termin-ID an den unterschiedlichen
+  // Fehlermeldungen ablesen, ob es sie gibt, ob sie ein Co-Visit ist und ob
+  // deren Partner noch lebt. `DELETE /:id` prüft die Policy ebenfalls direkt
+  // nach der Existenz und gibt darüber hinaus nichts preis.
+  if (removeLeg.coVisitGroupId == null) {
+    return sendBadRequest(res, "Dieser Termin ist kein Zwei-Kräfte-Einsatz.");
+  }
+
   const removeLegWasLocked = removeFlags.isLocked;
   const transactions = await budgetStorage.getTransactionsByAppointmentId(removeLegId);
   let serviceRecordRemovals: ServiceRecordAppointmentRemoval[] = [];
@@ -1945,9 +1929,9 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
   let survivingId = 0;
 
   await db.transaction(async (txClient) => {
-    // Lock-Ordering (Task #1906, im Sinne von 6hFPq5v5gwrH7vxp): BEIDE
-    // Termin-Zeilen zuerst, in EINEM Aufruf. `lockAppointmentsForUpdate`
-    // sortiert intern nach `id` und ordert im SELECT — die Sperr-Reihenfolge
+    // Lock-Ordering (Task #1906, im Sinne von 6hFPq5v5gwrH7vxp): ALLE Legs der
+    // Gruppe zuerst, in EINEM Aufruf. `lockCoVisitGroupForUpdate`
+    // sortiert nach `id` und ordert im SELECT — die Sperr-Reihenfolge
     // ist damit unabhängig davon, welches Leg der Aufrufer als bleibend
     // benennt. Erst danach werden Leistungsnachweise angefasst
     // (Termine-vor-LN). Der Co-Visit-Zweig des Löschpfads erwirbt die Sperren
@@ -1989,6 +1973,32 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
     survivingId = surviving.id;
 
     // ---- (a) Das weichende Leg: dieselben Guards wie beim Löschen ----------
+    // GoBD — Storno first, UNBEDINGT: ein Termin auf einer aktiven Rechnung
+    // verlässt den Einsatz nur über Storno, nie über diesen Weg.
+    //
+    // Der Guard steht BEWUSST vor (nicht in) der Versiegelungs-Prüfung. Im
+    // Löschpfad liegt er innerhalb des `isLocked`-Zweiges — und „abgerechnet,
+    // aber NICHT versiegelt" ist im Repo nachweislich erreichbar: die
+    // Admin-Route `revoke-signature/service_record/:id` setzt einen Nachweis
+    // auf `pending` zurück, ohne eine bereits gestellte Rechnung zu prüfen
+    // (der Kommentar in `server/routes/admin/audit.ts` beschreibt genau das
+    // und hat den dortigen Reopen-Pfad deshalb unbedingt gemacht). Läge der
+    // Guard auch hier im Zweig, würde in dieser Lage das Budget
+    // zurückgebucht, während die gestellte Rechnung den Verbrauch weiter
+    // ausweist.
+    const activeInvoices = await findActiveInvoicesForAppointments([removeLegId], txClient);
+    if (activeInvoices.length > 0) {
+      const numbers = [...new Set(activeInvoices.map((i) => i.invoiceNumber))].join(", ");
+      const allDraft = activeInvoices.every((i) => i.status === "entwurf");
+      throw new AppError(
+        409,
+        "APPOINTMENT_INVOICED",
+        allDraft
+          ? `Für diesen Termin existiert der Rechnungsentwurf ${numbers}. Bitte zuerst den Entwurf verwerfen, danach kann der Einsatz entkoppelt werden.`
+          : `Dieser Termin ist auf der Rechnung ${numbers} abgerechnet. Bitte zuerst die Rechnung stornieren, danach kann der Einsatz entkoppelt werden.`,
+      );
+    }
+
     if (await storage.lockAndCheckAppointmentLocked(removeLegId, txClient)) {
       // Versiegelt (unterschriebener LN). Admin-Korrektur-Zweig wie in
       // `DELETE /:id`: reduktions-only aus den Nachweisen herauslösen, der LN
@@ -1997,23 +2007,6 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
       if (!isAdmin) {
         throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
       }
-
-      // GoBD — Storno first. Bewusst OHNE Ausnahme für das Entkoppeln: ein
-      // abgerechnetes Leg verlässt den Einsatz nur über Storno, nie über
-      // diesen Weg.
-      const activeInvoices = await findActiveInvoicesForAppointments([removeLegId], txClient);
-      if (activeInvoices.length > 0) {
-        const numbers = [...new Set(activeInvoices.map((i) => i.invoiceNumber))].join(", ");
-        const allDraft = activeInvoices.every((i) => i.status === "entwurf");
-        throw new AppError(
-          409,
-          "APPOINTMENT_INVOICED",
-          allDraft
-            ? `Für diesen Termin existiert der Rechnungsentwurf ${numbers}. Bitte zuerst den Entwurf verwerfen, danach kann der Einsatz entkoppelt werden.`
-            : `Dieser Termin ist auf der Rechnung ${numbers} abgerechnet. Bitte zuerst die Rechnung stornieren, danach kann der Einsatz entkoppelt werden.`,
-        );
-      }
-
       serviceRecordRemovals = await storage.removeAppointmentFromServiceRecords(removeLegId, txClient);
     }
 
@@ -2035,6 +2028,30 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
     if (!unlinked) {
       throw new Error("Der verbleibende Termin konnte nicht entkoppelt werden");
     }
+  }).catch(async (err) => {
+    // Eine abgelehnte Entkopplung bekommt eine Spur — wie die abgelehnte
+    // Co-Visit-Korrektur im Löschpfad. Der Eintrag läuft NACH dem Rollback und
+    // OHNE `exec`, sonst würde er mit der Transaktion verworfen, die ihn
+    // ausgelöst hat. Er darf den Fehler nie verschlucken.
+    if (err instanceof AppError && (err.statusCode === 409 || err.statusCode === 422)) {
+      try {
+        await auditService.log(
+          user.id,
+          "appointment_decouple_blocked",
+          "appointment",
+          removeLegId,
+          {
+            customerId: removeLeg.customerId,
+            date: removeLeg.date,
+            coVisitGroupId: removeLeg.coVisitGroupId ?? undefined,
+            reasonCode: err.code,
+            actor: { role: actorRole(user) },
+          },
+          ip,
+        );
+      } catch { /* Audit darf die Ablehnung nicht verschlucken */ }
+    }
+    throw err;
   });
 
   // Nach erfolgreicher Transaktion steht der Survivor fest.
@@ -2054,7 +2071,6 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
       coVisitGroupId: surviving.coVisitGroupId ?? undefined,
       removedLegId: removeLegId,
       removedLegWasLocked: removeLegWasLocked,
-      reason: reason ?? undefined,
       actor: { role: actorRole(user) },
     },
     ip,
@@ -2072,6 +2088,10 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
       customerId: removeLeg.customerId,
       date: removeLeg.date,
       status: removeLeg.status,
+      // Gleiche Auswertbarkeit wie beim regulären Löschen: „welche
+      // abgeschlossenen Termine hat ein Admin zwangsentfernt?" muss die über
+      // diesen Pfad entfernten Legs mitzählen.
+      adminForceDelete: isAdmin && removeLeg.status === "completed",
       wasLocked: removeLegWasLocked,
       reversedTransactions: transactions.length,
       removedFromServiceRecordIds: serviceRecordRemovals.length > 0
@@ -2112,12 +2132,15 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
     }
   }
 
+  // Bewusst OHNE `survivingLegId`/`decoupledGroupId`: die Begründung für den
+  // Zuschnitt dieses Endpunkts ist, dass der Client die Partner-ID nicht kennt
+  // und nicht kennen soll. Sie in der Antwort nachzureichen würde dieselbe
+  // Grenze im selben Request-Zyklus wieder überschreiten — für Daten, die der
+  // Client nicht braucht (er navigiert nur weg).
   res.json({
     success: true,
     message: "Zwei-Kräfte-Einsatz entkoppelt — der verbleibende Termin ist jetzt ein Einzeltermin.",
-    survivingLegId: survivingId,
     removedLegId: removeLegId,
-    decoupledGroupId: surviving.coVisitGroupId,
   });
 }));
 
@@ -2190,6 +2213,21 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   // (GoBD-)Nachweis mutieren. Der FOR-UPDATE-Re-Check serialisiert gegen die
   // Unterschrift und bricht ab, wenn der LN inzwischen versiegelt wurde.
   await db.transaction(async (txClient) => {
+    // Task #1906 — Bei einem Zwei-Kräfte-Einsatz zuerst die GANZE Gruppe in
+    // `id`-Reihenfolge sperren, bevor irgendein einzelnes Leg oder ein
+    // Leistungsnachweis angefasst wird.
+    //
+    // Dieser Pfad erwarb die Sperren bisher nacheinander (Termin → LN →
+    // Partner-Termin). Gegen den neuen Entkoppel-Pfad, der über die Gruppe
+    // sperrt, entstünde daraus eine ABBA-Paarung: `DELETE(B)` hält B und will
+    // A, `decouple(A)` hält A und will B. Ein Deadlock wäre die Folge (kein
+    // Datenverlust — Postgres tötet eine Seite —, aber ein 500 für den
+    // Benutzer). Dieselbe Reihenfolge auf beiden Pfaden schließt das aus und
+    // verkleinert nebenbei die bekannte DELETE↔DELETE-Inversion
+    // (6hFPq5v5gwrH7vxp), ohne sie hier abschließend zu behandeln.
+    if (appointment.coVisitGroupId != null) {
+      await storage.lockCoVisitGroupForUpdate(appointment.coVisitGroupId, txClient);
+    }
     if (await storage.lockAndCheckAppointmentLocked(id, txClient)) {
       // Task #1892 — Admin-Korrektur statt pauschalem Abbruch. Die
       // Policy-Schicht (`canDeleteAppointment`) erlaubt Admins das Löschen
