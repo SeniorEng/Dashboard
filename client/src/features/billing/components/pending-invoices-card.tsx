@@ -35,11 +35,17 @@ import type { Selection } from "../hooks/use-selection";
  * („vorläufig"). Der Betrag einer Zeile/Gruppe ist IST + PLAN; ist der Schalter
  * an, wird ein Betrag mit PLAN-Anteil zusätzlich als vorläufig markiert.
  *
- * Default AUS (fachlich so entschieden) — bewusst EINE Konstante, damit das
- * Ein-/Ausschalten eine Zeile bleibt und weder Berechnung noch Feldnamen
- * berührt.
+ * AN — und zwar tragend, nicht kosmetisch: PLAN wird bewusst KONSERVATIV
+ * gerechnet (keine spekulative USt-Reklassifizierung, weil die Topf-Lage zum
+ * Abrechnungszeitpunkt noch offen ist). Diese Entscheidung trägt nur, solange
+ * der Prognose-Anteil auch als solcher erkennbar ist. Ohne die Kennzeichnung
+ * stünde ein bewusst unscharfer Wert als blanker Euro-Betrag neben dem IST, das
+ * exakt der späteren Rechnungssumme entspricht.
+ *
+ * Bewusst EINE Konstante, damit das Ein-/Ausschalten eine Zeile bleibt und
+ * weder Berechnung noch Feldnamen berührt.
  */
-const SHOW_PROVISIONAL_MARKER = false;
+const SHOW_PROVISIONAL_MARKER = true;
 
 /**
  * IST + PLAN eines Kunden (Brutto-Cent). PLAN ist Prognose, siehe `@shared/api`.

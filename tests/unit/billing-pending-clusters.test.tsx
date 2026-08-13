@@ -202,10 +202,27 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
     expect(screen.getByTestId("text-pending-ready-incomplete")).not.toBeNull();
   });
 
-  it("„vorläufig“-Marker ist standardmäßig aus", () => {
+  it("PLAN-Anteil ist als „vorläufig“ gekennzeichnet — Zeile und Gruppensumme", () => {
+    // Tragend, nicht kosmetisch: PLAN wird bewusst konservativ gerechnet (keine
+    // spekulative USt). Das ist nur vertretbar, solange der Prognose-Anteil als
+    // solcher erkennbar ist und nicht als blanker Euro neben dem IST steht.
     const c = makeCustomer({ id: 600, openAppointments: 1, plannedAmountCents: 1000 });
     renderCard([c]);
+    expect(screen.getByTestId(`text-pending-provisional-${c.id}`)).not.toBeNull();
+    expect(screen.getByTestId("text-pending-documentation-provisional")).not.toBeNull();
+  });
+
+  it("ohne PLAN-Anteil KEINE „vorläufig“-Kennzeichnung (reines IST ist exakt)", () => {
+    const c = makeCustomer({
+      id: 601,
+      completedAppointments: 1,
+      coveredAppointments: 1,
+      signedAppointmentCount: 1,
+      unbilledAppointmentCount: 1,
+      actualAmountCents: 5000,
+    });
+    renderCard([c]);
     expect(screen.queryByTestId(`text-pending-provisional-${c.id}`)).toBeNull();
-    expect(screen.queryByTestId("text-pending-documentation-provisional")).toBeNull();
+    expect(screen.queryByTestId("text-pending-ready-provisional")).toBeNull();
   });
 });
