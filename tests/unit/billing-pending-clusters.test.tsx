@@ -44,7 +44,24 @@ function makeCustomer(
   return { ...BASE_CUSTOMER, ...overrides };
 }
 
-function renderCard(customers: BillingCustomerItem[]) {
+/** Minimale Auswahl-Hülle (#1376-Form) mit fest gesetzten IDs. */
+function makeSelection(selected: number[]) {
+  const set = new Set(selected);
+  return {
+    has: (id: number) => set.has(id),
+    toggle: vi.fn(),
+    toggleMany: vi.fn(),
+    setAll: vi.fn(),
+    clear: vi.fn(),
+    size: set.size,
+    ids: [...set],
+  } as unknown as Parameters<typeof PendingInvoicesCard>[0]["selection"];
+}
+
+function renderCard(
+  customers: BillingCustomerItem[],
+  selection?: Parameters<typeof PendingInvoicesCard>[0]["selection"],
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
   });
@@ -55,6 +72,7 @@ function renderCard(customers: BillingCustomerItem[]) {
           customers={customers}
           isLoading={false}
           onCreateForCustomer={vi.fn()}
+          selection={selection}
         />
       </Router>
     </QueryClientProvider>,
@@ -200,6 +218,35 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
     // Summe = nur der bekannte Betrag, aber sichtbar als unvollständig markiert.
     expect(screen.getByTestId("text-pending-ready-total").textContent).toContain("50,00");
     expect(screen.getByTestId("text-pending-ready-incomplete")).not.toBeNull();
+  });
+
+  it("Auswahl-Summe glättet einen nicht berechenbaren Betrag NICHT zu 0", () => {
+    // Diese Zahl steht direkt neben dem Sammel-Schreibknopf. Sie still zu klein
+    // zu zeigen wäre genau die Falschaussage, die Zeile und Gruppensumme
+    // vermeiden — also weist sie sich ebenfalls als unvollständig aus.
+    const known = makeCustomer({
+      id: 800,
+      completedAppointments: 1,
+      coveredAppointments: 1,
+      signedAppointmentCount: 1,
+      unbilledAppointmentCount: 1,
+      actualAmountCents: 5000,
+    });
+    const unknown = makeCustomer({
+      id: 801,
+      completedAppointments: 1,
+      coveredAppointments: 1,
+      signedAppointmentCount: 1,
+      unbilledAppointmentCount: 1,
+      actualAmountCents: null,
+    });
+    const selection = makeSelection([known.id, unknown.id]);
+    renderCard([known, unknown], selection);
+
+    const label = screen.getByTestId("text-pending-selected-count").textContent ?? "";
+    expect(label).toContain("2 ausgewählt");
+    expect(label).toContain("50,00");
+    expect(screen.getByTestId("text-pending-selected-incomplete")).not.toBeNull();
   });
 
   it("PLAN-Anteil ist als „vorläufig“ gekennzeichnet — Zeile und Gruppensumme", () => {

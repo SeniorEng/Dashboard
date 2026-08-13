@@ -101,10 +101,12 @@ export type GenerateInvoiceResult =
  *     stammt dann aus der fehlenden Buchung, nicht aus einem echten
  *     Privatanteil (siehe `summarizePotAmounts`).
  *
- * Fehlt ein Katalogpreis, wirft der Zeilen-Bauer — bewusst NICHT gefangen: ein
- * verschluckter Preis-Fehler würde hier eine zu kleine Geldsumme anzeigen, und
- * genau das darf eine Geld-Spalte nicht. Der Erstellungs-Pfad verhält sich
- * bereits so.
+ * Fehlt ein Katalogpreis, wirft der Zeilen-Bauer (400). Diese Funktion fängt das
+ * NICHT — eine verschluckte Preis-Lücke würde eine zu kleine Geldsumme liefern,
+ * und genau das darf eine Geld-Spalte nicht. Der AUFRUFER
+ * (`GET /billing/eligible-customers`) fängt fachliche 400er pro Kunde ab und
+ * liefert für ihn `null` = „nicht berechenbar"; so bleibt der Fehler sichtbar,
+ * ohne die Liste für alle übrigen Kunden zu leeren.
  */
 export async function computeDocumentedGrossCents(args: {
   customerId: number;
@@ -459,8 +461,12 @@ export async function buildInvoiceDraft(input: {
     // `splitLineItemsByPot`). Quelle ist dieselbe zentrale SSoT wie auf dem
     // Buchungs-/Rebook-Pfad: nur Selbstzahler oder `acceptsPrivatePayment`
     // dürfen einen privaten Anteil/Topf bekommen.
+    // Aufgelöster Zahler-Typ (wie oben und im Empfänger-Pfad) — ein leerer
+    // String hätte hier `allowPrivatePot: false` ergeben, während die Anzeige
+    // ihn als Selbstzahler behandelt. `billing_type` ist notNull mit Default,
+    // heute also folgenlos; die Auflösung hält die Pfade trotzdem beisammen.
     allowPrivatePot: isPrivatePaymentAllowed({
-      billingType: customer.billingType,
+      billingType,
       acceptsPrivatePayment: customer.acceptsPrivatePayment,
     }),
   });

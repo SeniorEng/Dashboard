@@ -699,21 +699,53 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
         // folgenlos, bei einem leeren String wären die Pfade auseinandergelaufen.
         const billingType = billingTypeById.get(id) || "selbstzahler";
         const sets = clusterAppts.get(id);
+        // Ein fachlicher Fehler (400) beim Rechnen eines EINZELNEN Kunden macht
+        // dessen Betrag „nicht berechenbar" — er darf nicht die Liste für ALLE
+        // Kunden des Monats leeren. Technische Fehler (DB, Programmierfehler)
+        // fliegen weiter: sie sind eine Störung und sollen als solche auffallen,
+        // statt sich als Katalog-Problem zu tarnen.
+        const billableOrNull = async <T>(compute: () => Promise<T>): Promise<T | null> => {
+          try {
+            return await compute();
+          } catch (err) {
+            if (err instanceof AppError && err.statusCode === 400) {
+              log(
+                `eligible-customers Betrag nicht berechenbar customer=${id} month=${month}/${year}: ${err.message}`,
+                "billing",
+              );
+              return null;
+            }
+            throw err;
+          }
+        };
+
         // 1. Abrechenbarer Anteil (nur wo es ihn gibt — sonst wirft/liefert der
-        //    Draft ohnehin nichts Zählbares).
+        //    Draft ohnehin nichts Zählbares). Auch dieser Aufruf ist gefangen:
+        //    er zieht denselben Zeilen-Bauer und kann an einem fehlenden
+        //    Katalogpreis (oder dem #1353-Privatanteil-Backstop) scheitern.
+        //    Scheitert er, ist der IST dieses Kunden als Ganzes nicht bestimmbar
+        //    — dann wird auch der Rest NICHT gerechnet, sonst stünde dort ein zu
+        //    kleiner Teilbetrag, der wie eine vollständige Zahl aussieht.
         let draftApptIds: number[] = [];
         let actualCents = 0;
+        let draftFailed = false;
         if ((unbilledFacts.get(id)?.unbilledAppointmentCount ?? 0) > 0) {
-          const draft = await buildInvoiceDraft({
-            customerId: id,
-            billingMonth: month,
-            billingYear: year,
-            dateFrom: dateFromQ,
-            dateTo: dateToQ,
-            mode: "preview",
-          });
-          draftApptIds = draft.apptIds;
-          actualCents = draft.grossAmountCents;
+          const draft = await billableOrNull(() =>
+            buildInvoiceDraft({
+              customerId: id,
+              billingMonth: month,
+              billingYear: year,
+              dateFrom: dateFromQ,
+              dateTo: dateToQ,
+              mode: "preview",
+            }),
+          );
+          if (draft === null) {
+            draftFailed = true;
+          } else {
+            draftApptIds = draft.apptIds;
+            actualCents = draft.grossAmountCents;
+          }
         }
         // 2. Rest = dokumentiert + unabgerechnet, aber nicht im Draft.
         const draftSet = new Set(draftApptIds);
@@ -744,35 +776,29 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
         //    Ein einzelner Katalog-Fehler legt damit die Abrechnung still.
         // Stattdessen `null` = „nicht berechenbar": der betroffene Kunde zeigt
         // ein „?" statt einer Zahl, alle anderen bleiben rechenbar.
-        const grossOrNull = async (compute: () => Promise<number>): Promise<number | null> => {
-          try {
-            return await compute();
-          } catch (err) {
-            log(
-              `eligible-customers Betrag nicht berechenbar customer=${id} month=${month}/${year}: ${err instanceof Error ? err.message : String(err)}`,
-              "billing",
-            );
-            return null;
-          }
-        };
         const [restCents, plannedCents] = await Promise.all([
-          grossOrNull(() =>
-            computeDocumentedGrossCents({
-              customerId: id,
-              appointmentIds: restIds,
-              billingType,
-              acceptsPrivatePayment: acceptsPrivateById.get(id),
-            }),
-          ),
+          draftFailed
+            ? Promise.resolve(null)
+            : billableOrNull(() =>
+                computeDocumentedGrossCents({
+                  customerId: id,
+                  appointmentIds: restIds,
+                  billingType,
+                  acceptsPrivatePayment: acceptsPrivateById.get(id),
+                }),
+              ),
           openIds.length === 0
             ? Promise.resolve(0)
-            : grossOrNull(() =>
+            : billableOrNull(() =>
                 buildLineItemsFromAppointments(openIds, id, billingType).then(
                   (r) => r.totalNetCents + r.totalVatCents,
                 ),
               ),
         ]);
-        actualByCustomer.set(id, restCents === null ? null : actualCents + restCents);
+        actualByCustomer.set(
+          id,
+          draftFailed || restCents === null ? null : actualCents + restCents,
+        );
         plannedByCustomer.set(id, plannedCents);
       }),
     );

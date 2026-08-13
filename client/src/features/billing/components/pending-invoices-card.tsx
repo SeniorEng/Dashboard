@@ -584,9 +584,19 @@ export function PendingInvoicesCard({
   // Sammelaktion tatsächlich in Rechnung stellt. „Bereit"-Kunden haben ohnehin
   // keinen PLAN-Anteil (keine offenen Termine) — die Einschränkung ist die
   // Absicherung gegen den Fall, dass sich das je ändert.
-  const selectedTotalCents = selection
-    ? readyCustomers.filter((c) => selection.has(c.id)).reduce((s, c) => s + (c.actualAmountCents ?? 0), 0)
-    : 0;
+  //
+  // `null` (nicht berechenbar) wird NICHT zu 0 geglättet, sondern markiert die
+  // Summe als unvollständig — analog zur Gruppensumme. Diese Zahl steht direkt
+  // neben dem Sammel-Schreibknopf; sie stillschweigend zu klein zu zeigen wäre
+  // genau die Falschaussage, die `rowTotalCents`/`groupTotals` verhindern.
+  const selectedReady = selection
+    ? readyCustomers.filter((c) => selection.has(c.id))
+    : [];
+  const selectedTotalCents = selectedReady.reduce(
+    (s, c) => s + (c.actualAmountCents ?? 0),
+    0,
+  );
+  const selectedHasUnknown = selectedReady.some((c) => c.actualAmountCents === null);
 
   return (
     <Card className="mb-6" data-testid="card-pending-invoices">
@@ -666,6 +676,15 @@ export function PendingInvoicesCard({
                     {selectedReadyCount > 0 && (
                       <span className="text-sm text-gray-600" data-testid="text-pending-selected-count">
                         {selectedReadyCount} ausgewählt · {formatEuroDE(selectedTotalCents)}
+                        {selectedHasUnknown && (
+                          <span
+                            className="ml-1 text-amber-700"
+                            title="Mindestens ein ausgewählter Betrag ist nicht berechenbar (fehlender Preis im Dienstleistungskatalog) — die Summe ist unvollständig."
+                            data-testid="text-pending-selected-incomplete"
+                          >
+                            + ?
+                          </span>
+                        )}
                       </span>
                     )}
                     <Button
