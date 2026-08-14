@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { activeInvoiceSqlRaw } from "../../lib/appointment-invoiced";
 import { z } from "zod";
 import { insertCustomerServicePriceSchema } from "@shared/schema";
 import { requireAdmin } from "../../middleware/auth";
@@ -82,7 +83,10 @@ async function findAffectedInvoicesFromDate(
            status
     FROM invoices
     WHERE customer_id = ${customerId}
-      AND status != 'storniert'
+      -- Task #1909 — kanonisches Aktiv-Prädikat. Gutschriften sind bewusst
+      -- ausgeschlossen: ein Storno-Beleg wird von einer Preisänderung nicht mehr
+      -- getroffen. Zuvor stand hier nur der Status-Filter.
+      AND ${activeInvoiceSqlRaw("invoices")}
       AND (billing_year > ${year}
            OR (billing_year = ${year} AND billing_month >= ${month}))
     ORDER BY billing_year, billing_month, id
@@ -578,9 +582,16 @@ router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kunden
   // Auch wenn die Löschung erst ab morgen wirkt (valid_to = today), war der Preis
   // bereits seit recordValidFrom aktiv und kann in bestehenden Rechnungen verwendet
   // worden sein. Wir prüfen daher den gesamten Aktivzeitraum, damit eine spätere
-  // Re-Generierung dieser Monate (z. B. nach Storno) nicht stillschweigend andere
-  // Preise verwendet. Für rein zukünftige Preise (recordValidFrom > today) bleibt
-  // das Verhalten identisch.
+  // Re-Generierung dieser Monate nicht stillschweigend andere Preise verwendet.
+  // Für rein zukünftige Preise (recordValidFrom > today) bleibt das Verhalten
+  // identisch.
+  //
+  // Task #1909 — der frühere Zusatz „z. B. nach Storno" trägt nicht mehr: die
+  // GUTSCHRIFT ist seit #1909 ausgeschlossen. Er hing ohnehin am Zufall, dass
+  // die Gutschrift die Periode noch signalisierte — der stornierte ORIGINAL-Beleg
+  // fiel schon vorher über `status='storniert'` heraus. Ein Monat, der nur noch
+  // aus Storno-Belegen besteht, meldet hier also keine Betroffenheit mehr; er
+  // enthält auch keine gültige Rechnung, die andere Preise verwenden könnte.
   const affectFromDate = recordValidFrom;
   const affectedInvoices = await findAffectedInvoicesFromDate(db, customerId, affectFromDate);
   if (affectedInvoices.length > 0 && !confirmInvoiceOverride) {

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { activeInvoiceSqlRaw } from "../lib/appointment-invoiced";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
@@ -92,8 +93,11 @@ interface AffectedInvoice {
 /**
  * Standardpreise wirken firmenweit; eine Änderung könnte daher die erneute
  * Erstellung bereits abgerechneter Monate JEDES Kunden betreffen. Wir prüfen
- * deshalb (im Gegensatz zum Kundenpreis-Pfad) ALLE nicht-stornierten
- * Rechnungen ab dem Stichtag.
+ * deshalb (im Gegensatz zum Kundenpreis-Pfad) firmenweit alle Rechnungen ab dem
+ * Stichtag — aber bewusst OHNE Gutschriften: ein Storno-Beleg wird von einer
+ * Preisänderung nicht mehr getroffen (Task #1909). Zuvor stand hier nur der
+ * Status-Filter; dadurch erschienen Gutschriften als „betroffen" und blähten die
+ * Warnung auf.
  */
 async function findAffectedInvoicesFromDate(
   tx: typeof db,
@@ -107,7 +111,7 @@ async function findAffectedInvoicesFromDate(
            billing_month AS "billingMonth", billing_year AS "billingYear",
            status
     FROM invoices
-    WHERE status != 'storniert'
+    WHERE ${activeInvoiceSqlRaw("invoices")}
       AND (billing_year > ${year}
            OR (billing_year = ${year} AND billing_month >= ${month}))
     ORDER BY billing_year, billing_month, id
