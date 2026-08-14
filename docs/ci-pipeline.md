@@ -29,7 +29,7 @@ Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_US
 Fünf Verbrauchs-Hebel, die **keinen** der Pflicht-Gates und **nicht** die Branch-Protection schwächen:
 
 - **Keine doppelten Runs (Trigger-Modell).** `push` triggert nur noch auf `main`, dazu `pull_request`. Vorher liefen Feature-Branch-Commits mit offenem PR **doppelt** (je ein `push`- UND ein `pull_request`-Run), weil die `concurrency`-Gruppe auf `github.ref` keyte und beide Events sich dort unterscheiden. Jetzt deckt ein Feature-Branch ausschließlich das `pull_request`-Event ab; direkte Pushes/Merges nach `main` laufen weiter die volle Suite. Die `concurrency`-Gruppe keyt für PRs auf die PR-Nummer (`github.event.pull_request.number`), für `main`-Pushes auf die Ref — superseded Runs des überlebenden Triggers werden korrekt gecancelt, ohne dass PR- und Push-Runs sich gegenseitig abbrechen. **Was auf `main` bzw. auf PRs nach `main` geprüft wird, ändert sich nicht.**
-- **`timeout-minutes` pro Job.** Jeder Job hat ein großzügiges Hard-Limit (weit über der beobachteten Laufzeit, aber weit unter dem 6-h-Default): `static-analysis` 20, `tests` 40, `e2e-smoke` 30, `template-cache-verify` 30, `mutation` 25, `erechnung-validation` 25, `changes` 5. Ein hängender Prozess (Server/Vitest/Browser/Download) wird so nach Minuten gekillt statt bis zum Default weiterzubillen.
+- **`timeout-minutes` pro Job.** Jeder Job hat ein großzügiges Hard-Limit (weit über der beobachteten Laufzeit, aber weit unter dem 6-h-Default): `static-analysis` 20, `tests-shard` 25, `tests` (Aggregator) 5, `e2e-smoke` 30, `template-cache-verify` 30, `mutation` 25, `erechnung-validation` 25, `changes` 5. Ein hängender Prozess (Server/Vitest/Browser/Download) wird so nach Minuten gekillt statt bis zum Default weiterzubillen.
 - **Dependency-Installation: bewusst bei `npm ci` + `cache: npm` belassen.** Der `node_modules`-Cache-Hebel (Install über die 6 Jobs skippen) wurde **verworfen**: Ein restaurierter `node_modules` würde sowohl `npm ci` als auch den `postinstall`-Hook `normalize-lockfile.mjs` überspringen, und native/Toolchain-Binaries (esbuild, Playwright/Chromium, drizzle-kit) sind cache-empfindlich. Ohne beweisbare Cache-Sicherheit kostet ein Cache-Bug (flaky Jobs) mehr als die gesparte Installation. `cache: npm` (Download-Tarball-Cache) + `npm ci` + Lockfile-Registry-Guard + `postinstall`-Normalize-Hook bleiben unverändert.
 - **Path-Gating der optionalen Schwer-Jobs (Branch-Protection-sicher).** Ein leichter `changes`-Job (`dorny/paths-filter`) ermittelt zentral, ob e-rechnungs- bzw. cache-relevante Pfade geändert wurden. `template-cache-verify` (KEIN Required-Check) wird bei irrelevanten PR-Änderungen komplett übersprungen (`if: push || template_cache` ⇒ ein Skip lässt keinen Merge „pending" hängen). `erechnung-validation` (**Required-Check**) läuft dagegen **immer** als Job und meldet grün — das Java-freie **Strict-WASM-XSD-Gate läuft unbedingt**; nur der teure Java-Download + Mustang/veraPDF-Lauf ist auf relevante Pfade (oder `main`-Push) gegated. So bleibt kein Required-Kontext „pending", aber ein docs-only-PR spart den Java-Teil.
 - **Artefakte schlanker.** Schwere Artefakte (Playwright-Report/Traces/Video, Coverage, Test-Reports, knip-, mutation-Report) werden nur noch **bei Fehlschlag** (`if: failure()`) hochgeladen und die Retention auf 3 Tage gekürzt (vorher 7).
@@ -117,10 +117,12 @@ Der manuelle Push ist fehleranfällig — wird er vergessen, driftet GitHub `mai
 ```bash
 bash scripts/github-sync.sh check   # Drift-Signal (read-only): SHA-Vergleich + OpenAPI-Check, Exit != 0 bei Drift
 bash scripts/github-sync.sh push    # Pusht main nach GitHub, falls Drift; No-op wenn bereits in sync
+bash scripts/github-sync.sh doctor  # Auth-Diagnose (read-only, ohne OpenAPI): Token-Broker + Token-Gesundheit + SHA
 ```
 
 - **Drift-Signal:** `check` vergleicht die lokale `main`-SHA (`git rev-parse HEAD`, Fallback `.git/refs/heads/main`) mit der Remote-SHA (GitHub-API `…/git/refs/heads/main`) und ruft zusätzlich `gen:openapi -- --check`. Exit-Code `0` = in sync + Spec aktuell; `1` = Drift (Sync nötig). Eignet sich als schneller Pre-Push-Check und als Health-Probe in einem Cronjob.
-- **Token-Handling:** Das Skript pusht zuerst mit dem Standard-Connector-Token (`GITHUB_PERSONAL_ACCESS_TOKEN`) für reine Code-/Doku-Pushes. Scheitert der Push am fehlenden `workflow`-Scope (GH013 bei `.github/workflows/*`) **oder** ist kein Connector-Token vorhanden (z.B. im Deployment), fällt es automatisch auf den `GITHUB_WORKFLOW_PAT` (Classic-PAT mit `repo`+`workflow`) zurück.
+- **Token-Handling:** Das Skript geht die Token in fester Vorrangreihenfolge durch — zuerst der Standard-Connector-Token (`GITHUB_PERSONAL_ACCESS_TOKEN`) für reine Code-/Doku-Pushes, dann der `GITHUB_WORKFLOW_PAT` (Classic-PAT mit `repo`+`workflow`). Scheitert der Push am fehlenden `workflow`-Scope (GH013 bei `.github/workflows/*`) **oder** ist kein Connector-Token vorhanden (z.B. im Deployment), greift der PAT-Fallback wie gehabt.
+- **Totes Token wird übersprungen statt probiert (Task #1903):** Vor jedem Push-Versuch prüft das Skript den jeweiligen Token mit **einem** read-only-API-Request. Antwortet GitHub mit `401/403`, ist der Token tot — er wird als solcher benannt (`GITHUB_PERSONAL_ACCESS_TOKEN: TOT (GitHub-API antwortet 401/403) — übersprungen, kein Push-Versuch.`) und übersprungen, statt einen kompletten Push-Versuch inkl. Objekt-Upload daran zu verschwenden. Ein in diesem Lauf als tot erkannter Token wird auch beim Remote-SHA-Lesen nicht erneut probiert. Ist die Vorabprüfung **nicht eindeutig** (Netzwerk/Transport statt 401/403), wird der Push trotzdem versucht — die Prüfung darf nie ein funktionierendes Token aussperren. Die Erfolgszeile benennt immer, **welches** Token gegriffen hat (`Push erfolgreich — verwendetes Token: GITHUB_WORKFLOW_PAT.`). Sind **alle** Token tot, nennt die Fehlerausgabe genau das als Ursache und verweist auf `npm run sync:doctor`.
 - **Token-bewusste Verifikation (Task #1483):** Nach einem erfolgreichen Push liest das Skript die Remote-SHA bevorzugt mit **demselben Token, der den Push authentifiziert hat**, und probiert sonst beide Token durch — es zählt nur ein HTTP-`200`. Ein abgelaufener Connector-Token (401) maskiert damit kein erfolgreiches Lesen mehr und erzeugt keine falsche `WARNUNG: Remote-SHA … unbekannt` nach einem in Wahrheit gelungenen Push. Lässt sich die Remote-SHA mit keinem Token gegenlesen, gibt es einen neutralen `HINWEIS` (Push gilt trotzdem als erfolgreich), keine `WARNUNG`.
 - **Sichtbares Fehlersignal bei totem/abgelaufenem Token (Task #1483):** Ein fehlgeschlagener Push ist kein stiller No-op mehr — das Skript beendet sich mit **Exit-Code `1`** (das Scheduled Deployment markiert den Lauf damit als fehlgeschlagen) und loggt eine actionable Meldung. Bei erkanntem Auth-Fehler (401/403 / „Authentication failed" / „Bad credentials") lautet sie explizit: *„Token ungültig/abgelaufen. GITHUB_WORKFLOW_PAT (Scope repo+workflow) in den Deployment-Secrets erneuern."* — so wird ein abgelaufenes PAT sofort sichtbar, statt dass der Backlog stillschweigend wächst.
 - **Idempotenz:** Ist GitHub bereits auf dem lokalen Stand, ist `push` ein No-op (kein leerer Push, kein Fehler) — gefahrlos beliebig oft ausführbar.
@@ -155,10 +157,123 @@ Im Normalbetrieb ist jeder Sync-Push ein Fast-Forward (GitHub `main` ist Vorfahr
 
 > **Hinweis Workflow-Scope-Henne-Ei:** Ein *neues* `.github/workflows/*.yml` würde über den normalen Connector-Sync nie auf GitHub landen (kein `workflow`-Scope). Deshalb wurde der Sync bewusst Replit-seitig als Skript + Scheduled Deployment gebaut, nicht als GitHub-Actions-Workflow. Bestehende Workflow-Dateien werden über den PAT-Fallback des Skripts mitgepusht.
 
+### Karteileichen-Remotes: „Failed to authenticate with the remote" im Git-Pane (Task #1900)
+
+Jeder Task-Agent-Lauf in einem Subrepl hinterlässt im Haupt-Repl ein Remote `subrepl-<id>` mit SSH-URL auf `ssh.worf.replit.dev`. Nach dem Merge existiert das Subrepl nicht mehr, das Remote bleibt aber stehen. Stand Task #1900 hatten sich so **1052** solcher Einträge angesammelt (`.git/config` ~215 KB). Die Git-Oberfläche im Workspace läuft beim Auflisten/Prüfen der Remotes in diese toten SSH-URLs (`Host key verification failed`, kein `ssh-askpass`) und meldet pauschal **„Failed to authenticate with the remote" (UNAUTHENTICATED)** — obwohl die GitHub-Verbindung gesund ist und `git ls-remote origin` funktioniert. Der Fehler ist also ein Remote-Bestands-, kein Verbindungsproblem; ein Neu-Verbinden des GitHub-Kontos behebt ihn nicht.
+
+Aufräumen (idempotent, entfernt nur `subrepl-*`-Remotes, deren URL auf den Subrepl-SSH-Host zeigt; `origin`, `gitsafe-backup` und `main-repl` bleiben unangetastet):
+
+```bash
+bash scripts/prune-stale-subrepl-remotes.sh          # Trockenlauf: nur zählen
+bash scripts/prune-stale-subrepl-remotes.sh --apply  # entfernen (legt vorher .local/git-backups/config.backup-* an)
+```
+
+`main-repl` NICHT entfernen: darüber gleicht ein Task-Environment mit dem Haupt-Repl ab.
+
+Damit sich der Bestand nicht erneut aufstaut, ruft `scripts/post-merge.sh` das Skript nach jedem Merge best-effort mit `--apply` auf (60-s-Timeout, `|| true` — ein Fehlschlag blockiert den Merge nie). Wichtig: Die Bereinigung wirkt immer nur auf die `.git/config` der Umgebung, in der sie läuft — `.git/config` ist kein versionierter Inhalt und wandert nicht über einen Task-Merge mit. Ein Task-Agent kann den Bestand des Haupt-Repls also nur über diesen Post-Merge-Hook (oder der Nutzer manuell in der Shell) aufräumen.
+
+### Aufgeblähtes `.git`: hängende Hintergrundwartung erkennen (Task #1904)
+
+**Symptom.** Git-Operationen der Workspace-Oberfläche (Status, Refs auflisten, Diff) werden zäh bis zu Timeouts, `.git` wächst in den dreistelligen MB-Bereich.
+
+**Ursache.** Gits automatische Hintergrundwartung (`git maintenance`) legt vor dem Lauf `.git/objects/maintenance.lock` an und entfernt sie danach wieder. Bricht ein Lauf hart ab (Container-Kill, Workspace-Neustart), **bleibt die Sperre liegen — und jeder weitere Wartungslauf beendet sich ab da sofort und still**. Lose Objekte werden nie mehr zusammengepackt. Stand Task #1904 lag die Sperre seit dem 02.06.2026 im Objektspeicher: `.git` = 494 MB, davon 463 MiB in **39.705 losen** Objekten (gepackt waren nur 7.928 Objekte / 22 MiB), dazu **1.054 tote `subrepl-*`-Branches** aus früheren Task-Agent-Läufen (1.089 Refs gesamt) und ein Garbage-Temp-Objekt.
+
+**Wiedererkennen (read-only, ein Befehl):**
+
+```bash
+git count-objects -vH        # count: > ~5.000 lose Objekte = Wartung läuft nicht mehr
+ls -l .git/objects/maintenance.lock   # existiert + monatealt = verwaiste Sperre
+```
+
+**Aufräumen (idempotent, Trockenlauf ist der Default):**
+
+```bash
+bash scripts/prune-git-object-bloat.sh                    # nur messen + klassifizieren
+bash scripts/prune-git-object-bloat.sh --list-unverified  # zusätzlich die Friedhof-Kandidaten zeigen
+bash scripts/prune-git-object-bloat.sh --apply            # Sperre lösen, Branches abräumen, gc
+```
+
+Das Skript (1) entfernt die Sperre nur, wenn **kein** Wartungsprozess läuft und sie älter als 60 min ist, (2) räumt `subrepl-*`-Branches ab — nach der unten beschriebenen Beweis-Regel, nie allein nach Alter, (3) fährt `git gc` mit dem **Default-Prune-Fenster von 2 Wochen** (kein `--prune=now`, unerreichbare Objekte jünger als zwei Wochen bleiben als Netz liegen) und (4) prüft anschließend mit `git fsck --connectivity-only`. `main`, `replit-agent`, `replit-safety-*`, jedes andere nicht-`subrepl-*`-Local-Branch, alle Remote-Refs, Tags und Notes werden nie angefasst; es wird **keine** Historie umgeschrieben (kein Rewrite, kein Shallow-Clone, kein Force-Push).
+
+#### Branches: löschen nur mit Beweis, sonst Friedhof
+
+Ein altes Commit-Datum belegt **nicht**, dass die Arbeit eines Branches gemergt ist — ein lange ruhender, aber noch relevanter Branch sieht genauso aus. Deshalb wird jeder Kandidat klassifiziert:
+
+| Klasse | Kriterium | Aktion |
+| --- | --- | --- |
+| **integriert** | Spitze ist von einem erhaltenen Ref aus erreichbar **oder** ihr Baum (der komplette Dateistand) kommt in dessen Historie vor | Branch wird gelöscht — der Inhalt liegt nachweislich schon woanders |
+| **ungeprüft** | alles andere | Branch wird **nicht** gelöscht, sondern als echter Backup-Ref nach `refs/subrepl-graveyard/<name>` verschoben und aus `refs/heads/` entfernt |
+
+Der Friedhofs-Ref hält die Objekte dauerhaft am Leben — `git gc` fasst sie nicht an (verifiziert gegen `git gc --prune=now`). Aus der Branch-Liste und damit aus der Git-Oberfläche sind die Einträge trotzdem raus. Wiederherstellen ist ein Einzeiler:
+
+```bash
+git branch <name> refs/subrepl-graveyard/<name>
+```
+
+Der Friedhof läuft **nicht von selbst ab**. Ein Eintrag verschwindet nur, wenn er bei einem späteren Lauf inzwischen nachweislich integriert ist (Beweis, nicht Zeit) — oder wenn jemand bewusst `--apply --expire-graveyard` aufruft (entfernt Einträge älter als `GRAVEYARD_TTL_DAYS`, Default 180). Der Post-Merge-Hook ruft das **nie** auf; der einzige unumkehrbare Schritt bleibt eine bewusste Handlung.
+
+Zwei weitere Gates greifen vor der Klassifikation:
+
+- **Ausgecheckte Branches sind tabu** — der HEAD des Verzeichnisses *und* jeder in einem verlinkten Worktree ausgecheckte Branch, unabhängig von Alter und Klassifikation. Sonst zöge ein Lauf der laufenden Arbeitskopie den Branch unter den Füßen weg und HEAD zeigte ins Leere.
+- **Alters-Gate**: Branches, deren Spitze jünger als `PRUNE_AGE_DAYS` (Default 14) ist, werden gar nicht erst angefasst.
+
+Jeder `--apply`-Lauf protokolliert die Klassifikation zusätzlich nach `.local/git-backups/subrepl-branches.backup-*.tsv`. Abgesichert ist das Ganze durch `tests/architecture/git-object-bloat-guard.test.ts`: der Test spannt ein Wegwerf-Repository auf und weist nach, dass ein uralter *ausgecheckter* `subrepl-*`-Branch (HEAD wie verlinkter Worktree) unangetastet bleibt, ein integrierter gelöscht und ein ungeprüfter auf den Friedhof gerettet und von dort wiederherstellbar ist. Er ist DB- und server-frei und läuft im `unit`-Project in jedem CI-Fork mit.
+
+Klassifikation der 1.054 Branches in Task #1904: **571 nachweislich integriert**, **483 ungeprüft** (davon 3 zu jung und damit unangetastet). Dass fast die Hälfte keinen exakten Baum-Treffer hat, ist erwartbar und kein Alarmsignal: Agent-Branches enden auf Zwischenständen („Saved your changes before starting work"), deren Inhalt beim Merge unter anderer SHA und leicht verändert in `main` landet. Genau deshalb werden sie aufbewahrt statt gelöscht.
+
+#### Ergebnis und Grenzen
+
+Gemessen in Task #1904 (voller Lauf in einem Task-Environment): `.git` **494 MB → 240 MB**, lose Objekte **39.705 → 0**, Packs 12 → 2, Garbage 1 → 0, Refs **1.089 → 38**; `git fsck` sauber, HEAD/Historie/Remotes unverändert. Dieser Lauf hat alle Kandidaten gelöscht. Mit der ausgelieferten, vorsichtigen Variante bleiben die 483 ungeprüften Spitzen im Friedhof erreichbar — die Refs sinken dann auf ~518 (davon nur 6 in `refs/heads/`) und die Endgröße liegt entsprechend etwas über 240 MB. Der entscheidende Gewinn ist davon unberührt: die 39.705 losen Objekte landen in Packs, und die Branch-Liste ist wieder kurz.
+
+**Warum nicht kleiner?** Die 22 MiB des alten Packs waren nur ein Teilstand (7.928 von 39.473 Objekten) — der große Rest der *erreichbaren* Historie lag lose herum. Gepackt sind es 238 MiB, und die stecken fast vollständig in `attached_assets/` (~274 MB allein im HEAD-Baum: Screenshots, XLSX-, PDF-Anhänge, ein 24-MB-Coverage-JSON). Binärdateien lassen sich nicht wegdelta-komprimieren; weiter schrumpfen ginge nur über einen History-Rewrite — bewusst nicht gemacht. Fürs Deployment-Image ist das ohnehin irrelevant: `.replitignore` schließt `.git/` bereits aus.
+
+**Damit es sich nicht erneut aufstaut** ruft `scripts/post-merge.sh` das Skript nach jedem Merge best-effort mit `--apply` auf (300-s-Timeout, `|| true` — ein Fehlschlag blockiert den Merge nie; unterhalb von 5.000 losen Objekten ist der Lauf ein schneller No-Op). Wichtig, gleiche Einschränkung wie beim Remote-Prune oben: Die Bereinigung wirkt immer nur auf das `.git` der Umgebung, in der sie läuft — der Objektspeicher ist kein versionierter Inhalt und wandert nicht über einen Task-Merge mit. Ein Task-Agent kann das Haupt-Repl also nur über diesen Post-Merge-Hook (oder der Nutzer manuell in der Shell) entschlacken.
+
+### Token-Broker-Ausfall: Git-Pane wirkungslos, Push über das Skript (Task #1903)
+
+**Symptom.** Die Git-Ansicht im Workspace ist unbenutzbar: Sync/Pull/Push piepen kurz und ändern nichts, die GitHub-Verbindung lässt sich weder aktualisieren noch löschen. Trotzdem sieht die Verbindung „verbunden" aus und die Pane zeigt Zähler wie „10 ↓ 2 ↑".
+
+**Ursache.** Replits Credential-Helper `replit-git-askpass` (der Token-Broker hinter `GIT_ASKPASS`) läuft bei jeder Anfrage in einen **30-Sekunden-Timeout** und liefert statt eines Tokens nichts bzw. den Text `GitHub token request timed out`. Git schickt das als Passwort weiter, GitHub antwortet `remote: Invalid username or token`, die Aktion bricht ab. Das liegt **nicht** am Repository: keine divergierte Historie, kein Hook, keine Lock-Datei — Auth ist die einzige Blockade. Abzugrenzen von der Karteileichen-Remotes-Ursache oben (Task #1900): die meldet `Failed to authenticate with the remote (UNAUTHENTICATED)` sofort, dieser Ausfall **hängt erst ~30 s**.
+
+**Warum die Pane trotzdem halb lebendig wirkt.** `SeniorEng/Dashboard` ist öffentlich, anonyme Lesezugriffe (`git fetch`, `git ls-remote`, ungeauthentifizierte API) funktionieren also weiter. Die angezeigten Ahead/Behind-Zähler stammen dann aus einem veralteten Cache und sind **kein** echter Zustand. Auch die *ungeauthentifizierte* GitHub-API liefert nach einem Push noch minutenlang die alte SHA aus dem CDN-Cache — für ein verlässliches Gegenlesen immer **mit Token** lesen (genau das macht das Sync-Skript).
+
+**Diagnose in einem Befehl** (read-only, ~5 s, kein OpenAPI-Lauf):
+
+```bash
+npm run sync:doctor
+```
+
+Ausgabe: Zustand des Token-Brokers (Timeout → Klartext-Hinweis, dass die Pane deshalb wirkungslos ist), Gesundheit jedes konfigurierten Tokens (`OK` / `TOT` / `nicht gesetzt`) und der SHA-Vergleich lokal ↔ GitHub. Exit `0` nur, wenn mindestens ein Token gültig **und** GitHub auf dem lokalen Stand ist. Token-Werte werden nie ausgegeben, nur klassifiziert.
+
+**Ersatzweg zum Pushen** (umgeht den Broker komplett, authentifiziert direkt über die Secrets):
+
+```bash
+npm run sync:github        # = bash scripts/github-sync.sh push
+```
+
+Der Befehl ist idempotent (No-op, wenn bereits in sync), macht **keinen** Force-Push und schreibt keine Historie um. Vor dem Push meldet er zusätzlich, wenn der Broker ausgefallen ist — inklusive Hinweis, dass die Pane deshalb nichts bewirkt und dieser Befehl der Ersatzweg ist. Diese Vorabprüfung ist rein informativ und blockiert den Sync nie; abschaltbar mit `SKIP_CREDENTIAL_BROKER_CHECK=1`, Timeout über `CREDENTIAL_BROKER_PROBE_TIMEOUT` (Default 5 s).
+
+**Was Replit-seitig bleibt.** Broker und GitHub-Verbindung selbst sind Plattform-Sache und von hier aus nicht reparierbar: Workspace neu laden bzw. das GitHub-Konto in den Account-Einstellungen (Connections) neu verknüpfen, notfalls Replit-Support. Solange der Broker hängt, ist der Skript-Weg oben der verlässliche Push-Pfad — die stündliche Sync-Kadenz (Scheduled Deployment) ist davon ohnehin unberührt, weil sie ebenfalls über die Secrets authentifiziert und den Broker nie anfasst.
+
 ### Drift früh erkennen
 
 Der lokale `npm run gen:openapi -- --check` ist der schnellste Frühindikator: läuft er grün, ist die committete Spec konsistent mit dem Code, und nach einem Push läuft auch das CI-Gate grün. Geht er lokal rot, liegt echter Drift vor (Spec neu generieren), nicht nur ein Sync-Problem. Bequemer kapselt `bash scripts/github-sync.sh check` denselben Check plus den SHA-Vergleich gegen GitHub.
 
+## Test-Gate: drei Shard-Legs + Aggregator
+
+Der volle Vitest-Lauf lief bis 11.08.2026 sequenziell in EINEM Job `tests` (~19 min von ~22 min Job-Laufzeit) und war der alleinige Wall-Clock-Treiber der Pipeline — alle anderen Jobs sind nach ≤ 4 min fertig und warteten. Ursache war nicht die Testmenge, sondern fehlende Parallelität: das `integration`-Project in `vitest.config.ts` pinnt `minWorkers`/`maxWorkers`/`fileParallelism` auf `EPHEMERAL_DB_WORKERS`, und CI setzt diese Env nicht.
+
+Seither läuft das Gate als Matrix **`tests-shard`** mit `--shard=i/3` — drei Legs, jedes mit eigener Postgres-Instanz, eigenem Neon-Proxy und eigenem App-Server auf Port 5000. Gemessener kritischer Pfad: **~8:30 statt ~22:00**. Preis: 3× Runner-Minuten für dieses Gate (~22 → ~26–27 min), also eine bewusste Gegenbewegung zu den Sparhebeln oben.
+
+**Der Required Check heißt weiterhin `tests`** — das ist der Aggregator-Job, der nichts ausführt, sondern nur `needs.tests-shard.result` auswertet: grün nur, wenn ALLE Legs grün sind, `skipped` und alles andere rot. Er trägt `if: always()`, damit ein rotes Leg zu einem roten Kontext führt statt zu einem übersprungenen.
+
+Was dabei zu beachten ist:
+
+- **Coverage-Gates laufen nur auf Leg 3.** Sie fahren eigene, fest gepinnte Testlisten. `qonto` (Modus `server`) misst allerdings den DB-Reststand des jeweiligen Hauptlaufs mit — 80,0 % Branches im Shard-Betrieb gegen 81,5 % im alten Einzellauf, bei Floor 72.
+- **Architektur-Fitness läuft in JEDEM Leg.** Der Gate-Meta-Check (`scripts/assert-gate-ran.ts`) verlangt beide JUnit-Reports im selben Arbeitsverzeichnis und darf laut `tests/architecture/gate-meta-check.test.ts` weder ein `if:` tragen noch mehrfach im YAML stehen.
+- **Matrix und Nenner sind gekoppelt geprüft.** `tests/architecture/ci-shard-partition.test.ts` erzwingt, dass die Matrix-Werte lückenlos `1..N` sind und jede `--shard=…/N`-Stelle denselben Nenner `N` trägt. Ohne diesen Wächter könnte eine auf `[1, 2]` gekürzte Matrix mit stehengebliebenem `/3` ein Drittel der Suite still überspringen, bei durchweg grünem Lauf.
+- **Die Leg-Zuordnung wandert.** Vitest shardet über einen SHA1-Sort der Dateipfade mit Slice-Grenzen bei ⌊n/3⌋. Jede hinzugefügte oder entfernte Testdatei verschiebt die Grenzen. Siehe `docs/flaky-tests.md` → „Wandernde Shard-Zuordnung".
+
 ## Branch-Protection (aktiv)
 
-`main` auf `SeniorEng/Dashboard` erzwingt die Required-Status-Checks `static-analysis`, `tests`, `e2e-smoke` und `erechnung-validation` (strict / „branch up to date") vor jedem Merge; Force-Pushes und Branch-Löschung sind gesperrt. PR-Reviews werden nicht erzwungen, damit Renovate grüne Patch-Updates weiterhin auto-mergen kann; `enforce_admins` ist aus (Admin-Notfall-Override möglich). Wichtig: Die CI-Job-Namen (`name:`) sind bewusst identisch mit den Job-IDs (`static-analysis`/`tests`/`e2e-smoke`/`erechnung-validation`), weil GitHub den Required-Check-Kontext über den Job-**Namen** matcht — bei abweichenden Anzeigenamen würden die Checks nie „grün" und jeder Merge (inkl. Renovate) bliebe blockiert. Eingerichtet via GitHub-API am 2026-05-28, bestätigt durch Repo-Admin `SeniorEng`; `erechnung-validation` als vierter Required-Check ergänzt am 2026-06-10 (nachdem der Job erstmals real grün lief). Verwaltung: Repo → Settings → Branches.
+`main` auf `SeniorEng/Dashboard` erzwingt die Required-Status-Checks `static-analysis`, `tests`, `e2e-smoke` und `erechnung-validation` (strict / „branch up to date") vor jedem Merge; Force-Pushes und Branch-Löschung sind gesperrt. PR-Reviews werden nicht erzwungen, damit Renovate grüne Patch-Updates weiterhin auto-mergen kann; `enforce_admins` ist aus (Admin-Notfall-Override möglich). Wichtig: Die CI-Job-Namen (`name:`) sind bewusst identisch mit den Job-IDs (`static-analysis`/`tests`/`e2e-smoke`/`erechnung-validation`), weil GitHub den Required-Check-Kontext über den Job-**Namen** matcht — bei abweichenden Anzeigenamen würden die Checks nie „grün" und jeder Merge (inkl. Renovate) bliebe blockiert. Seit dem Shard-Umbau ist `tests` **nicht mehr der DB-Job selbst**, sondern der Aggregator über die Matrix-Legs `tests-shard (1|2|3)` (Details oben). Eine Matrix erzeugt Kontexte mit dem Leg im Namen und könnte den Kontext `tests` deshalb nie erfüllen — der Aggregator existiert genau dafür. Die Required-Liste bleibt damit unverändert; die drei `tests-shard (N)`-Kontexte zusätzlich als Required zu setzen ist möglich, aber nicht nötig. Eingerichtet via GitHub-API am 2026-05-28, bestätigt durch Repo-Admin `SeniorEng`; `erechnung-validation` als vierter Required-Check ergänzt am 2026-06-10 (nachdem der Job erstmals real grün lief). Verwaltung: Repo → Settings → Branches.

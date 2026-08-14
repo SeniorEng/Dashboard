@@ -14,6 +14,15 @@ export const AUDIT_ACTIONS = [
   "appointment_created",
   "appointment_updated",
   "appointment_deleted",
+  // Task #1906 — Zwei-Kräfte-Einsatz entkoppelt: ein Leg weicht, das andere
+  // bleibt als Einzeltermin. Eigener Typ, weil im Verlauf unterscheidbar
+  // bleiben muss, ob ein Paar AUFGELÖST oder ein Einzeltermin gelöscht wurde.
+  // Der Lösch-Eintrag für das weichende Leg entsteht zusätzlich.
+  "appointment_decoupled",
+  // Task #1906 — abgelehnte Entkopplung (Storno-first / Versiegelung). Spur
+  // auch für den Fall, in dem NICHTS passiert ist — analog zur abgelehnten
+  // Co-Visit-Korrektur im Löschpfad.
+  "appointment_decouple_blocked",
   "employee_anonymized",
   "customer_updated",
   "customer_care_level_changed",

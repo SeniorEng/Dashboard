@@ -32,6 +32,7 @@ export default mergeConfig(
         "tests/unit/cancellation-policy.test.ts",
         "tests/utils/money.test.ts",
         "tests/unit/import-cutoff.test.ts",
+        "tests/unit/pot-amounts-summary.test.ts",
         "tests/month-close-cutoff.test.ts",
       ],
       testTimeout: 20000,

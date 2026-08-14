@@ -57,6 +57,14 @@ A failed push (dead/expired PAT) now exits non-zero with an actionable
 failed instead of the backlog growing silently. Any future change here must keep
 the read-token preference tied to the push-token, not hardcode connector-first.
 
+**Probe before push:** the script now spends ONE read-only API request per token
+before pushing with it; `401/403` ⇒ the token is declared dead, skipped (no push
+attempt) and remembered as dead for the rest of the run, so the remote-SHA read
+doesn't retry it either. An *inconclusive* probe (network/transport, not 401/403)
+must still fall through to a real push attempt — never let the probe lock out a
+working token. `doctor` (npm `sync:doctor`) exposes the same probe read-only.
+See also `git-token-broker-outage.md` for the pane-is-dead failure mode.
+
 **Agent env note:** newly-added secrets ARE live in freshly-spawned bash tool
 processes (proven with a `setEnvVars` probe round-trip) — a 401 on a just-added
 token is the token being bad, not a stale env.

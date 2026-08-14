@@ -284,12 +284,22 @@ Orchestrator gibt, wäre still weg. Er geht deshalb direkt über TCP.
 > Neon-Proxy (also `sudo docker compose up`) und wirft die persistente Test-DB
 > mit `down` weg. Nicht aus dem Routine-Loop heraus fahren — bei Bedarf Alrik.
 
-Nötig, weil der gating `tests`-Job **anders läuft als der Orchestrator**: EINE
-geteilte DB, fester Port 5000, alle Dateien nacheinander dagegen, App-Zugriff über
-den **Neon-WS-Proxy** statt Direkt-TCP. Genau daraus entstehen die Fehlschläge, die
-nur in CI auftreten (Cross-Datei-Kontamination in der geteilten DB, Proxy-Verhalten,
-Reihenfolge-Abhängigkeiten) — der Orchestrator mit seinen Per-Worker-DBs kann sie
-per Konstruktion nicht zeigen. Dieser Ablauf ist das einzige Werkzeug dafür.
+Nötig, weil das gating Test-Gate **anders läuft als der Orchestrator**: eine
+geteilte DB **pro Shard-Leg**, fester Port 5000, die Dateien des Legs nacheinander
+dagegen, App-Zugriff über den **Neon-WS-Proxy** statt Direkt-TCP. Genau daraus
+entstehen die Fehlschläge, die nur in CI auftreten (Cross-Datei-Kontamination in
+der geteilten DB, Proxy-Verhalten, Reihenfolge-Abhängigkeiten) — der Orchestrator
+mit seinen Per-Worker-DBs kann sie per Konstruktion nicht zeigen. Dieser Ablauf
+ist das einzige Werkzeug dafür.
+
+**Seit dem Shard-Umbau läuft das Gate in drei parallelen Legs** (`tests-shard`,
+`--shard=i/3`), zusammengefasst vom Required Check `tests`. Für diesen
+Fallback-Ablauf ändert sich nichts — er baut weiterhin EIN Leg nach, nur eben
+mit allen Dateien statt einem Drittel. Was sich ändert: **welche** Dateien sich
+eine DB teilen. Eine Kontamination zwischen zwei Dateien, die jetzt in
+verschiedenen Legs liegen, tritt in CI nicht mehr auf; eine zwischen Dateien im
+selben Leg schon. Wer eine CI-only-Kontamination reproduziert, sollte deshalb
+zuerst im Job-Log nachsehen, welches Leg rot war und welche Dateien darin liefen.
 
 ```bash
 npm ci                                            # drizzle-kit-Version aus dem Lockfile

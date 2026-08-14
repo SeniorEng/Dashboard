@@ -14,7 +14,10 @@ import { useMemo, useState } from "react";
 import type { RefObject } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { BillingCustomerItem } from "@shared/api";
-import { hasOpenAppointments } from "@shared/domain/billing-eligibility";
+import {
+  hasOpenAppointments,
+  isFullyBillableIgnoringOpen,
+} from "@shared/domain/billing-eligibility";
 import { MONTH_NAMES } from "../constants";
 import { getCustomerName } from "../utils";
 import type { GenerateAllResponse } from "../types";
@@ -74,32 +77,40 @@ export function GenerateAllDialog({
   const isSelectionRun = selectedCustomerIds !== undefined;
 
   const totalCount = scopedCustomers.length;
-  // Task #1775: Der (N)-Zähler „werden erstellt" darf nur die Kunden zählen, die
-  // tatsächlich abgerechnet werden — also solche ohne offene Termine UND mit
-  // erfülltem Unterschrifts-Gate (`eligibility.status === "eligible"`). Das
-  // entspricht der Karten-Gruppe „Bereit zum Abrechnen". Signatur-blockierte
-  // Pflegekasse-Kunden (`customer_signature_required`) haben keine offenen
-  // Termine mehr, werden aber server-seitig nicht abgerechnet — sie zählten
-  // vorher fälschlich mit und ließen den Zähler mehr versprechen, als entsteht.
-  const readyCount = useMemo(
-    () =>
-      scopedCustomers.filter(
-        (c) => !hasOpenAppointments(c) && c.eligibility.status === "eligible",
-      ).length,
-    [scopedCustomers],
-  );
-  // Task #1783: Auch ohne readyOnly werden signatur-blockierte Kunden
-  // (`eligibility.status !== "eligible"`) server-seitig übersprungen. Der
-  // Vorab-Zähler muss diese als `willSkip` ausweisen, damit Vorab-Schätzung
-  // und tatsächliches Lauf-Ergebnis übereinstimmen.
-  const signatureBlockedCount = useMemo(
-    () =>
-      scopedCustomers.filter((c) => c.eligibility.status !== "eligible")
-        .length,
-    [scopedCustomers],
-  );
-  const willCreate = readyOnly ? readyCount : totalCount - signatureBlockedCount;
-  const willSkip = readyOnly ? totalCount - readyCount : signatureBlockedCount;
+  // Task #1905 (absorbiert #1895) — die Vorab-Zähler leiten sich jetzt aus den
+  // geteilten SSoT-Prädikaten (`hasOpenAppointments`, `isFullyBillableIgnoringOpen`)
+  // ab, nicht mehr aus einer eigenen Kombination von `hasOpenAppointments` +
+  // `eligibility.status`.
+  //
+  // Die frühere Formel zählte einen Mischkunden (kundensignierter LN für einen
+  // Teil, nur mitarbeiter-signierter für den Rest) als „wird erstellt": er hat
+  // keine offenen Termine und ist `eligible`. Der Server rechnet ihn aber NUR
+  // mit gesetztem `confirmPartial` ab — ohne Häkchen meldet er ihn als
+  // „übersprungen mit Ausweis" (#1883-Guard). Der Zähler versprach also eine
+  // Rechnung, die nicht entsteht, und zwar unabhängig vom Häkchen.
+  //
+  // Server-Verhalten, das hier gespiegelt wird (`POST /billing/generate-all`):
+  //  • `readyOnly` überspringt Kunden mit OFFENEN Terminen (nicht „nicht bereit").
+  //  • ohne abrechenbaren Anteil (`unbilledAppointmentCount === 0`) wird
+  //    übersprungen („Bereits abgerechnet" / kein signierter LN).
+  //  • bleibt ein dokumentierter Termin mangels Kundenunterschrift/LN außen vor,
+  //    entscheidet `confirmPartial` über Erstellen vs. Überspringen.
+  const willCreate = useMemo(() => {
+    const candidates = readyOnly
+      ? scopedCustomers.filter((c) => !hasOpenAppointments(c))
+      : scopedCustomers;
+    return candidates.filter((c) => {
+      // Nichts abzurechnen ⇒ der Server überspringt, egal was sonst gilt.
+      if ((c.unbilledAppointmentCount ?? 0) <= 0) return false;
+      // Ist ALLES Dokumentierte abrechenbar? Das beantwortet die benannte SSoT
+      // `isFullyBillableIgnoringOpen` — dieselbe, aus der sich auch die
+      // Cluster-Zuordnung speist. Offene (noch nicht durchgeführte) Termine
+      // spielen dabei bewusst keine Rolle: der Teil-Abrechnungs-Guard betrachtet
+      // ausschließlich dokumentierte Termine (Herleitung im Docstring der SSoT).
+      return isFullyBillableIgnoringOpen(c) || confirmPartial;
+    }).length;
+  }, [scopedCustomers, readyOnly, confirmPartial]);
+  const willSkip = totalCount - willCreate;
 
   return (
     <Dialog

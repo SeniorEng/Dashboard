@@ -58,6 +58,31 @@ export async function getCoVisitPartnerAppointments(
   );
 }
 
+/**
+ * Task #1906 — Sperrt ALLE Legs einer Co-Visit-Gruppe in EINER Anweisung,
+ * aufsteigend nach `id`.
+ *
+ * Der Sinn ist die deterministische Sperr-Reihenfolge: `POST /:id/decouple`
+ * kann von JEDEM Leg aus aufgerufen werden. Würde erst das aufrufende Leg und
+ * dann der Partner gesperrt, hätten zwei gleichzeitige Aufrufe aus
+ * entgegengesetzter Richtung die klassische ABBA-Konstellation (genau die
+ * Inversion, die im Co-Visit-Zweig des Löschpfads noch steckt). Über die
+ * Gruppe zu sperren macht die Reihenfolge unabhängig vom Aufrufer.
+ *
+ * BEWUSST OHNE `activeOnly()`: gesperrt wird die ganze Gruppe, auch bereits
+ * soft-gelöschte Legs. Sonst könnten zwei Läufe unterschiedliche Zeilenmengen
+ * sperren und sich gegenseitig durchrutschen.
+ */
+export async function lockCoVisitGroupForUpdate(
+  coVisitGroupId: string,
+  tx: DbOrTx,
+): Promise<void> {
+  await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, tx)
+    .where(eq(appointments.coVisitGroupId, coVisitGroupId))
+    .orderBy(appointments.id)
+    .for("update");
+}
+
 function buildEmployeeCondition(employeeId: number | number[] | undefined, assignedOnly?: boolean) {
   if (employeeId === undefined) return undefined;
   const ids = Array.isArray(employeeId) ? employeeId : [employeeId];

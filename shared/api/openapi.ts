@@ -358,11 +358,15 @@ export const BillingCustomerItemSchema = component(
     openAppointments: z.number().int(),
     signedAppointmentCount: z.number().int(),
     unbilledAppointmentCount: z.number().int(),
-    // Task #1887 — voraussichtlicher Brutto-Betrag des AKTUELL abrechenbaren Teils
-    // (buildInvoiceDraft preview, dieselbe SSoT wie die echte Erstellung inkl.
-    // #1883-Ausschlüsse). 0 bei nicht-abrechenbaren Kunden (LN fehlt / offen / nur
-    // employee_signed).
-    estimatedAmountCents: z.number().int(),
+    // Task #1905 — IST/PLAN statt des früheren einzelnen `estimatedAmountCents`:
+    // `actualAmountCents` = Brutto der dokumentierten, noch nicht abgerechneten
+    // Termine (abrechenbarer Teil aus `buildInvoiceDraft` preview + Rest über
+    // denselben Zeilen-Bauer); `plannedAmountCents` = Brutto-PROGNOSE der noch
+    // offenen Termine. PLAN ist reiner Anzeigewert und darf nie in einen
+    // Rechnungs-/Buchungs-/Nachweis-Pfad einfließen (GoBD).
+    // `null` = nicht berechenbar (fehlender Katalogpreis) — bewusst nicht 0.
+    actualAmountCents: z.number().int().nullable(),
+    plannedAmountCents: z.number().int().nullable(),
     eligibility: z.object({
       status: z.enum(["eligible", "blocked"]),
       reason: z

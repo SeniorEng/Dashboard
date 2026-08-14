@@ -15,7 +15,7 @@
  *   2. Leistungsnachweis-Blockade  → `server/storage/service-records-storage.ts`
  *      (`getUndocumentedAppointmentsForPeriod` über `UNDOCUMENTED_STATUSES`).
  *   3. Abrechnungs-Karte „Noch zu erstellen" (noch offene Termine pro Kunde)
- *      → `server/services/invoice-data.ts` (`getOpenAppointmentCountByCustomer`
+ *      → `server/services/invoice-data.ts` (`getClusterAmountAppointmentsByCustomer`
  *      über `FINAL_APPOINTMENT_STATUSES`).
  *
  * Ein Konsument, der still eine eigene Status-Liste pflegt, würde weiter driften,
