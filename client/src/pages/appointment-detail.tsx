@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment, useAppointmentBudgetFit } from "@/features/appointments";
-import { useDeleteAppointment } from "@/features/appointments/hooks";
+import { useDeleteAppointment, useDecoupleCoVisit } from "@/features/appointments/hooks";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -168,6 +168,31 @@ export default function AppointmentDetail() {
   });
 
   const deleteMutation = useDeleteAppointment();
+  // Task #1906 — Ausweg aus dem Löschdialog: statt beide Legs zu entfernen, nur
+  // DIESES herauslösen. Der Partner bleibt mit allem, was er hat.
+  const decoupleMutation = useDecoupleCoVisit();
+
+  const handleDecouple = useCallback(async () => {
+    try {
+      await decoupleMutation.mutateAsync({ id });
+      toast({
+        title: "Einsatz entkoppelt",
+        description: "Dieser Termin wurde entfernt. Der Termin der zweiten Kraft bleibt als Einzeltermin bestehen.",
+      });
+      setShowDeleteDialog(false);
+      setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Der Einsatz konnte nicht entkoppelt werden.";
+      const code = error instanceof ApiError ? error.code : undefined;
+      // Dieselben zwei fachlichen Reihenfolgen wie beim Löschen — Entkoppeln ist
+      // ausdrücklich KEIN Weg um sie herum.
+      const title =
+        code === "APPOINTMENT_INVOICED" ? "Zuerst die Rechnung erledigen"
+        : code === "APPOINTMENT_LOCKED" ? "Termin liegt auf einem unterschriebenen Nachweis"
+        : "Fehler";
+      toast({ variant: "destructive", title, description: message });
+    }
+  }, [decoupleMutation, id, toast, setLocation, appointment?.date]);
 
   const handleDelete = useCallback(async () => {
     try {
@@ -556,17 +581,41 @@ export default function AppointmentDetail() {
           )}
           {isCoVisit && (
             <div
-              className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3"
+              className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3"
               data-testid="warning-co-visit-delete"
             >
-              <Users className={`${iconSize.sm} text-amber-600 shrink-0 mt-0.5`} />
-              <p className="text-sm text-amber-800">
-                Dieser Termin ist Teil eines Zwei-Kräfte-Einsatzes — das Löschen betrifft auch die zweite Kraft
-                {coVisitPartnerNames.length > 0 ? (
-                  <> (<strong>{coVisitPartnerNames.join(", ")}</strong>)</>
-                ) : null}
-                . Der Partner-Termin wird ebenfalls entfernt.
-              </p>
+              <div className="flex items-start gap-2">
+                <Users className={`${iconSize.sm} text-amber-600 shrink-0 mt-0.5`} />
+                <p className="text-sm text-amber-800">
+                  Dieser Termin ist Teil eines Zwei-Kräfte-Einsatzes — das Löschen betrifft auch die zweite Kraft
+                  {coVisitPartnerNames.length > 0 ? (
+                    <> (<strong>{coVisitPartnerNames.join(", ")}</strong>)</>
+                  ) : null}
+                  . Der Partner-Termin wird ebenfalls entfernt.
+                </p>
+              </div>
+              {/* Task #1906 — der Ausweg. Bis hierher war „beide weg" die einzige
+                  Möglichkeit; wer nur eine Kraft herausnehmen wollte, musste
+                  löschen und neu anlegen — und verlor dabei den Zustand des
+                  anderen Legs. */}
+              <div className="flex flex-col gap-1 border-t border-amber-200 pt-2">
+                <p className="text-sm text-amber-800">
+                  Soll nur <strong>dieser</strong> Termin entfallen und die zweite Kraft den
+                  Einsatz allein übernehmen? Dann entkoppeln statt löschen — der Partner-Termin
+                  bleibt vollständig erhalten, samt Dokumentation und Unterschriften.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  disabled={decoupleMutation.isPending}
+                  onClick={handleDecouple}
+                  data-testid="button-decouple-co-visit"
+                >
+                  Nur diesen Termin entfernen (entkoppeln)
+                </Button>
+              </div>
             </div>
           )}
           <AlertDialogFooter>

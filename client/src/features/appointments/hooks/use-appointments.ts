@@ -105,6 +105,37 @@ export function useAppointment(id: number) {
   });
 }
 
+/**
+ * Task #1906 — Zwei-Kräfte-Einsatz entkoppeln: DIESER Termin weicht, der
+ * Partner-Termin bleibt als Einzeltermin bestehen.
+ *
+ * Die ID des Partner-Legs wird bewusst NICHT mitgeschickt — der Client kennt
+ * sie nicht (vom Partner ist ausschließlich der Name sichtbar) und soll sie
+ * nicht kennen. Der Server löst den Survivor aus der Gruppe auf.
+ */
+export function useDecoupleCoVisit() {
+  const queryClient = useQueryClient();
+
+  // onError-waived: Der Aufrufer (`appointment-detail.tsx`) fängt selbst und
+  // unterscheidet die fachlichen Ablehnungen — „zuerst die Rechnung erledigen"
+  // (`APPOINTMENT_INVOICED`) und „liegt auf einem unterschriebenen Nachweis"
+  // (`APPOINTMENT_LOCKED`) — von einem echten Fehler. Ein generisches
+  // `onError`-Toast hier würde diese Unterscheidung mit einem zweiten,
+  // nichtssagenden „Fehler" überdecken.
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: number; reason?: string }) => {
+      const result = await api.post<{
+        survivingLegId: number;
+        removedLegId: number;
+      }>(`/appointments/${id}/decouple`, reason ? { reason } : {});
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "appointments");
+    },
+  });
+}
+
 export function useDeleteAppointment() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
