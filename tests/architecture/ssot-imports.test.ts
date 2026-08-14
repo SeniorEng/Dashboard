@@ -399,6 +399,8 @@ const ACTIVE_INVOICE_PREDICATE_ALLOWLIST = new Set<string>(
 const ACTIVE_INVOICE_WINDOW = 600;
 
 const RAW_STORNO_STATUS_RE = /status\s*!=\s*'storniert'/i;
+/** Globale Variante für den A6b-Scan (matchAll braucht das `g`-Flag). */
+const RAW_STORNO_STATUS_RE_G = /status\s*!=\s*'storniert'/gi;
 const RAW_STORNO_TYPE_RE = /invoice_type\s*!=\s*'stornorechnung'/i;
 /**
  * Termin-BINDUNG, nicht bloße Erwähnung — zwei Formen, beide erkannt:
@@ -473,6 +475,68 @@ export function detectActiveInvoicePredicateViolations(files: ScanFile[]): Guard
         });
         break;
       }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// A6b — „Zählt diese Rechnung noch?" OHNE Termin-Bindung
+// ---------------------------------------------------------------------------
+
+/**
+ * Task #1908 — Schwester von A6, und der Grund, warum A6 allein nicht reichte.
+ *
+ * A6 schlägt nur an, wenn das Storno-Paar an `invoice_line_items.appointment_id`
+ * gebunden wird — also bei der Frage „liegt dieser TERMIN auf einer aktiven
+ * Rechnung?". Die reine Rechnungs-Frage („zählt diese Rechnung noch?") lief
+ * daran vorbei: 17 handgeschriebene Roh-SQL-Kopien, davon acht allein im
+ * Umsatz-Reader und drei in der SSoT-Datei selbst.
+ *
+ * Das ist das Prädikat unter der gesamten Umsatz-Statistik. Eine vergessene
+ * Kopie verändert einen ausgewiesenen Umsatz, ohne dass ein Test anschlägt —
+ * genau deshalb braucht diese Frage einen eigenen Detektor und nicht bloß einen
+ * Registry-Eintrag. (Die Lehre aus #87: ein dokumentierter, aber unbewachter
+ * Eintrag verhindert eine dritte Kopie nicht.)
+ *
+ * ERKANNT wird ausschließlich das VOLLSTÄNDIGE Paar in einem Fenster — Status
+ * UND Typ. Das ist Absicht:
+ *  • `standard-prices.ts` / `customers/service-prices.ts` filtern NUR
+ *    `status != 'storniert'` (Frage: „welche Rechnungen wären von einer
+ *    Preisänderung betroffen?") und matchen deshalb nicht. Sie stehen bewusst
+ *    NICHT in einer Allowlist: ein Allowlist-Eintrag, der nichts abwehrt, würde
+ *    später einen echten Verstoß in derselben Datei verdecken.
+ *  • Engere Fragen wie `status = 'entwurf' AND invoice_type != 'stornorechnung'`
+ *    (Entwurfs-Löschpfade) tragen den Status-Vergleich gar nicht in der
+ *    `!=`-Form und matchen ebenfalls nicht.
+ */
+const ACTIVE_INVOICE_ONLY_ALLOWLIST = new Set<string>(
+  ssotGuardAllowlist("appointment-active-invoice", "ACTIVE_INVOICE_ONLY_ALLOWLIST"),
+);
+
+/** Fenster um ein Vorkommen — grob eine WHERE-Klausel. */
+const ACTIVE_INVOICE_ONLY_WINDOW = 240;
+
+export function detectActiveInvoiceOnlyViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (ACTIVE_INVOICE_ONLY_ALLOWLIST.has(rel)) continue;
+    // Einmal-Werkzeuge unter `server/scripts/` sind per One-off-Disziplin
+    // temporär und werden wieder gelöscht (CLAUDE.md) — sie in die Konsolidierung
+    // zu zwingen hieße, an Code zu arbeiten, der verschwindet.
+    if (rel.startsWith("server/scripts/")) continue;
+    const code = stripComments(content).replace(/\s+/g, " ");
+
+    for (const m of code.matchAll(RAW_STORNO_STATUS_RE_G)) {
+      const w = code.slice(m.index, m.index + ACTIVE_INVOICE_ONLY_WINDOW);
+      if (!RAW_STORNO_TYPE_RE.test(w)) continue;
+      out.push({
+        file: rel,
+        detail:
+          "schreibt das Storno-Paar in Roh-SQL selbst, statt `activeInvoiceSqlRaw(alias)` zu verwenden",
+      });
+      break;
     }
   }
   return out;
@@ -863,6 +927,53 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
       "server/routes/fake-private-a.ts",
       "server/routes/fake-private-b.ts",
     ]);
+  });
+
+  it("A6b: das Storno-Paar in Roh-SQL gehoert ausschliesslich in `activeInvoiceSqlRaw`", () => {
+    const v = detectActiveInvoiceOnlyViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Aktive-Rechnung-SSoT verletzt — handgeschriebenes Storno-Paar gefunden:\n" +
+          formatViolations(v) +
+          "\n\nDie Frage „Zählt diese Rechnung noch?“ gehört ausschließlich in " +
+          "`server/lib/appointment-invoiced.ts`. Nutze `activeInvoiceSqlRaw(alias)` " +
+          "(Roh-SQL) bzw. `activeInvoiceCondition()` (Drizzle) und hänge deinen " +
+          "Zusatz-Scope daneben, statt „aktiv“ neu zu formulieren.\n\n" +
+          "Dieses Prädikat sitzt unter der Umsatz-Statistik: eine vergessene " +
+          "Kopie verändert einen ausgewiesenen Umsatz, ohne dass ein Test anschlägt.",
+      );
+    }
+  });
+
+  it("A6b: Negativ — eine neue Roh-SQL-Kopie bricht das Gate", () => {
+    const v = detectActiveInvoiceOnlyViolations([
+      {
+        rel: "server/storage/statistics/fake-revenue.ts",
+        content:
+          "const q = sql`SELECT SUM(i.gross_amount_cents) FROM invoices i " +
+          "WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung'`;",
+      },
+    ]);
+    expect(v).toHaveLength(1);
+    expect(v[0].file).toBe("server/storage/statistics/fake-revenue.ts");
+  });
+
+  it("A6b: die bewusst abweichenden Preis-Pfade matchen NICHT (nur Status, andere Frage)", () => {
+    // Ohne diese Abgrenzung waeren sie in einer Allowlist gelandet — und eine
+    // Allowlist, die nichts abwehrt, verdeckt spaeter einen echten Verstoss.
+    const v = detectActiveInvoiceOnlyViolations([
+      {
+        rel: "server/routes/standard-prices.ts",
+        content: "const q = sql`SELECT 1 FROM invoices i WHERE i.status != 'storniert'`;",
+      },
+      {
+        rel: "server/services/some-draft-path.ts",
+        content:
+          "const q = sql`SELECT 1 FROM invoices i WHERE i.status = 'entwurf' " +
+          "AND i.invoice_type != 'stornorechnung'`;",
+      },
+    ]);
+    expect(v).toEqual([]);
   });
 
   it("A6: das Storno-Paar wird nur in der Aktive-Rechnung-SSoT an `appointment_id` gebunden", () => {

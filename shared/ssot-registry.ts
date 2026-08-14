@@ -271,7 +271,9 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
   },
   {
     id: "appointment-active-invoice",
-    question: "Liegt dieser Termin auf einer AKTIVEN Rechnung? (Task #1892)",
+    question:
+      "Zählt diese Rechnung noch — und liegt dieser Termin auf einer AKTIVEN " +
+      "Rechnung? (Tasks #1892, #1908)",
     canonical: [
       // Drizzle-Bedingung zum Komponieren …
       { symbol: "activeInvoiceCondition", module: "server/lib/appointment-invoiced.ts" },
@@ -279,6 +281,13 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
       { symbol: "activeInvoiceForAppointmentExistsSqlRaw", module: "server/lib/appointment-invoiced.ts" },
       { symbol: "latestActiveInvoiceForAppointmentLateralRaw", module: "server/lib/appointment-invoiced.ts" },
       { symbol: "activeInvoicedAppointmentIdsSqlRaw", module: "server/lib/appointment-invoiced.ts" },
+      // Task #1908 — der Roh-SQL-Zwilling OHNE Termin-Bindung. Er fehlte, und
+      // genau deshalb stand das Paar 17-mal handgeschrieben im Repo (acht
+      // Kopien allein im Umsatz-Reader, drei in DIESER Datei).
+      { symbol: "activeInvoiceSqlRaw", module: "server/lib/appointment-invoiced.ts" },
+      // Reines TS-Prädikat auf bereits geladenen Objekten — dieselbe Regel,
+      // dritte Formulierung. Alle drei MÜSSEN im Gleichschritt geändert werden.
+      { symbol: "isStorniertInvoice", module: "shared/domain/billing-pipeline.ts" },
     ],
     ownedLiterals: [],
     guards: [
@@ -293,6 +302,20 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
         // nicht durch eine zweite Definition von „aktiv" erkauft.
         test: SSOT_IMPORTS_GUARD,
         allowlistName: "ACTIVE_INVOICE_PREDICATE_ALLOWLIST",
+        allowlist: ["server/lib/appointment-invoiced.ts"],
+      },
+      {
+        // Task #1908 — Schwester-Guard OHNE Termin-Bindung: das Storno-Paar in
+        // Roh-SQL gehört ausschließlich in `activeInvoiceSqlRaw`. A6 allein
+        // reichte nicht — es sieht nur die an `appointment_id` gebundene Form,
+        // und daran lief die gesamte Umsatz-Statistik vorbei.
+        //
+        // Die Allowlist enthält NUR die SSoT-Datei. Die Preis-Pfade
+        // (`standard-prices.ts`, `customers/service-prices.ts`) filtern bewusst
+        // nur den Status und matchen deshalb gar nicht — ein Allowlist-Eintrag
+        // für sie würde später einen echten Verstoß in derselben Datei verdecken.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "ACTIVE_INVOICE_ONLY_ALLOWLIST",
         allowlist: ["server/lib/appointment-invoiced.ts"],
       },
     ],

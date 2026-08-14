@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { activeInvoiceSqlRaw } from "../../lib/appointment-invoiced";
 import { db } from "../../lib/db";
 import type { CockpitResponse, ServiceTypeMinutesBreakdown } from "@shared/statistics";
 import { billingPeriodFilter, buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
@@ -45,7 +46,7 @@ async function computeRevenueStages(p: ResolvedPeriod) {
     SELECT COALESCE(SUM(li.total_cents), 0)::bigint AS invoiced
     FROM invoice_line_items li
     JOIN invoices i ON i.id = li.invoice_id
-    WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+    WHERE ${activeInvoiceSqlRaw("i")}
       ${invFilter}
   `);
 

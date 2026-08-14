@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { activeInvoiceSqlRaw } from "../../lib/appointment-invoiced";
 import { db } from "../../lib/db";
 import type { CustomerStatsResponse } from "@shared/statistics";
 import { billingPeriodFilter, buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
@@ -148,7 +149,7 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
       WITH cust_rev AS (
         SELECT i.customer_id, SUM(li.total_cents)::bigint AS rev
         FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
-        WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
+        WHERE ${activeInvoiceSqlRaw("i")} ${invFilter}
         GROUP BY i.customer_id
       )
       SELECT c.pflegegrad, COUNT(*)::int AS count, COALESCE(SUM(cr.rev), 0)::bigint AS revenue_cents
@@ -166,7 +167,7 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
         COALESCE(SUM(li.total_cents), 0)::bigint AS revenue_cents
       FROM customers c
       LEFT JOIN invoices i ON i.customer_id = c.id
-        AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
+        AND ${activeInvoiceSqlRaw("i")} ${invFilter}
       LEFT JOIN invoice_line_items li ON li.invoice_id = i.id
       WHERE c.deleted_at IS NULL
       GROUP BY c.id, c.vorname, c.nachname, c.name

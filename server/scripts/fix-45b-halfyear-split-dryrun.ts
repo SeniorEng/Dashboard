@@ -38,6 +38,7 @@
  *   DATABASE_URL=<prod-KOPIE> npx tsx server/scripts/fix-45b-halfyear-split-dryrun.ts
  *   … --json
  */
+import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
@@ -154,9 +155,13 @@ async function lauf(keying: CarryoverKeying, asOfIso: string): Promise<Row[]> {
           // kein Backfill, GoBD). Sonst würde eine gestellte Altrechnung als
           // „Entwurf, nach vorn korrigierbar" ausgewiesen — GoBD-gefährlich.
           isNotNull(invoices.issuedAt),
-          // Aktiv = beides. `storniert_at` allein reicht nicht: Altbestand kann
-          // status='storniert' bei leerem storniert_at tragen.
-          isNull(invoices.storniertAt),
+          // Aktiv = DIE EINE SSoT. `storniert_at` allein reichte hier nicht und
+          // der Kommentar sagte das auch — der Code prüfte trotzdem nur das
+          // Datum. An echten Daten gemessen: ALLE 114 Gutschriften tragen
+          // `storniert_at = NULL` und hätten als aktiv gezählt. Folgenlos war
+          // das bisher nur, weil `issued_at` sie zufällig ausschließt (Gutschriften
+          // tragen keins) — eine Invariante, die nichts erzwingt.
+          activeInvoiceCondition(),
         ));
       for (const x of inv) if (x.appointmentId != null) gestellteTermine.add(x.appointmentId);
     }
