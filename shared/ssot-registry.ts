@@ -528,13 +528,27 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
           "shared/domain/insurance-period.ts",
           // Der eine SCHREIBpfad: die Erstzuordnung.
           "server/storage/customer-mgmt/insurance.ts",
-          // Zwei ANZEIGE-/Vorbelegungs-Pfade im Client, beide nachweislich im
-          // Erstzuordnungs-Zweig: `defaultValidFrom(isFirstAssignment)` ruft den
-          // Anker nur im `true`-Fall (sonst 1. des Folgemonats), und der
-          // Anlage-Wizard legt per Definition eine Erstzuordnung an. Sie
-          // rechnen bewusst DENSELBEN Anker wie der Server, damit die Anfrage
-          // den Wert zeigt, der auch gespeichert wird — genau dafür ist die
-          // Funktion in `shared/` und nicht auf dem Server.
+          // Zwei Client-Pfade. Sie rechnen bewusst DENSELBEN Anker wie der
+          // Server, damit die Anfrage den Wert zeigt, der auch gespeichert wird
+          // — dafür liegt die Funktion in `shared/`. WICHTIG für den nächsten
+          // Leser: die beiden sind NICHT gleich gut abgesichert.
+          //
+          //  • Der Anlage-Wizard ist eine echte Erstzuordnung — er kann
+          //    ausschließlich ANLEGEN (kein `customerId`-Parameter, einziger
+          //    Mount `customer-new.tsx`, einzige Mutation `POST
+          //    /admin/customers`). Serverseitig ist die Historie eines gerade
+          //    angelegten Kunden zwangsläufig leer.
+          //
+          //  • Der Kassen-Reiter ist eine VORBELEGUNG, keine Entscheidung. Sein
+          //    `isFirstAssignment` bedeutet „keine Kasse gültig HEUTE"
+          //    (`!currentInsurance`), das Server-Prädikat dagegen „überhaupt
+          //    keine Zeile in der Historie". Bei einem Kunden mit AUSGELAUFENER
+          //    Kasse sagt der Client also `true`, der Server `false` — ein
+          //    Zweitbegriff derselben Frage (siehe FINDING im PR #96).
+          //    Folgenlos für die Daten: verbindlich entscheidet
+          //    `server/storage/customer-mgmt/insurance.ts` unter dem
+          //    Advisory-Lock, und der Anker läuft dort nur bei echter
+          //    Erstzuordnung. Der Client-Wert ist Vorschlag, nicht Wahrheit.
           "client/src/features/customers/components/admin/customer-insurance-tab.tsx",
           "client/src/features/customers/hooks/use-customer-wizard.ts",
         ],

@@ -18,9 +18,16 @@
  * Der Detektor ist PUR und wird vom Real-Tree-Scan UND vom Negativ-Test mit
  * DERSELBEN Funktion aufgerufen.
  *
- * GRENZE: ein Namens-Stolperdraht, keine Datenflussanalyse. Er sieht den Aufruf,
- * nicht, ob der aufrufende Zweig wirklich eine Erstzuordnung ist. Die
- * fachliche Bedingung (`isFirstAssignment`) bleibt Sache des Reviews.
+ * GRENZE (bewusst offen, benannt statt verschwiegen):
+ *  • Ein NAMENS-Stolperdraht, keine Datenflussanalyse. Er sieht den Aufruf,
+ *    nicht, ob der aufrufende Zweig wirklich eine Erstzuordnung ist. Die
+ *    fachliche Bedingung bleibt Sache des Reviews — und sie ist im Client
+ *    tatsächlich schwächer als auf dem Server (siehe Registry-Eintrag).
+ *  • Ein ALIAS-Import (`import { firstInsuranceAnchorISO as anchor }` →
+ *    `anchor(...)`) läuft daran vorbei. Ein Muster, das jede Umbenennung
+ *    fängt, ohne normale Arbeit zu blockieren, gibt es hier nicht; die Lücke
+ *    ist offen und soll es wissentlich sein.
+ *  • Gescannt werden `server`, `shared` und `client/src` — NICHT `scripts/`.
  */
 import { describe, it, expect } from "vitest";
 import {
