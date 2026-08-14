@@ -17,6 +17,7 @@
  * die zurückgegebenen Rechnungs-IDs).
  */
 
+import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 import { and, eq, ne } from "drizzle-orm";
 import { addDays, todayISO } from "@shared/utils/datetime";
 import { toPotKey } from "@shared/domain/budget-invoice-split";
@@ -244,8 +245,10 @@ export async function stornoInvoiceCascade(
         and(
           eq(invoicesTable.billingRunId, root.billingRunId),
           ne(invoicesTable.id, rootInvoiceId),
-          ne(invoicesTable.status, "storniert"),
-          ne(invoicesTable.invoiceType, "stornorechnung"),
+          // „aktiv" aus DER EINEN SSoT statt handgeschrieben — die Kaskade darf
+          // weder eine bereits stornierte Geschwister-Rechnung noch eine
+          // Gutschrift erneut stornieren.
+          activeInvoiceCondition(),
         ),
       );
     for (const s of siblings) {

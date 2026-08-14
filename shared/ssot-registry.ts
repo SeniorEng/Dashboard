@@ -270,12 +270,50 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
-    id: "appointment-active-invoice",
-    question: "Liegt dieser Termin auf einer AKTIVEN Rechnung? (Task #1892)",
+    // Task #1908 — die BASIS-Frage. Bewusst ein EIGENER Eintrag neben
+    // `appointment-active-invoice`: jene Frage ist DIESE plus einen Join über
+    // `invoice_line_items.appointment_id`. Verschiedene Antworttypen,
+    // verschiedene Aufrufer, verschiedene Guards — unter einer `id` wäre das
+    // Feld „Die fachliche Frage" (Singular) eine Notlüge.
+    id: "invoice-active",
+    question: "Zählt diese Rechnung noch — weder storniert noch Gutschrift? (Task #1908)",
     canonical: [
       // Drizzle-Bedingung zum Komponieren …
       { symbol: "activeInvoiceCondition", module: "server/lib/appointment-invoiced.ts" },
-      // … und die Roh-SQL-Zwillinge derselben Regel.
+      // … ihr Roh-SQL-Zwilling. Er fehlte, und genau deshalb stand das Paar
+      // 17-mal handgeschrieben im Repo (acht Kopien allein im Umsatz-Reader,
+      // drei in der SSoT-Datei selbst).
+      { symbol: "activeInvoiceSqlRaw", module: "server/lib/appointment-invoiced.ts" },
+      // … und das reine TS-Prädikat auf bereits geladenen Objekten. Alle drei
+      // MÜSSEN im Gleichschritt bleiben; festgehalten in
+      // `tests/unit/active-invoice-ssot.test.ts`.
+      { symbol: "isStorniertInvoice", module: "shared/domain/billing-pipeline.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // A6b — das Storno-Paar in Roh-SQL gehört ausschließlich in
+        // `activeInvoiceSqlRaw`. A6 (unten) reichte nicht: es sieht nur die an
+        // `appointment_id` gebundene Form, und daran lief die gesamte
+        // Umsatz-Statistik vorbei.
+        //
+        // Die Allowlist enthält NUR die SSoT-Datei. Die Preis-Pfade
+        // (`standard-prices.ts`, `customers/service-prices.ts`) filtern bewusst
+        // nur den Status und matchen deshalb gar nicht — ein Allowlist-Eintrag
+        // für sie würde später einen echten Verstoß in derselben Datei verdecken.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "ACTIVE_INVOICE_ONLY_ALLOWLIST",
+        allowlist: ["server/lib/appointment-invoiced.ts"],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
+    id: "appointment-active-invoice",
+    question: "Liegt dieser Termin auf einer AKTIVEN Rechnung? (Task #1892)",
+    canonical: [
+      // Die Aktiv-Definition selbst lebt in `invoice-active` (oben); hier stehen
+      // die Bausteine, die sie mit der Termin-Bindung komponieren.
       { symbol: "activeInvoiceForAppointmentExistsSqlRaw", module: "server/lib/appointment-invoiced.ts" },
       { symbol: "latestActiveInvoiceForAppointmentLateralRaw", module: "server/lib/appointment-invoiced.ts" },
       { symbol: "activeInvoicedAppointmentIdsSqlRaw", module: "server/lib/appointment-invoiced.ts" },

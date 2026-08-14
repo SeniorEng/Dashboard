@@ -65,6 +65,36 @@ export function activeInvoiceCondition(): SQL {
 }
 
 /**
+ * Roh-SQL-ZWILLING von `activeInvoiceCondition()` — dasselbe Prädikat für
+ * Leser, die ihre Query als Roh-SQL bauen (die Statistik-Reader unter
+ * `server/storage/statistics/**` tun das durchgehend).
+ *
+ * Bis zu diesem Baustein gab es das Fragment nur handgeschrieben: 17 Kopien
+ * über den Server verstreut, davon acht allein im Umsatz-Reader — und drei
+ * innerhalb DIESER Datei, also in der SSoT selbst. Genau daran hängt der Punkt:
+ * eine einzelne vergessene Kopie verändert einen ausgewiesenen Umsatz, ohne
+ * dass ein Test anschlägt.
+ *
+ * MUSS mit `activeInvoiceCondition()` im Gleichschritt geändert werden — beide
+ * sind Formulierungen DERSELBEN Regel (Muster `server/lib/appointment-signed.ts`).
+ *
+ * @param alias Tabellen-Alias der `invoices`-Tabelle in der aufrufenden Query
+ *   (z. B. `"i"`). Bewusst Pflichtparameter: die Reader nutzen verschiedene
+ *   Aliase, und ein stiller Default würde in der falschen Query lautlos auf die
+ *   falsche Tabelle zeigen.
+ */
+export function activeInvoiceSqlRaw(alias: string): SQL {
+  // `sql.raw` umgeht die Parametrisierung — ein durchgereichter Alias könnte
+  // hier sonst beliebiges SQL einschleusen. Heute übergeben alle Aufrufer
+  // String-Literale; die Prüfung kostet nichts und hält das so.
+  if (!/^[a-z_][a-z0-9_]*$/i.test(alias)) {
+    throw new Error(`activeInvoiceSqlRaw: unzulässiger Tabellen-Alias "${alias}"`);
+  }
+  const a = sql.raw(alias);
+  return sql`${a}.status != 'storniert' AND ${a}.invoice_type != 'stornorechnung'`;
+}
+
+/**
  * Roh-SQL-Zwilling in Mengen-Form: die IDs aller Termine, die auf einer aktiven
  * Rechnung liegen — als Sub-SELECT für `<termin>.id IN (…)` /
  * `NOT IN (…)`-Formulierungen.
@@ -81,7 +111,7 @@ export function activeInvoicedAppointmentIdsSqlRaw(extraInvoiceFilter: SQL = sql
   return sql`SELECT DISTINCT li.appointment_id
       FROM invoice_line_items li
       JOIN invoices i ON i.id = li.invoice_id
-      WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+      WHERE ${activeInvoiceSqlRaw("i")}
         AND li.appointment_id IS NOT NULL ${extraInvoiceFilter}`;
 }
 
@@ -99,7 +129,7 @@ export function activeInvoiceForAppointmentExistsSqlRaw(appointmentIdRef: string
       SELECT 1 FROM invoice_line_items li
       JOIN invoices i ON i.id = li.invoice_id
       WHERE li.appointment_id = ${apptId}
-        AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+        AND ${activeInvoiceSqlRaw("i")}
     )`;
 }
 
@@ -123,7 +153,7 @@ export function latestActiveInvoiceForAppointmentLateralRaw(
       FROM invoice_line_items li
       JOIN invoices i ON i.id = li.invoice_id
       WHERE li.appointment_id = ${apptId}
-        AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+        AND ${activeInvoiceSqlRaw("i")}
       ORDER BY i.id DESC
       LIMIT 1
     ) ${r} ON true`;

@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { activeInvoiceSqlRaw } from "../../lib/appointment-invoiced";
 import { db } from "../../lib/db";
 import type { RevenueStatsResponse, RevenueGapRow, PlannedRevenueTotals } from "@shared/statistics";
 import { billingPeriodFilter, buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
@@ -75,7 +76,7 @@ async function computeStages(p: ResolvedPeriod) {
   const inv = await db.execute(sql`
     SELECT COALESCE(SUM(li.total_cents), 0)::bigint AS invoiced
     FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
-    WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
+    WHERE ${activeInvoiceSqlRaw("i")} ${invFilter}
   `);
   const row = r.rows[0] as Record<string, unknown>;
   const inv0 = inv.rows[0] as Record<string, unknown>;
@@ -118,7 +119,7 @@ async function stageSparklines(year: number) {
     invoiced AS (
       SELECT i.billing_month AS m, COALESCE(SUM(li.total_cents), 0)::bigint AS invoiced
       FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
-      WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+      WHERE ${activeInvoiceSqlRaw("i")}
         AND i.billing_year = ${year}
       GROUP BY i.billing_month
     )
@@ -192,7 +193,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
         JOIN invoices i ON i.id = li.invoice_id
         JOIN appointments a ON a.id = li.appointment_id
         LEFT JOIN inv_appt_service_type iast ON iast.id = a.id
-        WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
+        WHERE ${activeInvoiceSqlRaw("i")} ${invFilter}
         GROUP BY 1
       )
       SELECT b.service_type, b.planned, b.documented, b.proven,
@@ -220,7 +221,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
           COALESCE(SUM(li.total_cents), 0)::bigint AS invoiced
         FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
         JOIN appointments a ON a.id = li.appointment_id
-        WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
+        WHERE ${activeInvoiceSqlRaw("i")} ${invFilter}
         GROUP BY 1
       )
       SELECT u.id AS employee_id, u.display_name AS employee_name,
@@ -251,7 +252,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
       inv_by_cust AS (
         SELECT i.customer_id, COALESCE(SUM(li.total_cents), 0)::bigint AS invoiced
         FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
-        WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
+        WHERE ${activeInvoiceSqlRaw("i")} ${invFilter}
         GROUP BY i.customer_id
       )
       SELECT c.id AS customer_id,
@@ -285,11 +286,11 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
           COALESCE((SELECT SUM(revenue_cents) FROM proven), 0) -
           COALESCE((SELECT SUM(li.total_cents) FROM invoice_line_items li
             JOIN invoices i ON i.id = li.invoice_id
-            WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}), 0)
+            WHERE ${activeInvoiceSqlRaw("i")} ${invFilter}), 0)
         )::bigint AS proven_minus_invoiced,
         ((SELECT COUNT(*) FROM proven) - (SELECT COUNT(DISTINCT li.appointment_id)
           FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
-          WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
+          WHERE ${activeInvoiceSqlRaw("i")} ${invFilter}
             AND li.appointment_id IS NOT NULL))::int AS proven_minus_invoiced_count
     `),
     db.execute(sql`
@@ -308,7 +309,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
         ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (i.created_at - msr.created_at)) / 86400.0)::numeric, 1) AS p90_days
       FROM monthly_service_records msr
       JOIN invoices i ON i.customer_id = msr.customer_id AND i.billing_year = msr.year AND i.billing_month = msr.month
-        AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+        AND ${activeInvoiceSqlRaw("i")}
       WHERE msr.deleted_at IS NULL AND msr.year = ${period.year} AND i.created_at >= msr.created_at
       GROUP BY 1 ORDER BY 1
     `),
