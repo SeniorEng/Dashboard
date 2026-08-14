@@ -84,6 +84,12 @@ export function activeInvoiceCondition(): SQL {
  *   falsche Tabelle zeigen.
  */
 export function activeInvoiceSqlRaw(alias: string): SQL {
+  // `sql.raw` umgeht die Parametrisierung — ein durchgereichter Alias könnte
+  // hier sonst beliebiges SQL einschleusen. Heute übergeben alle Aufrufer
+  // String-Literale; die Prüfung kostet nichts und hält das so.
+  if (!/^[a-z_][a-z0-9_]*$/i.test(alias)) {
+    throw new Error(`activeInvoiceSqlRaw: unzulässiger Tabellen-Alias "${alias}"`);
+  }
   const a = sql.raw(alias);
   return sql`${a}.status != 'storniert' AND ${a}.invoice_type != 'stornorechnung'`;
 }

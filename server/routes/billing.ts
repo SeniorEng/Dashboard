@@ -1589,7 +1589,7 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
   // Druck-Bündel raus — der Admin will den postalischen Stapel für die
   // Kasse drucken, nicht Storno-Belege.
   const printable = allInvoices
-    .filter(inv => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung")
+    .filter(inv => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }))
     .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
 
   if (printable.length === 0) {

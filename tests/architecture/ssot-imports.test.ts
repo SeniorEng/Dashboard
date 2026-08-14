@@ -27,10 +27,15 @@
  *       `invoice_line_items.appointment_id` gebunden werden — weder korreliert
  *       (`li.appointment_id = a.id`) noch mengen-produzierend
  *       (`a.id IN (SELECT … appointment_id …)`).
+ *   A6b „Zählt diese RECHNUNG noch?" (Task #1908) — dasselbe Storno-Paar OHNE
+ *       Termin-Bindung. A6 allein reichte nicht: es sieht nur die gebundene
+ *       Form, und daran lief die gesamte Umsatz-Statistik vorbei (17
+ *       handgeschriebene Kopien, acht davon im Umsatz-Reader). Kanonisch ist
+ *       `activeInvoiceSqlRaw(alias)`.
  *
  * Zusammen mit den Schwester-Wächtern (`budget-single-reader.test.ts` für die
  * §45b-/Cap-Verfügbarkeits-SSoT, `budget-default-pots-ssot.test.ts` für die
- * Default-Aktivierung) decken diese fünf Detektoren die vier fachlichen Budget-
+ * Default-Aktivierung) decken diese Detektoren die vier fachlichen Budget-
  * Fragen ab — Bestandsaufnahme: docs/budget-ssot-audit.md.
  *
  * Jeder Detektor ist PUR und wird vom Real-Tree-Scan UND vom Negativ-Test mit
@@ -381,9 +386,9 @@ export function detectPrivatePaymentFormulaViolations(files: ScanFile[]): GuardV
  * `<termin>.id [NOT] IN (SELECT … appointment_id …)`. Die reine Frage „ist diese
  * RECHNUNG aktiv?" — Geld-Aggregate über aktive Rechnungen, in denen `appointments`
  * nur als Attributions-Join oder `appointment_id IS NOT NULL` vorkommt (z. B.
- * `revenue.ts` Umsatz-Summen) — ist eine ANDERE fachliche Frage mit eigenem,
- * noch offenem Konsolidierungs-Vorhaben und wird absichtlich NICHT mitgefangen;
- * sonst wäre die Allowlist eine Attrappe.
+ * `revenue.ts` Umsatz-Summen) — wird hier absichtlich NICHT mitgefangen; sonst
+ * wäre die Allowlist eine Attrappe. Sie hat seit Task #1908 ihren eigenen
+ * Detektor A6b und ihren eigenen Registry-Eintrag (`invoice-active`).
  *
  * Allowlist kommt aus der Registry (`appointment-active-invoice`) und enthält
  * NUR die SSoT-Datei selbst. Jede andere Stelle komponiert — auch
@@ -398,10 +403,10 @@ const ACTIVE_INVOICE_PREDICATE_ALLOWLIST = new Set<string>(
 /** Fenster um ein Vorkommen herum — grob eine SQL-/Query-Anweisung. */
 const ACTIVE_INVOICE_WINDOW = 600;
 
-const RAW_STORNO_STATUS_RE = /status\s*!=\s*'storniert'/i;
+const RAW_STORNO_STATUS_RE = /status\s*(?:!=|<>)\s*'storniert'/i;
 /** Globale Variante für den A6b-Scan (matchAll braucht das `g`-Flag). */
-const RAW_STORNO_STATUS_RE_G = /status\s*!=\s*'storniert'/gi;
-const RAW_STORNO_TYPE_RE = /invoice_type\s*!=\s*'stornorechnung'/i;
+const RAW_STORNO_STATUS_RE_G = /status\s*(?:!=|<>)\s*'storniert'/gi;
+const RAW_STORNO_TYPE_RE = /invoice_type\s*(?:!=|<>)\s*'stornorechnung'/i;
 /**
  * Termin-BINDUNG, nicht bloße Erwähnung — zwei Formen, beide erkannt:
  *
@@ -511,28 +516,46 @@ export function detectActiveInvoicePredicateViolations(files: ScanFile[]): Guard
  *    `!=`-Form und matchen ebenfalls nicht.
  */
 const ACTIVE_INVOICE_ONLY_ALLOWLIST = new Set<string>(
-  ssotGuardAllowlist("appointment-active-invoice", "ACTIVE_INVOICE_ONLY_ALLOWLIST"),
+  ssotGuardAllowlist("invoice-active", "ACTIVE_INVOICE_ONLY_ALLOWLIST"),
 );
 
-/** Fenster um ein Vorkommen — grob eine WHERE-Klausel. */
-const ACTIVE_INVOICE_ONLY_WINDOW = 240;
+/**
+ * Fenster um ein Vorkommen — SYMMETRISCH und so groß wie beim Geschwister-
+ * Detektor A6. Beides ist bewusst so:
+ *  • symmetrisch, weil die beiden Hälften in BELIEBIGER Reihenfolge stehen
+ *    können (`invoice_type != … AND … status != …`). Ein reiner Vorwärts-Blick
+ *    übersieht die gedrehte Form — gemessen.
+ *  • 600 statt eng, weil zwischen den Hälften eine realistische WHERE-Klausel
+ *    stehen kann (`billing_year`, `billing_month`, `customer_id`, `created_at`).
+ *    Der Wächter soll die KÜNFTIGE Kopie fangen, nicht nur die heutige Form.
+ */
+const ACTIVE_INVOICE_ONLY_WINDOW = ACTIVE_INVOICE_WINDOW;
 
 export function detectActiveInvoiceOnlyViolations(files: ScanFile[]): GuardViolation[] {
   const out: GuardViolation[] = [];
   for (const { rel, content } of files) {
     if (rel.startsWith("tests/")) continue;
     if (ACTIVE_INVOICE_ONLY_ALLOWLIST.has(rel)) continue;
-    // Einmal-Werkzeuge unter `server/scripts/` sind per One-off-Disziplin
-    // temporär und werden wieder gelöscht (CLAUDE.md) — sie in die Konsolidierung
-    // zu zwingen hieße, an Code zu arbeiten, der verschwindet.
-    if (rel.startsWith("server/scripts/")) continue;
+    // `server/scripts/` wird NICHT ausgenommen — bewusst, und aus Gleichlauf mit
+    // A6, das dort ebenfalls scannt. Ein Ausschluss wäre heute folgenlos
+    // (gemessen: 0 Roh-SQL-Treffer dort), würde aber genau die langlebigen
+    // Geld-Werkzeuge freistellen, bei denen eine falsche Aktiv-Definition am
+    // teuersten ist.
     const code = stripComments(content).replace(/\s+/g, " ");
 
     for (const m of code.matchAll(RAW_STORNO_STATUS_RE_G)) {
-      const w = code.slice(m.index, m.index + ACTIVE_INVOICE_ONLY_WINDOW);
+      const from = Math.max(0, m.index - ACTIVE_INVOICE_ONLY_WINDOW);
+      const w = code.slice(from, m.index + ACTIVE_INVOICE_ONLY_WINDOW);
       if (!RAW_STORNO_TYPE_RE.test(w)) continue;
+      // Zeilennummer aus dem ORIGINALTEXT (nicht aus `code` — dort ist der
+      // Whitespace normalisiert, der Index passt also nicht mehr). Bei acht
+      // Kopien in einer Datei ist das die halbe Arbeit beim Aufräumen.
+      const lineIdx = content
+        .split("\n")
+        .findIndex((l) => RAW_STORNO_STATUS_RE.test(l));
       out.push({
         file: rel,
+        line: lineIdx >= 0 ? lineIdx + 1 : undefined,
         detail:
           "schreibt das Storno-Paar in Roh-SQL selbst, statt `activeInvoiceSqlRaw(alias)` zu verwenden",
       });
@@ -956,6 +979,30 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
     ]);
     expect(v).toHaveLength(1);
     expect(v[0].file).toBe("server/storage/statistics/fake-revenue.ts");
+    expect(v[0].line, "Zeilennummer hilft beim Aufraeumen").toBeGreaterThan(0);
+  });
+
+  it("A6b: Negativ — gedrehte Reihenfolge und `<>`-Schreibweise entkommen NICHT", () => {
+    // Beide Umgehungen waren im ersten Wurf moeglich (gemessen): das Fenster
+    // blickte nur vorwaerts, und die Regex kannte nur `!=`.
+    const v = detectActiveInvoiceOnlyViolations([
+      {
+        rel: "server/storage/statistics/fake-gedreht.ts",
+        content:
+          "const q = sql`SELECT 1 FROM invoices i WHERE i.invoice_type != 'stornorechnung' " +
+          "AND i.billing_year = 2026 AND i.status != 'storniert'`;",
+      },
+      {
+        rel: "server/storage/statistics/fake-ungleich.ts",
+        content:
+          "const q = sql`SELECT 1 FROM invoices i WHERE i.status <> 'storniert' " +
+          "AND i.invoice_type <> 'stornorechnung'`;",
+      },
+    ]);
+    expect(v.map((x) => x.file).sort()).toEqual([
+      "server/storage/statistics/fake-gedreht.ts",
+      "server/storage/statistics/fake-ungleich.ts",
+    ]);
   });
 
   it("A6b: die bewusst abweichenden Preis-Pfade matchen NICHT (nur Status, andere Frage)", () => {

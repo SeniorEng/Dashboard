@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
-import type { AgingBucket } from "@shared/domain/billing-pipeline";
+import { isStorniertInvoice, type AgingBucket } from "@shared/domain/billing-pipeline";
 import {
   STATUS_LABELS,
   STATUS_COLORS,
@@ -169,8 +169,11 @@ export function InvoiceRow({
   const customerDisplay = getInvoiceCustomerDisplayName(invoice);
   const showSeparateRecipient =
     customerDisplay && customerDisplay.trim() !== invoice.recipientName.trim();
-  const canStorno =
-    invoice.status !== "storniert" && invoice.invoiceType !== "stornorechnung";
+  // „Stornierbar?" ist die Aktiv-Frage — über die SSoT, nicht handgeschrieben.
+  const canStorno = !isStorniertInvoice({
+    status: invoice.status,
+    invoiceType: invoice.invoiceType,
+  });
 
   // Task #1007: Betrag wird am Handy in der Kopfzeile (neben der Nummer) und auf
   // größeren Screens in der eigenen Spalte angezeigt — dieselbe Darstellung,
