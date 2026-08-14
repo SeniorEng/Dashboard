@@ -1,8 +1,24 @@
 /**
  * Reine Arithmetik der halbjahresscharfen §45b-Übertrags-Gegenrechnung.
  *
- * Gehört zum Einmal-Werkzeug `server/scripts/fix-45b-halfyear-split-dryrun.ts`
- * und wird gemeinsam mit ihm gelöscht (One-off-Disziplin, CLAUDE.md).
+ * Gehört heute zum Einmal-Werkzeug
+ * `server/scripts/fix-45b-halfyear-split-dryrun.ts` und liegt deshalb hier.
+ *
+ * ── Lebensdauer: eine Weggabelung, keine Zusage ──────────────────────────
+ * Bleibt es beim reinen Diagnose-Werkzeug, wird diese Datei gemeinsam mit ihm
+ * GELÖSCHT (One-off-Disziplin, CLAUDE.md) — zusammen mit
+ * `tests/unit/45b-halfyear-math.test.ts` und `45b-halfyear-contract.test.ts`,
+ * die aus diesem Verzeichnis importieren.
+ *
+ * Importiert dagegen der kommende Produktions-Fix `evaluate45bHalfYear`, ist
+ * sie damit Produktionscode und gehört VORHER nach `shared/domain/budget/` —
+ * ein Produktions-Import aus einem Verzeichnis, das laut Regel zu löschen ist,
+ * darf nicht entstehen. Der Umzug ist ein eigener, kleiner Schritt und
+ * ausdrücklich NICHT Teil dieses PR (der ist verhaltensneutral).
+ *
+ * Frühere Fassungen dieses Docblocks behaupteten BEIDES zugleich — gelöscht
+ * werden UND Grundlage des Produktions-Fixes sein. Das ging nicht auf.
+ *
  * Bewusst OHNE DB-Import, damit die Formel ohne Datenbank testbar ist —
  * genau das fehlte in der ersten Fassung und ließ zwei Rechenfehler durch,
  * die drei synthetische Fälle sofort gezeigt hätten.

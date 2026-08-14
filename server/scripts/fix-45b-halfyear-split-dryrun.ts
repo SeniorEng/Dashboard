@@ -19,7 +19,9 @@
  *
  * ── Wo die Rechnung liegt ────────────────────────────────────────────────
  * NICHT hier. `evaluate45bHalfYear` in `lib/45b-halfyear-math.ts` ist die
- * gemeinsame Funktion, die auch der kommende Produktions-Fix benutzt; sie setzt
+ * gemeinsame Funktion, auf die ein kommender Produktions-Fix aufsetzen KANN —
+ * dann zieht sie vorher nach `shared/domain/budget/` um (siehe Lebensdauer-
+ * Absatz dort); sie setzt
  * ausschließlich exportierte Produktionsteile zusammen
  * (`shared/domain/budget/anchor-45b.ts`). Dieses Skript beschafft nur Daten und
  * formatiert. Frühere Fassungen rechneten selbst — daraus entstanden zehn
