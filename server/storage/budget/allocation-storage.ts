@@ -12,6 +12,10 @@ import { eq, and, sql, lt, lte, gte, isNull, isNotNull, desc, asc, inArray, or }
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth, addDays } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
+import { resolve45bAnchor, initialBalanceMonthKeys, pickEffective45bSettingRow, effective45bSettingsWindow, shiftStartToSettings, clampEndToSettings } from "@shared/domain/budget/anchor-45b";
+// Re-Export: Bestands-Aufrufer (summary-queries) importieren die Funktion
+// weiterhin von hier. Die Definition liegt jetzt in der SSoT.
+export { pickEffective45bSettingRow };
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
@@ -66,43 +70,6 @@ async function assertSelbstzahlerStatutoryAllocationAllowed(
     intent: { budgetType },
   });
   if (!v.ok) throw new SelbstzahlerStatutoryPotError(v.message);
-}
-
-/**
- * Task #911 — Phasen-bewusste Auswahl der für einen Monat wirksamen §45b-
- * `customer_budget_type_settings`-Zeile. SSoT für die Monats-Aufstockung
- * (`monthlyAmountFor` unten) UND für die in der Overview/Summary angezeigte
- * `monthlyLimitCents` (`getBudgetSummary`). Vorher leitete die Anzeige den
- * Limit-Wert aus einer einzigen `forDate(heute)`-Zeile ab, während die
- * Allocation über ALLE Phasen iterierte — eine erst im Folge-Append wirksame
- * Phase (z.B. `validFrom = morgen`, aber bis Monatsende in Kraft) reduzierte
- * den Topf korrekt, die UI zeigte aber `null`.
- *
- * Auswahl analog `monthlyAmountFor`: gegen das **Monatsende** geprüft (eine im
- * laufenden Monat ab Tag > 15 wirksame Phase matcht trotzdem), die Zeile mit
- * dem spätesten `validFrom`, deren Fenster den Monat berührt, gewinnt. `rows`
- * darf in beliebiger Reihenfolge übergeben werden.
- */
-export function pickEffective45bSettingRow(
-  rows: CustomerBudgetTypeSetting[],
-  year: number,
-  month: number,
-): CustomerBudgetTypeSetting | undefined {
-  if (rows.length === 0) return undefined;
-  const monthEnd = lastDayOfMonth(year, month);
-  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-  const sorted = [...rows].sort((a, b) => {
-    const av = a.validFrom ?? "";
-    const bv = b.validFrom ?? "";
-    return av < bv ? -1 : av > bv ? 1 : 0;
-  });
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    const r = sorted[i];
-    const startsByMonthEnd = r.validFrom == null || r.validFrom <= monthEnd;
-    const endsAfterMonthStart = r.validTo == null || r.validTo >= monthStart;
-    if (startsByMonthEnd && endsAfterMonthStart) return r;
-  }
-  return undefined;
 }
 
 export async function createBudgetAllocation(
@@ -615,58 +582,25 @@ async function calculateAllocated45b(
   // fabriziert. Identisch in `ensureYearlyCarryover45b` und im
   // /initial-budget-§45b-Pfad. Die Allokations-Fallbacks unten greifen nur,
   // wenn KEINE Pflegegrad-Historie existiert.
-  let budgetStartDate: string | null = null;
-  // Task #724 — Der automatisch aus der Pflegegrad-Historie abgeleitete Anker
-  // darf den Eligibility-Gate NICHT umgehen: §45b akkumuliert nur, wenn der
-  // Topf in mindestens einer Phase aktiviert ist. Ein Pflegekasse-Kunde MIT
-  // Pflegegrad-Historie, aber OHNE §45b-Einrichtung (kein type-setting) zeigte
-  // sonst einen Phantom-Topf — 131 €/Monat ist ein fixer statutorischer Betrag,
-  // anders als §45a greift hier KEIN `monthlyAmount==0`-Schutz. Echte
-  // persistierte Mittel (initial_balance/carryover) ankern weiterhin
-  // unabhängig vom Gate über die Fallbacks unten.
+  // Anker-Kette: SSoT in `shared/domain/budget/anchor-45b.ts`. Die Reihenfolge
+  // (Pflegegrad → aktiver Startwert → aktiver Übertrag → soft-gelöschter
+  // Startwert → Eligibility-Gate/Jahresanfang) samt ihrer Begründungen steht
+  // dort; hier bleibt nur die Datenbeschaffung. Verhalten unverändert.
   const s45bEnabled = all45bSettings.some(s => s.enabled);
   const pgStart = await getEarliestCareLevelStart(customerId, d);
-  if (pgStart && s45bEnabled) {
-    budgetStartDate = floorAutoAnchor45bToCurrentYear(pgStart, curYear);
-  }
+  const anchorBase = {
+    pgStartIso: pgStart ?? null,
+    s45bEnabled,
+    activeAllocations: existingAllocations,
+    fallbackYear: curYear,
+    floorPgAnchor: (iso: string) => floorAutoAnchor45bToCurrentYear(iso, curYear),
+  };
 
-  if (!budgetStartDate) {
-    const initialBalances = existingAllocations
-      .filter(a => a.source === "initial_balance" && a.validFrom);
-    if (initialBalances.length > 0) {
-      budgetStartDate = initialBalances.reduce((min, a) =>
-        a.validFrom < min.validFrom ? a : min
-      ).validFrom;
-    }
-  }
-
-  if (!budgetStartDate) {
-    const carryoverEntries = existingAllocations
-      .filter(a => a.source === "carryover" && a.validFrom);
-    if (carryoverEntries.length > 0) {
-      budgetStartDate = carryoverEntries.reduce((min, a) =>
-        a.validFrom < min.validFrom ? a : min
-      ).validFrom;
-    }
-  }
-
-  // Task #1262 — Anker-Fallback aus SOFT-GELÖSCHTEN initial_balance-Zeilen.
-  //
-  // Ein soft-gelöschter Startwert ist weiterhin Beleg dafür, dass §45b für
-  // diesen Kunden eingerichtet wurde. Ohne diesen Fallback verlöre die
-  // Allocation nach dem Soft-Delete ALLER aktiven Startwerte ihren Anker:
-  // `existingAllocations` (nur aktive Zeilen) wäre §45b-leer, und ohne
-  // aktivierte `customer_budget_type_settings` (`s45bEnabled = false`) griffe
-  // unten das Eligibility-Gate → harter `return 0`. Der gelöschte Monat würde
-  // damit die reguläre 131-€-Monatsaufstockung DAUERHAFT blockieren (Task
-  // #642), obwohl ein gelöschter Startwert exakt dorthin zurückkehren muss.
-  //
-  // Wir ankern daher zusätzlich an der frühesten `validFrom` aller (auch
-  // soft-gelöschter) Startwerte. Das Skip-Set unten (`initialBalanceMonths`)
-  // zählt unverändert nur AKTIVE Startwerte, sodass gelöschte Monate wieder
-  // die Monatsaufstockung erhalten und ein noch aktiver Startwert seinen
-  // Monat weiterhin belegt (Doppelzählungsschutz aus Task #101 bleibt).
-  if (!budgetStartDate) {
+  let anchor = resolve45bAnchor({ ...anchorBase, deletedInitialBalanceValidFroms: [] });
+  // Die soft-gelöschten Startwerte (Stufe 4) werden NUR geholt, wenn die
+  // Stufen 1–3 nichts geliefert haben — sonst wäre das eine zusätzliche Query
+  // auf jedem Aufruf dieses heißen Lesepfads.
+  if (anchor.kind === "ineligible" || anchor.via === "jahresanfang") {
     const deletedInitialBalances = await budgetAllocationsRepo.selectFrom(d)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
@@ -674,27 +608,18 @@ async function calculateAllocated45b(
         eq(budgetAllocations.source, "initial_balance"),
         isNotNull(budgetAllocations.deletedAt),
       ));
-    const withValidFrom = deletedInitialBalances.filter(a => a.validFrom);
-    if (withValidFrom.length > 0) {
-      budgetStartDate = withValidFrom.reduce((min, a) =>
-        a.validFrom < min.validFrom ? a : min
-      ).validFrom;
-    }
+    anchor = resolve45bAnchor({
+      ...anchorBase,
+      deletedInitialBalanceValidFroms: deletedInitialBalances
+        .map(a => a.validFrom)
+        .filter((v): v is string => !!v),
+    });
   }
 
-  if (!budgetStartDate) {
-    // Task #885 — Eligibility/Anker-Gate darf NICHT nur am Heute-Stand
-    // (`typeSettings`, forDate today) hängen: Ein §45b-Settings-Fenster, das
-    // im abgefragten Zeitraum (Jahr/asOfDate) gültig war, aber bis „heute"
-    // bereits abgelaufen ist (validTo in der Vergangenheit), würde sonst zum
-    // harten `return 0` führen — die Monats-Aufstockung des Gültigkeitsmonats
-    // verschwände komplett. Wir prüfen daher gegen ALLE §45b-Zeilen
-    // (`all45bSettings`, datumsunabhängig). Das Windowing übernimmt weiterhin
-    // der allocStart/end-Shift weiter unten (validFrom/validTo-Klammer).
-    if (!s45bEnabled) return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetCutoffDate: null };
-    // Task #1204 — kein Pflegegrad und keine Allokation: Jahresanfang als Anker.
-    budgetStartDate = `${curYear}-01-01`;
+  if (anchor.kind === "ineligible") {
+    return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetCutoffDate: null };
   }
+  const budgetStartDate: string = anchor.anchorIso;
 
   const startDate = parseLocalDate(budgetStartDate);
   let allocStartYear = startDate.getFullYear();
@@ -772,9 +697,9 @@ async function calculateAllocated45b(
     allocStartMonth = 1;
   }
 
-  const initialBalanceSet = new Set(
-    initialBalanceMonths.map(ib => `${ib.year}-${ib.month}`)
-  );
+  // Skip-Set der Monatsaufstockung — SSoT in `anchor-45b.ts` (nur AKTIVE
+  // Startwerte, Task #642/#101). Identisches Ergebnis wie zuvor.
+  const initialBalanceSet = initialBalanceMonthKeys(existingAllocations);
 
   // Task #603 — Per-Kunde konfigurierbarer §45b-Monats-Anteil ist historisiert.
   // Wir holen ALLE §45b-Zeilen einmal und schlagen pro iteriertem Monat die
@@ -834,19 +759,12 @@ async function calculateAllocated45b(
   // komplett, weil neue Zeile validFrom=Mai war). Korrekt ist die FRÜHESTE
   // `validFrom` aller §45b-Zeilen für diesen Kunden.
   // Liegt nur eine Zeile vor, fällt das auf das alte Verhalten zurück.
-  const effectiveS45bValidFrom = all45bSettings.length > 0
-    ? all45bSettings[0].validFrom // selectFrom oben asc sortiert
-    : (s45b?.validFrom ?? null);
-
-  if (effectiveS45bValidFrom) {
-    const vfDate = parseLocalDate(effectiveS45bValidFrom);
-    const vfYear = vfDate.getFullYear();
-    const vfMonth = vfDate.getMonth() + 1;
-    if (vfYear > allocStartYear || (vfYear === allocStartYear && vfMonth > allocStartMonth)) {
-      allocStartYear = vfYear;
-      allocStartMonth = vfMonth;
-    }
-  }
+  // Fenster-Shift: SSoT in `anchor-45b.ts`. Verhalten unverändert.
+  const s45bWindow = effective45bSettingsWindow(all45bSettings, s45b ?? null);
+  ({ year: allocStartYear, month: allocStartMonth } = shiftStartToSettings(
+    { year: allocStartYear, month: allocStartMonth },
+    s45bWindow.validFrom,
+  ));
 
   let horizonYear = curYear;
   let horizonMonth = curMonth;
@@ -890,31 +808,10 @@ async function calculateAllocated45b(
 
   let endYear = horizonYear;
   let endMonth = horizonMonth;
-  // Analog zum validFrom-Shift: bei mehreren §45b-Zeilen die SPÄTESTE
-  // `validTo` heranziehen. Eine offene Zeile (`validTo = null`) bedeutet
-  // unbegrenzte Geltung — dann kein End-Shift.
-  let effectiveS45bValidTo: string | null = null;
-  if (all45bSettings.length > 0) {
-    const hasOpenEnd = all45bSettings.some(r => r.validTo == null);
-    if (!hasOpenEnd) {
-      effectiveS45bValidTo = all45bSettings.reduce<string | null>(
-        (max, r) => (max == null || (r.validTo != null && r.validTo > max) ? r.validTo : max),
-        null,
-      );
-    }
-  } else {
-    effectiveS45bValidTo = s45b?.validTo ?? null;
-  }
-
-  if (effectiveS45bValidTo) {
-    const vtDate = parseLocalDate(effectiveS45bValidTo);
-    const vtYear = vtDate.getFullYear();
-    const vtMonth = vtDate.getMonth() + 1;
-    if (vtYear < endYear || (vtYear === endYear && vtMonth < endMonth)) {
-      endYear = vtYear;
-      endMonth = vtMonth;
-    }
-  }
+  ({ year: endYear, month: endMonth } = clampEndToSettings(
+    { year: endYear, month: endMonth },
+    s45bWindow.validTo,
+  ));
 
   // Task #1812 — §45b-Startwert = Reset/Re-Baseline. Der SPÄTESTE zum Stichtag
   // (`ibDateLimit`) bereits wirksame Startwert-Monat M ist die neue Basis: er
