@@ -496,6 +496,53 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    // Task #1910 — BEWUSST ein eigener Eintrag neben `insurance-at-date`, nicht
+    // daran angehaengt. Jener beantwortet „WELCHE Kasse gilt an einem
+    // Stichtag?" (Auflösung einer bestehenden Historie). Dies hier beantwortet
+    // „AB WANN beginnt die ERSTE Zuordnung?" — eine Normalisierung beim
+    // Anlegen, mit ganz anderen Konsumenten und einer anderen Fehlerklasse:
+    // ein falscher Anker laesst vergangene Monate OHNE Kostentraeger stehen,
+    // ein falscher Stichtag ordnet sie der FALSCHEN Kasse zu.
+    id: "first-insurance-anchor",
+    question:
+      "Ab wann gilt die ERSTE Kostentraeger-Zuordnung eines Kunden? " +
+      "(Normalisierung bei der Erstzuordnung — jeder WEITERE Wechsel bleibt " +
+      "hart auf den Monatsersten begrenzt, #1893)",
+    canonical: [
+      // Liegt in `shared/`, weil Client UND Server denselben Anker rechnen
+      // müssen: der Wizard schickt genau den Wert, den der Server speichern
+      // wird. Läuft er auseinander, zeigt die Anfrage etwas anderes als die
+      // Zeile — und der Unterschied fällt erst beim Abrechnen auf.
+      { symbol: "firstInsuranceAnchorISO", module: "shared/domain/insurance-period.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Der Anker darf nur in der Erstzuordnung angewandt werden. Wuerde ihn
+        // ein zweiter Schreibpfad benutzen, wuerde dort ein WECHSEL-Datum still
+        // zurueckdatiert — und ein Abrechnungsmonat rueckwirkend der falschen
+        // Kasse zugeordnet. Genau der Fehler, den #1893 abgestellt hat.
+        test: "tests/architecture/first-insurance-anchor-ssot.test.ts",
+        allowlistName: "FIRST_INSURANCE_ANCHOR_ALLOWLIST",
+        allowlist: [
+          "shared/domain/insurance-period.ts",
+          // Der eine SCHREIBpfad: die Erstzuordnung.
+          "server/storage/customer-mgmt/insurance.ts",
+          // Zwei ANZEIGE-/Vorbelegungs-Pfade im Client, beide nachweislich im
+          // Erstzuordnungs-Zweig: `defaultValidFrom(isFirstAssignment)` ruft den
+          // Anker nur im `true`-Fall (sonst 1. des Folgemonats), und der
+          // Anlage-Wizard legt per Definition eine Erstzuordnung an. Sie
+          // rechnen bewusst DENSELBEN Anker wie der Server, damit die Anfrage
+          // den Wert zeigt, der auch gespeichert wird — genau dafür ist die
+          // Funktion in `shared/` und nicht auf dem Server.
+          "client/src/features/customers/components/admin/customer-insurance-tab.tsx",
+          "client/src/features/customers/hooks/use-customer-wizard.ts",
+        ],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "insurance-at-date",
     question:
       "Welcher Kostenträger gilt für einen Kunden an einem Stichtag? (Abrechnung/Versand: Stichtag = Ende des Abrechnungszeitraums, NICHT heute)",
