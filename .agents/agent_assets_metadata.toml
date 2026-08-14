@@ -211,3 +211,10 @@ uri = "file://.local/exports/wirtschaftlichkeit-juni-august-2026.xlsx"
 type = "table"
 title = "Wirtschaftlichkeitsanalyse Juni–August 2026"
 description = "718 Termine. Marge je gebundener Stunde als Kernkennzahl. Kurztermine 5,43 €/Std vs. 17,33 €/Std ab einer Stunde."
+
+[[outputs]]
+id = "fOTWZHHDHxHRfVF6zMYgq"
+uri = "file://.local/exports/wirtschaftlichkeit-vollkosten-juni-august-2026.xlsx"
+type = "table"
+title = "Wirtschaftlichkeit Vollkosten – Juni bis August 2026"
+description = "Löhne 16/18/19/27 € plus 40 % Sozialnebenkosten, Fahrzeit nur wo erfasst. Deckungsbeitrag 31,5 % statt 49 %."
