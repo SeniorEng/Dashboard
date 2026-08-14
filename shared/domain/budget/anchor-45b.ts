@@ -6,11 +6,25 @@ import { lastDayOfMonth } from "../../utils/datetime";
  * die Anker-Fallback-Kette, die bisher nur intern in `calculateAllocated45b`
  * (`server/storage/budget/allocation-storage.ts`) existierte.
  *
- * HERAUSGELÖST, NICHT NACHGEBAUT. Der Produktionspfad ruft dieselbe Funktion;
- * es gibt keine zweite Fassung dieser Kette. Damit können Lese-Werkzeuge
- * (§45b-Übertrags-Diagnose, kommender Produktions-Fix) den Anker beziehen,
- * ohne die Reihenfolge erneut zu kodieren — genau die Divergenz, an der eine
- * frühere Fassung des Diagnose-Skripts scheiterte.
+ * HERAUSGELÖST, NICHT NACHGEBAUT: der LESEPFAD (`calculateAllocated45b`) ruft
+ * dieselbe Funktion, es gibt dort keine zweite Fassung mehr. Damit können
+ * Lese-Werkzeuge (§45b-Übertrags-Diagnose, kommender Produktions-Fix) den Anker
+ * beziehen, ohne die Reihenfolge erneut zu kodieren — genau die Divergenz, an
+ * der eine frühere Fassung des Diagnose-Skripts scheiterte.
+ *
+ * ── ACHTUNG: eine zweite Kette existiert weiterhin ───────────────────────
+ * `ensureYearlyCarryover45b` (`server/storage/budget/allocation-storage.ts`)
+ * trägt dieselbe Anker-Frage ein zweites Mal — auf dem SCHREIBpfad, und mit
+ * drei Abweichungen: es prüft `enabled` gegen `readBudgetTypeSettings(…,
+ * forDate: todayISO())` statt datumsunabhängig (die `todayISO()`-vs-`asOf`-Falle
+ * aus CLAUDE.md: ein §45b-Fenster, das im Quelljahr galt und heute abgelaufen
+ * ist, führt dort dazu, dass für dieses Jahr GAR KEIN Übertrag angelegt wird),
+ * es kennt Stufe 4 (soft-gelöschte `initial_balance`) nicht, und es nimmt
+ * `validFrom` der heute-aktiven Zeile statt der frühesten über alle Phasen.
+ *
+ * Diese Extraktion räumt das NICHT mit auf — sie ist bewusst verhaltensneutral
+ * (per differenziellem Fuzz gegen den alten Inline-Code belegt). Der Schreibpfad
+ * ist ein eigener Task; wer ihn anfasst, zieht ihn auf DIESE Funktion.
  *
  * Rein und DB-frei: alle Zeilen kommen als Parameter herein, damit die Kette
  * ohne Datenbank testbar ist.

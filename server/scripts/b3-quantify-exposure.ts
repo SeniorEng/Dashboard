@@ -34,6 +34,7 @@
  *   … --as-of=2026-06-30      Stichtag (Default: heute)
  *   … --json
  */
+import { assertDevDatabase } from "../lib/dev-db-guard";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { budgetAllocations } from "@shared/schema";
@@ -55,20 +56,28 @@ function stichtag(): string {
   return wert;
 }
 
-/** Fail-closed: bricht ab, wenn die DATABASE_URL nach Produktion aussieht. */
+/**
+ * Prod-Schutz über die zentrale SSoT `assertDevDatabase`
+ * (`server/lib/dev-db-guard.ts`, bewacht von `tests/architecture/
+ * sweep-dev-guard.test.ts` + `dev-db-guard-parity.test.ts`).
+ *
+ * ERSETZT einen Eigenbau-Guard, der zwei Löcher hatte — beide gemessen:
+ *  1. Er prüfte das PROD_HOST_PATTERN gar nicht. Eine `DATABASE_URL` auf
+ *     `prod-db.internal` lief anstandslos durch, solange `PROD_DATABASE_URL`
+ *     in der Shell nicht gesetzt war.
+ *  2. Seine Host-Extraktion (`/@([^/:]+)/`) zerbricht an einem `@` im Passwort:
+ *     `postgres://user:p@ssw0rd@prod-db.internal/app` ergab den „Host"
+ *     `ssw0rd@prod-db.internal` — der Vergleich gegen `PROD_DATABASE_URL` ging
+ *     damit ins Leere.
+ *
+ * Für ein Werkzeug, das (wenn auch mit Rollback) SCHREIBT, ist ein schwächerer
+ * Zweitguard neben einer bewachten SSoT das falsche Sparen.
+ */
 function assertKopie(): void {
-  const url = process.env.DATABASE_URL ?? "";
-  if (!url) { console.error("[b3] DATABASE_URL nicht gesetzt."); process.exit(2); }
-  const host = (url.match(/@([^/:]+)/)?.[1] ?? "").toLowerCase();
-  if (!host) { console.error("[b3] Host aus DATABASE_URL nicht lesbar — fail-closed."); process.exit(2); }
-  const prodUrl = process.env.PROD_DATABASE_URL ?? "";
-  const prodHost = (prodUrl.match(/@([^/:]+)/)?.[1] ?? "").toLowerCase();
-  if (prodHost && host === prodHost) {
-    console.error(`[b3] DATABASE_URL zeigt auf den PROD-Host (${host}). Abbruch.`);
-    process.exit(2);
-  }
-  if (process.env.NODE_ENV === "production") {
-    console.error("[b3] NODE_ENV=production — Abbruch.");
+  try {
+    assertDevDatabase();
+  } catch (err) {
+    console.error(`[b3] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(2);
   }
 }

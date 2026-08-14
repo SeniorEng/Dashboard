@@ -64,8 +64,10 @@ export interface SsotEntry {
   /**
    * Kanonische Funktion(en). Meist genau eine; ein Frage-Paar (pure Mathe +
    * DB-Reader) darf beide listen. Leer NUR bei einer reinen Absenz-Invariante
-   * (siehe `budget-anchor`: es gibt bewusst KEIN persistiertes Anker-Feld — der
-   * Anker wird zur Laufzeit pro Topf abgeleitet).
+   * — also wenn die SSoT gar keine Funktion hat, sondern das FEHLEN eines
+   * Feldes/Pfades ist. (`budget-anchor` war das Beispiel dafür, ist es seit der
+   * Extraktion der Anker-Kette nach `shared/domain/budget/anchor-45b.ts` aber
+   * nicht mehr — der Eintrag listet jetzt kanonische Symbole.)
    */
   canonical: readonly SsotCanonical[];
   /**
