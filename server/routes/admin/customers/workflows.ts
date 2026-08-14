@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { activeInvoiceCondition } from "../../../lib/appointment-invoiced";
 import { storage } from "../../../storage";
 import { customerManagementStorage } from "../../../storage/customer-management";
 import { birthdaysCache } from "../../../services/cache";
@@ -216,7 +217,11 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
         eq(invoicesTable.customerId, id),
         eq(invoicesTable.billingYear, y),
         eq(invoicesTable.billingMonth, m),
-        ne(invoicesTable.status, "storniert"),
+        // Task #1909 — kanonisches Aktiv-Prädikat statt nur des Status. Eine
+        // GUTSCHRIFT (`invoice_type = 'stornorechnung'`) ist keine Abrechnung:
+        // ein Monat, in dem nur ein Storno-Beleg liegt, galt hier bisher als
+        // „hat Rechnung" und fiel damit aus dem Gate.
+        activeInvoiceCondition(),
       ))
       .limit(1);
     invoiceChecks.push({
@@ -385,7 +390,11 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
         eq(invoicesTable.customerId, id),
         eq(invoicesTable.billingYear, y),
         eq(invoicesTable.billingMonth, m),
-        ne(invoicesTable.status, "storniert"),
+        // Task #1909 — kanonisches Aktiv-Prädikat statt nur des Status. Eine
+        // GUTSCHRIFT (`invoice_type = 'stornorechnung'`) ist keine Abrechnung:
+        // ein Monat, in dem nur ein Storno-Beleg liegt, galt hier bisher als
+        // „hat Rechnung" und fiel damit aus dem Gate.
+        activeInvoiceCondition(),
       ))
       .limit(1);
     if (existingInvoices.length === 0) {

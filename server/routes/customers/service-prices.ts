@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { activeInvoiceSqlRaw } from "../../lib/appointment-invoiced";
 import { z } from "zod";
 import { insertCustomerServicePriceSchema } from "@shared/schema";
 import { requireAdmin } from "../../middleware/auth";
@@ -82,7 +83,10 @@ async function findAffectedInvoicesFromDate(
            status
     FROM invoices
     WHERE customer_id = ${customerId}
-      AND status != 'storniert'
+      -- Task #1909 — kanonisches Aktiv-Prädikat. Gutschriften sind bewusst
+      -- ausgeschlossen: ein Storno-Beleg wird von einer Preisänderung nicht mehr
+      -- getroffen. Zuvor stand hier nur der Status-Filter.
+      AND ${activeInvoiceSqlRaw("invoices")}
       AND (billing_year > ${year}
            OR (billing_year = ${year} AND billing_month >= ${month}))
     ORDER BY billing_year, billing_month, id
