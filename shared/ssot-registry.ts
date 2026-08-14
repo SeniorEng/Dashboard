@@ -298,9 +298,11 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
         // Umsatz-Statistik vorbei.
         //
         // Die Allowlist enthält NUR die SSoT-Datei. Die Preis-Pfade
-        // (`standard-prices.ts`, `customers/service-prices.ts`) filtern bewusst
-        // nur den Status und matchen deshalb gar nicht — ein Allowlist-Eintrag
-        // für sie würde später einen echten Verstoß in derselben Datei verdecken.
+        // (`standard-prices.ts`, `customers/service-prices.ts`) rufen seit
+        // #1909 selbst `activeInvoiceSqlRaw` auf und brauchen deshalb keinen
+        // Eintrag — vorher filterten sie nur den Status und matchten dadurch
+        // ohnehin nicht. Ein Allowlist-Eintrag für sie würde später einen
+        // echten Verstoß in derselben Datei verdecken.
         test: SSOT_IMPORTS_GUARD,
         allowlistName: "ACTIVE_INVOICE_ONLY_ALLOWLIST",
         allowlist: ["server/lib/appointment-invoiced.ts"],

@@ -506,11 +506,13 @@ export function detectActiveInvoicePredicateViolations(files: ScanFile[]): Guard
  *
  * ERKANNT wird ausschließlich das VOLLSTÄNDIGE Paar in einem Fenster — Status
  * UND Typ. Das ist Absicht:
- *  • `standard-prices.ts` / `customers/service-prices.ts` filtern NUR
- *    `status != 'storniert'` (Frage: „welche Rechnungen wären von einer
- *    Preisänderung betroffen?") und matchen deshalb nicht. Sie stehen bewusst
- *    NICHT in einer Allowlist: ein Allowlist-Eintrag, der nichts abwehrt, würde
- *    später einen echten Verstoß in derselben Datei verdecken.
+ *  • Ein Filter, der NUR `status != 'storniert'` trägt, matcht nicht — das ist
+ *    eine andere Frage („welche Rechnungen wären von einer Preisänderung
+ *    betroffen?") und stand so bis #1909 in den Preis-Pfaden. Seit #1909 rufen
+ *    die dort `activeInvoiceSqlRaw` auf; die Abgrenzung gilt aber weiter für
+ *    jede künftige Status-only-Stelle. Solche Stellen gehören bewusst NICHT in
+ *    eine Allowlist: ein Eintrag, der nichts abwehrt, würde später einen echten
+ *    Verstoß in derselben Datei verdecken.
  *  • Engere Fragen wie `status = 'entwurf' AND invoice_type != 'stornorechnung'`
  *    (Entwurfs-Löschpfade) tragen den Status-Vergleich gar nicht in der
  *    `!=`-Form und matchen ebenfalls nicht.
@@ -1005,12 +1007,14 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
     ]);
   });
 
-  it("A6b: die bewusst abweichenden Preis-Pfade matchen NICHT (nur Status, andere Frage)", () => {
-    // Ohne diese Abgrenzung waeren sie in einer Allowlist gelandet — und eine
-    // Allowlist, die nichts abwehrt, verdeckt spaeter einen echten Verstoss.
+  it("A6b: Status-only und engere Entwurfs-Fragen matchen NICHT (andere Fragen)", () => {
+    // Ohne diese Abgrenzung waeren solche Stellen in einer Allowlist gelandet —
+    // und eine Allowlist, die nichts abwehrt, verdeckt spaeter einen echten
+    // Verstoss. Bewusst ein FIKTIVER Pfad: die realen Preis-Pfade rufen seit
+    // #1909 die SSoT auf, taugen als Beispiel also nicht mehr.
     const v = detectActiveInvoiceOnlyViolations([
       {
-        rel: "server/routes/standard-prices.ts",
+        rel: "server/routes/fake-status-only.ts",
         content: "const q = sql`SELECT 1 FROM invoices i WHERE i.status != 'storniert'`;",
       },
       {
