@@ -218,3 +218,10 @@ uri = "file://.local/exports/wirtschaftlichkeit-vollkosten-juni-august-2026.xlsx
 type = "table"
 title = "Wirtschaftlichkeit Vollkosten – Juni bis August 2026"
 description = "Löhne 16/18/19/27 € plus 40 % Sozialnebenkosten, Fahrzeit nur wo erfasst. Deckungsbeitrag 31,5 % statt 49 %."
+
+[[outputs]]
+id = "8Mus97LRXD4CyX1MiXQMf"
+uri = "file://.local/exports/termine-liste-juni-august-2026.xlsx"
+type = "table"
+title = "Terminliste Juni–August 2026 – alle Termine, alle Kennzahlen"
+description = "718 Termine, 56 Spalten. Dauer-Klasse und Marge-Klasse als Filter-Attribute, Autofilter aktiv."
