@@ -204,3 +204,10 @@ uri = "file://.local/exports/wirtschaftlichkeit-analyse-2026.xlsx"
 type = "table"
 title = "Wirtschaftlichkeitsanalyse 2026 — korrigiert (mit Anfahrt)"
 description = "Korrigiert um Anfahrtzeit je Termin. Kernkennzahl: Marge je gebundener Stunde. Kurze Termine bringen 4,25 €/Std, lange 16,31 €/Std."
+
+[[outputs]]
+id = "VlHducIYaSC0ZHhrdDZUl"
+uri = "file://.local/exports/wirtschaftlichkeit-juni-august-2026.xlsx"
+type = "table"
+title = "Wirtschaftlichkeitsanalyse Juni–August 2026"
+description = "718 Termine. Marge je gebundener Stunde als Kernkennzahl. Kurztermine 5,43 €/Std vs. 17,33 €/Std ab einer Stunde."
