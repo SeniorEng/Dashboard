@@ -39,12 +39,26 @@ interface ParsedTime {
 // ============================================================
 
 /**
- * Die EINE Stelle, an der dieses Repo „jetzt" liest.
+ * Die EINE Stelle, an der DIESE DATEI „jetzt" liest.
  *
- * Alle „aktuelle Zeit"-Funktionen dieser Datei (`todayISO`, `isPast`,
+ * Alle „aktuelle Zeit"-Funktionen hier (`todayISO`, `isPast`,
  * `currentTimeHHMMSS`, die Geburtsdatums-Prüfungen) gehen hierdurch — und damit
  * mittelbar auch `currentYearAndMonth()`, das auf `todayISO()` aufsetzt. Die
- * ~150 Aufrufstellen im Repo erben die Naht, ohne angefasst zu werden.
+ * ~150 Aufrufstellen, die über diese Datei gehen, erben die Naht, ohne
+ * angefasst zu werden.
+ *
+ * ── Was die Naht NICHT erreicht (Gate-2-Fund S2) ────────────────────────
+ * Sie ist KEIN repo-weites „heute". Wer `new Date()` direkt aufruft, bleibt auf
+ * der Echt-Uhr. Bekannte Stellen im Produktivpfad, jeweils mit einem
+ * `now: Date = new Date()`-Default:
+ *   - `shared/domain/appointments.ts` — `canModifyAppointment`, `daysOverdue`,
+ *     `getDocumentationAgeBucket`, `isMoreThan3MonthsInPast`
+ *   - `shared/domain/billing-blockers.ts`
+ * `isMoreThan3MonthsInPast` wird aus `server/routes/appointments.ts` OHNE `now`
+ * gerufen. Ein Test, der die Uhr weit von der Echt-Uhr wegstellt und zugleich
+ * Termine anlegt, kann damit ZWEI „heute" in einem Request haben. Wer solche
+ * Fixtures baut, wählt den Stichtag entweder nah an der Echt-Uhr oder reicht
+ * `now` explizit durch.
  *
  * ── Warum es diese Naht gibt ────────────────────────────────────────────
  * Die §45b-Fristen (Verfall strikt 30.06., Halbjahres-Boden, Jahreswechsel)
@@ -307,7 +321,8 @@ function parseLocalTime(timeString: string): ParsedTime {
 
 /**
  * Gibt die aktuelle Uhrzeit als "HH:MM:SS" String zurück.
- * Dies ist die EINZIGE Stelle wo `new Date()` für Uhrzeiten erlaubt ist.
+ * Dies ist die EINZIGE Stelle, die „jetzt" als Uhrzeit liest — seit der
+ * Uhr-Naht über `nowDate()` statt direkt über `new Date()`.
  */
 export function currentTimeHHMMSS(): string {
   const now = nowDate();

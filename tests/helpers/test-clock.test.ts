@@ -2,7 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { todayISO, currentYearAndMonth } from "@shared/utils/datetime";
 import { apiGet, getAuthCookie } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle, type BudgetScenarioSpec } from "./budget-scenarios";
-import { runWithClock, useTestClock, withTestClock } from "./test-clock";
+import { assertTestClockActive, clearTestClock, runWithClock, useTestClock, withTestClock } from "./test-clock";
+import { freezeTime, thawTime } from "./frozen-clock";
 
 /**
  * §45b-Präventions-Cluster Welle 1 — Abnahmetest der injizierbaren Uhr.
@@ -49,6 +50,30 @@ describe("Injizierbare Uhr — im eigenen Prozess", () => {
       }),
     ).rejects.toThrow("absichtlich");
     expect(todayISO()).toBe("2026-06-15");
+  });
+
+  it("assertTestClockActive schlägt an, wenn keine Uhr gesetzt ist (Gate-2-Fund S1)", () => {
+    // Ohne Uhr: laut. Das ist der Zustand, in dem ein `beforeAll`-Setup ab dem
+    // ZWEITEN Test der Datei landet — `tests/setup.ts#afterEach` hat abgeräumt.
+    clearTestClock();
+    expect(() => assertTestClockActive()).toThrow(/beforeAll.*beforeEach/s);
+
+    useTestClock("2026-06-15");
+    expect(() => assertTestClockActive()).not.toThrow();
+
+    // Nach dem Abräumen wieder laut — genau die stille Lücke, die der Wächter
+    // schließt.
+    clearTestClock();
+    expect(() => assertTestClockActive()).toThrow();
+  });
+
+  it("freezeTime verweigert einen abweichenden Zeitpunkt (Gate-2-Fund S3)", () => {
+    useTestClock("2026-06-15");
+    // Gleicher Zeitpunkt ist der übliche, erlaubte Fall.
+    expect(() => freezeTime("2026-06-15T12:00:00")).not.toThrow();
+    thawTime();
+    // Abweichender Zeitpunkt wäre der stille Fehlschlag — jetzt laut.
+    expect(() => freezeTime("2026-07-01T00:01:00")).toThrow(/widerspricht der gesetzten Testuhr/);
   });
 
   it("Tages-Datum wird auf lokale Mittagszeit gelegt, nicht auf Mitternacht", () => {

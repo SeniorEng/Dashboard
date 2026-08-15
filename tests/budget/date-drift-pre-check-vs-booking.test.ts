@@ -30,7 +30,7 @@ import {
   pastWeekdayInBillingMonth,
   snapToWeekday,
 } from "../helpers/billing-month";
-import { useTestClock } from "../helpers/test-clock";
+import { assertTestClockActive, useTestClock } from "../helpers/test-clock";
 
 beforeAll(async () => { await getAuthCookie(); });
 afterAll(async () => { await runCleanup(); });
@@ -282,7 +282,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
     const beforeExpiry = `${targetYear}-06-15`;  // vor dem 30.06.
     const afterExpiry = `${targetYear}-07-15`;   // nach dem 30.06.
 
-    beforeEach(() => { useTestClock(SEED_KLOCK); });
+    beforeEach(() => { useTestClock(SEED_KLOCK); assertTestClockActive(); });
 
     beforeAll(async () => {
       useTestClock(SEED_KLOCK);
@@ -372,19 +372,19 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
           eq(budgetTransactions.transactionType, "write_off"),
         ));
 
-      // REICHWEITE — bewusst benannt, damit die Lücke nicht als abgedeckt gilt:
-      // Der Verfall wird erst materialisiert, wenn die Frist REAL abgelaufen ist
-      // (`processExpiredCarryover` liest `todayISO()`, nicht den Stichtag).
-      // Läuft der Test im H1 des Zieljahres, existiert noch gar keine
-      // Write-Off-Zeile — dann ist hier nichts zu entlasten und die Assertion
-      // unten ist trivial erfüllt. Der Test greift also nur bei Läufen ab dem
-      // 01.07.; siehe `FINDING` im PR-Body. Deterministisch schließen lässt sich
-      // das hier nicht: ein Übertrag aus einem FRÜHEREN Jahr würde durch
-      // `floorAutoAnchor45bToCurrentYear` die Monats-Aufstockungen auf 0 boden
-      // und die Assertion damit genauso trivial machen.
-      if (writeOffs.length === 0) return;
-
-      expect(writeOffs).toHaveLength(1);
+      // Die frühere REICHWEITE-Einschränkung ist mit der injizierbaren Uhr weg:
+      // `processExpiredCarryover` liest `todayISO()`, und das steht jetzt fest
+      // auf `SEED_KLOCK` (15.07., also NACH der Frist). Der Write-Off wird damit
+      // an jedem Lauftag materialisiert, statt nur bei Läufen ab dem 01.07.
+      //
+      // Der frühere Escape `if (writeOffs.length === 0) return;` ist deshalb
+      // ersatzlos gestrichen: er wäre heute unerreichbar und würde einen
+      // ausbleibenden Verfall still durchgehen lassen, statt rot zu werden.
+      expect(
+        writeOffs,
+        "Kein Write-Off — der Übertrag ist zum Stichtag (15.07.) verfallen und " +
+          "muss abgeschrieben sein. Fehlt er, greift der Verfall nicht mehr.",
+      ).toHaveLength(1);
       expect(writeOffs[0].amountCents).toBe(-CARRYOVER_CENTS);
       // Die Zeile liegt im Fenster (`transactionDate <= afterExpiry`) und
       // würde ohne die symmetrische Exklusion ein zweites Mal abgezogen.

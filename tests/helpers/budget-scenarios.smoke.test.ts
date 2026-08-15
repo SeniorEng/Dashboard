@@ -5,7 +5,7 @@ import {
   type BudgetScenarioHandle,
   type BudgetScenarioSpec,
 } from "./budget-scenarios";
-import { useTestClock } from "./test-clock";
+import { assertTestClockActive, useTestClock } from "./test-clock";
 
 interface OverviewResponse {
   entlastungsbetrag45b: {
@@ -39,6 +39,10 @@ describe("budget-scenarios DSL — smoke", () => {
   // stellt nach JEDEM Test die Echt-Uhr wieder her.
   beforeEach(() => {
     useTestClock(KLOCK);
+    // Wächter gegen die `beforeAll`-Falle (Gate-2-Fund S1): stünde das
+    // `useTestClock` oben in `beforeAll`, liefe ab dem zweiten Test dieser Datei
+    // alles still gegen den Lauftag.
+    assertTestClockActive();
   });
 
   beforeAll(async () => {

@@ -44,6 +44,36 @@ import {
 /** Aktuell gesetztes Testdatum, oder `null` für Echt-Uhr. */
 let activeISO: string | null = null;
 
+/**
+ * Gate-2-Fund S1 — Wächter gegen die stille `beforeAll`-Falle.
+ *
+ * `tests/setup.ts#afterEach` räumt nach JEDEM Test ab. Eine in `beforeAll`
+ * gesetzte Uhr wirkt deshalb nur für den ERSTEN Test der Datei; ab dem zweiten
+ * misst sie gegen die Echt-Uhr — ohne Warnung, ohne Rot. Genau der stille
+ * Fehlschlag, gegen den diese Naht gebaut ist.
+ *
+ * Ein Test, der eine Uhr BRAUCHT, ruft das hier und macht daraus einen lauten.
+ * Bewusst eine positive Zusicherung („jetzt muss eine gesetzt sein") und kein
+ * Verlaufs-Merker: Dateien dürfen geclockte und ungeclockte Tests mischen
+ * (`tests/equality/45b-fifo-breakdown-consistency.test.ts` tut das bewusst),
+ * ein Merker gäbe dort Fehlalarm.
+ *
+ * Bewusst auch KEIN automatischer `beforeEach` in `useTestClock`: Hooks lassen
+ * sich in Vitest nur während der Collection-Phase registrieren, aus einem
+ * Testkörper heraus schlüge das fehl. Ein expliziter Wächter ist ehrlicher als
+ * ein Hook, der je nach Aufrufort wirkt oder nicht.
+ */
+export function assertTestClockActive(): void {
+  if (activeISO !== null) return;
+  throw new Error(
+    "Testuhr ist nicht gesetzt, dieser Test braucht aber eine. Ursache ist fast " +
+      "immer `useTestClock` in `beforeAll` statt `beforeEach`: " +
+      "`tests/setup.ts#afterEach` stellt nach JEDEM Test die Echt-Uhr her, die " +
+      "Uhr wirkt dann nur für den ersten Test der Datei. Ohne diesen Wächter " +
+      "würde der Test still gegen den Lauftag messen.",
+  );
+}
+
 /** Liest `tests/test-utils.ts`, um den Header an jeden Request zu hängen. */
 export function activeTestClockISO(): string | null {
   return activeISO;

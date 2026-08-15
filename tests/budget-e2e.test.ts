@@ -21,7 +21,7 @@ import {
   billingReferenceMonth,
   pastWeekdayInBillingMonth,
 } from "./helpers/billing-month";
-import { useTestClock } from "./helpers/test-clock";
+import { assertTestClockActive, useTestClock } from "./helpers/test-clock";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -857,7 +857,7 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
   const futureExpiresAt = `${futureTargetYear}-06-30`;
 
   // `beforeEach`, weil `tests/setup.ts` nach JEDEM Test die Echt-Uhr herstellt.
-  beforeEach(() => { useTestClock(KLOCK); });
+  beforeEach(() => { useTestClock(KLOCK); assertTestClockActive(); });
 
   beforeAll(async () => {
     useTestClock(KLOCK);
@@ -1049,7 +1049,7 @@ describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
   const fifoTargetYear = 2026;
   const fifoAsOf = "2026-06-15";
 
-  beforeEach(() => { useTestClock(fifoAsOf); });
+  beforeEach(() => { useTestClock(fifoAsOf); assertTestClockActive(); });
 
   beforeAll(async () => {
     useTestClock(fifoAsOf);
