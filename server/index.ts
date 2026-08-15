@@ -17,6 +17,10 @@ import { getBuildInfo } from "./lib/build-info";
 import { sql as sqlBuilder } from "drizzle-orm";
 import { closeBrowser } from "./services/pdf-generator";
 import { startMemoryWatchdog } from "./lib/memory-watchdog";
+// Statischer Import (kein `await import`): `server/index.ts` wird per esbuild zu
+// CJS gebündelt, Top-Level-`await` bräche den Build. Der Import ist folgenlos —
+// registriert wird die Middleware unten nur unter `NODE_ENV=test`.
+import { testClockMiddleware } from "./lib/test-clock";
 const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
@@ -50,6 +54,16 @@ app.use(express.json({ limit: "10mb" }));
 
 app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 app.use(cookieParser());
+
+// §45b-Präventions-Cluster Welle 1 — Injizierbare Uhr: NUR im Testlauf. Außerhalb `NODE_ENV=test`
+// wird die Middleware gar nicht erst registriert, ein `X-Test-Clock`-Header
+// trifft dort also auf keinen Leser (fail-closed, nicht „wird ignoriert").
+// Muss VOR den Routen und vor allem stehen, was `todayISO()` liest — deshalb
+// direkt hinter den Body-/Cookie-Parsern. Bewacht von
+// `tests/architecture/injectable-clock.test.ts`.
+if (process.env.NODE_ENV === "test") {
+  app.use(testClockMiddleware);
+}
 
 // Restore the `data:image/...;base64,` prefix on signature fields. The browser
 // strips it before sending (the edge WAF blocks request bodies containing a

@@ -9,7 +9,7 @@ import {
 } from "../helpers/budget-scenarios";
 import { runInParallel } from "../helpers/race";
 import { freezeTime, thawTime } from "../helpers/frozen-clock";
-import { expirySubjectAnchor } from "../helpers/billing-month";
+import { useTestClock } from "../helpers/test-clock";
 import { addDays } from "@shared/utils/datetime";
 import { processExpiredCarryover } from "../../server/storage/budget/allocation-storage";
 
@@ -40,13 +40,27 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
 
   it("RACE-K7 — Zwei parallele processExpiredCarryover-Aufrufe erzeugen genau einen write_off mit korrektem Betrag", async () => {
     const carryoverAmountCents = 5000;
-    // Frist-SUBJEKT: Der Test prüft die Verfallsmechanik selbst, der Anker muss
-    // deshalb zur eingefrorenen Zeit passen — nicht umgekehrt. Zieljahr liegt im
-    // nächsten Kalenderjahr, die Frist also real in der Zukunft; sonst schreibt
-    // der App-Server (eigener Prozess, reale Uhr) den Übertrag schon während
-    // `setupBudgetScenario` ab und die Vorab-Sanity unten fällt. Details im
-    // Docstring von `expirySubjectAnchor`.
-    const { sourceYear, targetYear, expiresAt, frozenJustAfterExpiry } = expirySubjectAnchor();
+    // Frist-SUBJEKT: Der Test prüft die Verfallsmechanik selbst.
+    //
+    // §45b-Präventions-Cluster Welle 1 — Der frühere `expirySubjectAnchor` schob das Zieljahr ins
+    // NÄCHSTE Kalenderjahr, damit die Frist real in der Zukunft lag: sonst
+    // schrieb der App-Server (eigener Prozess, reale Uhr) den Übertrag schon
+    // während `setupBudgetScenario` ab, und die Vorab-Sanity unten fiel. Mit der
+    // injizierbaren Uhr entfällt dieser Umweg — wir stellen den Server auf einen
+    // Tag im H1 des Zieljahres, und die Jahreszahlen sind wieder Literale.
+    const SOURCE_YEAR = 2025;
+    const TARGET_YEAR = 2026;
+    const expiresAt = `${TARGET_YEAR}-06-30`;
+    // Bewusst OHNE UTC-Offset: ein ISO-Zeitstempel ohne Offset wird als ORTSZEIT
+    // geparst (TZ ist oben auf Europe/Berlin gepinnt). Ein fixes `+02:00`
+    // unterstellte, der 01.07. sei in Berlin immer MESZ.
+    const frozenJustAfterExpiry = `${TARGET_YEAR}-07-01T00:01:00`;
+
+    // Seed-Zeitpunkt: Mitte H1 des Zieljahres. Der Server sieht den Übertrag
+    // damit als GÜLTIG und schreibt ihn nicht vorzeitig ab.
+    useTestClock(`${TARGET_YEAR}-06-15`);
+    const sourceYear = SOURCE_YEAR;
+    const targetYear = TARGET_YEAR;
 
     scenario = await setupBudgetScenario({
       customerNamePrefix: "RACE-K7",
@@ -91,9 +105,17 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
       );
     expect(Number(preWriteOffs[0]?.c ?? 0)).toBe(0);
 
-    // Frist 30.06. abgelaufen → 01.07. 00:01 MESZ des Zieljahres. Ab hier ist
-    // die Uhr des TESTPROZESSES maßgeblich; `processExpiredCarryover` wird
-    // unten in-process gerufen, dort wirkt der Freeze.
+    // Frist 30.06. abgelaufen → 01.07. 00:01 MESZ des Zieljahres.
+    //
+    // BEIDE Uhren weiterstellen, und zwar auf denselben Zeitpunkt:
+    //  - `useTestClock`, weil `processExpiredCarryover` sein „heute" über
+    //    `todayISO()` aus der Datetime-SSoT liest. Der Prozess-Override hat dort
+    //    VORRANG vor dem gefakten globalen `Date` — bliebe die Testuhr auf dem
+    //    Seed-Datum stehen, liefe der Verfall gegen den 15.06. und der Test
+    //    fände null write_offs (gemessen, bevor diese Zeile stand).
+    //  - `freezeTime`, weil derselbe Pfad zusätzlich `new Date()` für
+    //    Zeitstempel benutzt, die nicht über die SSoT laufen.
+    useTestClock(frozenJustAfterExpiry);
     freezeTime(frozenJustAfterExpiry);
 
     // Pool vorwärmen, BEVOR die Barriere aufgeht. Ohne das zog der erste Call

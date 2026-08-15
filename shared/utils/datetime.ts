@@ -35,6 +35,94 @@ interface ParsedTime {
 }
 
 // ============================================================
+// UHR-NAHT (§45b-Präventions-Cluster Welle 1 — injizierbare Uhr)
+// ============================================================
+
+/**
+ * Die EINE Stelle, an der dieses Repo „jetzt" liest.
+ *
+ * Alle „aktuelle Zeit"-Funktionen dieser Datei (`todayISO`, `isPast`,
+ * `currentTimeHHMMSS`, die Geburtsdatums-Prüfungen) gehen hierdurch — und damit
+ * mittelbar auch `currentYearAndMonth()`, das auf `todayISO()` aufsetzt. Die
+ * ~150 Aufrufstellen im Repo erben die Naht, ohne angefasst zu werden.
+ *
+ * ── Warum es diese Naht gibt ────────────────────────────────────────────
+ * Die §45b-Fristen (Verfall strikt 30.06., Halbjahres-Boden, Jahreswechsel)
+ * sind ohne bewegliche Uhr nicht prüfbar. `vi.setSystemTime`
+ * (`tests/helpers/frozen-clock.ts`) wirkt NUR im Testprozess; die
+ * Integrationstests sprechen aber einen eigenständigen App-Server an, der seine
+ * eigene Systemzeit liest. Genau daran scheiterte die bisherige Umgehung, die
+ * `tests/helpers/billing-month.ts` in ihrer Anker-Familie dokumentiert
+ * („einen Clock-Override kennt der Server nicht").
+ *
+ * ── Fail-closed ─────────────────────────────────────────────────────────
+ * `setClockProvider` wirft außerhalb `NODE_ENV === "test"`. Der Default ist die
+ * Echt-Uhr; in Produktion ist die Naht ein einzelner Funktionsaufruf und sonst
+ * nichts. Die Server-Middleware, die den `X-Test-Clock`-Header liest, wird
+ * außerhalb `NODE_ENV === "test"` gar nicht erst registriert — der Header
+ * trifft dort auf keinen Leser. Bewacht von
+ * `tests/architecture/injectable-clock.test.ts`.
+ *
+ * ── Client-Sicherheit ───────────────────────────────────────────────────
+ * Hier steht bewusst NUR die Funktionsreferenz. Die AsyncLocalStorage-Mechanik
+ * (`node:async_hooks`) liegt in `server/lib/test-clock.ts` — diese Datei wird
+ * auch in den Browser gebündelt und darf keinen `node:`-Import bekommen. Der
+ * Client setzt nie einen Provider und läuft damit immer auf der Echt-Uhr.
+ */
+type ClockProvider = () => Date;
+
+const REAL_CLOCK: ClockProvider = () => new Date();
+
+let clockProvider: ClockProvider = REAL_CLOCK;
+
+/** `true`, wenn wir nachweislich im Testlauf sind (auch im Browser-Bundle sicher). */
+function isTestEnv(): boolean {
+  return (
+    typeof process !== "undefined" &&
+    typeof process.env !== "undefined" &&
+    process.env.NODE_ENV === "test"
+  );
+}
+
+/**
+ * Interner Zugriff auf „jetzt". Alle Now-Leser dieser Datei benutzen ihn.
+ *
+ * Liefert bewusst immer eine KOPIE: Aufrufer wie `isPast` rufen
+ * `setHours(0,0,0,0)` auf dem Ergebnis auf. Gäbe ein Provider dieselbe
+ * `Date`-Instanz mehrfach heraus (`() => festesDatum` ist die naheliegende
+ * Test-Schreibweise), würde der erste Aufrufer die Uhr dauerhaft auf
+ * Mitternacht mutieren.
+ */
+function nowDate(): Date {
+  return new Date(clockProvider().getTime());
+}
+
+/**
+ * Setzt die Uhr-Quelle. NUR für Tests — wirft außerhalb `NODE_ENV === "test"`,
+ * damit ein versehentlicher Produktiv-Aufruf laut scheitert statt still die
+ * Systemzeit zu verbiegen.
+ */
+export function setClockProvider(provider: ClockProvider): void {
+  if (!isTestEnv()) {
+    throw new Error(
+      "setClockProvider ist nur unter NODE_ENV=test erlaubt (aktuell: " +
+        `${typeof process !== "undefined" ? process.env?.NODE_ENV ?? "undefined" : "kein process"}). ` +
+        "Die injizierbare Uhr ist ein Test-Werkzeug, kein Produktiv-Schalter.",
+    );
+  }
+  clockProvider = provider;
+}
+
+/**
+ * Stellt die Echt-Uhr wieder her. Bewusst OHNE Env-Guard und idempotent: der
+ * Weg ZURÜCK zur Systemzeit muss immer offenstehen (Sicherheitsnetz in
+ * `tests/setup.ts#afterEach`, analog zu `thawTime`).
+ */
+export function resetClockProvider(): void {
+  clockProvider = REAL_CLOCK;
+}
+
+// ============================================================
 // DATUM-FUNKTIONEN
 // ============================================================
 
@@ -63,7 +151,7 @@ export function formatDateISO(date: Date): string {
  * Gibt das heutige Datum als "YYYY-MM-DD" zurück
  */
 export function todayISO(): string {
-  return formatDateISO(new Date());
+  return formatDateISO(nowDate());
 }
 
 /**
@@ -124,7 +212,7 @@ export function isValidCalendarDate(dateStr: string): boolean {
  */
 export function isPast(dateString: string): boolean {
   const date = parseLocalDate(dateString);
-  const today = new Date();
+  const today = nowDate();
   today.setHours(0, 0, 0, 0);
   return date < today;
 }
@@ -222,7 +310,7 @@ function parseLocalTime(timeString: string): ParsedTime {
  * Dies ist die EINZIGE Stelle wo `new Date()` für Uhrzeiten erlaubt ist.
  */
 export function currentTimeHHMMSS(): string {
-  const now = new Date();
+  const now = nowDate();
   const hours = String(now.getHours()).padStart(2, "0");
   const minutes = String(now.getMinutes()).padStart(2, "0");
   const seconds = String(now.getSeconds()).padStart(2, "0");
@@ -349,7 +437,7 @@ export function validateGeburtsdatum(geburtsdatum: string | null | undefined): s
     return "Ungültiges Geburtsdatum";
   }
 
-  const today = new Date();
+  const today = nowDate();
   today.setHours(0, 0, 0, 0);
 
   if (birth >= today) {
@@ -412,7 +500,7 @@ export function parseTimestamp(value: string | Date): Date {
 export function isChild(geburtsdatum: string | null): boolean {
   if (!geburtsdatum) return false;
   const birth = parseLocalDate(geburtsdatum);
-  const today = new Date();
+  const today = nowDate();
   const age = today.getFullYear() - birth.getFullYear();
   const monthDiff = today.getMonth() - birth.getMonth();
   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {

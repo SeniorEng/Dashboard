@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { TEST_CLOCK_HEADER, activeTestClockISO } from "./helpers/test-clock";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 const TEST_EMAIL = process.env.TEST_USER_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
@@ -99,8 +100,17 @@ const BACKOFF_BASE_MS = 1500;
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
   const method = init.method || "GET";
   const path = url.replace(BASE_URL, "");
+  // §45b-Präventions-Cluster Welle 1 — Injizierbare Uhr: ALLE Test-Requests laufen durch diese eine
+  // Funktion, deshalb hängt der `X-Test-Clock`-Header genau hier dran. Ohne ihn
+  // sähe der App-Server (eigener Prozess!) weiter seine Echt-Uhr, während der
+  // Testprozess auf dem gesetzten Datum steht — genau die Divergenz, wegen der
+  // es die Anker-Familie in `billing-month.ts` gab.
+  const clock = activeTestClockISO();
+  const withClock: RequestInit = clock
+    ? { ...init, headers: { ...(init.headers as Record<string, string> | undefined), [TEST_CLOCK_HEADER]: clock } }
+    : init;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const response = await fetch(url, init);
+    const response = await fetch(url, withClock);
     if (response.status !== 429) {
       return response;
     }
