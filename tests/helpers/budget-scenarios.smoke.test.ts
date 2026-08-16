@@ -5,7 +5,7 @@ import {
   type BudgetScenarioHandle,
   type BudgetScenarioSpec,
 } from "./budget-scenarios";
-import { carryoverAnchor } from "./billing-month";
+import { assertTestClockActive, useTestClock } from "./test-clock";
 
 interface OverviewResponse {
   entlastungsbetrag45b: {
@@ -24,10 +24,27 @@ interface OverviewResponse {
   };
 }
 
-// Relativer Kalender-Anker statt hartkodierter Jahreszahlen (2025/2026).
-const ANCHOR = carryoverAnchor();
+// §45b-Präventions-Cluster Welle 1 — Fester Stichtag statt relativem Kalender-Anker. Die Uhr steht für
+// Testprozess UND App-Server auf diesem Tag, deshalb sind die Jahreszahlen jetzt
+// Literale und driften nicht mehr mit dem Lauftag.
+//
+// 15.06.2026 ist ein Montag im ERSTEN Halbjahr: der Übertrag aus 2025 gilt an
+// diesem Tag noch (er verfällt zum 30.06.2026).
+const KLOCK = "2026-06-15";
+const SOURCE_YEAR = 2025;
+const EXPIRES_AT = "2026-06-30";
 
 describe("budget-scenarios DSL — smoke", () => {
+  // `beforeEach`, nicht `beforeAll`: das Sicherheitsnetz in `tests/setup.ts`
+  // stellt nach JEDEM Test die Echt-Uhr wieder her.
+  beforeEach(() => {
+    useTestClock(KLOCK);
+    // Wächter gegen die `beforeAll`-Falle (Gate-2-Fund S1): stünde das
+    // `useTestClock` oben in `beforeAll`, liefe ab dem zweiten Test dieser Datei
+    // alles still gegen den Lauftag.
+    assertTestClockActive();
+  });
+
   beforeAll(async () => {
     await getAuthCookie();
   });
@@ -73,7 +90,7 @@ describe("budget-scenarios DSL — smoke", () => {
         { type: "umwandlung_45a", enabled: false, priority: 2 },
         { type: "ersatzpflege_39_42a", enabled: false, priority: 3 },
       ],
-      carryover: { type: "entlastungsbetrag_45b", amountCents: 5000, year: ANCHOR.sourceYear },
+      carryover: { type: "entlastungsbetrag_45b", amountCents: 5000, year: SOURCE_YEAR },
     };
 
     beforeEach(async () => {
@@ -86,18 +103,17 @@ describe("budget-scenarios DSL — smoke", () => {
 
     it("Overview enthält Carryover-Anteil mit Juni-Verfallsdatum", async () => {
       // Stichtag EXPLIZIT statt „heute": ein Vorjahres-Uebertrag ist nur bis zum
-      // 30.06. des Zieljahres gueltig. Ohne `?date=` liest der Test gegen den
-      // Lauftag und behauptet damit stillschweigend, wir befaenden uns im ersten
-      // Halbjahr — ab dem 01.07. ist der Uebertrag KORREKT verfallen und der Test
-      // kippt, ohne dass sich Produktivcode geaendert haette.
+      // 30.06. des Zieljahres gueltig. Der `?date=`-Parameter bleibt bewusst
+      // stehen, obwohl die Uhr denselben Tag zeigt — er haelt die fachliche
+      // Aussage („zu DIESEM Stichtag") im Test sichtbar, statt sie in die
+      // Uhr-Konfiguration zu verstecken.
       const overview = await apiGet<OverviewResponse>(
-        `/api/budget/${scenario.customerId}/overview?date=${ANCHOR.asOf}`,
+        `/api/budget/${scenario.customerId}/overview?date=${KLOCK}`,
       );
       expect(overview.status).toBe(200);
       expect(overview.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThanOrEqual(5000);
-      // Die Frist selbst bleibt unangetastet — sie wird weiterhin auf den 30.06.
-      // des Zieljahres gepinnt, nur relativ statt als Literal.
-      expect(overview.data.entlastungsbetrag45b.carryoverExpiresAt).toBe(ANCHOR.expiresAt);
+      // Die Frist selbst bleibt unangetastet — 30.06. des Zieljahres.
+      expect(overview.data.entlastungsbetrag45b.carryoverExpiresAt).toBe(EXPIRES_AT);
     });
   });
 });

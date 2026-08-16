@@ -19,11 +19,9 @@ import { db } from "../server/lib/db";
 import { sql } from "drizzle-orm";
 import {
   billingReferenceMonth,
-  carryoverAnchor,
-  expiredCarryoverAnchor,
-  expirySubjectAnchor,
   pastWeekdayInBillingMonth,
 } from "./helpers/billing-month";
+import { assertTestClockActive, useTestClock } from "./helpers/test-clock";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -839,21 +837,30 @@ describe("INT-12: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
 describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => {
   let scenario: BudgetScenarioHandle;
 
-  // Frist-SUBJEKT: dieser Block prüft die 30.06.-Verfallsmechanik selbst.
-  // Beide Übertragsjahre sind deshalb relativ verankert; die FRIST bleibt in
-  // jedem Fall exakt der 30.06. des jeweiligen Zieljahres und wird weiterhin
-  // wörtlich assertiert.
-  const {
-    sourceYear: expiredSourceYear,
-    targetYear: expiredTargetYear,
-  } = expiredCarryoverAnchor();
-  const {
-    sourceYear: futureSourceYear,
-    targetYear: futureTargetYear,
-    expiresAt: futureExpiresAt,
-  } = expirySubjectAnchor();
+  // Frist-SUBJEKT: dieser Block prüft die 30.06.-Verfallsmechanik selbst und
+  // braucht dafür ZWEI Überträge in entgegengesetzter Fristlage.
+  //
+  // §45b-Präventions-Cluster Welle 1 — Früher mussten die Zieljahre dafür relativ zum Lauftag gerechnet
+  // werden (`expiredCarryoverAnchor` = Vorjahr, `expirySubjectAnchor` = Folgejahr),
+  // weil nur die ECHT-Uhr des Servers darüber entschied, was „schon verfallen"
+  // und was „noch nicht verfallen" heißt. Mit der injizierbaren Uhr wird der
+  // Stichtag gesetzt und beide Lagen sind Literale.
+  //
+  // Stichtag 15.09.2026 → Zieljahr 2025 ist sicher verfallen (Frist 30.06.2025),
+  // Zieljahr 2027 sicher noch nicht (Frist 30.06.2027). Die FRIST selbst bleibt
+  // unangetastet und wird unten weiterhin wörtlich assertiert.
+  const KLOCK = "2026-09-15";
+  const expiredSourceYear = 2024;
+  const expiredTargetYear = 2025;
+  const futureSourceYear = 2026;
+  const futureTargetYear = 2027;
+  const futureExpiresAt = `${futureTargetYear}-06-30`;
+
+  // `beforeEach`, weil `tests/setup.ts` nach JEDEM Test die Echt-Uhr herstellt.
+  beforeEach(() => { useTestClock(KLOCK); assertTestClockActive(); });
 
   beforeAll(async () => {
+    useTestClock(KLOCK);
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-13",
       pflegegradSeit: "2024-01-01",
@@ -1030,16 +1037,22 @@ describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
   // er damit hinter die Frist, der Verbrauch findet kein Carryover-Geld mehr und
   // bekommt gar keine `allocationId` — INT-14.3 scheiterte an `undefined`.
   //
-  // `carryoverAnchor` liefert Quell-/Zieljahr und einen vergangenen Werktag im
-  // H1 des Zieljahres. Dieser Tag ist Termindatum UND Lese-Stichtag: gebucht und
-  // gelesen wird damit im selben, gültigen Fenster.
+  // §45b-Präventions-Cluster Welle 1 — Stichtag als Literal, festgehalten von der Uhr: der 15.06.2026
+  // ist ein Montag (Werktag) im H1 des Zieljahres. Dieser Tag ist Termindatum
+  // UND Lese-Stichtag — gebucht und gelesen wird damit im selben, gültigen
+  // Fenster.
   //
   // Der Seed läuft über `upsertCarryoverAllocation` (Storage, direkt), nicht über
-  // `POST /initial-budget` — der Anker-Boden auf die Echt-Uhr, der andere
-  // Fixtures dieser Serie eingefangen hat, greift hier also nicht.
-  const { sourceYear: fifoSourceYear, targetYear: fifoTargetYear, asOf: fifoAsOf } = carryoverAnchor();
+  // `POST /initial-budget` — der Anker-Boden auf die Uhr, der andere Fixtures
+  // dieser Serie eingefangen hat, greift hier also nicht.
+  const fifoSourceYear = 2025;
+  const fifoTargetYear = 2026;
+  const fifoAsOf = "2026-06-15";
+
+  beforeEach(() => { useTestClock(fifoAsOf); assertTestClockActive(); });
 
   beforeAll(async () => {
+    useTestClock(fifoAsOf);
     // Task #1204: Der §45b-Anker wird zur Laufzeit aus pflegegradSeit abgeleitet.
     // Damit der FIFO-Verbrauch deterministisch das ÄLTESTE Geld (den Carryover)
     // trifft, schalten wir die monatliche §45b-Ansammlung über einen Zukunfts-

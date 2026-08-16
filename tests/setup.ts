@@ -1,6 +1,7 @@
 import { beforeAll, afterAll, afterEach } from "vitest";
 import fc from "fast-check";
 import { thawTime } from "./helpers/frozen-clock";
+import { clearTestClock } from "./helpers/test-clock";
 
 if (!process.env.TEST_USER_PASSWORD && process.env.TEST_USER_PASSWORD_INTERNAL) {
   process.env.TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD_INTERNAL;
@@ -56,8 +57,14 @@ beforeAll(async () => {
 
 // Sicherheitsnetz: vergessenes `freezeTime` darf nachfolgende Tests nicht
 // beeinflussen. `thawTime` ist idempotent (vi.useRealTimers).
+//
+// Dasselbe für die injizierbare Uhr (§45b-Präventions-Cluster Welle 1): `clearTestClock` ist ebenfalls
+// idempotent und stellt Testprozess UND Header-Weitergabe auf die Echt-Uhr
+// zurück. Ohne das leckte ein vergessenes `useTestClock` in die nächste Datei
+// desselben Workers — die laufen sequenziell gegen DENSELBEN App-Server.
 afterEach(() => {
   thawTime();
+  clearTestClock();
 });
 
 afterAll(async () => {

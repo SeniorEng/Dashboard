@@ -16,7 +16,7 @@
  * sein, die `createConsumptionTransaction` bei `transactionDate=date` durchlässt.
  * Cost-Estimate (`/api/budget/:id/cost-estimate?date=…`) liest dieselbe Quelle.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { db } from "../../server/lib/db";
 import { appointments, appointmentServices, budgetAllocations, budgetTransactions } from "@shared/schema";
 import { and, eq, isNull } from "drizzle-orm";
@@ -27,10 +27,10 @@ import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budge
 import { apiGet, getAuthCookie, runCleanup } from "../test-utils";
 import {
   billingReferenceMonth,
-  carryoverAnchor,
   pastWeekdayInBillingMonth,
   snapToWeekday,
 } from "../helpers/billing-month";
+import { assertTestClockActive, useTestClock } from "../helpers/test-clock";
 
 beforeAll(async () => { await getAuthCookie(); });
 afterAll(async () => { await runCleanup(); });
@@ -255,10 +255,18 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
   describe("(c) Carryover-Verfallsgrenze zwischen Pre-Check und Buchung", () => {
     let scenario: BudgetScenarioHandle;
 
-    // §45b-Übertrag kalender-relativ verankern (Helfer aus #51). Die FRIST bleibt
-    // unangetastet — `expiresAt` ist weiterhin exakt der 30.06. des Zieljahres,
-    // nur nicht mehr als Literal `2026-06-30`.
-    const { sourceYear, targetYear, expiresAt } = carryoverAnchor();
+    // §45b-Präventions-Cluster Welle 1 — Die Jahreszahlen sind wieder Literale, weil die Uhr sie
+    // festhält (`SEED_KLOCK` unten). Die FRIST bleibt unangetastet: `expiresAt`
+    // ist weiterhin exakt der 30.06. des Zieljahres, hier nur nicht mehr aus
+    // einem relativen Anker gerechnet.
+    const sourceYear = 2025;
+    const targetYear = 2026;
+    const expiresAt = `${targetYear}-06-30`;
+    // Bewusst NACH dem 30.06.: dieser Block prüft unten ausdrücklich, dass die
+    // Verfalls-Abschreibung stattgefunden hat. Ein Stichtag im H1 würde den
+    // Übertrag beim Seed noch gültig lassen und den dritten Test gegenstandslos
+    // machen. Die beiden Lese-Stichtage kommen ohnehin als `?date=` mit.
+    const SEED_KLOCK = `${targetYear}-07-15`;
     const CARRYOVER_CENTS = 50_000;
     // SSoT statt Literal: an dieser Zahl hängt unten eine Modulo-Assertion.
     // Der Szenario-Topf hat `monthlyLimitCents: null` → die Monatsaufstockung
@@ -274,7 +282,10 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
     const beforeExpiry = `${targetYear}-06-15`;  // vor dem 30.06.
     const afterExpiry = `${targetYear}-07-15`;   // nach dem 30.06.
 
+    beforeEach(() => { useTestClock(SEED_KLOCK); assertTestClockActive(); });
+
     beforeAll(async () => {
+      useTestClock(SEED_KLOCK);
       // Nur Carryover, kein initial_balance → Carryover wird NICHT durch
       // `!ibYears.has(carryover.year - 1)` herausgefiltert.
       scenario = await setupBudgetScenario({
@@ -361,19 +372,19 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
           eq(budgetTransactions.transactionType, "write_off"),
         ));
 
-      // REICHWEITE — bewusst benannt, damit die Lücke nicht als abgedeckt gilt:
-      // Der Verfall wird erst materialisiert, wenn die Frist REAL abgelaufen ist
-      // (`processExpiredCarryover` liest `todayISO()`, nicht den Stichtag).
-      // Läuft der Test im H1 des Zieljahres, existiert noch gar keine
-      // Write-Off-Zeile — dann ist hier nichts zu entlasten und die Assertion
-      // unten ist trivial erfüllt. Der Test greift also nur bei Läufen ab dem
-      // 01.07.; siehe `FINDING` im PR-Body. Deterministisch schließen lässt sich
-      // das hier nicht: ein Übertrag aus einem FRÜHEREN Jahr würde durch
-      // `floorAutoAnchor45bToCurrentYear` die Monats-Aufstockungen auf 0 boden
-      // und die Assertion damit genauso trivial machen.
-      if (writeOffs.length === 0) return;
-
-      expect(writeOffs).toHaveLength(1);
+      // Die frühere REICHWEITE-Einschränkung ist mit der injizierbaren Uhr weg:
+      // `processExpiredCarryover` liest `todayISO()`, und das steht jetzt fest
+      // auf `SEED_KLOCK` (15.07., also NACH der Frist). Der Write-Off wird damit
+      // an jedem Lauftag materialisiert, statt nur bei Läufen ab dem 01.07.
+      //
+      // Der frühere Escape `if (writeOffs.length === 0) return;` ist deshalb
+      // ersatzlos gestrichen: er wäre heute unerreichbar und würde einen
+      // ausbleibenden Verfall still durchgehen lassen, statt rot zu werden.
+      expect(
+        writeOffs,
+        "Kein Write-Off — der Übertrag ist zum Stichtag (15.07.) verfallen und " +
+          "muss abgeschrieben sein. Fehlt er, greift der Verfall nicht mehr.",
+      ).toHaveLength(1);
       expect(writeOffs[0].amountCents).toBe(-CARRYOVER_CENTS);
       // Die Zeile liegt im Fenster (`transactionDate <= afterExpiry`) und
       // würde ohne die symmetrische Exklusion ein zweites Mal abgezogen.

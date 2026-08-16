@@ -1,16 +1,19 @@
 /**
  * Referenz-„heute" für Abrechnungs-Fixtures.
  *
- * WEGWEISER für die beiden §45b-Jahres-Anker in dieser Datei — wer den falschen
- * greift, bekommt einen Test, der nichts misst:
- *   - Frist ist KONTEXT, der Übertrag soll zum Stichtag noch GELTEN
- *     → {@link carryoverAnchor} (Zieljahr = laufendes Jahr, Stichtag im H1).
- *   - Frist ist PRÜFGEGENSTAND, der Übertrag soll kontrolliert VERFALLEN
- *     → {@link expirySubjectAnchor} (Zieljahr = Folgejahr, Frist real in der
- *       Zukunft, Test friert selbst auf den Tag danach ein).
- *   - Der Übertrag soll BEREITS VERFALLEN SEIN, ohne Zutun des Tests
- *     → {@link expiredCarryoverAnchor} (Zieljahr = Vorjahr, Frist real
- *       vergangen; der Server hat ihn beim Seed schon abgeschrieben).
+ * ── §45b-Fristen-Anker: ENTFERNT (§45b-Präventions-Cluster Welle 1) ───────────────────────────
+ * Diese Datei trug bis dahin drei Anker für §45b-Übertragsszenarien
+ * (`carryoverAnchor`, `expirySubjectAnchor`, `expiredCarryoverAnchor`). Sie
+ * rechneten das Kalenderjahr relativ zum Lauftag aus, weil die Uhr des
+ * App-Servers nicht bewegt werden konnte — ihr eigener Docstring nannte den
+ * Grund: „einen Clock-Override kennt der Server nicht."
+ *
+ * Den kennt er jetzt. Ein Test, der eine Fristenlage braucht, setzt den Stichtag
+ * über `tests/helpers/test-clock.ts#useTestClock` und schreibt die Jahreszahlen
+ * wieder als Literale — für Testprozess UND Server derselbe Tag.
+ *
+ * Was hier BLEIBT, löst ein anderes Problem und ist davon unberührt: die
+ * Werktags-/Monats-Arithmetik der Fixtures (unten).
  *
  * ERSETZT das direkte `new Date()` in den Billing-Fixtures, die einen
  * VERGANGENEN Werktags-Slot im laufenden Monat suchen (`createAppt`, 13 Dateien).
@@ -151,170 +154,4 @@ export function snapToWeekday(iso: string, direction: "forward" | "backward" = "
     cand.setDate(cand.getDate() + step);
   }
   throw new Error(`snapToWeekday: kein Werktag in Reichweite von ${iso}`);
-}
-
-/**
- * Anker für §45b-CARRYOVER-Szenarien.
- *
- * ERSETZT die hartkodierten Jahreszahlen in den Übertrags-Fixtures
- * (`carryover: { year: 2025 }`, `expiresAt === "2026-06-30"`) und das implizite
- * „heute" als Stichtag.
- *
- * Das Problem: Ein §45b-Übertrag aus Jahr Y gilt im Folgejahr und verfällt
- * strikt am 30.06. (SGB XI §45b Abs. 3, siehe CLAUDE.md). Fixtures, die einen
- * Vorjahres-Übertrag seeden und ihn dann gegen „heute" lesen, unterstellen
- * damit stillschweigend das ERSTE HALBJAHR. Ab dem 01.07. ist der Übertrag
- * korrekt verfallen, die Tests kippen auf rot — ohne dass sich eine Zeile
- * Produktivcode geändert hätte.
- *
- * DIE FRIST SELBST WIRD NICHT ANGEFASST. Dieser Helfer verschiebt weder den
- * 30.06. noch weicht er eine Assertion auf: er liefert das Jahrespaar relativ
- * zum Lauf und einen Stichtag, an dem der Übertrag nachweislich noch gilt.
- * `expiresAt` bleibt exakt der 30.06. des Zieljahres und gehört weiter
- * assertiert — nur eben relativ statt als Literal.
- *
- * Der Stichtag ist immer VERGANGEN (damit Termine dokumentierbar sind) und
- * liegt immer im H1 des Zieljahres. Läuft der Test in den ersten Januartagen,
- * gibt es kein solches Datum im laufenden Jahr — dann rückt das Zieljahr um
- * eins zurück, analog zu {@link billingReferenceDate}.
- */
-export function carryoverAnchor(now: Date = new Date()): {
-  /** Jahr, AUS dem der Übertrag stammt (Seed: `carryover.year`). */
-  sourceYear: number;
-  /** Jahr, IN dem der Übertrag gilt. */
-  targetYear: number;
-  /** Verfallsdatum des Übertrags — der 30.06. des Zieljahres. */
-  expiresAt: string;
-  /** Stichtag im H1 des Zieljahres, garantiert in der Vergangenheit. */
-  asOf: string;
-} {
-  // Spätester unbedenklicher Punkt im H1: Mitte Juni, klar vor der Grenze.
-  const preferred = (y: number) => new Date(y, 5, 15);
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-
-  let targetYear = now.getFullYear();
-  let asOfDate = preferred(targetYear) <= yesterday ? preferred(targetYear) : yesterday;
-
-  // Zu früh im Jahr: kein vergangener Tag im H1 des laufenden Jahres.
-  if (asOfDate < new Date(targetYear, 0, 1)) {
-    targetYear -= 1;
-    asOfDate = preferred(targetYear);
-  }
-
-  // Der Werktags-Snap läuft NACH der Jahresgrenzen-Korrektur und kann sie wieder
-  // reissen: fällt der 01.01. auf einen Samstag oder Sonntag, zieht ein
-  // Rückwärts-Snap vom 01.01. in den DEZEMBER DES VORJAHRES. Der Stichtag läge
-  // dann vor `validFrom` des Übertrags (`${targetYear}-01-01`), `carryoverCounted`
-  // griffe nicht, und der Aufrufer bekäme 0 statt des geseedeten Betrags —
-  // dieselbe Kalender-Falle, gegen die dieser Helfer gebaut ist, nur an 2–3
-  // Tagen im Jahr (belegt: 02./03.01.2028, 02.01.2033, 02.01.2034).
-  //
-  // Wir prüfen deshalb das GESNAPPTE Ergebnis, nicht das Roh-Datum, und weichen
-  // bei Unterschreitung auf das Vorjahr aus — analog zum Zweig darüber.
-  let asOf = snapToWeekday(ymd(asOfDate), "backward");
-  if (asOf < `${targetYear}-01-01`) {
-    targetYear -= 1;
-    asOf = snapToWeekday(ymd(preferred(targetYear)), "backward");
-  }
-
-  return {
-    sourceYear: targetYear - 1,
-    targetYear,
-    expiresAt: `${targetYear}-06-30`,
-    asOf,
-  };
-}
-
-/**
- * Anker für Tests, die den §45b-VERFALL SELBST prüfen (Frist-SUBJEKT).
- *
- * ERGÄNZT {@link carryoverAnchor} um den gegenläufigen Fall und ERSETZT das
- * Muster „Übertrag mit einem Quelljahr in der VERGANGENHEIT seeden und die Uhr
- * auf den Tag nach der Frist einfrieren" (`race-writeoff`: `year: 2025` +
- * `freezeTime("2026-07-01")`).
- *
- * Warum dieses Muster nicht trägt: `freezeTime` benutzt `vi.useFakeTimers` und
- * wirkt damit NUR im Testprozess. `setupBudgetScenario` läuft aber über die
- * API, und der App-Server ist ein EIGENER Prozess mit realer Uhr
- * (`shared/utils/datetime.ts#todayISO` liest die Systemzeit; einen
- * Clock-Override kennt der Server nicht). Liegt die Frist real in der
- * Vergangenheit, schreibt der Server den Übertrag also schon WÄHREND des Seeds
- * ab — die Vorbedingung „noch kein write_off" ist verletzt, bevor der Test
- * überhaupt einfriert. Empirisch belegt: Uhr auf 2026-06-15 eingefroren, dann
- * geseedet → trotzdem ein write_off mit Datum 2026-07-01.
- *
- * Die Lösung dreht die Richtung um: das Zieljahr liegt IMMER im nächsten
- * Kalenderjahr, die Frist damit garantiert in der REALEN Zukunft. Kein
- * server-seitiger Pfad kann den Übertrag vorzeitig abschreiben; der Test friert
- * anschließend selbst auf den ersten Tag NACH der Frist ein und ruft die
- * Verfallslogik in-process auf, wo der Freeze wirkt.
- *
- * DIE FRIST WIRD NICHT ANGEFASST: `expiresAt` ist weiterhin exakt der 30.06.
- * des Zieljahres und gehört weiter assertiert — nur relativ statt als Literal.
- */
-export function expirySubjectAnchor(now: Date = new Date()): {
-  /** Jahr, AUS dem der Übertrag stammt (Seed: `carryover.year`). */
-  sourceYear: number;
-  /** Jahr, IN dem der Übertrag gilt — immer das nächste Kalenderjahr. */
-  targetYear: number;
-  /** Verfallsdatum: der 30.06. des Zieljahres, garantiert real in der Zukunft. */
-  expiresAt: string;
-  /**
-   * Erster Zeitpunkt NACH Ablauf der Frist (01.07., 00:01 Ortszeit Berlin), als
-   * Argument für `freezeTime`. Deckungsgleich mit dem `writeOffDate` der
-   * Produktivlogik (`expiresAt + 1 Tag`).
-   */
-  frozenJustAfterExpiry: string;
-} {
-  const sourceYear = now.getFullYear();
-  const targetYear = sourceYear + 1;
-  return {
-    sourceYear,
-    targetYear,
-    expiresAt: `${targetYear}-06-30`,
-    // Bewusst OHNE UTC-Offset: ein ISO-Zeitstempel ohne Offset wird als
-    // ORTSZEIT geparst. Ein fixes `+02:00` unterstellte, dass der 01.07. in
-    // Berlin immer MESZ ist — fiele die Sommerzeit weg, waere `00:01+02:00`
-    // lokal der 30.06. 23:01, `todayISO()` damit der 30.06., der Uebertrag
-    // nicht abgelaufen und der Test mit irrefuehrender Meldung rot. Gleiches
-    // Muster wie `budget-e2e.test.ts` (`${curYear}-07-01T12:00:00`).
-    frozenJustAfterExpiry: `${targetYear}-07-01T00:01:00`,
-  };
-}
-
-/**
- * Anker für einen §45b-Übertrag, der BEREITS VERFALLEN sein soll.
- *
- * Dritter und letzter Fall der Anker-Familie (siehe WEGWEISER oben) und
- * Gegenstück zu {@link expirySubjectAnchor}: dort liegt die Frist garantiert in
- * der Zukunft, hier garantiert in der Vergangenheit.
- *
- * ERSETZT die Inline-Zeile `new Date().getFullYear() - 1` in den Fixtures, die
- * einen abgeschriebenen Übertrag brauchen (`budget-e2e` INT-13.2/13.3). Sie war
- * fachlich richtig, stand aber als lose Rechnung im Testkörper — ohne Docstring,
- * ohne Wächter und ohne Eintrag im Wegweiser. Genau daraus entstehen die
- * duplizierten Kalender-Rechnungen, die diese Serie beseitigt.
- *
- * Zieljahr = Vorjahr, die Frist (30.06.) liegt damit an JEDEM Lauftag zwischen
- * gut sechs und knapp achtzehn Monaten in der Vergangenheit. `processExpiredCarryover`
- * schreibt so einen Übertrag bereits beim Seed ab — die Fixture muss dafür
- * nichts einfrieren.
- *
- * DIE FRIST WIRD NICHT ANGEFASST: `expiresAt` ist exakt der 30.06. des
- * Zieljahres und gehört weiter assertiert, nur relativ statt als Literal.
- */
-export function expiredCarryoverAnchor(now: Date = new Date()): {
-  /** Jahr, AUS dem der Übertrag stammt (Seed: `carryover.year`). */
-  sourceYear: number;
-  /** Jahr, IN dem der Übertrag galt — immer das Vorjahr. */
-  targetYear: number;
-  /** Verfallsdatum: der 30.06. des Zieljahres, garantiert real vergangen. */
-  expiresAt: string;
-} {
-  const targetYear = now.getFullYear() - 1;
-  return {
-    sourceYear: targetYear - 1,
-    targetYear,
-    expiresAt: `${targetYear}-06-30`,
-  };
 }

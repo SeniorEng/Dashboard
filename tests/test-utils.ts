@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { TEST_CLOCK_HEADER, activeTestClockISO } from "./helpers/test-clock";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 const TEST_EMAIL = process.env.TEST_USER_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
@@ -99,8 +100,32 @@ const BACKOFF_BASE_MS = 1500;
 async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
   const method = init.method || "GET";
   const path = url.replace(BASE_URL, "");
+  // §45b-Präventions-Cluster Welle 1 — Injizierbare Uhr: alle Requests über die
+  // `api*`-Helfer laufen durch diese eine Funktion, deshalb hängt der
+  // `X-Test-Clock`-Header genau hier dran. Ohne ihn sähe der App-Server (eigener
+  // Prozess!) weiter seine Echt-Uhr, während der Testprozess auf dem gesetzten
+  // Datum steht — genau die Divergenz, wegen der es die Anker-Familie in
+  // `billing-month.ts` gab.
+  //
+  // GRENZE (Gate-2-Fund N2): ~37 Testdateien rufen `fetch()` direkt statt über
+  // die `api*`-Helfer (z.B. `tests/customers.test.ts`, `billing-flow.test.ts`).
+  // Diese Requests tragen den Header NICHT und laufen gegen die Echt-Uhr des
+  // Servers. Wer dort eine Uhr braucht, muss auf die `api*`-Helfer wechseln
+  // oder den Header selbst setzen — `TEST_CLOCK_HEADER` ist dafür exportiert.
+  //
+  // `new Headers(...)` statt Objekt-Spread: `RequestInit.headers` darf auch eine
+  // `Headers`-Instanz oder ein `[k,v][]` sein. Ein Spread darüber ergäbe ein
+  // leeres Objekt und verlöre Cookie + CSRF — und zwar NUR bei gesetzter Uhr,
+  // also sprunghaft und schwer lesbar.
+  const clock = activeTestClockISO();
+  let withClock: RequestInit = init;
+  if (clock) {
+    const headers = new Headers(init.headers);
+    headers.set(TEST_CLOCK_HEADER, clock);
+    withClock = { ...init, headers };
+  }
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const response = await fetch(url, init);
+    const response = await fetch(url, withClock);
     if (response.status !== 429) {
       return response;
     }

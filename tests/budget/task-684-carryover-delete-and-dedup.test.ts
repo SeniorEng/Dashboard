@@ -32,7 +32,7 @@ import {
   runCleanup,
   apiPut,
 } from "../test-utils";
-import { carryoverAnchor } from "../helpers/billing-month";
+import { useTestClock } from "../helpers/test-clock";
 import { freezeTime, thawTime } from "../helpers/frozen-clock";
 
 beforeAll(async () => {
@@ -150,11 +150,21 @@ describe("T684 — §45b-Carryover Delete-Stickiness & Anti-Dedup", () => {
     // 104800 statt 139250). Wir verankern den Stichtag deshalb im H1 des
     // Zieljahres, statt die Erwartung aufzuweichen.
     //
-    // Der Freeze wirkt hier, weil ALLE wertrelevanten Aufrufe unten in-process
-    // laufen (`upsertCarryoverAllocation`, `syncCarryoverAndExpiry`,
-    // `getBudgetSummary`). Für Aussagen über die API wäre er wirkungslos — der
-    // App-Server ist ein eigener Prozess mit realer Uhr.
-    const { sourceYear, targetYear, asOf } = carryoverAnchor();
+    // §45b-Präventions-Cluster Welle 1 — Stichtag ist jetzt ein Literal statt eines relativen Ankers:
+    // `useTestClock` stellt Testprozess UND App-Server auf denselben Tag, die
+    // Jahreszahlen driften also nicht mehr mit dem Lauftag. `freezeTime` bleibt
+    // daneben stehen, weil die in-process gerufenen Pfade
+    // (`upsertCarryoverAllocation`, `syncCarryoverAndExpiry`, `getBudgetSummary`)
+    // zusätzlich rohes `new Date()` für Zeitstempel benutzen; beide MÜSSEN
+    // denselben Zeitpunkt zeigen (siehe Vorrang-Hinweis in helpers/test-clock.ts).
+    //
+    // 15.06.2026 liegt im H1 des Zieljahres — der Übertrag aus 2025 gilt dort
+    // noch, und die Formel `elapsedMonths × monthly + carryover` geht auf. Ab
+    // Juli trüge er per Gesetz 0 bei (gemessen: 104800 statt 139250).
+    const sourceYear = 2025;
+    const targetYear = 2026;
+    const asOf = "2026-06-15";
+    useTestClock(`${asOf}T12:00:00`);
     freezeTime(`${asOf}T12:00:00`);
 
     const userId = await getActorUserId();

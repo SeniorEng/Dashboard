@@ -65,14 +65,18 @@ describe("Task #601 — §45b-Carryover wird nicht doppelt gezählt", () => {
     // lieferten 0 statt 157200 (gemessen). Statt die Erwartungen aufzuweichen,
     // bekommt der Test einen STICHTAG im Gültigkeitsfenster.
     //
-    // Das JAHR muss dabei aus der ECHT-Uhr kommen, NICHT aus `carryoverAnchor()`:
-    // `POST /initial-budget` bodet den §45b-Anker serverseitig auf das laufende
-    // Jahr der Echt-Uhr (`server/services/budget-initial-setup.ts:86-92`,
+    // Das JAHR muss dabei aus der ECHT-Uhr kommen: `POST /initial-budget` bodet
+    // den §45b-Anker serverseitig auf das laufende Jahr
+    // (`server/services/budget-initial-setup.ts:86-92`,
     // `floorAutoAnchor45bToCurrentYear`) und leitet daraus `year`, `validFrom`
     // und `expiresAt` der Carryover-Zeile ab — was der Test als
-    // `budgetStartDate` schickt, ist dafür unerheblich. Ein Anker-Jahr, das am
-    // 01.01. um eins zurückrollt, liefe deshalb gegen die Server-Wahrheit und
-    // machte den Test an genau diesem Tag rot.
+    // `budgetStartDate` schickt, ist dafür unerheblich. Ein relativ gerechnetes
+    // Anker-Jahr, das am 01.01. um eins zurückrollt, liefe gegen diese
+    // Server-Wahrheit und machte den Test an genau diesem Tag rot.
+    //
+    // §45b-Präventions-Cluster Welle 1 — Mit der injizierbaren Uhr (`tests/helpers/test-clock.ts`) wäre
+    // die Server-Wahrheit setzbar und diese H1/H2-Verzweigung entbehrlich.
+    // Bewusst NICHT in diesem PR (Welle 1 = Naht + Fristen-Anker).
     //
     // Bewusst auch NICHT `toISOString()`: das rechnet nach UTC um und lieferte
     // in den frühen Stunden des 01.01. den 31.12. des Vorjahres — dieselbe

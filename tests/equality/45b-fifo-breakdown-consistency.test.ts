@@ -27,7 +27,8 @@
  * Reversal-Zeile), Storno einer Reversal → 400 REVERSAL_NOT_REVERSIBLE.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { carryoverAnchor, snapToWeekday } from "../helpers/billing-month";
+import { snapToWeekday } from "../helpers/billing-month";
+import { useTestClock } from "../helpers/test-clock";
 import { getAuthCookie, apiGet, apiPost, runCleanup } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import type { BudgetFifo45bBreakdownDTO } from "@shared/api/budget";
@@ -83,21 +84,23 @@ describe("Task #1129 — §45b FIFO-Aufschlüsselung rekonziliert exakt mit der 
   });
 
   it("Übertrag + laufendes Jahr + dokumentierte Termine: Topf-Summen === Karten-Zahlen", async () => {
-    // EIN Anker, relativ zum Lauf — kein „heute" und keine harte Jahreszahl.
-    //
     // Der Test seedet einen VORJAHRES-Uebertrag und erwartet ihn als eigenen
     // FIFO-Topf. Ein solcher Uebertrag verfaellt strikt am 30.06. des
-    // Zieljahres; gegen „heute" gelesen gilt der Test also nur im ersten
-    // Halbjahr. `carryoverAnchor` liefert das Jahrespaar und einen Stichtag im
-    // H1 des Zieljahres, der garantiert in der Vergangenheit liegt — die Frist
-    // selbst bleibt unberuehrt, sie wird nur nicht mehr zufaellig ueberschritten.
-    const anchor = carryoverAnchor();
-    const year = anchor.targetYear;
-    const sourceYear = anchor.sourceYear;
+    // Zieljahres — gegen „heute" gelesen gaelte der Test also nur im ersten
+    // Halbjahr. Die Frist selbst bleibt unberuehrt, sie wird nur nicht mehr
+    // zufaellig ueberschritten.
+    //
+    // §45b-Präventions-Cluster Welle 1 — Die Uhr hält den Stichtag fest, deshalb sind Jahr und Tag
+    // wieder Literale. 15.06.2026 ist ein Montag (Werktag, damit der Termin
+    // geseedet werden kann) im H1 des Zieljahres — der Übertrag aus 2025 gilt
+    // dort noch und erscheint als eigener FIFO-Topf.
+    const year = 2026;
+    const sourceYear = 2025;
     // Termin und Stichtag fallen zusammen: der Konsum muss den asOf-Filter
-    // passieren. `carryoverAnchor` garantiert bereits einen Werktag.
-    const apptDate = anchor.asOf;
-    const asOfDate = anchor.asOf;
+    // passieren.
+    const apptDate = "2026-06-15";
+    const asOfDate = apptDate;
+    useTestClock(asOfDate);
 
     handle = await setupBudgetScenario({
       customerNamePrefix: "T1129-FIFO",

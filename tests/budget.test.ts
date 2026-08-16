@@ -453,12 +453,17 @@ describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover",
   // Wir geben dem Lesepfad deshalb einen STICHTAG im ersten Halbjahr, statt eine
   // Erwartung aufzuweichen.
   //
-  // Das JAHR kommt dabei aus der ECHT-Uhr und NICHT aus `carryoverAnchor()`:
-  // der §45b-Anker wird serverseitig auf das laufende Jahr der Echt-Uhr gebodet
-  // (`floorAutoAnchor45bToCurrentYear`, gespeist aus `currentYearAndMonth()`),
-  // während `?date=` nur den Lese-Stichtag verschiebt. Ein Anker-Jahr, das am
-  // 01.01. um eins zurückrollt, liefe gegen diese Server-Wahrheit und machte den
-  // Test an genau diesem Tag rot — dort, wo er heute grün ist.
+  // Das JAHR kommt dabei aus der ECHT-Uhr: der §45b-Anker wird serverseitig auf
+  // das laufende Jahr gebodet (`floorAutoAnchor45bToCurrentYear`, gespeist aus
+  // `currentYearAndMonth()`), während `?date=` nur den Lese-Stichtag verschiebt.
+  // Ein relativ gerechnetes Anker-Jahr, das am 01.01. um eins zurückrollt, liefe
+  // gegen diese Server-Wahrheit und machte den Test an genau diesem Tag rot.
+  //
+  // §45b-Präventions-Cluster Welle 1 — Seit es die injizierbare Uhr gibt (`tests/helpers/test-clock.ts`),
+  // ließe sich diese H1/H2-Verzweigung durch einen festen Stichtag ersetzen: die
+  // Server-Wahrheit ist dann setzbar statt vorgefunden. Bewusst NICHT in diesem
+  // PR — Welle 1 baut die Naht und migriert die Fristen-Anker; dieser Test hing
+  // nie an ihnen und läuft grün.
   const dedupNow = new Date();
   const dedupYear = dedupNow.getFullYear();
   const dedupToday = `${dedupYear}-${String(dedupNow.getMonth() + 1).padStart(2, "0")}-${String(dedupNow.getDate()).padStart(2, "0")}`;
