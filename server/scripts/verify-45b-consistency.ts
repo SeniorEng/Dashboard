@@ -33,6 +33,7 @@
  *   tsx server/scripts/verify-45b-consistency.ts --all     # alle §45b-Kunden
  */
 import { and, asc, eq, isNull } from "drizzle-orm";
+import { CARRYOVER_45B_EXPIRY_MONTH, expiry45bFloorYearFor } from "@shared/domain/budget/expiry-45b";
 import { db } from "../lib/db";
 import {
   customers,
@@ -84,7 +85,8 @@ function legalCeilingCents(
 
   // Vorjahres-Übertrag nur im 1. Halbjahr und nur, wenn der Anker das Vorjahr
   // (oder früher) erreicht.
-  if (curMonth <= 6) {
+  // Halbjahres-Grenze aus der Frist-SSoT (Welle 2) statt als nackte 6.
+  if (curMonth <= CARRYOVER_45B_EXPIRY_MONTH) {
     const eligibleMonths = eligible45bCarryoverMonths(accrualAnchorISO, curYear);
     ceiling += max45bCarryoverCents(eligibleMonths);
   }
@@ -96,7 +98,7 @@ async function main() {
   const showAll = process.argv.includes("--all");
   const today = todayISO();
   const { year: curYear, month: curMonth } = currentYearAndMonth();
-  const expiryFloorYear = curMonth <= 6 ? curYear - 1 : curYear;
+  const expiryFloorYear = expiry45bFloorYearFor(curYear, curMonth);
 
   console.log(`\n=== §45b-Verfall & Cap · Read-only-Verifikationsreport (Task #959) ===`);
   console.log(`Stichtag: ${today} · Fenster-Boden-Jahr: ${expiryFloorYear} · Modus: ${showAll ? "ALLE §45b-Kunden" : "nur Drift"}\n`);

@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { apiGet, getAuthCookie, runCleanup } from "../test-utils";
+import { netAvailable45bAt } from "../../server/storage/budget/net-available-45b";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { assertTestClockActive, useTestClock, withTestClock } from "../helpers/test-clock";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
@@ -132,12 +133,23 @@ describe("Task #1927 — NULL-verlinkter Verbrauch verfällt mit seinen Monaten"
   /**
    * Symmetrie-Invariante über einen Stichtags-Sweep.
    *
-   * Die Aussage ist nicht „eine bestimmte Zahl", sondern eine Beziehung, die an
-   * JEDEM Stichtag gelten muss: was aus `Allocated` fällt, muss auch aus dem
-   * Verbrauch fallen. Operationalisiert als `available === allocated − used`
-   * ohne negatives Rest-Delta — ein Verbrauch, dessen Topf verschwunden ist,
-   * würde die Verfügbarkeit unter die Aufstockung des laufenden Fensters
-   * drücken.
+   * ── Warum das UNGEFLOORT gemessen wird (Gate-2-Funde S2/S3) ─────────────
+   * Die erste Fassung prüfte über die API `availableCents >= 0` und
+   * `totalUsedCents <= totalAllocatedCents`. Beides war wertlos:
+   *
+   *  - `availableCents` ist `Math.max(0, …)` (`computeNetAvailable45b`) und kann
+   *    konstruktionsbedingt nie negativ werden — die Assertion konnte gar nicht
+   *    fehlschlagen.
+   *  - `totalUsedCents` ist die ROHE Verbrauchssumme der Karte; sie kennt die
+   *    symmetrische Exklusion bewusst nicht. Nach genau diesem Fix DARF sie die
+   *    Zuteilung übersteigen (`BudgetLedgerSection` rechnet damit als
+   *    `expiredUsedCents`). Die Assertion hätte ab ~25 Terminen in 2026 einen
+   *    Phantom-Regress gemeldet — bei völlig korrektem Code.
+   *
+   * Tragfähig ist nur die ungefloorte Beziehung aus dem Verfügbarkeits-Reader:
+   * der Verbrauch, der NACH der Exklusion noch zählt, darf die Zuteilung nie
+   * übersteigen. Ein Verbrauch, dessen Topf verschwunden ist, bräche das sofort.
+   * Deshalb hier in-process gegen `netAvailable45bAt` statt über die API.
    */
   it("Symmetrie hält über die Stichtage hinweg (Sweep über zwei Jahreskanten)", async () => {
     const stichtage = [
@@ -146,23 +158,25 @@ describe("Task #1927 — NULL-verlinkter Verbrauch verfällt mit seinen Monaten"
     ];
 
     for (const tag of stichtage) {
-      const res = await withTestClock(tag, () =>
-        apiGet<OverviewResponse>(`/api/budget/${scenario.customerId}/overview`),
-      );
-      expect(res.status, `Stichtag ${tag}`).toBe(200);
-      const p = res.data.entlastungsbetrag45b;
+      const r = await netAvailable45bAt(scenario.customerId, tag, { projectFuture: true });
+      // `rawConsumedNetCents`, NICHT `consumedNetCents`: letzteres ist bereits
+      // `max(0, raw − excluded)` und würde eine Über-Exklusion wieder verstecken
+      // — dieselbe Floor-Falle wie bei `availableCents`.
+      const gezaehlterVerbrauch = r.rawConsumedNetCents - r.excludedConsumedNetCents;
 
       expect(
-        p.availableCents,
-        `Stichtag ${tag}: Verfügbarkeit ist negativ — Verbrauch wird gegen einen ` +
-          "Topf gerechnet, der zu diesem Stichtag gar nicht mehr existiert.",
-      ).toBeGreaterThanOrEqual(0);
+        gezaehlterVerbrauch,
+        `Stichtag ${tag}: nach der Exklusion bleibt mehr Verbrauch stehen ` +
+          `(${gezaehlterVerbrauch}) als überhaupt zugeteilt ist (${r.allocatedCents}). ` +
+          "Genau die Asymmetrie, die der NULL-Pfad erzeugte: Monate fallen aus " +
+          "`Allocated`, ihr Verbrauch bleibt abgezogen.",
+      ).toBeLessThanOrEqual(r.allocatedCents);
 
       expect(
-        p.totalUsedCents,
-        `Stichtag ${tag}: mehr Verbrauch abgezogen als überhaupt zugeteilt ist — ` +
-          "genau die Asymmetrie, die der NULL-Pfad erzeugte.",
-      ).toBeLessThanOrEqual(p.totalAllocatedCents);
+        r.excludedConsumedNetCents,
+        `Stichtag ${tag}: mehr Verbrauch exkludiert als überhaupt gebucht wurde — ` +
+          "Über-Exklusion würde die Verfügbarkeit fälschlich anheben.",
+      ).toBeLessThanOrEqual(r.rawConsumedNetCents);
     }
   });
 });

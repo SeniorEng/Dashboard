@@ -906,6 +906,16 @@ async function calculateAllocated45b(
   // die Differenz null. Alles unterhalb des Reset-Monats deckt ohnehin schon
   // `resetCutoffDate` (Glied (b)), das ist also keine Lücke, sondern die
   // richtige Arbeitsteilung zwischen den beiden Gliedern.
+  //
+  // KOPPLUNG, die beim Anfassen zu beachten ist (Gate-2-Fund Q5): der
+  // Ledger-Assert in `server/services/invoice-45b-reduction.ts` fordert
+  // `allocated − consumedNet === 0` EXAKT und haengt damit direkt an
+  // `excludedConsumedNetCents`. Er ist heute unberuehrt, weil jener Pfad einen
+  // Startwert auf den Monatsersten setzt und damit `resetCutoffDate >=
+  // accrualFloorDate` gilt — das NULL-Glied ist dort eine Teilmenge des
+  // Reset-Glieds. Wer diesen Boden ueber den Abrechnungsmonat hebt (etwa auf
+  // `enumStart`), bricht jene Stelle als harten 400er mitten in einer
+  // GoBD-Korrektur.
   const accrualFloorDate = `${allocStartYear}-${String(allocStartMonth).padStart(2, "0")}-01`;
 
   if (opts.year != null) {
@@ -1025,6 +1035,11 @@ export async function getExcluded45bConsumption(
     d,
     typeSettings,
   );
+  // Kurzschluss (Gate-2-Fund N2): `accrualFloorDate` ist fuer jeden Kunden mit
+  // §45b-Anspruch gesetzt, dieser Zweig greift also praktisch nur noch im
+  // `ineligible`-Fall. Das ist gewollt — die Alternative waere eine zusaetzliche
+  // Query nach dem fruehesten `transaction_date`, also genau der Roundtrip, den
+  // der Kurzschluss sparen soll. Er bleibt als Ineligible-Ausstieg stehen.
   if (excludedSpecialAllocationIds.length === 0 && !resetCutoffDate && !accrualFloorDate) {
     return { excludedSpecialAllocationIds, excludedConsumedNetCents: 0 };
   }

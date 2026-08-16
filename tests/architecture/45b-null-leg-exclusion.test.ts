@@ -22,8 +22,9 @@
  * lockern", sondern das NULL-Glied wiederherstellen.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync, readdirSync, statSync } from "fs";
+import { join, relative } from "path";
+import { ssotGuardAllowlist } from "@shared/ssot-registry";
 
 const DATEI = join(process.cwd(), "server", "storage", "budget", "allocation-storage.ts");
 
@@ -78,24 +79,78 @@ describe("§45b-Exklusion — das NULL-Leg bleibt abgedeckt", () => {
   });
 });
 
+/**
+ * Gate-2-Fund S1/S4 — die erste Fassung dieses Wächters scannte ZWEI hart
+ * verdrahtete Dateien und hieß trotzdem „genau eine Quelle". Der Review fand
+ * daraufhin drei weitere Kopien, zwei davon in Produktions-Services. Ein
+ * Wächter, der Vollständigkeit im Titel behauptet und eine Handvoll Dateien
+ * prüft, ist schlimmer als keiner: er zertifiziert etwas, das er nicht misst.
+ *
+ * Jetzt scannt er `server/**` + `shared/**` vollständig; die legitimen
+ * Ausnahmen kommen aus der SSoT-Registry (`budget-45b-expiry`), damit sie dort
+ * gepflegt werden statt hier.
+ */
+const FRIST_ERLAUBT = new Set<string>([
+  ...ssotGuardAllowlist("budget-45b-expiry", "FRIST_LITERAL_ERLAUBT"),
+  join("shared", "domain", "budget", "expiry-45b.ts"),
+]);
+
+function* durchlaufe(dir: string): Generator<string> {
+  let eintraege: string[];
+  try {
+    eintraege = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const e of eintraege) {
+    if (e === "node_modules" || e.startsWith(".")) continue;
+    const voll = join(dir, e);
+    if (statSync(voll).isDirectory()) yield* durchlaufe(voll);
+    else if (/\.ts$/.test(voll)) yield voll;
+  }
+}
+
 describe("§45b-Verfallsfrist — genau eine Quelle", () => {
-  it("kodiert den 30.06. nicht mehr als Literal außerhalb der Frist-SSoT", () => {
+  it("kodiert die Frist nirgends in server/** oder shared/** als Literal", () => {
     const treffer: string[] = [];
-    for (const rel of [
-      join("server", "storage", "budget", "allocation-storage.ts"),
-      join("shared", "domain", "budget-carryover-dedup.ts"),
-    ]) {
-      const inhalt = readFileSync(join(process.cwd(), rel), "utf8");
-      // Nur echte Code-Literale, keine Kommentare/Doku.
-      for (const zeile of inhalt.split("\n")) {
-        const ohneKommentar = zeile.replace(/\/\/.*$/, "").replace(/^\s*\*.*$/, "");
-        if (/-06-30`|-06-30"|-06-30'/.test(ohneKommentar)) treffer.push(`${rel}: ${zeile.trim()}`);
+    for (const baum of ["server", "shared"]) {
+      for (const datei of durchlaufe(join(process.cwd(), baum))) {
+        const rel = relative(process.cwd(), datei);
+        if (FRIST_ERLAUBT.has(rel)) continue;
+        for (const zeile of readFileSync(datei, "utf8").split("\n")) {
+          // Nur echte Code-Literale, keine Kommentare/Doku.
+          const ohneKommentar = zeile.replace(/\/\/.*$/, "").replace(/^\s*\*.*$/, "");
+          if (/-06-30`|-06-30"|-06-30'/.test(ohneKommentar)) treffer.push(`${rel}: ${zeile.trim()}`);
+        }
       }
     }
     expect(
       treffer,
       "Die 30.06.-Frist steht wieder als Literal im Code. Sie gehört ausschließlich " +
-        `in \`shared/domain/budget/expiry-45b.ts\`. Gefunden: ${treffer.join(" | ")}`,
+        "in `shared/domain/budget/expiry-45b.ts` (`carryoverExpiresAtFor`). Legitime " +
+        "Ausnahmen gehören in die SSoT-Registry unter `budget-45b-expiry`, nicht " +
+        `hierher. Gefunden: ${treffer.join(" | ")}`,
+    ).toEqual([]);
+  });
+
+  it("kodiert die Halbjahres-Grenze nirgends als nackte 6", () => {
+    const treffer: string[] = [];
+    for (const baum of ["server", "shared"]) {
+      for (const datei of durchlaufe(join(process.cwd(), baum))) {
+        const rel = relative(process.cwd(), datei);
+        if (FRIST_ERLAUBT.has(rel)) continue;
+        for (const zeile of readFileSync(datei, "utf8").split("\n")) {
+          const ohneKommentar = zeile.replace(/\/\/.*$/, "").replace(/^\s*\*.*$/, "");
+          if (/(?:cur|horizon|as[Oo]f)Month\s*<=\s*6\b/.test(ohneKommentar)) {
+            treffer.push(`${rel}: ${zeile.trim()}`);
+          }
+        }
+      }
+    }
+    expect(
+      treffer,
+      "Die Halbjahres-Grenze ist wieder als nackte `6` kodiert. Sie kommt aus " +
+        `\`expiry45bFloorYearFor\` bzw. \`CARRYOVER_45B_EXPIRY_MONTH\`. Gefunden: ${treffer.join(" | ")}`,
     ).toEqual([]);
   });
 });
