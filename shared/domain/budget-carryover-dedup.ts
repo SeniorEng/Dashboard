@@ -10,6 +10,7 @@
  * Zeilen — eine vom Admin gelöschte Carryover-Zeile ist ein expliziter
  * „nicht regenerieren"-Marker.
  */
+import { carryoverExpiresAtFor } from "./budget/expiry-45b";
 
 export interface CarryoverWindow {
   targetYear: number;
@@ -28,7 +29,10 @@ export function carryoverWindowFor(sourceYear: number): CarryoverWindow {
   return {
     targetYear,
     validFrom: `${targetYear}-01-01`,
-    expiresAt: `${targetYear}-06-30`,
+    // Frist aus der SSoT statt als Literal — dieselbe Konstante speist den
+    // Verfalls-Boden im Lesepfad (`expiry45bFloorYearFor`). Vorher standen
+    // beide unabhängig da und konnten gegeneinander laufen.
+    expiresAt: carryoverExpiresAtFor(targetYear),
   };
 }
 
