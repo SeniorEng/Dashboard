@@ -66,13 +66,29 @@ function nextWeekday(offset: number): string {
  * Mitarbeiter- MIT einem Primärkunden-Filter
  * (`server/routes/appointments.ts:422-424`) und wäre für eine Vorbedingung zu
  * subtil — es könnte Termine übersehen, die genau den Fehlschlag auslösen.
+ *
+ * ── Der Filter spiegelt die Produktivlogik, nicht die Intuition ─────────
+ * `assignedEmployeeId` ODER `performedByEmployeeId`. Der Vorgänger-Pool wird in
+ * `server/routes/appointments.ts:1591` über
+ * `getAppointmentsWithCustomers(date, undefined, targetEmployeeId)` gebaut; mit
+ * `assignedOnly = undefined` liefert `buildEmployeeCondition`
+ * (`server/storage/appointments-storage.ts:101`) genau
+ * `or(assignedEmployeeId = X, performedByEmployeeId = X)`. Eine Vorprüfung, die
+ * nur `assignedEmployeeId` kennt, übersieht deshalb genau die Termine, gegen
+ * die sie schützen soll — der Test wäre weiterhin instabil, nur seltener.
+ *
+ * Nicht gefiltert werden muss dagegen nach `deleted_at` und `cancelled`: beide
+ * schließt schon `getAppointmentsWithCustomers` aus
+ * (`appointments-storage.ts:195`), auf beiden Seiten identisch.
  */
 async function eigeneTermineAm(date: string): Promise<number[]> {
-  const res = await apiGet<Array<{ id: number; assignedEmployeeId: number | null }>>(
-    `/api/appointments?date=${date}`,
-  );
+  const res = await apiGet<
+    Array<{ id: number; assignedEmployeeId: number | null; performedByEmployeeId: number | null }>
+  >(`/api/appointments?date=${date}`);
   if (res.status !== 200 || !Array.isArray(res.data)) return [];
-  return res.data.filter((a) => a.assignedEmployeeId === auth.user.id).map((a) => a.id);
+  return res.data
+    .filter((a) => a.assignedEmployeeId === auth.user.id || a.performedByEmployeeId === auth.user.id)
+    .map((a) => a.id);
 }
 
 async function hatEigenenTermin(date: string): Promise<boolean> {
