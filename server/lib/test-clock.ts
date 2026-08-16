@@ -30,13 +30,22 @@ import { setClockProvider, resetClockProvider } from "@shared/utils/datetime";
  *     demselben Worker sequenziell dagegen laufen: ein globaler Wert würde bei
  *     vergessenem Reset in die nächste Datei lecken. Per-Request kann das nicht
  *     und erlaubt 30.06. und 01.07. im selben Test.
- *  2. `runWithClock(iso, fn)` — dasselbe für In-Process-Aufrufe (Tests, die
- *     Storage-Funktionen direkt importieren, ohne HTTP).
+ *  2. `setProcessTestClock` — der In-Process-Eingang. Testseitig ausschließlich
+ *     über `tests/helpers/test-clock.ts` benutzt (`useTestClock` /
+ *     `withTestClock`), damit ein Test IMMER beide Uhren zugleich stellt.
  *
- * Dazu `setProcessTestClock` als unskalierter Rückfall für Setup auf
- * `describe`-Ebene. Auflösungsreihenfolge im Provider:
+ * ── Warum es keinen dritten Eingang gibt (Gate-2-Fund S5) ───────────────
+ * Eine frühere Fassung hatte zusätzlich `runWithClock(iso, fn)` — einen
+ * ALS-gescopten In-Process-Eingang. Er beantwortete dieselbe fachliche Frage
+ * wie `withTestClock` („führe das mit Uhr X aus"), konnte aber nur den EIGENEN
+ * Prozess bewegen. Damit war er ein schwächerer Zweitbegriff derselben Frage:
+ * wer ihn nahm und nebenbei die API ansprach, bekam genau die Zwei-Uhren-
+ * Divergenz zurück, gegen die diese Naht gebaut ist. Entfernt — es bleibt EIN
+ * in-Prozess-Eingang, und der stellt beide Uhren.
  *
- *     ALS-Store  →  Prozess-Override  →  Echt-Uhr
+ * Auflösungsreihenfolge im Provider:
+ *
+ *     ALS-Store (HTTP)  →  Prozess-Override  →  Echt-Uhr
  *
  * ── Fail-closed ─────────────────────────────────────────────────────────
  * Jeder Einstieg installiert den Provider über `setClockProvider`, das
@@ -91,16 +100,6 @@ export function parseTestClock(value: string): Date {
     );
   }
   return parsed;
-}
-
-/**
- * Führt `fn` mit fest gesetzter Uhr aus (In-Process-Eingang). Der Wert gilt für
- * den gesamten asynchronen Baum unterhalb von `fn` und endet mit ihm — kein
- * Aufräumen nötig, kein Leck in den nächsten Test.
- */
-export function runWithClock<T>(iso: string, fn: () => T): T {
-  install();
-  return clockStore.run(parseTestClock(iso), fn);
 }
 
 /**

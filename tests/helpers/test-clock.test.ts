@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { todayISO, currentYearAndMonth } from "@shared/utils/datetime";
 import { apiGet, getAuthCookie } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle, type BudgetScenarioSpec } from "./budget-scenarios";
-import { assertTestClockActive, clearTestClock, runWithClock, useTestClock, withTestClock } from "./test-clock";
+import { assertTestClockActive, clearTestClock, useTestClock, withTestClock } from "./test-clock";
 import { freezeTime, thawTime } from "./frozen-clock";
 
 /**
@@ -32,13 +32,6 @@ describe("Injizierbare Uhr — im eigenen Prozess", () => {
     useTestClock("2027-07-01");
     expect(todayISO()).toBe("2027-07-01");
     expect(currentYearAndMonth()).toEqual({ year: 2027, month: 7 });
-  });
-
-  it("runWithClock gilt nur INNERHALB des Callbacks", () => {
-    const drinnen = runWithClock("2030-03-08", () => todayISO());
-    expect(drinnen).toBe("2030-03-08");
-    // Danach wieder Echt-Uhr — kein Aufräumen nötig, kein Leck.
-    expect(todayISO()).not.toBe("2030-03-08");
   });
 
   it("withTestClock stellt den vorherigen Stand wieder her — auch bei Fehlern", async () => {

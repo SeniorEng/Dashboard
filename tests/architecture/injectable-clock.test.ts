@@ -127,7 +127,7 @@ describe("Injizierbare Uhr — Zusage 2: Middleware nur unter NODE_ENV=test", ()
 });
 
 describe("Injizierbare Uhr — Zusage 3: kein Produktivcode setzt die Uhr", () => {
-  const VERBOTEN = /\b(setClockProvider|setProcessTestClock|runWithClock|useTestClock)\s*\(/;
+  const VERBOTEN = /\b(setClockProvider|setProcessTestClock|useTestClock|withTestClock)\s*\(/;
 
   it("findet keinen Setter-Aufruf außerhalb der Naht", () => {
     const treffer: string[] = [];

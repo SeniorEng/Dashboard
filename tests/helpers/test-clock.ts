@@ -2,7 +2,6 @@ import {
   TEST_CLOCK_HEADER,
   clearProcessTestClock,
   resetTestClock,
-  runWithClock,
   setProcessTestClock,
 } from "../../server/lib/test-clock";
 
@@ -117,10 +116,3 @@ export async function withTestClock<T>(iso: string, fn: () => Promise<T> | T): P
     else useTestClock(vorher);
   }
 }
-
-/**
- * Rein synchroner In-Process-Scope (kein HTTP). Dünne Weiterreichung an
- * `runWithClock` aus `server/lib/test-clock.ts` — der Server-Prozess sieht
- * dieses Datum NICHT, deshalb nur für Tests ohne API-Aufruf.
- */
-export { runWithClock };
