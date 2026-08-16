@@ -134,13 +134,6 @@ export async function bulkUpdateSeriesAppointments(
   return result.length;
 }
 
-export async function bulkCancelSeriesAppointments(
-  appointmentIds: number[],
-  tx?: DbOrTx,
-): Promise<number> {
-  return bulkUpdateSeriesAppointments(appointmentIds, { status: "cancelled" }, tx);
-}
-
 export async function bulkDeleteSeriesAppointments(
   appointmentIds: number[],
   tx?: DbOrTx,

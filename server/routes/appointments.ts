@@ -62,6 +62,7 @@ import {
   canDeleteAppointment as policyCanDelete,
   canDocumentAppointment as policyCanDocument,
   canReopenAppointment as policyCanReopen,
+  discardsDocumentation,
   isAdminLike,
   type PolicyUser,
   type PolicyAppointment,
@@ -2159,6 +2160,8 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   const decision = policyCanDelete(policyUser, policyAppt);
   if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
 
+  const confirmDiscardDocumentation = req.body?.confirmDiscardDocumentation === true;
+
   // Task #1892 — EINE Prädikat-Quelle für „zählt als Admin?": dieselbe, die
   // die Policy oben benutzt (`isAdmin || isSuperAdmin`). Vorher stand hier
   // `user.isAdmin`; beide Spalten sind unabhängig (shared/schema/users.ts),
@@ -2179,7 +2182,29 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   }
   const isLocked = flags.isLocked;
   const isCompleted = appointment.status === "completed";
-  
+
+  // Geteilter Gate mit dem Absage-Pfad: ein Termin im Status `documenting`
+  // traegt eine begonnene Dokumentation, die beim Loeschen verloren geht.
+  // Loeschen bleibt erlaubt — aber nicht STILL. Ohne
+  // `confirmDiscardDocumentation` antwortet die Route mit 409 und weist aus, was
+  // verworfen wuerde; der zweite Aufruf mit Flag fuehrt aus.
+  //
+  // Dieselbe Policy-Funktion wie `cancelAppointments`
+  // (`shared/policies/appointments.ts#discardsDocumentation`) — waere sie hier
+  // nachgebaut, koennten die beiden Wege wieder auseinanderlaufen, und genau das
+  // war der Defekt.
+  if (discardsDocumentation(policyAppt) && !confirmDiscardDocumentation) {
+    return res.status(409).json({
+      code: "CANCEL_DISCARDS_DOCUMENTATION",
+      message:
+        "Für diesen Termin wurde bereits eine Dokumentation begonnen. Beim Löschen wird sie " +
+        "verworfen und kann nicht wiederhergestellt werden. Bitte ausdrücklich bestätigen.",
+      details: {
+        appointments: [{ id, date: appointment.date, status: appointment.status, verworfen: "Dokumentation" }],
+      },
+    });
+  }
+
   const ip = req.ip || req.socket.remoteAddress;
 
   let reversedTransactions = 0;
