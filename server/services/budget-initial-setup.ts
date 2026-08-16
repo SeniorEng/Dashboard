@@ -4,6 +4,7 @@ import type { BudgetAllocation } from "@shared/schema";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { formatEuroDE } from "@shared/utils/money";
 import { floorAutoAnchor45bToCurrentYear } from "@shared/domain/budgets";
+import { carryoverExpiresAtFor } from "@shared/domain/budget/expiry-45b";
 import {
   eligible45bCarryoverMonths,
   max45bStartValueCents,
@@ -159,7 +160,11 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
       amountCents: carryoverAmountCents,
       source: "carryover",
       validFrom: `${year}-01-01`,
-      expiresAt: `${year}-06-30`,
+      // Frist aus der SSoT (Welle 2): dasselbe Datum speist `carryoverWindowFor`
+      // und den Verfalls-Boden im Lesepfad. Als Literal war es die Kopie, die
+      // beim Verschieben der Frist still zurueckgeblieben waere — und damit den
+      // Window-Dedup gegen den Auto-Pfad ausgehebelt haette.
+      expiresAt: carryoverExpiresAtFor(year),
       notes: `Übertrag aus ${year - 1}`,
     }, userId, tx);
     allocations.push(carryoverAllocation);

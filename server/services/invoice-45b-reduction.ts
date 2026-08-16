@@ -14,6 +14,7 @@
 // Es wird KEINE parallele Mathe eingeführt.
 
 import { sql, eq, and, or, gt, inArray } from "drizzle-orm";
+import { carryoverExpiresAtFor } from "@shared/domain/budget/expiry-45b";
 import { db } from "../lib/db";
 import { withAudit } from "../lib/with-audit";
 import { badRequest, notFound } from "../lib/errors";
@@ -175,7 +176,8 @@ export async function reduceInvoice45bToPaidAmount(
   const billingYear = invoice.billingYear;
   const overflowCents = invoiceGrossCents - paidCents;
   const firstOfMonthIso = `${billingYear}-${String(billingMonth).padStart(2, "0")}-01`;
-  const expiresAtIso = `${billingYear + 1}-06-30`;
+  // Frist aus der SSoT (Welle 2) statt Literal.
+  const expiresAtIso = carryoverExpiresAtFor(billingYear + 1);
   const endOfMonthIso = lastDayOfMonthIso(billingYear, billingMonth);
 
   // Precondition: ein SPÄTERER §45b-Startwert (Monat > Abrechnungsmonat) würde

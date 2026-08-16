@@ -481,6 +481,41 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "budget-45b-expiry",
+    question: "Wann verfällt ein §45b-Übertrag, und ab welchem Jahr trägt eine Monatsaufstockung zum Stichtag noch bei? (30.06., SGB XI §45b Abs. 3)",
+    // Welle 2 des §45b-Präventions-Clusters. Die eine Frist war an FÜNF Stellen
+    // unabhängig kodiert — zwei nannte der Plan, eine fand der Rückfall-Wächter
+    // dieses PRs, zwei weitere der Gate-2-Review:
+    //   - `carryoverWindowFor` (Fenster-Literal)
+    //   - `expiryFloorAnchorYear` in `calculateAllocated45b` (`<= 6`-Ausdruck)
+    //   - `ensureYearlyCarryover45b` (Insert des Auto-Übertrags)
+    //   - `budget-initial-setup.ts` (Wizard-Übertrag)
+    //   - `invoice-45b-reduction.ts` (Kürzungs-Startwert)
+    // Genau dieses Muster — Kopien, die niemand zählt — ist der Grund für den
+    // Registry-Eintrag: die Allow-List gehört gepflegt, nicht im Wächter hart.
+    canonical: [
+      { symbol: "carryoverExpiresAtFor", module: "shared/domain/budget/expiry-45b.ts" },
+      { symbol: "expiry45bFloorYearFor", module: "shared/domain/budget/expiry-45b.ts" },
+    ],
+    ownedLiterals: ["CARRYOVER_45B_EXPIRY_MONTH", "CARRYOVER_45B_EXPIRY_DAY"],
+    guards: [
+      {
+        test: "tests/architecture/45b-null-leg-exclusion.test.ts",
+        allowlistName: "FRIST_LITERAL_ERLAUBT",
+        // Erwartungswerte in Test-Fixtures, kein zweiter Implementierungspfad:
+        // sie schreiben ein konkretes Jahr fest und müssten bei einer
+        // Fristverschiebung ohnehin von Hand nachgezogen werden.
+        allowlist: [
+          "server/scripts/lib/__fixtures__/45b-halfyear-cases.ts",
+          // Einmal-Korrekturskript mit einem Monatsende, das zufällig der
+          // 30.06. ist — keine §45b-Frist.
+          "server/scripts/fix-ursula-99-june-rebill.ts",
+        ],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "statutory-caps",
     question: "Wie werden Budget-Beträge auf die gesetzlichen Höchstwerte geklemmt? (R-45B/R-45A/R-39)",
     canonical: [{ symbol: "clampToStatutoryMax", module: "shared/domain/budgets.ts" }],

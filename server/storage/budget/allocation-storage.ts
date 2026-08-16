@@ -13,6 +13,7 @@ import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth, addDays 
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 import { resolve45bAnchor, initialBalanceMonthKeys, pickEffective45bSettingRow, effective45bSettingsWindow, shiftStartToSettings, clampEndToSettings } from "@shared/domain/budget/anchor-45b";
+import { expiry45bFloorYearFor, carryoverExpiresAtFor } from "@shared/domain/budget/expiry-45b";
 // Re-Export: Bestands-Aufrufer (summary-queries) importieren die Funktion
 // weiterhin von hier. Die Definition liegt jetzt in der SSoT.
 export { pickEffective45bSettingRow };
@@ -550,6 +551,18 @@ interface Allocated45bResult {
   // werden (`getExcluded45bConsumption`). `null`, wenn kein Reset wirksam ist
   // bzw. im `{year}`-Pool-Modus.
   resetCutoffDate: string | null;
+  // Task #1927 — Monatsanfang, ab dem Monatsaufstockungen zum Topf beitragen
+  // (`enumStart` nach ALLEN Shifts: Anker, Übertrag, Settings-Fenster,
+  // Verfalls-Boden, Startwert-Reset).
+  //
+  // Verbrauch VOR diesem Datum, der gegen die virtuelle Monatsaufstockung
+  // gebucht wurde (`allocation_id IS NULL`, das FIFO-Restleg in
+  // `consumption-engine.ts`), gehört zu Monaten, die aus `Allocated`
+  // herausgefallen sind. Er darf den laufenden Topf nicht weiter belasten —
+  // dieselbe Symmetrie wie bei `excludedSpecialAllocationIds`, nur für das Leg,
+  // das gar keine Allocation-Zeile hat und deshalb über keine ID greifbar ist.
+  // `null` im `{year}`-Pool-Modus.
+  accrualFloorDate: string | null;
 }
 
 async function calculateAllocated45b(
@@ -617,7 +630,9 @@ async function calculateAllocated45b(
   }
 
   if (anchor.kind === "ineligible") {
-    return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetCutoffDate: null };
+    // Kein Anspruch, also auch kein Aufstockungs-Boden: es gibt keine Monate,
+    // die herausfallen koennten.
+    return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetCutoffDate: null, accrualFloorDate: null };
   }
   const budgetStartDate: string = anchor.anchorIso;
 
@@ -798,7 +813,11 @@ async function calculateAllocated45b(
   // weiterhin Vorrang behält und es zu KEINER Doppelzählung kommt. NICHT im
   // `{year}`-Modus (Pool-Berechnung von `ensureYearlyCarryover45b`) — dort muss
   // das volle Quelljahr sichtbar bleiben, damit der Übertrag korrekt entsteht.
-  const expiryFloorAnchorYear = horizonMonth <= 6 ? horizonYear - 1 : horizonYear;
+  // Frist-SSoT (`shared/domain/budget/expiry-45b.ts`) statt des nackten
+  // Ausdrucks `horizonMonth <= 6 ? …`. Dieselbe Konstante speist das
+  // Übertrags-Fenster in `carryoverWindowFor` — Boden und Frist können damit
+  // nicht mehr gegeneinander laufen. Verhalten unverändert.
+  const expiryFloorAnchorYear = expiry45bFloorYearFor(horizonYear, horizonMonth);
   if (opts.year == null) {
     if (expiryFloorAnchorYear > allocStartYear) {
       allocStartYear = expiryFloorAnchorYear;
@@ -866,6 +885,39 @@ async function calculateAllocated45b(
     monthlyAmountFor,
   });
 
+  // Task #1927 — Aufstockungs-Boden VERÖFFENTLICHEN (nicht neu rechnen).
+  //
+  // `allocStartYear/Month` ist die Grenze, unterhalb derer ÜBERHAUPT NICHTS mehr
+  // zum Topf beiträgt — nach Anker, Übertrags-Shift, Settings-Fenster und
+  // Verfalls-Boden. Sie bestimmt bereits `Allocated`; sie war nur nach außen
+  // unsichtbar. `getExcluded45bConsumption` braucht genau sie, um den Verbrauch
+  // symmetrisch zu behandeln.
+  //
+  // BEWUSST `allocStart` und NICHT `enumStart`: `enumStart` liegt bei einem
+  // Startwert-Reset einen Monat HÖHER (der Monat M des Startwerts wird von der
+  // Enumeration übersprungen, weil ihn der Startwert selbst deckt). Der Monat M
+  // trägt aber sehr wohl zum Topf bei — über die `initial_balance`-Zeile. Nähme
+  // man `enumStart`, fiele der Verbrauch des Reset-Monats aus dem Abzug und die
+  // Verfügbarkeit stiege ohne fachlichen Grund.
+  //
+  // GEMESSEN, nicht hergeleitet: mit `enumStart` bewegten sich an
+  // `engeldesk_ref` HEUTE 8 Kunden um +656,80 € — exakt die acht mit einem
+  // Startwert-Reset (57, 89, 94, 96, 99, 182, 210, 222). Mit `allocStart` ist
+  // die Differenz null. Alles unterhalb des Reset-Monats deckt ohnehin schon
+  // `resetCutoffDate` (Glied (b)), das ist also keine Lücke, sondern die
+  // richtige Arbeitsteilung zwischen den beiden Gliedern.
+  //
+  // KOPPLUNG, die beim Anfassen zu beachten ist (Gate-2-Fund Q5): der
+  // Ledger-Assert in `server/services/invoice-45b-reduction.ts` fordert
+  // `allocated − consumedNet === 0` EXAKT und haengt damit direkt an
+  // `excludedConsumedNetCents`. Er ist heute unberuehrt, weil jener Pfad einen
+  // Startwert auf den Monatsersten setzt und damit `resetCutoffDate >=
+  // accrualFloorDate` gilt — das NULL-Glied ist dort eine Teilmenge des
+  // Reset-Glieds. Wer diesen Boden ueber den Abrechnungsmonat hebt (etwa auf
+  // `enumStart`), bricht jene Stelle als harten 400er mitten in einer
+  // GoBD-Korrektur.
+  const accrualFloorDate = `${allocStartYear}-${String(allocStartMonth).padStart(2, "0")}-01`;
+
   if (opts.year != null) {
     const yearMonthlyTotal = sum45bStatutoryMonths(
       statutoryMonths.filter(s => s.year === opts.year),
@@ -874,6 +926,9 @@ async function calculateAllocated45b(
       allocatedCents: yearMonthlyTotal + sumInitialBalancesForYear(existingAllocations, opts.year),
       excludedSpecialAllocationIds: [],
       resetCutoffDate: null,
+      // Pool-Modus (Uebertrags-Berechnung), kein Lesepfad: dort muss das volle
+      // Quelljahr sichtbar bleiben, ein Boden waere fachlich falsch.
+      accrualFloorDate: null,
     };
   }
 
@@ -945,6 +1000,7 @@ async function calculateAllocated45b(
     allocatedCents: totalCalculated + initialBalanceTotal + carryoverTotal,
     excludedSpecialAllocationIds,
     resetCutoffDate,
+    accrualFloorDate,
   };
 }
 
@@ -973,29 +1029,59 @@ export async function getExcluded45bConsumption(
   // (z.B. Forecast-Projektion in `getBudgetSummary` rechnet mit
   // `projectFuture: true`). Default (undefined) = bisheriges Verhalten der
   // Lese-/Buchungs-Pfade (`unified-reader`, `consumption-engine`).
-  const { excludedSpecialAllocationIds, resetCutoffDate } = await calculateAllocated45b(
+  const { excludedSpecialAllocationIds, resetCutoffDate, accrualFloorDate } = await calculateAllocated45b(
     customerId,
     { asOfDate, projectFuture: opts?.projectFuture },
     d,
     typeSettings,
   );
-  if (excludedSpecialAllocationIds.length === 0 && !resetCutoffDate) {
+  // Kurzschluss (Gate-2-Fund N2): `accrualFloorDate` ist fuer jeden Kunden mit
+  // §45b-Anspruch gesetzt, dieser Zweig greift also praktisch nur noch im
+  // `ineligible`-Fall. Das ist gewollt — die Alternative waere eine zusaetzliche
+  // Query nach dem fruehesten `transaction_date`, also genau der Roundtrip, den
+  // der Kurzschluss sparen soll. Er bleibt als Ineligible-Ausstieg stehen.
+  if (excludedSpecialAllocationIds.length === 0 && !resetCutoffDate && !accrualFloorDate) {
     return { excludedSpecialAllocationIds, excludedConsumedNetCents: 0 };
   }
 
-  // Task #1812 — Zwei symmetrische Exklusions-Quellen in EINER Bedingung
-  // (die ODER-Verknüpfung dedupliziert Zeilen, die beides erfüllen):
+  // Task #1812/#1927 — DREI symmetrische Exklusions-Quellen in EINER Bedingung
+  // (die ODER-Verknüpfung dedupliziert Zeilen, die mehrere erfüllen):
   //  (a) Verbrauch gegen eine aus `Allocated` entfernte Spezial-Allocation
   //      (abgelaufener Übertrag / vom Reset verdrängter früherer Startwert),
   //  (b) Verbrauch VOR dem Reset-Stichtag M — bereits in der neuen Startwert-
   //      Basis abgebildet, darf also nicht erneut vom laufenden Topf abgezogen
-  //      werden.
+  //      werden,
+  //  (c) Task #1927 — Verbrauch gegen die virtuelle MONATSAUFSTOCKUNG aus
+  //      Monaten unterhalb des Aufstockungs-Bodens.
+  //
+  // Warum (c) nötig ist und (a) es nicht erschlägt: Die FIFO-Buchung
+  // (`consumption-engine.ts`) verbraucht zuerst die Spezial-Allocations, jede
+  // mit ihrer `allocation_id`; was danach übrig bleibt, wird als EINE Zeile mit
+  // `allocation_id = NULL` gebucht — das Monatsaufstockungs-Leg, das keine
+  // materialisierte Zeile hat, auf die es zeigen könnte. `inArray(allocationId, …)`
+  // aus (a) trifft solche Zeilen per SQL-Semantik NIE.
+  //
+  // Wandert der Boden (jeden 01.07. durch den Verfalls-Boden, an jedem
+  // Jahreswechsel durch den Anker), fallen die Aufstockungen der darunter
+  // liegenden Monate aus `Allocated` — ihr Verbrauch blieb bisher trotzdem
+  // abgezogen und belastete den neuen Topf dauerhaft.
+  //
+  // NUR für `allocation_id IS NULL`: Verbrauch gegen eine noch GEZÄHLTE
+  // Spezial-Allocation darf eine reine Datumsregel nicht wegnehmen. Damit
+  // bleiben (a) und (c) trennscharf — ID-Weg für verlinkte Zeilen, Datums-Weg
+  // ausschließlich für das Leg ohne Verlinkung.
   const exclusionParts = [
     excludedSpecialAllocationIds.length > 0
       ? inArray(budgetTransactions.allocationId, excludedSpecialAllocationIds)
       : undefined,
     resetCutoffDate
       ? lt(budgetTransactions.transactionDate, resetCutoffDate)
+      : undefined,
+    accrualFloorDate
+      ? and(
+          isNull(budgetTransactions.allocationId),
+          lt(budgetTransactions.transactionDate, accrualFloorDate),
+        )
       : undefined,
   ].filter((p): p is NonNullable<typeof p> => p != null);
   const exclusionCond = exclusionParts.length === 1
@@ -1505,7 +1591,10 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
       amountCents: unused,
       source: "carryover",
       validFrom: `${targetYear}-01-01`,
-      expiresAt: `${targetYear}-06-30`,
+      // Frist aus der SSoT — dieselbe Konstante wie `carryoverWindowFor` und der
+      // Verfalls-Boden im Lesepfad. Diese dritte Kopie des Literals hat der
+      // Rueckfall-Waechter gefunden (`tests/architecture/45b-null-leg-exclusion.test.ts`).
+      expiresAt: carryoverExpiresAtFor(targetYear),
       notes: `Übertrag aus ${year}: ${formatEuroDE(unused)} (verfällt 30.06.${targetYear})`,
     }).onConflictDoNothing().returning();
 
