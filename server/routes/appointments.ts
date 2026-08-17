@@ -2130,7 +2130,6 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   const decision = policyCanDelete(policyUser, policyAppt);
   if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
 
-
   // Task #1892 — EINE Prädikat-Quelle für „zählt als Admin?": dieselbe, die
   // die Policy oben benutzt (`isAdmin || isSuperAdmin`). Vorher stand hier
   // `user.isAdmin`; beide Spalten sind unabhängig (shared/schema/users.ts),
@@ -2151,7 +2150,7 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   }
   const isLocked = flags.isLocked;
   const isCompleted = appointment.status === "completed";
-
+  
   const ip = req.ip || req.socket.remoteAddress;
 
   let reversedTransactions = 0;
