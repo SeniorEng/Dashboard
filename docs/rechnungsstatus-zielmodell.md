@@ -7,15 +7,21 @@ Grundlage ist die Bestandsaufnahme in [`statusmodell-karte.md`](./statusmodell-k
 — dort steht, was es heute gibt und wo es sich widerspricht. Hier steht, was es
 werden soll.
 
-Modell bestätigt von Alrik am 17.08.2026. Diese Spec schreibt es aus, benennt
-die Ableitungsregeln und die Migration — und drei Stellen, an denen das Modell
-auf die vorhandenen Daten trifft und eine Entscheidung braucht (Abschnitt 7).
+**Modell final, alle Entscheidungen bestätigt von Alrik am 17.08.2026.** Diese
+Spec schreibt es aus: Modell, Ableitungsregeln, Übergänge, Migration.
+
+Die drei Stellen, an denen das Modell auf die vorhandenen Daten traf, sind
+entschieden — sie stehen in Abschnitt 7 mit der jeweiligen Entscheidung und
+ihrer Begründung, damit später nachvollziehbar bleibt, warum es so und nicht
+anders aussieht.
 
 ---
 
 ## 1. Das Modell
 
-### Gespeichert: vier Status
+### Gespeichert: vier Status für Rechnungen, ein eigener für Storno-Dokumente
+
+**Normale Rechnungen** (`invoice_type = rechnung`) durchlaufen genau vier:
 
 ```
 entwurf  →  versendet  →  bezahlt
@@ -33,12 +39,48 @@ entwurf  →  versendet  →  bezahlt
 `entwurf → storniert` ist zulässig (ein Entwurf kann verworfen werden), führt
 aber praktisch selten dorthin — ein Entwurf wird gelöscht, nicht storniert.
 
+**Storno-Dokumente** (`invoice_type = stornorechnung`) haben genau einen:
+
+| Status | Bedeutung |
+|---|---|
+| `abgeschlossen` | Das Dokument **entsteht fertig**. Es ist kein Entwurf (nichts daran zu entscheiden), wird nie bezahlt (es fordert nichts) und wird nie storniert (der Storno IST es). |
+
+Ein Storno-Dokument ist die Belegseite eines Vorgangs, der am **Original**
+verbucht ist — dort steht `storniert`. Das Dokument selbst hat keinen
+Lebenszyklus, es hat einen Zustand: erledigt.
+
+**Damit lösen sich die „114 auf `entwurf`" auf.** Sie standen dort nicht, weil
+jemand vergessen hätte weiterzuklicken, sondern weil das Modell für ihren
+tatsächlichen Zustand keinen Namen hatte.
+
+`abgeschlossen` ist ausdrücklich **kein** Ausgang für normale Rechnungen. Eine
+Rechnung, die nichts mehr einbringt, geht nach `storniert` — das ist die Regel
+„terminal für alles Terminale", und sie bleibt unangetastet.
+
+> **Zum Namen:** `abgeschlossen` existiert bereits als **Cluster**-Wert (für
+> bezahlte Rechnungen). Das ist keine Kollision, sondern dieselbe Aussage auf
+> zwei Ebenen: eine bezahlte Rechnung und ein Storno-Dokument sind beide fertig
+> und landen beide im Cluster „Abgeschlossen". Der Status sagt *warum*, der
+> Cluster sagt *dass*. Wer die Enums liest, soll das hier gelesen haben und
+> nicht für ein Versehen halten.
+
 ### Abgeleitet: zwei Badges, kein Status
 
 | Badge | Regel | Quelle |
 |---|---|---|
 | **Teilweise bezahlt** | `0 < Σ gezahlt < Brutto` | Zahlungssumme, nicht Statusspalte |
 | **Überfällig** | unbezahlt **und** Fälligkeit überschritten | `dueDate` bzw. Zahler-Anker |
+| **Versandt** | `sent_at` gesetzt | Zeitstempel, nicht Status |
+
+Das **Versandt**-Badge gehört zum Storno-Dokument: dass eine Stornorechnung
+verschickt wurde, ist ein Kennzeichen am Beleg, kein Zustandswechsel — sie war
+vorher fertig und ist es nachher. Bei normalen Rechnungen sagt der Status
+`versendet` dasselbe bereits; dort ist das Badge redundant und wird nicht
+angezeigt.
+
+Damit ist auch die Frage beantwortet, die die Bestandsaufnahme offen ließ:
+Storno-Dokumente DÜRFEN verschickt werden, und ob sie es wurden, ist ablesbar —
+ohne dass ein Status dafür herhalten muss.
 
 Badges sind **Sichten auf Zahlen**, keine Zustände. Sie werden nie geschrieben,
 nie migriert, nie als Übergang geprüft. Zwei Rechnungen mit demselben Status
@@ -65,9 +107,16 @@ Quellen leiten dasselbe ab — `bezahlt` oder das Teilzahlungs-Badge.
 Kasse und Selbstzahler haben **dieselben vier Status**. Der Avis ist lediglich
 eine andere Zuordnungs-Quelle, kein anderer Lebenszyklus.
 
-Was bleiben **darf**, weil es keine Status-Frage ist: der **Aging-Anker**
-(Selbstzahler ab Fälligkeit, Kasse ab Versand). Das ist eine Frage an das
-Überfällig-Badge, nicht an den Status. Siehe Abschnitt 7.3.
+**Genau eine Ausnahme, bewusst und benannt:** der **Aging-Anker**. Selbstzahler
+altern ab Fälligkeitsdatum, Kassenrechnungen ab Versanddatum. Das ist eine Frage
+an das **Überfällig-Badge**, nicht an den Status — und sie ist sachlich
+begründet: bei der Kasse liegt zwischen Versand und Zahlung der Avis-Schritt,
+beim Kunden nicht.
+
+Das ist nach diesem Umbau die **einzige** Stelle im gesamten Rechnungswesen, an
+der noch „Kasse ≠ Kunde" steht. Sie steht dort absichtlich. Wer sie später
+findet und für einen Rest der alten Vermischung hält, soll hier lesen, dass sie
+geprüft und behalten wurde. Ausgeschrieben in Abschnitt 7.3.
 
 ---
 
@@ -80,6 +129,7 @@ Was bleiben **darf**, weil es keine Status-Frage ist: der **Aging-Anker**
 | Handlungs-Cluster | abgeleitet aus Stufe + Zahlungsbindung | rein abgeleitet |
 | Teilzahlung | abgeleitet aus der Zahlungssumme | **Badge**, nie Status |
 | Überfälligkeit | abgeleitet aus Zahlungsstand + Frist | **Badge**, nie Status |
+| Versand eines Storno-Dokuments | `invoices.sent_at` | **Badge**, nie Status |
 
 Damit lösen sich drei Widersprüche der Bestandsaufnahme auf:
 
@@ -87,7 +137,8 @@ Damit lösen sich drei Widersprüche der Bestandsaufnahme auf:
 - **W2** (Ableitung schreibt Spalte) — der Zahlungsabgleich schreibt nur noch
   `bezahlt`, und das ist ein echter Zustandswechsel, keine Ableitung.
 - **W4** (`storniert` zweimal ausdrückbar) — der Typ sagt nichts mehr über den
-  Zustand. Storniert ist, was `status = 'storniert'` hat.
+  Zustand. Storniert ist, was `status = 'storniert'` hat; ein Storno-Dokument
+  ist `abgeschlossen`, nicht storniert.
 
 **W5 (stille `default`-Schlucker) wird ausdrücklich aufgehoben:** ein
 unbekannter Status muss auffallen. Siehe Abschnitt 4.
@@ -116,11 +167,12 @@ bleibt real und unabhängig vom Status.
 ### Status + Typ → Stufe
 
 ```
-status = storniert   → side: storniert   (zählt in keine Stufe)
-status = entwurf     → stage: rechnung_erstellt
-status = versendet   → stage: versendet
-status = bezahlt     → stage: bezahlt
-sonst                → FEHLER
+status = storniert     → side: storniert       (zählt in keine Stufe)
+status = abgeschlossen → side: storno_dokument (zählt in keine Stufe, siehe 4.4)
+status = entwurf       → stage: rechnung_erstellt
+status = versendet     → stage: versendet
+status = bezahlt       → stage: bezahlt
+sonst                  → FEHLER
 ```
 
 **Kein `default`-Schlucker mehr.** Ein unbekannter Status ist ein
@@ -137,6 +189,7 @@ Laufzeit-Fehler ist die zweite Lage für Werte, die aus der DB kommen.
 
 ```
 side: storniert                          → storniert
+side: storno_dokument                    → abgeschlossen
 hasBoundPayment && stage = versendet     → zahlung_zugeordnet_pruefung
 stage = rechnung_erstellt                → zu_versenden
 stage = versendet                        → zahlung_ausstehend
@@ -145,6 +198,30 @@ stage = bezahlt                          → abgeschlossen
 
 Der Zahler-Typ kommt hier **nicht mehr vor**. Das ist die konkrete Wirkung von
 „Empfänger-Unterschied raus".
+
+### 4.4 Storno-Dokumente tragen keinen offenen Forderungsbetrag
+
+**Ausdrückliche Regel, kein Nebeneffekt.**
+
+Ein Storno-Dokument geht in **keine** €-Summe der Pipeline ein. Nicht, weil sein
+Typ zufällig in einen Side-Zustand fällt — sondern weil es fachlich keine
+offene Forderung ausweist: der Betrag, den es aufhebt, ist bereits am Original
+herausgerechnet (dort steht `storniert`, und stornierte Rechnungen zählen in
+keine Stufe).
+
+Beide mitzuzählen wäre eine **Doppelzählung**. Größenordnung, falls es doch
+geschähe: die 114 Storno-Dokumente tragen zusammen −15.884,35 €; sie würden die
+Stufe `versendet` von 23.748,53 € auf rund 7.864 € drücken — eine Zahl, die
+nichts Reales beschreibt.
+
+Warum das hier als eigener Abschnitt steht: heute folgt derselbe Ausschluss
+**implizit** aus dem typ-basierten Side-Zustand. Sobald der Typ aufhört, den
+Zustand zu bestimmen (Abschnitt 2, W4), verschwindet der Ausschluss mit ihm —
+lautlos. Die Regel muss also benannt und geprüft werden, nicht geerbt.
+
+**Umsetzungshinweis:** ein Test, der genau diese Aussage festhält („die Summe
+über alle Stufen enthält keinen Storno-Betrag"), gehört zum
+Implementierungs-PR. Ohne ihn ist die Regel eine Absichtserklärung.
 
 ### Zahlungen → Status und Badges
 
@@ -161,12 +238,22 @@ Die Überzahlungs-Invariante bleibt unverändert — sie ist heute richtig.
 
 ### Übergänge
 
+**Normale Rechnungen:**
+
 ```
 entwurf    → versendet, storniert
 versendet  → bezahlt, storniert
 bezahlt    → storniert
 storniert  → —
 ```
+
+**Storno-Dokumente:** keine. Sie entstehen auf `abgeschlossen` und bleiben dort.
+Es gibt keinen Übergang hinein (außer der Anlage) und keinen hinaus. Ein
+Storno-Dokument zu stornieren ist kein Vorgang, den das Modell kennt — wer den
+Storno rückgängig machen will, stellt neu aus.
+
+Das `sent_at`-Kennzeichen wird davon unabhängig gesetzt und ist **kein**
+Übergang.
 
 **Ein** Übergangs-Regime für **alle** Schreibpfade. Der heutige Zustand — der
 Zahlungsabgleich schreibt per Direkt-Update an der Übergangs-SSoT vorbei (W3) —
@@ -188,7 +275,7 @@ Bestand gemessen an der Referenz-Kopie (Stand 13.08.2026):
 | `storniert` | rechnung | 110 | 69 | `storniert` (unverändert) |
 | `storniert` | nachberechnung | 4 | 0 | `storniert` (unverändert) |
 | `teilweise_bezahlt` | — | **0** | — | `versendet` + Badge |
-| `entwurf` | **stornorechnung** | **114** | **0** | **offen — siehe 7.1** |
+| `entwurf` | **stornorechnung** | **114** | **0** | **`abgeschlossen`** |
 
 ### `avis_erhalten` → `versendet` (54 Zeilen)
 
@@ -204,10 +291,22 @@ Heute leer. Der Fall ist trotzdem zu implementieren, weil er beim ersten
 Teilzahlungs-Eingang eintritt — und heute (W1) als €-Summe an der falschen
 Stelle im Cockpit-Board landen würde.
 
-### Empfehlung zum Verfahren: **auditierter Einmal-Lauf**, nicht map-on-read
+### `entwurf` (stornorechnung) → `abgeschlossen` (114 Zeilen)
 
-Alrik hat beide Wege zur Wahl gestellt. Meine Empfehlung ist der Einmal-Lauf,
-aus drei Gründen:
+Kein Statuswechsel im eigentlichen Sinn, sondern eine **Korrektur der
+Benennung**: diese Dokumente waren nie Entwürfe. Sie sind fertig, seit sie
+existieren — es gab bloß kein Wort dafür.
+
+`sent_at` wird dabei **nicht** angefasst. Es bleibt `NULL`, weil niemand weiß,
+ob die Dokumente je verschickt wurden. Nach der Migration sagt die Akte damit
+genau das Richtige: *fertig, nicht versandt.* Falls sich herausstellt, dass sie
+zugestellt wurden, ist das ein eigener, belegbarer Nachtrag — kein Beiwerk
+dieser Migration.
+
+### Verfahren: **auditierter Einmal-Lauf** (entschieden)
+
+Alrik hat entschieden: Einmal-Lauf, nicht map-on-read. Die Gründe, damit die
+Entscheidung nachvollziehbar bleibt:
 
 1. **Der Status ist kein Dokument-Feld.** Er steht auf keiner Rechnung, in
    keinem PDF, in keiner ZUGFeRD-Datei. Was GoBD schützt — das ausgegebene
@@ -227,11 +326,12 @@ aus drei Gründen:
 - Scope hart auf die betroffenen Altwerte, kein „alles neu berechnen".
 - Prod-Write nach den Hausregeln (Gate 4).
 
-**Gegenargument, das ich nicht unterschlage:** map-on-read ist die
-umkehrbarere Variante. Wer der Umstellung nicht traut, kann sie damit
-schrittweise ausrollen und den Altwert als Rückfallebene behalten. Wenn Alrik
-das vorzieht, ist der Preis eine Übersetzungsschicht, die dauerhaft
-mitgeschleppt und irgendwann vergessen wird.
+**Was dabei aufgegeben wird, ausdrücklich:** map-on-read wäre die umkehrbarere
+Variante gewesen — der Altwert bliebe als Rückfallebene stehen. Der Preis dafür
+wäre eine Übersetzungsschicht, die dauerhaft mitgeschleppt und irgendwann
+vergessen wird. Diese Umkehrbarkeit wird bewusst gegen Klarheit eingetauscht.
+Die Sicherung ist stattdessen der Audit-Eintrag je Zeile: aus ihm ist der
+Vorher-Zustand jederzeit rekonstruierbar.
 
 ---
 
@@ -253,84 +353,71 @@ sie durch:
 - Rechnungsliste, Cockpit-Board, Statistik (Client)
 - der Avis-Backfill (`server/startup/backfill-avis-received-status.ts`) — nach
   der Migration gegenstandslos, gehört entfernt
+- der Anlagepfad der Stornorechnung: sie entsteht künftig auf `abgeschlossen`,
+  nicht auf `entwurf`
+- der Entwurfs-Löschpfad: er darf Storno-Dokumente nicht mehr erfassen (sie sind
+  keine Entwürfe mehr — heute sind sie es, und das ist eine Löschgefahr, die mit
+  dem neuen Zustand von selbst verschwindet)
+- der Test, der Abschnitt 4.4 festhält (neu)
 
 ---
 
-## 7. Drei Stellen, an denen das Modell auf die Daten trifft
+## 7. Die drei Entscheidungen, ausgeschrieben
 
-### 7.1 Die 114 Stornorechnungen — sie waren nie versandt
+Hier stand in der Entwurfsfassung, was zu entscheiden war. Jetzt steht hier, wie
+entschieden wurde und warum — damit in einem Jahr niemand raten muss.
 
-**Das ist die wichtigste offene Frage.**
+### 7.1 Die 114 Storno-Dokumente → eigener Endzustand `abgeschlossen`
 
-Alrik: *„Endzustand ist abgeschlossen/versendet, nicht bezahlt — behebt die 114
-auf entwurf."*
+**Der Befund:** alle 114 haben `sent_at = NULL` bei gesetztem `pdf_path`. Jede
+referenziert genau ein Original, und alle 114 Originale stehen auf `storniert`.
 
-Gemessen: **alle 114 haben `sent_at = NULL`** — bei gesetztem `pdf_path`. Sie
-wurden erzeugt, aber nie als versandt vermerkt. Zugleich referenziert jede genau
-ein Original, und **alle 114 Originale stehen auf `storniert`**. Der
-Storno-*Vorgang* ist also vollständig am Original verbucht; das Storno-*Dokument*
-ist ein Nebenprodukt, das liegen blieb.
+Damit war klar, was sie sind: **fertige Belege zu einem anderswo verbuchten
+Vorgang**. Weder Entwürfe (es ist nichts zu entscheiden) noch Zahlungserwartung
+(sie fordern nichts) noch stornierbar (sie SIND der Storno).
 
-Sie auf `versendet` zu setzen hieße zu behaupten, sie seien rausgegangen. Das
-weiß niemand, und `sent_at` widerspricht. **Ich würde das nicht tun.**
+**Entschieden:** eigener Endzustand `abgeschlossen`, ausschließlich für
+Storno-Dokumente. Sie entstehen darin.
 
-Drei Wege, alle mit Preis:
+Verworfen wurden:
+- **`versendet`** — hätte behauptet, sie seien rausgegangen; `sent_at`
+  widerspricht.
+- **`entwurf` belassen** — wäre nicht falsch gewesen, aber es hätte einen
+  richtigen Zustand mit einem falschen Wort benannt und die Frage offen
+  gelassen.
+- **`storniert`** — formal konsistent, liest sich aber falsch: eine
+  Stornorechnung ist nicht storniert.
 
-| | Was | Preis |
-|---|---|---|
-| **A** | Auf `entwurf` lassen; das Modell sagt, Stornorechnungen laufen den normalen Weg, diese hier sind schlicht nie versandt worden | Die „114 auf entwurf" bleiben — aber sie sind dann eine **richtige** Aussage und ein sichtbares operatives To-do statt eines Modell-Artefakts |
-| **B** | `versendet` + `sent_at` aus einer belegbaren Quelle nachziehen (z. B. Storno-Zeitpunkt des Originals) | Nur zulässig, wenn die Dokumente tatsächlich zugestellt wurden. Sonst schreiben wir eine Unwahrheit in die Akte |
-| **C** | `storniert` als terminaler Sammelzustand („nichts steht mehr aus") | Formal konsistent mit „terminal für alles Terminale", liest sich aber falsch: eine Stornorechnung ist nicht storniert |
+Die Frage, die dabei auftauchte — *sollen Storno-Dokumente überhaupt verschickt
+werden?* — ist mit dem `sent_at`-Badge beantwortet: sie **dürfen**, und ob sie
+es wurden, ist ablesbar. Kein Status muss dafür herhalten.
 
-**Meine Empfehlung: A.** Es ist die einzige Variante, die nichts behauptet. Und
-sie fördert eine echte Frage zutage, die das Modell gar nicht beantworten kann:
-*Sollen Stornorechnungen überhaupt versandt werden?* Wenn ja, fehlt ein
-Arbeitsschritt. Wenn nein, ist `entwurf` für ein nie zu versendendes Dokument der
-falsche Name — dann bräuchte es einen eigenen Ausgang, und das Modell hätte
-einen fünften Status.
+### 7.2 Storno-Dokumente aus den €-Summen — als benannte Regel
 
-**Diese Frage gehört beantwortet, bevor gebaut wird.**
+**Entschieden:** Ausschluss bleibt, aber ausdrücklich formuliert statt aus dem
+Typ geerbt. Ausgeschrieben in Abschnitt 4.4, samt Test-Auftrag.
 
-### 7.2 Stornorechnungen in den €-Summen
+Der Unterschied ist nicht kosmetisch: heute folgt der Ausschluss aus einer
+Enum-Zuordnung, die dieser Umbau gerade beseitigt. Ohne die benannte Regel
+verschwände er lautlos mit ihr — und die Stufen-Summen wären um −15.884,35 €
+falsch, ohne dass irgendetwas rot würde.
 
-Heute sind Stornorechnungen über den **Typ** ein Side-Zustand und zählen in
-**keine** Stufe. Wenn der Typ aufhört, den Zustand zu bestimmen (Abschnitt 2,
-W4), wandern sie in die Stufen-Summen — mit ihren **negativen** Beträgen.
+### 7.3 Aging-Anker behält „Kasse ≠ Kunde"
 
-Größenordnung: die 114 tragen zusammen **−15.884,35 €**. Stünden sie auf
-`versendet`, fiele diese Stufe von 23.748,53 € auf rund 7.864 €.
+**Entschieden:** enge Lesart. Der Empfänger-Unterschied verlässt das
+**Status-Modell** vollständig, bleibt aber beim **Überfälligkeits-Timing**:
 
-Das kann **richtig** sein (Netto-Sicht: was steht wirklich noch aus) oder
-**falsch** (Doppelzählung, wenn das Original bereits als `storniert`
-herausgerechnet ist). Nach dem heutigen Stand ist es Doppelzählung: das Original
-ist bereits aus den Summen draußen, die Gutschrift zöge ein zweites Mal ab.
+- Selbstzahler/Privat: Anker `dueDate` (Fälligkeit)
+- Pflegekasse: Anker `sentAt` (Versand, vor Avis-Eingang)
 
-**Vorschlag:** Stornorechnungen bleiben aus den €-Summen der Stufen
-ausgeschlossen — aber über eine **ausdrückliche Regel** („Storno-Dokumente
-tragen keinen offenen Forderungsbetrag"), nicht als Nebenwirkung eines
-Typ-basierten Side-Zustands. Der Unterschied ist wichtig: die Regel wird dann
-benannt und geprüft, statt aus einer Enum-Zuordnung zu folgen.
+Begründung: es sind zwei verschiedene reale Abläufe. Bei der Kasse liegt der
+Avis-Schritt zwischen Versand und Zahlung; „überfällig ab Fälligkeitsdatum"
+würde dort Rechnungen anmahnen, die im normalen Lauf sind.
 
-### 7.3 Aging-Anker: bleibt der Empfänger-Unterschied hier zulässig?
-
-„Empfänger-Unterschied raus" gilt für den **Status** — das ist eindeutig. Der
-Aging-Anker ist aber eine Frage an das **Überfällig-Badge**: ab wann gilt eine
-Rechnung als überfällig?
-
-Heute: Selbstzahler ab `dueDate`, Kasse ab `sentAt`. Sachlich hat das einen
-Grund (bei der Kasse liegt der Avis-Schritt dazwischen).
-
-**Zwei Lesarten**, beide vertretbar:
-- **eng**: Der Unterschied verlässt nur das Status-Modell; das Badge darf ihn
-  behalten. Die Fälligkeit einer Kassenrechnung ist real eine andere.
-- **weit**: Auch das Badge wird vereinheitlicht — alle Rechnungen altern ab
-  `dueDate`. Dann braucht jede Kassenrechnung ein belastbares `dueDate`.
-
-Ich neige zur **engen** Lesart, würde sie aber nicht selbst entscheiden: sie ist
-die einzige Stelle, an der nach diesem Umbau noch „Kasse ≠ Kunde" steht, und das
-sollte bewusst so bleiben, nicht übersehen worden sein.
-
----
+**Diese Stelle ist als einzige legitime Empfänger-Unterscheidung benannt.** Alles
+andere — Status, Stufe, Cluster — ist danach empfängerblind. Wer künftig eine
+zweite Stelle mit `billingType` findet, hat einen Rückfall gefunden, keinen
+Rest.
 
 ## 8. Was diese Spec nicht regelt
 
