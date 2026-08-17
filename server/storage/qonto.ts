@@ -17,6 +17,7 @@ import { eq, and, isNull, isNotNull, desc, gte, lte, sql, inArray } from "drizzl
 import { db, type DbOrTx } from "../lib/db";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { paymentAdvicesRepo } from "../repos";
+import { statusesAllowedToTransitionTo } from "@shared/domain/invoice-status";
 
 interface PaymentAdviceWithItems extends PaymentAdvice {
   items: PaymentAdviceItem[];
@@ -364,7 +365,7 @@ class QontoStorage {
       .innerJoin(invoices, eq(paymentAdviceItems.matchedInvoiceId, invoices.id))
       .where(and(
         inArray(paymentAdviceItems.paymentAdviceId, adviceIds),
-        inArray(invoices.status, ["versendet", "avis_erhalten"]),
+        inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
       ));
 
     // Task #1859 — Doppelzuordnungs-Schutz: eine Rechnung, die bereits über eine

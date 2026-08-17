@@ -761,7 +761,10 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
       .where(eq(invoices.id, previousInvoiceId))
       .limit(1);
 
-    if (invRow && (invRow.status === "bezahlt" || invRow.status === "teilweise_bezahlt")) {
+    // Nur eine als bezahlt gefuehrte Rechnung kann zurueckgesetzt werden.
+    // `teilweise_bezahlt` ist als Status entfallen; eine teilbezahlte Rechnung
+    // steht ohnehin auf `versendet` und braucht keine Ruecknahme.
+    if (invRow && invRow.status === "bezahlt") {
       const remaining = (await qontoStorage.getInvoicePaymentTotals([previousInvoiceId], dbTx))
         .get(previousInvoiceId) ?? { paidCents: 0, skontoCents: 0 };
       const decision = resolveInvoicePaymentStatus({

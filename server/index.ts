@@ -560,7 +560,7 @@ async function runStartupTasks() {
     // `ensureInvoiceLineItemQuantityColumns` und VOR
     // `reconcileDriftedColumnTypes`), migrate-monthly-work-hours-to-numeric
     // (#833), backfill-orphan-reversal-appointment-id (#819),
-    // backfill-storno-transaction-date (#963), backfill-avis-received-status
+    // backfill-storno-transaction-date (#963)
     // (#1284), clear-45b-monthly-limits (#603), migrate-in-progress-appointments,
     // migrate-task-status-in-progress, migrate-expired-unsigned-appointments —
     // allesamt VOR dem Budget-Migrations-Block (`backfillBudgetHistorization` +

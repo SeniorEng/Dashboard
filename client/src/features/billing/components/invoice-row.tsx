@@ -38,6 +38,8 @@ import { isStorniertInvoice,
 import {
   STATUS_LABELS,
   STATUS_COLORS,
+  BADGE_COLORS,
+  BADGE_LABELS,
   TYPE_LABELS,
   TYPE_COLORS,
   AGING_BADGE,
@@ -51,6 +53,7 @@ import {
   paymentBadgeTitle,
 } from "../utils";
 import { InvoiceDetail } from "./invoice-detail";
+import type { InvoiceStatus } from "@shared/schema/billing";
 
 interface InvoiceRowProps {
   invoice: InvoiceItem;
@@ -214,12 +217,29 @@ export function InvoiceRow({
               >
                 {TYPE_LABELS[invoice.invoiceType] || invoice.invoiceType}
               </Badge>
+              {/* Status — EIN Wert, immer sichtbar. `parseInvoiceStatus` ist
+                  hier bewusst NICHT im Einsatz: eine Liste soll nicht wegen
+                  einer einzelnen kaputten Zeile weiß bleiben. Ein unbekannter
+                  Wert wird angezeigt wie er ist, damit er auffällt. */}
               <Badge
                 variant="outline"
-                className={STATUS_COLORS[invoice.status] || "bg-gray-100 text-gray-600 border-gray-200"}
+                className={STATUS_COLORS[invoice.status as InvoiceStatus] ?? "bg-gray-100 text-gray-600 border-gray-200"}
               >
-                {STATUS_LABELS[invoice.status] || invoice.status}
+                {STATUS_LABELS[invoice.status as InvoiceStatus] ?? invoice.status}
               </Badge>
+              {/* Badges — KEINE Zustände, sondern Sichten auf Zahlen. Null bis
+                  drei Stück, je nach Zahlungsstand, Frist und Versand. Sie
+                  stehen NEBEN dem Status, nie an seiner Stelle. */}
+              {(invoice.badges ?? []).map((b) => (
+                <Badge
+                  key={b}
+                  variant="outline"
+                  className={`hidden sm:inline-flex ${BADGE_COLORS[b]}`}
+                  data-testid={`badge-${b}-${invoice.id}`}
+                >
+                  {BADGE_LABELS[b]}
+                </Badge>
+              ))}
               {/* Task #1890: Verknüpfung Original ↔ Stornorechnung. Eine
                   Stornorechnung zeigt die stornierte Originalrechnung, ein
                   storniertes Original seine Gutschrift — beide anklickbar

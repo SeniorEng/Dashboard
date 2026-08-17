@@ -50,7 +50,6 @@ const ALL_STAGES: BillingTermineStage[] = [
   "nachgewiesen",
   "rechnung_erstellt",
   "versendet",
-  "avis_erhalten",
   "bezahlt",
   "kunde_nicht_angetroffen",
 ];

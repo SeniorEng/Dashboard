@@ -1,4 +1,5 @@
 import type { InvoicePotKey } from "../domain/budget-invoice-split";
+import type { InvoiceBadge } from "../domain/invoice-badges";
 import type { PaymentDifferenceResult } from "../domain/qonto/payment-difference";
 import type { BillingEligibilityStatus, BillingBlockReason } from "../domain/billing-eligibility";
 
@@ -147,6 +148,20 @@ export interface InvoiceItem {
   boundPaidCents?: number;
   paymentDifferenceCents?: number;
   paymentDifferenceResult?: PaymentDifferenceResult;
+
+  /**
+   * Die BADGES dieser Rechnung — teilweise bezahlt, überfällig, versandt.
+   *
+   * Vom SERVER berechnet, nicht vom Client. Der Grund ist die Erfahrung aus
+   * dem Status-Umbau: die Überfälligkeits-Regel trägt die einzige verbliebene
+   * Empfänger-Unterscheidung (Selbstzahler ab Fälligkeit, Kasse ab Versand),
+   * und die soll an EINER Stelle stehen. Rechnete der Client nach, wäre sie
+   * sofort wieder zweimal formuliert.
+   *
+   * Optional, damit ältere Antworten und andere Aufrufer unverändert
+   * weiterlaufen — fehlt das Feld, zeigt die Liste einfach keine Badges.
+   */
+  badges?: InvoiceBadge[];
 }
 
 interface InvoiceLineItem {

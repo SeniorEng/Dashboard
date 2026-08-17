@@ -38,7 +38,6 @@ export const PIPELINE_STAGES = [
   "unterschrieben",
   "rechnung_erstellt",
   "versendet",
-  "avis_erhalten",
   "bezahlt",
 ] as const;
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
@@ -49,7 +48,6 @@ export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
   unterschrieben: "Unterschrieben",
   rechnung_erstellt: "Rechnung erstellt",
   versendet: "Versendet",
-  avis_erhalten: "Avis erhalten",
   bezahlt: "Bezahlt",
 };
 

@@ -26,10 +26,11 @@ interface StatusPipelineCardProps {
 
 // Frühe Stufen (vor Rechnung) → Termine-Tab; späte Stufen → Rechnungen-Tab.
 const TERMINE_STAGES: PipelineStage[] = ["offen", "dokumentiert", "unterschrieben"];
+// `avis_erhalten` ist als Stufe entfallen: der Avis ist eine
+// Zuordnungs-Mechanik, kein Zustand. Bis zur Zahlung steht `versendet`.
 const RECHNUNGEN_STAGES: PipelineStage[] = [
   "rechnung_erstellt",
   "versendet",
-  "avis_erhalten",
   "bezahlt",
 ];
 

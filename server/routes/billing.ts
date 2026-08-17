@@ -98,6 +98,9 @@ import {
   doubleBeihilfePdfs,
   buildCustomerPostAddress,
 } from "../services/invoice-delivery";
+import { invoiceBadges } from "@shared/domain/invoice-badges";
+import { parseInvoiceStatus } from "@shared/schema/billing";
+import { statusesAllowedToTransitionTo } from "@shared/domain/invoice-status";
 
 const router = Router();
 router.use(requireAuth);
@@ -271,13 +274,30 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
             paymentDifferenceResult: cls.result,
           }
         : {}),
-      // Bestandsvertrag aus Task #1822: `teilweise_bezahlt` trägt `paidCents`
-      // und `openAmountCents` — UNABHÄNGIG davon, ob eine Bindung vorliegt.
-      // (Ohne diese Zeile verlor eine teilbezahlte Rechnung ohne gebundene
-      // Zahlung ihre Beträge; genau das hat Fall (d) gefangen.)
-      ...(inv.status === "teilweise_bezahlt"
+      // Bestandsvertrag aus Task #1822: eine TEILBEZAHLTE Rechnung trägt
+      // `paidCents` und `openAmountCents` — unabhängig davon, ob eine Bindung
+      // vorliegt. (Ohne diese Zeile verlor eine teilbezahlte Rechnung ohne
+      // gebundene Zahlung ihre Beträge.)
+      //
+      // Die Bedingung fragt jetzt die ZAHLUNGSSUMME statt einen Status: seit
+      // dem Umbau gibt es `teilweise_bezahlt` als Status nicht mehr, die Frage
+      // dahinter aber schon.
+      ...(cls.result === "underpaid" && t.paidCents > 0
         ? { paidCents: t.paidCents, openAmountCents: cls.differenceCents }
         : {}),
+      // Die Badges — SERVERSEITIG berechnet. Die Überfälligkeits-Regel trägt
+      // die einzige verbliebene Empfänger-Unterscheidung; rechnete der Client
+      // nach, wäre sie sofort wieder zweimal formuliert.
+      badges: invoiceBadges({
+        status: parseInvoiceStatus(inv.status),
+        invoiceType: inv.invoiceType,
+        grossAmountCents: inv.grossAmountCents,
+        paidCents: t.paidCents,
+        dueDate: inv.dueDate ?? null,
+        sentAt: inv.sentAt ? new Date(inv.sentAt).toISOString().slice(0, 10) : null,
+        billingType: inv.billingType,
+        asOfIso: todayISO(),
+      }),
     };
   });
   res.json(enriched);
@@ -292,7 +312,7 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
 // eine Transaktion gebundenen Avis (getClaimedInvoiceIds, SSoT). Verhindert, dass
 // dieselbe Rechnung zwei Zahlungen zufällt.
 router.get("/open-for-match", asyncHandler("Offene Rechnungen konnten nicht geladen werden", async (_req, res) => {
-  const candidates = (await storage.getInvoices({ statuses: ["versendet", "avis_erhalten"] }))
+  const candidates = (await storage.getInvoices({ statuses: statusesAllowedToTransitionTo("bezahlt") }))
     .filter(inv => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }));
   const claimed = await qontoStorage.getClaimedInvoiceIds(db, candidates.map(inv => inv.id));
   res.json(candidates.filter(inv => !claimed.has(inv.id)));
@@ -1075,7 +1095,8 @@ router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht wer
 router.post("/bulk-status", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
   const parsed = z.object({
     invoiceIds: z.array(z.number().int().positive()).min(1).max(200),
-    status: z.enum(["versendet", "avis_erhalten", "bezahlt"]),
+    // `avis_erhalten` ist als Ziel entfallen — der Avis ist kein Status mehr.
+    status: z.enum(["versendet", "bezahlt"]),
   }).safeParse(req.body);
   if (!parsed.success) {
     throw badRequest(fromError(parsed.error).toString());

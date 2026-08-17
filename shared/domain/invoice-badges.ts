@@ -26,6 +26,7 @@
  */
 
 import type { InvoiceStatus } from "../schema/billing";
+import { agingModelForBillingType, resolveAgingBucket } from "./billing-pipeline";
 
 export const INVOICE_BADGES = ["teilweise_bezahlt", "ueberfaellig", "versandt"] as const;
 export type InvoiceBadge = (typeof INVOICE_BADGES)[number];
@@ -47,7 +48,11 @@ export interface InvoiceBadgeInput {
   dueDate: string | null;
   /** Versanddatum (ISO) — Anker für Pflegekassen, und Quelle des Versandt-Badges. */
   sentAt: string | null;
-  /** Zahler-Typ. Siehe Kommentar bei `istUeberfaellig`. */
+  /**
+   * Zahler-Typ. Die EINZIGE legitime Empfänger-Unterscheidung im
+   * Rechnungswesen nach dem Status-Umbau — sie sitzt hier, im Badge, nicht im
+   * Status (Spec, Abschnitt 7.3).
+   */
   billingType: string;
   /** Stichtag. Hereingereicht, nie hier gelesen (Testbarkeit). */
   asOfIso: string;
@@ -83,18 +88,23 @@ export function istTeilweiseBezahlt(input: InvoiceBadgeInput): boolean {
  * Wer künftig eine ZWEITE Stelle mit `billingType` im Rechnungswesen findet,
  * hat einen Rückfall gefunden, keinen Rest.
  */
-export function istUeberfaellig(input: InvoiceBadgeInput, fristTage: number): boolean {
+export function istUeberfaellig(input: InvoiceBadgeInput): boolean {
   if (input.status !== "versendet") return false;
   if (input.paidCents >= input.grossAmountCents) return false;
 
-  const selbstzahler = input.billingType === "selbstzahler" || input.billingType === "privat";
-  const anker = selbstzahler ? input.dueDate : input.sentAt;
-  if (!anker) return false;
-
-  const tage = tageZwischen(anker, input.asOfIso);
-  // Beim Selbstzahler IST das Fälligkeitsdatum die Frist; bei der Kasse zählt
-  // die Wartefrist ab Versand.
-  return selbstzahler ? tage > 0 : tage > fristTage;
+  // KEINE eigene Frist-Zahl. Der erste Entwurf dieser Funktion trug einen
+  // `fristTage`-Parameter — und hätte damit eine ZWEITE Definition von
+  // „überfällig" neben die bestehende Aging-Ampel gestellt. Genau die Sorte
+  // Zweitbegriff, gegen die der ganze Umbau läuft.
+  //
+  // Stattdessen komponiert: Anker aus `agingModelForBillingType`, Schwelle aus
+  // `resolveAgingBucket`. „Überfällig" ist alles, was die Ampel nicht mehr
+  // grün nennt — beim Selbstzahler ab dem Tag nach Fälligkeit, bei der Kasse
+  // nach der Wartefrist ab Versand.
+  const model = agingModelForBillingType(input.billingType);
+  const anker = model === "selbstzahler" ? input.dueDate : input.sentAt;
+  const bucket = resolveAgingBucket(model, anker, input.asOfIso);
+  return bucket !== "green" && bucket !== "none";
 }
 
 /**
@@ -113,17 +123,10 @@ export function istVersandt(input: InvoiceBadgeInput): boolean {
 }
 
 /** Alle zutreffenden Badges einer Rechnung. Reihenfolge = Anzeigereihenfolge. */
-export function invoiceBadges(input: InvoiceBadgeInput, fristTage: number): InvoiceBadge[] {
+export function invoiceBadges(input: InvoiceBadgeInput): InvoiceBadge[] {
   const badges: InvoiceBadge[] = [];
   if (istTeilweiseBezahlt(input)) badges.push("teilweise_bezahlt");
-  if (istUeberfaellig(input, fristTage)) badges.push("ueberfaellig");
+  if (istUeberfaellig(input)) badges.push("ueberfaellig");
   if (istVersandt(input)) badges.push("versandt");
   return badges;
-}
-
-/** Ganztägige Differenz `asOf - anker` in Tagen. */
-function tageZwischen(ankerIso: string, asOfIso: string): number {
-  const a = new Date(`${ankerIso.slice(0, 10)}T00:00:00Z`).getTime();
-  const b = new Date(`${asOfIso.slice(0, 10)}T00:00:00Z`).getTime();
-  return Math.floor((b - a) / 86_400_000);
 }

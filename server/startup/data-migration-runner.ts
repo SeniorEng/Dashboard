@@ -22,7 +22,7 @@
  * → der nächste Boot versucht sie erneut ("re-arm").
  *
  * Für die GoBD-Backfills (`backfill-orphan-reversal-appointment-id`,
- * `backfill-storno-transaction-date`, `backfill-avis-received-status`) setzt der
+ * `backfill-storno-transaction-date`) setzt der
  * Wrapper den transaktions-lokalen GoBD-Bypass (`gobdBypass: true`); die übrigen
  * Migrationen berühren keine GoBD-geschützten Tabellen (`gobdBypass: false`).
  * Der Conservation-Check des Wrappers ist für alle hier registrierten
@@ -93,7 +93,6 @@ export async function buildPreBudgetRegistry(): Promise<GuardedBudgetMigration[]
   const { migrateMonthlyWorkHoursToNumeric } = await import("./migrate-monthly-work-hours-to-numeric");
   const { backfillOrphanReversalAppointmentId } = await import("./backfill-orphan-reversal-appointment-id");
   const { backfillStornoTransactionDate } = await import("./backfill-storno-transaction-date");
-  const { backfillAvisReceivedStatus } = await import("./backfill-avis-received-status");
   const { backfillInvoiceIssuedAt } = await import("./backfill-invoice-issued-at");
   const { clear45bMonthlyLimits } = await import("./clear-45b-monthly-limits");
   const { migrateInProgressAppointments } = await import("./migrate-in-progress-appointments");
@@ -132,14 +131,6 @@ export async function buildPreBudgetRegistry(): Promise<GuardedBudgetMigration[]
       conservationCheck: false,
       migrate: async (tx) => {
         await backfillStornoTransactionDate(undefined, tx);
-      },
-    },
-    {
-      name: "backfill-avis-received-status",
-      gobdBypass: true,
-      conservationCheck: false,
-      migrate: async (tx) => {
-        await backfillAvisReceivedStatus(tx);
       },
     },
     {
