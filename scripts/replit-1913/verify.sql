@@ -179,3 +179,69 @@ SELECT a.id, a.date, a.assigned_employee_id,
 FROM appointments a
 WHERE a.id IN (915,917,918,919,922,923,924,925,926,1123,1754,1755,1756)
 ORDER BY a.date;
+
+-- ---------------------------------------------------------------------------
+-- (F) SIND ES ÜBERHAUPT 13? — Gegenprüfung gegen Abwesenheit und Kollision
+--
+--     Diese Abfrage ist NACHTRÄGLICH entstanden, aus der Lohn-Frage heraus, und
+--     sie stellt die Prämisse des Tickets in Frage. Gegen die Referenz-Kopie
+--     gemessen sind von den 13 nur drei eindeutig „geleistet und verloren".
+--
+--     Zwei Ausschluss-Gründe, beide hier geprüft:
+--
+--     1. ABWESEND. War die Kraft an dem Tag im Urlaub oder krank, kann der
+--        Termin nicht stattgefunden haben. Die Absage war dann richtig, und ein
+--        Zurückholen erzeugte einen Termin, den niemand dokumentieren kann.
+--
+--     2. KOLLISION mit einem GELEISTETEN Termin zur selben Zeit. Die Kraft kann
+--        nicht an zwei Orten sein. Zwei Unterfälle, und der Unterschied
+--        entscheidet:
+--          - SELBER Kunde  -> der Besuch HAT stattgefunden, nur unter einer
+--            anderen Termin-ID. Das ist die Handschrift einer Serien-ÄNDERUNG
+--            (alter Termin abgesagt, neuer angelegt), nicht die eines Verlusts.
+--            Zurückholen wäre hier aktiv schädlich: doppelte Leistung, bei
+--            Abrechnung doppelte Belastung der Kundin.
+--          - ANDERER Kunde -> die Kraft war anderswo. Der abgesagte Besuch fand
+--            nicht statt.
+--
+--     Nur was WEDER abwesend NOCH kollidierend ist und wo die Kraft an dem Tag
+--     nachweislich gearbeitet hat, ist ein Opfer im Sinne des Tickets.
+-- ---------------------------------------------------------------------------
+SELECT
+  a.id, a.date, a.assigned_employee_id AS kraft, a.scheduled_start, a.customer_id AS kunde,
+  (SELECT e.entry_type FROM employee_time_entries e
+    WHERE e.deleted_at IS NULL AND e.user_id = a.assigned_employee_id
+      AND e.entry_date = a.date AND e.entry_type IN ('urlaub','krankheit') LIMIT 1) AS abwesend,
+  k.id            AS kollidiert_mit,
+  k.customer_id   AS kunde_der_kollision,
+  (a.customer_id = k.customer_id) AS selber_kunde,
+  (SELECT count(*) FROM appointments o
+    WHERE o.deleted_at IS NULL AND o.performed_by_employee_id = a.assigned_employee_id
+      AND o.date = a.date AND o.status = 'completed') AS geleistet_am_tag,
+  CASE
+    WHEN (SELECT 1 FROM employee_time_entries e
+           WHERE e.deleted_at IS NULL AND e.user_id = a.assigned_employee_id
+             AND e.entry_date = a.date AND e.entry_type IN ('urlaub','krankheit') LIMIT 1) IS NOT NULL
+      THEN 'KEIN OPFER — Kraft war abwesend'
+    WHEN k.id IS NOT NULL AND a.customer_id = k.customer_id
+      THEN 'KEIN OPFER — Besuch fand statt, andere Termin-ID (Serien-Aenderung)'
+    WHEN k.id IS NOT NULL
+      THEN 'KEIN OPFER — Kraft war zur selben Zeit bei anderer Kundin'
+    WHEN (SELECT count(*) FROM appointments o
+           WHERE o.deleted_at IS NULL AND o.performed_by_employee_id = a.assigned_employee_id
+             AND o.date = a.date AND o.status = 'completed') > 0
+      THEN 'OPFER — Kraft arbeitete an dem Tag, dieser Termin verschwand'
+    ELSE 'UNKLAR — an dem Tag ist gar nichts geleistet worden'
+  END AS befund
+FROM appointments a
+LEFT JOIN LATERAL (
+  SELECT o.id, o.customer_id FROM appointments o
+   WHERE o.deleted_at IS NULL AND o.id <> a.id
+     AND o.performed_by_employee_id = a.assigned_employee_id AND o.date = a.date
+     AND o.status = 'completed'
+     AND o.scheduled_start < (a.scheduled_start + (a.duration_promised || ' minutes')::interval)
+     AND (o.scheduled_start + (o.duration_promised || ' minutes')::interval) > a.scheduled_start
+   LIMIT 1
+) k ON true
+WHERE a.id IN (915,917,918,919,922,923,924,925,926,1123,1754,1755,1756)
+ORDER BY a.assigned_employee_id, a.date;
