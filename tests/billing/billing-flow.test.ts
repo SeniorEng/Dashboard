@@ -772,9 +772,20 @@ describe("BF-3: Storno (Stornorechnung + Audit + Schutz)", () => {
     for (const li of stornoDetail.lineItems) {
       expect(li.totalCents).toBeLessThanOrEqual(0);
     }
-    // BL-12: Stornorechnung wird als "entwurf" angelegt; Versand erfolgt
-    // durch den Buchhalter aktiv über den Send-Pfad.
-    expect(stornoDetail.status).toBe("entwurf");
+    // Vor dem Status-Umbau (BL-12) startete die Stornorechnung als "entwurf" —
+    // mit der Begründung, der Buchhalter versende sie aktiv über den Send-Pfad.
+    //
+    // Das vermischte zwei Fragen. "Entwurf" heißt: das Dokument kann noch
+    // geändert oder verworfen werden. Auf ein Storno-Dokument trifft das nie zu:
+    // es entsteht als Spiegelbild eines bereits gestellten Belegs, ist im selben
+    // Moment inhaltlich fertig und darf danach nichts anderes mehr werden.
+    // In Produktion standen deshalb 114 solcher Dokumente dauerhaft auf
+    // "entwurf" — ein Zustand, den keines von ihnen je verließ.
+    //
+    // Der Versand bleibt davon unberührt: dass ein fertiges Dokument noch
+    // verschickt werden kann, sagt jetzt das Badge `versandt` (`sent_at`),
+    // nicht der Status.
+    expect(stornoDetail.status).toBe("abgeschlossen");
   });
 
   it("BF-3.2 — Stornorechnung kann NICHT erneut storniert werden", async () => {
@@ -1746,7 +1757,18 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     // UND dass nichts angefasst wurde.
     expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(400);
     // BEIDE werden jetzt uebersprungen — versendet wie bezahlt.
-    expect(JSON.stringify(res.data)).toMatch(/versendet, avis_erhalten, bezahlt/);
+    //
+    // Geprüft wird, dass die Absage die ZULÄSSIGEN Ziele nennt (sonst rät der
+    // Aufrufer). Die Liste wird bewusst nicht als ein Stück gematcht: sie stand
+    // hier als `/versendet, avis_erhalten, bezahlt/` und war damit eine zweite,
+    // stille Kopie des Zod-Enums — beim Status-Umbau fiel sie genau deshalb um.
+    const meldung = JSON.stringify(res.data);
+    expect(meldung).toMatch(/versendet/);
+    expect(meldung).toMatch(/bezahlt/);
+    // Und der entfallene Wert taucht nicht mehr auf. Das ist die Aussage, die
+    // der Umbau hier hinterlässt: `avis_erhalten` ist als Ziel nicht mehr
+    // anfragbar, weil es ihn nicht mehr gibt.
+    expect(meldung).not.toMatch(/avis_erhalten/);
 
     const sentAfter = await apiGet<any>(`/api/billing/${sent.id}`);
     expect(sentAfter.data.status, "versendete Rechnung bleibt versendet").toBe("versendet");

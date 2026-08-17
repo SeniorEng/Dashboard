@@ -125,15 +125,17 @@ export interface InvoiceItem {
   // Paar Original ↔ Stornorechnung sichtbar zu verlinken. NULL bei normalen
   // Rechnungen.
   stornierteRechnungId: number | null;
-  // Task #1822: Nur im Zustand `teilweise_bezahlt` gesetzt. `paidCents` = Σ der
+  // Task #1822: Nur bei einer TEILZAHLUNG gesetzt — bis zum Status-Umbau war
+  // das der Zustand `teilweise_bezahlt`, heute entscheidet die Zahlungssumme
+  // (Badge). `paidCents` = Σ der
   // bereits eingegangenen, gebundenen Zahlungen; `openAmountCents` = offener Rest
   // (Brutto − Skonto − gezahlt). Beide stammen aus derselben SSoT wie der
   // Status-Schreibpfad (`getInvoicePaymentTotals` + `classifyPaymentDifference`),
   // damit Anzeige und Buchung nie auseinanderlaufen. Sonst undefined.
   paidCents?: number;
   openAmountCents?: number;
-  // #1897 — Zahlungsbindung für JEDE offene Rechnung (nicht nur
-  // `teilweise_bezahlt`). Ohne diese Felder konnte die Liste den Fall
+  // #1897 — Zahlungsbindung für JEDE offene Rechnung (nicht nur teilbezahlte).
+  // Ohne diese Felder konnte die Liste den Fall
   // „Geld ist da, Freigabe fehlt" nicht von „nichts eingegangen" unterscheiden
   // und hat ihn weiter angemahnt.
   //
@@ -295,7 +297,7 @@ export interface BulkDeleteResponse {
   results: BulkDeleteResultItem[];
 }
 
-// Task #1376 — Sammel-Statuswechsel (versendet/avis_erhalten/bezahlt). Pro
+// Task #1376 — Sammel-Statuswechsel (versendet/bezahlt). Pro
 // Rechnung gilt dieselbe Übergangs-SSoT wie beim Einzel-Statuswechsel;
 // ungültige Übergänge werden als `"skipped"` mit `reason` gemeldet.
 export interface BulkStatusResultItem {

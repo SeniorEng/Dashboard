@@ -527,9 +527,9 @@ class QontoService {
 
         // Task #1822 — Status aus dem KUMULIERTEN Zahlungsstand ableiten (Σ aller
         // gebundenen Zahlungen inkl. der soeben gebundenen), nicht nur aus dieser
-        // einen Transaktion. Unterzahlung ⇒ „teilweise_bezahlt", Volldeckung ⇒
-        // „bezahlt", Über-Toleranz-Überzahlung ⇒ nur binden + Mismatch-Flag
-        // (nie still als Vollzahlung gebucht).
+        // einen Transaktion. Volldeckung ⇒ „bezahlt"; Unterzahlung ⇒ kein
+        // Statuswechsel (Badge aus der Summe); Über-Toleranz-Überzahlung ⇒ nur
+        // binden + Mismatch-Flag (nie still als Vollzahlung gebucht).
         const totals = (await qontoStorage.getInvoicePaymentTotals([match.invoiceId], dbTx)).get(match.invoiceId)
           ?? { paidCents: 0, skontoCents: 0 };
         const decision = resolveInvoicePaymentStatus({
@@ -538,12 +538,25 @@ class QontoService {
           skontoCents: totals.skontoCents,
         });
 
-        if (decision.status === "bezahlt" || decision.status === "teilweise_bezahlt") {
-          const nextStatus = decision.status;
+        // ── Verzweigung ueber die KLASSIFIKATION, nicht ueber den Status ────
+        //
+        // Vor dem Status-Umbau fragte diese Stelle `decision.status` ab und kam
+        // damit aus: es gab drei Status, also drei Ausgaenge. Seit
+        // `teilweise_bezahlt` ein Badge ist, liefert `decision.status` nur noch
+        // `"bezahlt"` oder `null` — und `null` bedeutet ZWEI verschiedene Dinge:
+        // Unterzahlung (voellig normal, es fehlt nur noch Geld) und
+        // Ueber-Toleranz-Ueberzahlung (echter Prueffall).
+        //
+        // Wer weiter auf `null` verzweigt, wirft beide zusammen und meldet jede
+        // Teilzahlung als `invoice_payment_mismatch` zur manuellen Pruefung —
+        // waehrend `invoice_partial_payment` im Auto-Pfad nie mehr entstuende.
+        // Genau diese Sorte stiller Zusammenlegung ist der Grund fuer den Umbau;
+        // sie darf ihn nicht ueberleben.
+        const ergebnis = decision.classification.result;
+
+        if (decision.status === "bezahlt") {
           const invoiceUpdate = await dbTx.update(invoices)
-            .set(nextStatus === "bezahlt"
-              ? { status: "bezahlt", paidAt: qtx.emittedAt }
-              : { status: "teilweise_bezahlt" })
+            .set({ status: "bezahlt", paidAt: qtx.emittedAt })
             .where(and(
               eq(invoices.id, match.invoiceId),
               inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
@@ -559,7 +572,45 @@ class QontoService {
 
           audit.record({
             userId,
-            action: nextStatus === "bezahlt" ? "invoice_payment_reconciled" : "invoice_partial_payment",
+            action: "invoice_payment_reconciled",
+            entityType: "invoice",
+            entityId: match.invoiceId,
+            metadata: {
+              qontoTransactionId: qtx.id,
+              qontoTransactionExternalId: qtx.qontoTransactionId,
+              matchedBy: "auto",
+              confidence,
+              amountCents: qtx.amountCents,
+              cumulativePaidCents: totals.paidCents,
+              cumulativeSkontoCents: totals.skontoCents,
+              invoiceGrossCents: match.invoiceGrossCents,
+              differenceCents: decision.classification.differenceCents,
+              result: decision.classification.result,
+            },
+            ipAddress,
+          });
+        } else if (ergebnis === "underpaid") {
+          // Teilzahlung. Es wird KEIN Status geschrieben — die Rechnung wartet
+          // weiter auf Zahlung, genau wie vorher. Dass schon Geld da ist, sagt
+          // die gebundene Summe (Badge „Teilweise bezahlt").
+          //
+          // Der Nebenwirkungs-Schutz des Schreibpfads muss trotzdem greifen:
+          // die frueher hier ausgefuehrte Bedingung `WHERE status IN (…)`
+          // liess den Match auflaufen, wenn die Rechnung zwischenzeitlich
+          // storniert wurde. Ohne Schreibvorgang gibt es diese Bedingung nicht
+          // mehr, also wird derselbe Zustand ausdruecklich nachgelesen — sonst
+          // haenge man eine Zahlung an eine stornierte Rechnung.
+          const [nochOffen] = await dbTx.select({ status: invoices.status })
+            .from(invoices)
+            .where(and(
+              eq(invoices.id, match.invoiceId),
+              inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
+            ));
+          if (!nochOffen) throw new Error("INVOICE_STATUS_CHANGED");
+
+          audit.record({
+            userId,
+            action: "invoice_partial_payment",
             entityType: "invoice",
             entityId: match.invoiceId,
             metadata: {
@@ -577,7 +628,7 @@ class QontoService {
             ipAddress,
           });
         } else {
-          // Über-Toleranz-Überzahlung (decision.status === null): Transaktion
+          // Über-Toleranz-ÜBERZAHLUNG: Transaktion
           // bleibt an die Rechnung gebunden, aber die Rechnung wird NICHT still
           // auf „bezahlt" gesetzt, sondern nur zur manuellen Prüfung markiert.
           // Seit Task #1788 wird der Sonderfall „Sammelzahlung nennt EINE

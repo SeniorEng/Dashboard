@@ -337,7 +337,8 @@ class QontoStorage {
   /**
    * Task #1672 — offene Avise für den Sammel-Avis-Match: nicht gelöschte Avise
    * mit gesetztem Gesamtbetrag, die mindestens eine zugeordnete Rechnung im
-   * Status `versendet`/`avis_erhalten` tragen (bezahlt/storniert zählen NICHT).
+   * Status `versendet` tragen (bezahlt/storniert zählen NICHT; `avis_erhalten`
+   * ist mit dem Status-Umbau entfallen — der Avis ist eine Zuordnung).
    * Liefert je Avis die offenen Rechnungs-IDs und ihre Summe (Integer-Cents) für
    * die Triple-Equality. Bereits per Sammelzahlung geschlossene Avise fallen
    * automatisch heraus (ihre Rechnungen sind dann `bezahlt` ⇒ keine offenen).
@@ -534,7 +535,7 @@ class QontoStorage {
    * an eine Qonto-Transaktion gebunden (`matched_invoice_id`) ODER Mitglied eines
    * Zahlungsavis, das SELBST an eine Qonto-Transaktion gebunden ist
    * (`qonto_transactions.matched_payment_advice_id`). Ein bloß importiertes, aber
-   * noch NICHT mit einer Bank-Zahlung abgeglichenes Avis (Status `avis_erhalten`)
+   * noch NICHT mit einer Bank-Zahlung abgeglichenes Avis
    * beansprucht seine Rechnungen NICHT — sie bleiben manuell zuordenbar. Wird
    * sowohl im Picker-Lesepfad als auch im Schreib-Guard des Bulk-Match innerhalb
    * der Transaktion verwendet, damit dieselbe Rechnung nie zwei Zahlungen zufällt.
@@ -646,7 +647,7 @@ class QontoStorage {
    *       ist also tatsächlich eingegangen.
    *
    * Genutzt vom Einzelrechnungs-Match-Schreibpfad, um über die SSoT
-   * `resolveInvoicePaymentStatus` „teilweise_bezahlt" vs. „bezahlt" abzuleiten —
+   * `resolveInvoicePaymentStatus` abzuleiten, ob die Rechnung gedeckt ist —
    * mehrere Teilüberweisungen summieren sich auf denselben Restbetrag. `exec`
    * erlaubt die Ausführung IN der Match-Transaktion, damit die soeben gebundene
    * Zahlung mitgezählt wird.

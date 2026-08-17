@@ -270,7 +270,10 @@ describe("Task #1652 — Cascade-Storno erzeugt Storno-Rechnungen + Audit identi
       (o) => `${o.netAmountCents}|${o.vatAmountCents}|${o.grossAmountCents}`,
     );
     for (const st of stornosAfter) {
-      expect(st.status, `Storno ${st.id} muss als Entwurf starten`).toBe("entwurf");
+      // Storno-Dokumente entstehen FERTIG, nicht als Entwurf (Status-Umbau,
+      // `docs/rechnungsstatus-zielmodell.md`): sie spiegeln einen bereits
+      // gestellten Beleg und bewegen sich danach nicht mehr.
+      expect(st.status, `Storno ${st.id} muss fertig entstehen`).toBe("abgeschlossen");
       // Behavior-Quirk der SSoT (bewusst festgeschrieben): ALLE Storno-
       // Geschwister referenzieren die PATCH-Ziel-Rechnung (rootInvoiceId),
       // nicht ihr jeweiliges eigenes Original.

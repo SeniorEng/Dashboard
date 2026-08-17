@@ -35,7 +35,7 @@ import {
   applyProposals,
 } from "../../../scripts/verify-advice-backfill";
 import { updateInvoiceStatusTx } from "../../storage/billing-storage";
-import { statusesAllowedToTransitionTo } from "@shared/domain/invoice-status";
+import { statusesAllowedToTransitionTo, statusesAllowedToReverseTo } from "@shared/domain/invoice-status";
 
 const router = Router();
 router.use(requireSuperAdmin);
@@ -268,8 +268,9 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
 
     // Task #1822 — Status aus dem KUMULIERTEN Zahlungsstand ableiten (Σ aller
     // gebundenen Zahlungen inkl. der soeben gebundenen), nicht nur aus dieser
-    // einen Transaktion. Aus einer Unterzahlung wird „teilweise_bezahlt" statt
-    // still offen zu bleiben; erst die Volldeckung setzt „bezahlt".
+    // einen Transaktion. Erst die Volldeckung setzt „bezahlt"; eine
+    // Unterzahlung wechselt den Status NICHT — sie zeigt sich in der
+    // Zahlungssumme und im Badge „Teilweise bezahlt".
     const totals = (await qontoStorage.getInvoicePaymentTotals([invoiceId], dbTx)).get(invoiceId)
       ?? { paidCents: 0, skontoCents: 0 };
     decision = resolveInvoicePaymentStatus({
@@ -678,7 +679,7 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
       // Zuruecksetzen fuehrt IMMER nach `versendet`.
       //
       // Vorher wurde hier je Rechnung unterschieden, ob noch eine Avis-Deckung
-      // besteht (`avis_erhalten`) oder nicht (`versendet`) — inklusive einer
+      // besteht — inklusive einer
       // Schleife mit einer Query je Rechnung. Beides entfaellt: der Avis ist
       // eine Zuordnungs-Mechanik, kein Zustand. Faellt die Zahlung weg, wartet
       // die Rechnung wieder auf Zahlung, ob ein Avis vorliegt oder nicht.
@@ -687,9 +688,15 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
       // Zuordnungs-Quelle, nur eben nicht mehr im Status abgebildet.
       const reverted: number[] = [];
       if (adviceInvoiceIds.length > 0) {
+        // Ausgangs-Status aus der Ruecknahme-SSoT, nicht hingeschrieben —
+        // sonst deklariert `INVOICE_STATUS_REVERSAL_TRANSITIONS` die Regel und
+        // dieser Pfad fuehrt sie unabhaengig davon aus.
         const revertUpdate = await dbTx.update(invoices)
           .set({ status: "versendet", paidAt: null })
-          .where(and(inArray(invoices.id, adviceInvoiceIds), eq(invoices.status, "bezahlt")))
+          .where(and(
+            inArray(invoices.id, adviceInvoiceIds),
+            inArray(invoices.status, statusesAllowedToReverseTo("versendet")),
+          ))
           .returning({ id: invoices.id });
         reverted.push(...revertUpdate.map(r => r.id));
       }
@@ -752,8 +759,7 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
     // Match-Schreibpfad: `getInvoicePaymentTotals` + `resolveInvoicePaymentStatus`).
     // So fällt eine teilweise_bezahlte Rechnung nach dem Entfernen ihrer
     // (Teil-)Zahlung korrekt zurück, statt am Status „teilweise_bezahlt" hängen zu
-    // bleiben. `versendet`/`avis_erhalten`/`storniert` bleiben unangetastet, eine
-    // noch bestehende Avis-Zuordnung wird respektiert (→ avis_erhalten).
+    // bleiben. `versendet`/`storniert` bleiben unangetastet.
     let resultingStatus: string | undefined;
     const [invRow] = await dbTx
       .select({ status: invoices.status, grossAmountCents: invoices.grossAmountCents })
@@ -782,7 +788,11 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
       // hier stand ein Direkt-Update, das die Uebergangs-SSoT umging.
       if (remaining.paidCents <= 0 || decision.classification.result === "underpaid") {
         resultingStatus = "versendet";
-        await updateInvoiceStatusTx(dbTx, previousInvoiceId, "versendet", req.user!.id);
+        await updateInvoiceStatusTx(dbTx, previousInvoiceId, "versendet", req.user!.id, {
+          // Zahlungs-Ruecknahme: die Bindung wurde geloest, das Geld ist weg.
+          // Der einzige Weg, auf dem `bezahlt -> versendet` zulaessig ist.
+          zahlungsRuecknahme: true,
+        });
         await dbTx.update(invoices)
           .set({ paidAt: null })
           .where(eq(invoices.id, previousInvoiceId));
@@ -1329,7 +1339,7 @@ async function autoMatchAvisItems(
     }
 
     // 3) Betrags-Fallback: keine Referenz-Zuordnung ⇒ genau EINE offene Rechnung
-    //    (versendet/avis_erhalten) mit exakt passendem Bruttobetrag.
+    //    (offen laut Uebergangs-SSoT) mit exakt passendem Bruttobetrag.
     if (matchedId === null && item.betragCents > 0) {
       const byAmount = await db.select({ id: invoices.id })
         .from(invoices)
@@ -1347,29 +1357,31 @@ async function autoMatchAvisItems(
       await qontoStorage.updatePaymentAdviceItemMatch(item.id, invoiceId);
       matched++;
 
-      // Task #1284 — Avis-Treffer setzt die Rechnung von "versendet" auf
-      // "avis_erhalten". Bereits bezahlte/stornierte Rechnungen werden NICHT
-      // herabgestuft (Guard auf status='versendet'), audit-protokolliert.
-      await withAudit(async (dbTx, audit) => {
-        const flipped = await dbTx.update(invoices)
-          .set({ status: "avis_erhalten" })
-          .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")))
-          .returning({ id: invoices.id });
-
-        if (flipped.length > 0) {
-          audit.record({
-            userId,
-            action: "invoice_avis_received",
-            entityType: "invoice",
-            entityId: invoiceId,
-            metadata: {
-              paymentAdviceItemId: item.id,
-              rechnungsNummer: searchNum,
-              matchedBy: "avis",
-            },
-            ipAddress,
-          });
-        }
+      // Der Avis-Treffer aendert den STATUS NICHT mehr.
+      //
+      // Bis zum Status-Umbau wurde die Rechnung hier von `versendet` auf
+      // `avis_erhalten` gehoben. Der Avis ist aber eine ZUORDNUNGS-Mechanik: er
+      // verbindet einen angekuendigten Geldeingang mit einer Rechnung, genau
+      // wie eine Qonto-Banktransaktion. Bezahlt ist die Rechnung damit nicht,
+      // und ihr Zustand aendert sich nicht — sie wartet weiter auf Zahlung.
+      //
+      // Die ZUORDNUNG selbst bleibt vollstaendig erhalten
+      // (`updatePaymentAdviceItemMatch` oben) und mit ihr der Audit-Eintrag:
+      // dass ein Avis eine Rechnung getroffen hat, ist ein Ereignis und gehoert
+      // protokolliert. Nur der Status hat davon nichts mehr.
+      await withAudit(async (_dbTx, audit) => {
+        audit.record({
+          userId,
+          action: "invoice_avis_received",
+          entityType: "invoice",
+          entityId: invoiceId,
+          metadata: {
+            paymentAdviceItemId: item.id,
+            rechnungsNummer: searchNum,
+            matchedBy: "avis",
+          },
+          ipAddress,
+        });
       });
     }
   }
@@ -1526,7 +1538,7 @@ router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen
   const advices = await qontoStorage.getPaymentAdvices();
 
   // Task #1284 — Pro Avis anreichern, wie viele zugeordnete Rechnungen es gibt
-  // und wie viele davon noch offen (versendet/avis_erhalten) sind. Das FE blendet
+  // und wie viele davon noch offen sind. Das FE blendet
   // den "Als bezahlt markieren"-Button nur ein, wenn offene Treffer existieren.
   const matchedInvoiceIds = Array.from(new Set(
     advices.flatMap(a => a.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null)),
@@ -1551,7 +1563,7 @@ router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen
   const enriched = advices.map(a => {
     const matchedIds = a.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null);
     const unpaidMatchedCount = matchedIds.filter(
-      id => statusById.get(id) === "versendet" || statusById.get(id) === "avis_erhalten",
+      id => statusesAllowedToTransitionTo("bezahlt").includes(statusById.get(id) ?? ""),
     ).length;
     const items = a.items.map(i => {
       if (i.matchedInvoiceId == null) {
@@ -1591,7 +1603,7 @@ router.get("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht gelad
 }));
 
 // Task #1284 — "Avis als bezahlt markieren": setzt alle dem Avis zugeordneten,
-// noch offenen Rechnungen (versendet/avis_erhalten) auf "bezahlt". paidAt kommt
+// noch offenen Rechnungen auf "bezahlt". paidAt kommt
 // aus dem Zahlungsdatum des Avis (Fallback: jetzt). Bereits bezahlte/stornierte
 // Rechnungen werden übersprungen (nie herabstufen). GoBD-auditiert.
 router.post("/payment-advices/:id/mark-paid", asyncHandler("Avis konnte nicht als bezahlt markiert werden", async (req, res) => {
@@ -1713,28 +1725,18 @@ router.delete("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht ge
       throw notFound("Zahlungsavis nicht gefunden");
     }
 
-    // Task #1284 — Löschen eines Avis nimmt den von ihm gesetzten
-    // "avis_erhalten"-Status zurück (→ versendet). Bezahlte/stornierte
-    // Rechnungen bleiben unangetastet.
-    if (matchedInvoiceIds.length > 0) {
-      const resetRows = await dbTx.update(invoices)
-        .set({ status: "versendet" })
-        .where(and(
-          inArray(invoices.id, matchedInvoiceIds),
-          eq(invoices.status, "avis_erhalten"),
-        ))
-        .returning({ id: invoices.id });
-
-      for (const row of resetRows) {
-        audit.record({
-          userId: req.user!.id,
-          action: "invoice_avis_reverted",
-          entityType: "invoice",
-          entityId: row.id,
-          metadata: { paymentAdviceId: id, reason: "advice_deleted" },
-          ipAddress: req.ip,
-        });
-      }
+    // Das Loeschen eines Avis nimmt keinen Status mehr zurueck — es gibt
+    // keinen, den der Avis gesetzt haette. Der Audit-Eintrag bleibt: dass die
+    // Zuordnung wegfaellt, ist ein Ereignis.
+    for (const invId of matchedInvoiceIds) {
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_avis_reverted",
+        entityType: "invoice",
+        entityId: invId,
+        metadata: { paymentAdviceId: id, reason: "advice_deleted" },
+        ipAddress: req.ip,
+      });
     }
   }, { faults: readTestFaults(req) });
 

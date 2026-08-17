@@ -16,8 +16,9 @@ export async function getInvoices(filters: { year?: number; month?: number; cust
   if (filters.month) conditions.push(eq(invoices.billingMonth, filters.month));
   if (filters.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
   if (filters.status) conditions.push(eq(invoices.status, filters.status as string));
-  // Task #1859 — Mehr-Status-Filter (z.B. versendet + avis_erhalten für den
-  // Zahlungs-Zuordnungs-Picker). Wirkt zusätzlich zum Einzel-`status`.
+  // Task #1859 — Mehr-Status-Filter für den Zahlungs-Zuordnungs-Picker.
+  // Wirkt zusätzlich zum Einzel-`status`. (Er trug ursprünglich `versendet` +
+  // `avis_erhalten`; seit dem Status-Umbau ist nur noch `versendet` gemeint.)
   if (filters.statuses && filters.statuses.length > 0) {
     conditions.push(inArray(invoices.status, filters.statuses));
   }
@@ -151,6 +152,7 @@ export async function updateInvoiceStatusTx(
   id: number,
   status: string,
   _userId: number,
+  opts?: { zahlungsRuecknahme?: boolean },
 ): Promise<Invoice> {
   const { invoices } = await import("@shared/schema");
   const { eq, sql } = await import("drizzle-orm");
@@ -166,7 +168,7 @@ export async function updateInvoiceStatusTx(
   if (!ist) {
     throw new Error(`Rechnung ${id} nicht gefunden.`);
   }
-  if (ist.status !== status && !isAllowedInvoiceStatusTransition(ist.status, status)) {
+  if (ist.status !== status && !isAllowedInvoiceStatusTransition(ist.status, status, opts)) {
     throw new Error(
       `Unzulaessiger Statuswechsel fuer Rechnung ${id}: "${ist.status}" -> "${status}". ` +
       `Erlaubte Uebergaenge: shared/domain/invoice-status.ts`,

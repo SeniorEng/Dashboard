@@ -62,7 +62,8 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   index("qonto_transactions_side_idx").on(table.side),
   // Task #1822 — KEIN Unique-Index mehr auf matched_invoice_id: mehrere
   // Teilüberweisungen dürfen sich auf DIESELBE Rechnung legen und summieren
-  // sich zum Restbetrag auf (Zustand "teilweise_bezahlt"). Der frühere
+  // sich zum Restbetrag auf. (Das hiess bis zum Status-Umbau "teilweise_bezahlt"
+  // und war ein Status; heute ist es ein Badge aus der Zahlungssumme.) Der frühere
   // partielle Unique-Index (qonto_transactions_matched_invoice_unique_idx,
   // Task #445) wird beim Boot per Migration entfernt
   // (server/startup/drop-qonto-match-unique-index.ts). Die Per-Transaktions-

@@ -3,7 +3,7 @@
  *
  * Verifiziert gegen eine echte DB + den laufenden App-Server:
  *   1. Struktur-Invarianten der `GET /api/billing/pipeline`-Antwort
- *      (7 Stufen, 3 Side-Badges, Σ-Konsistenz Stufen/Side/Grand,
+ *      (6 Stufen, 5 Side-Zustände, Σ-Konsistenz Stufen/Side/Grand,
  *      Σ Karten-Cents === Stufen-Cents).
  *   2. €-Konservierung (Q1) als KREUZ-SSoT-Gleichheit: Der Pipeline-Reader und
  *      die bestehende Umsatz-Statistik (`getRevenueStats`) MÜSSEN für denselben
@@ -115,7 +115,7 @@ function round(n: number): number {
 }
 
 describe("GET /api/billing/pipeline — Pipeline-Reader (Task #1405)", () => {
-  it("liefert 7 Stufen + 3 Side-Badges mit konsistenten Σ-Invarianten und €-Konservierung pro Kunde", async () => {
+  it("liefert 6 Stufen + 5 Side-Zustaende mit konsistenten Σ-Invarianten und €-Konservierung pro Kunde", async () => {
     const { year, month } = pastMonth();
     const customerId = await createCustomer(`P-${uniqueId()}`);
 
@@ -133,11 +133,16 @@ describe("GET /api/billing/pipeline — Pipeline-Reader (Task #1405)", () => {
     const body = res.data;
 
     // --- Struktur-Invarianten ---
-    expect(body.stages).toHaveLength(7);
-    // Task #1874: Side-Zustand „Wartet auf Kundenunterschrift" hinzugekommen (3→4).
-    expect(body.sides).toHaveLength(4);
+    // Status-Umbau: die Stufe `avis_erhalten` ist entfallen (7→6). Sie bildete
+    // einen Zwischenzustand ab, den es nicht mehr gibt — der Avis ist eine
+    // Zuordnung, kein Zustand. Eine Rechnung mit Avis wartet in `versendet`.
+    expect(body.stages).toHaveLength(6);
+    // Task #1874: „Wartet auf Kundenunterschrift" (3→4).
+    // Status-Umbau: `storno_dokument` (4→5) — das Storno-DOKUMENT ist ein
+    // eigener Zustand, nicht dasselbe wie die stornierte RECHNUNG.
+    expect(body.sides).toHaveLength(5);
     expect(body.stages.map((s) => s.stage)).toEqual([
-      "offen", "dokumentiert", "unterschrieben", "rechnung_erstellt", "versendet", "avis_erhalten", "bezahlt",
+      "offen", "dokumentiert", "unterschrieben", "rechnung_erstellt", "versendet", "bezahlt",
     ]);
 
     const stageSum = body.stages.reduce((acc, s) => acc + s.totalCents, 0);

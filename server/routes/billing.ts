@@ -305,8 +305,11 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
 
 // Task #1710/#1859 — Rechnungen, die für die manuelle (Mehrfach-)Zuordnung zu
 // einer Qonto-Zahlung offen sind: JEDE Rechnung, die noch nicht mit einer echten
-// Bank-Zahlung abgeglichen ist. Das umfasst `versendet` UND `avis_erhalten`
-// (importiertes, aber noch nicht mit einer Zahlung abgeglichenes Avis). Entwurf,
+// Bank-Zahlung abgeglichen ist — also `versendet`, einschliesslich der
+// Rechnungen, deren Avis zwar importiert, aber noch nicht mit einer Zahlung
+// abgeglichen ist. (Die trugen vor dem Status-Umbau `avis_erhalten` und fielen
+// dadurch aus dem Picker; der Status ist entfallen, die Zusicherung bleibt.)
+// Entwurf,
 // bezahlt und storniert fallen raus; Gutschriften (`stornorechnung`) ebenso über
 // das geteilte Storno-Prädikat. „Beansprucht" = 1:1-Match ODER Mitglied eines an
 // eine Transaktion gebundenen Avis (getClaimedInvoiceIds, SSoT). Verhindert, dass
@@ -1010,7 +1013,7 @@ router.post("/discard-drafts", asyncHandler("Entwürfe konnten nicht verworfen w
 }));
 
 // Task #1376 — Sammel-Löschen: löscht ausschließlich Entwürfe (GoBD).
-// Finalisierte Rechnungen (versendet/avis_erhalten/bezahlt/storniert) und
+// Finalisierte Rechnungen (versendet/bezahlt/storniert/abgeschlossen) und
 // Storno-Belege werden defensiv per WHERE-Guard übersprungen und im Ergebnis
 // als "skipped" gemeldet — niemals hart gelöscht (die werden storniert).
 router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht werden", async (req, res) => {
@@ -1082,8 +1085,10 @@ router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht wer
   res.json(response);
 }));
 
-// Task #1376 — Sammel-Statuswechsel auf "entwurf"/"versendet"/"avis_erhalten"/
-// "bezahlt". "storniert" ist NICHT erlaubt (Sammel-Storno ist eine separate
+// Task #1376 — Sammel-Statuswechsel auf "versendet"/"bezahlt". "entwurf" ist
+// seit #66 kein Ziel mehr (kein Rückweg aus einem gestellten Beleg),
+// "avis_erhalten" seit dem Status-Umbau nicht mehr vorhanden.
+// "storniert" ist NICHT erlaubt (Sammel-Storno ist eine separate
 // Aufgabe und erfordert die Cascade-Logik aus `PATCH /:id/status`). Pro Rechnung
 // gilt dieselbe Übergangs-SSoT wie der Einzel-Statuswechsel; ungültige Übergänge
 // werden übersprungen und gemeldet. Audit analog zum Einzelpfad.
@@ -2591,8 +2596,8 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
 //
 // Bewusst eng gehalten:
 //  - nur aus `versendet` (spaetere Status implizieren Folgewirkungen; ein
-//    Zahlungsbezug hebt ohnehin auf `teilweise_bezahlt`/`bezahlt` und faellt
-//    damit schon durch diese Bedingung),
+//    Zahlungsbezug hebt ohnehin auf `bezahlt` und faellt damit schon durch
+//    diese Bedingung),
 //  - NIE auf einer Stornorechnung: das Gegendokument einer Storno-Kette darf
 //    nicht in den Entwurfsstatus zurueckfallen, waehrend das Original
 //    `storniert` bleibt,
