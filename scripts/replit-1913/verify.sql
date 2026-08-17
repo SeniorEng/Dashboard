@@ -185,9 +185,10 @@ ORDER BY a.date;
 --
 --     Diese Abfrage ist NACHTRÄGLICH entstanden, aus der Lohn-Frage heraus, und
 --     sie stellt die Prämisse des Tickets in Frage. Gegen die Referenz-Kopie
---     gemessen sind von den 13 nur drei eindeutig „geleistet und verloren".
+--     gemessen bleiben von den 13 noch ZWEI mit dem Befund „Opfer" (918, 923),
+--     zwei „unklar" (924, 1123) — neun sind ausgeschlossen.
 --
---     Zwei Ausschluss-Gründe, beide hier geprüft:
+--     Drei Ausschluss-Gründe, alle hier geprüft:
 --
 --     1. ABWESEND. War die Kraft an dem Tag im Urlaub oder krank, kann der
 --        Termin nicht stattgefunden haben. Die Absage war dann richtig, und ein
@@ -204,8 +205,22 @@ ORDER BY a.date;
 --          - ANDERER Kunde -> die Kraft war anderswo. Der abgesagte Besuch fand
 --            nicht statt.
 --
---     Nur was WEDER abwesend NOCH kollidierend ist und wo die Kraft an dem Tag
+--     3. BESUCH AM SELBEN TAG bei derselben Kundin, andere Uhrzeit. Dann wurde
+--        der Termin VERLEGT, nicht verloren. Diese Prüfung fehlte zuerst und
+--        machte den Befund falsch (Termin 919, siehe Kommentar unten).
+--
+--     Nur was von allen dreien frei ist und wo die Kraft an dem Tag
 --     nachweislich gearbeitet hat, ist ein Opfer im Sinne des Tickets.
+--
+--     ── WAS DIESE ABFRAGE NICHT SEHEN KANN ─────────────────────────────────
+--     Den BETREUERWECHSEL. Bei Kunde 68 ist die Betreuung im Juli auf eine
+--     andere Kraft übergegangen (heute primary; die alte nur noch backup) —
+--     der gesamte abgesagte Serien-Block ab 01.07. ist damit als legitime
+--     Serien-Beendigung erklärt, obwohl einzelne Termine daraus hier noch als
+--     „Opfer" erscheinen. Ein `befund = OPFER` ist deshalb ein KANDIDAT, kein
+--     Urteil. Vor jeder Reparatur gehört pro Fall die Frage dazu: Hat die
+--     Kundin danach eine andere Kraft bekommen? Und, verlässlicher als jedes
+--     SQL: fehlt der Mitarbeiterin dieser Besuch überhaupt?
 -- ---------------------------------------------------------------------------
 SELECT
   a.id, a.date, a.assigned_employee_id AS kraft, a.scheduled_start, a.customer_id AS kunde,
