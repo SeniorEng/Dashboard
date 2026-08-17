@@ -144,7 +144,12 @@ afterEach(() => {
 describe("Rechnungsliste — Cluster-Auswahl-Checkbox (Task #1632)", () => {
   it("Klick auf die Cluster-Checkbox wählt genau diesen Cluster aus, ohne einen anderen zu berühren", () => {
     // Zwei Rechnungen im expandierten Cluster „zu_versenden" (Entwurf), eine
-    // im Cluster „avis_ausstehend" (Pflegekasse, versendet).
+    // im Cluster „zahlung_ausstehend" (versendet).
+    //
+    // Vorher war die dritte im Cluster „avis_ausstehend" — den gibt es seit
+    // dem Status-Umbau nicht mehr: Kasse und Selbstzahler warten beide auf
+    // Zahlung, der Avis ist eine Zuordnungs-Mechanik. Die Aussage des Tests
+    // ist davon unberuehrt: ein Cluster-Klick darf keinen anderen anfassen.
     const inv1 = makeInvoice({ id: 101, status: "entwurf", billingType: "selbstzahler" });
     const inv2 = makeInvoice({ id: 102, status: "entwurf", billingType: "selbstzahler" });
     const invOther = makeInvoice({
@@ -168,7 +173,7 @@ describe("Rechnungsliste — Cluster-Auswahl-Checkbox (Task #1632)", () => {
     expect(screen.getByTestId("checkbox-select-102").getAttribute("aria-checked")).toBe("true");
 
     // Der andere Cluster bleibt unberührt.
-    expect(screen.getByTestId("checkbox-select-cluster-avis_ausstehend").getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByTestId("checkbox-select-cluster-zahlung_ausstehend").getAttribute("aria-checked")).toBe("false");
   });
 
   it("Klick auf die Cluster-Checkbox löst das Ein-/Ausklappen NICHT aus", () => {

@@ -1,14 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { activeInvoiceCondition, activeInvoiceSqlRaw } from "../../server/lib/appointment-invoiced";
-import { isStorniertInvoice } from "@shared/domain/billing-pipeline";
+import { istAktionsfaehigeRechnung } from "@shared/domain/billing-pipeline";
 
 /**
  * Task #1908 — die drei Formulierungen von „zählt diese Rechnung noch?" MÜSSEN
  * im Gleichschritt bleiben:
  *   • `activeInvoiceCondition()` — Drizzle
  *   • `activeInvoiceSqlRaw(alias)` — Roh-SQL
- *   • `isStorniertInvoice(...)`   — TS auf geladenen Objekten
+ *   • `istAktionsfaehigeRechnung(...)` — TS auf geladenen Objekten
+ *
+ * Zum TS-Zwilling: bis zum Status-Umbau war das `isStorniertInvoice`, weil es
+ * `status = 'storniert' ODER invoiceType = 'stornorechnung'` prüfte — genau die
+ * Negation der SQL-Bedingung. Seit der Typ nichts mehr über den Zustand sagt,
+ * prüft `isStorniertInvoice` nur noch den Status und ist damit NICHT mehr die
+ * Negation. Der Zwilling ist `istAktionsfaehigeRechnung`, das beide Dimensionen
+ * zusammensetzt. Genau diese Verschiebung hat dieser Test gefangen.
  *
  * Bisher stand das nur als Kommentar in der SSoT-Datei; nichts hat es erzwungen.
  * Der Architektur-Wächter A6b bewacht die AUFRUFSTELLEN — nicht, ob die drei
@@ -49,8 +56,8 @@ describe("Aktive-Rechnung-SSoT — die drei Formulierungen bleiben deckungsgleic
   });
 
   it("das TS-Prädikat entscheidet für jede Kombination wie die SQL-Formen", () => {
-    // Wahrheitstabelle über beide Dimensionen. `isStorniertInvoice` ist die
-    // Negation von „aktiv" — kippt eine der drei Formen, kippt hier eine Zeile.
+    // Wahrheitstabelle über beide Dimensionen. `istAktionsfaehigeRechnung` IST
+    // „aktiv" — kippt eine der drei Formen, kippt hier eine Zeile.
     const faelle = [
       { status: "versendet", invoiceType: "rechnung", aktiv: true },
       { status: "entwurf", invoiceType: "rechnung", aktiv: true },
@@ -58,10 +65,13 @@ describe("Aktive-Rechnung-SSoT — die drei Formulierungen bleiben deckungsgleic
       { status: "storniert", invoiceType: "rechnung", aktiv: false },
       { status: "versendet", invoiceType: "stornorechnung", aktiv: false },
       { status: "storniert", invoiceType: "stornorechnung", aktiv: false },
+      // Der neue Endzustand der Storno-Dokumente: fertig, aber nie „aktiv" —
+      // er traegt keine Forderung.
+      { status: "abgeschlossen", invoiceType: "stornorechnung", aktiv: false },
     ];
     for (const f of faelle) {
       expect(
-        !isStorniertInvoice({ status: f.status, invoiceType: f.invoiceType }),
+        istAktionsfaehigeRechnung({ status: f.status, invoiceType: f.invoiceType }),
         `${f.status}/${f.invoiceType}`,
       ).toBe(f.aktiv);
     }

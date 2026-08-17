@@ -288,6 +288,16 @@ export function traegtOffeneForderung(input: { invoiceType: string }): boolean {
  *
  * Der Name sagt jetzt, was gemeint ist, statt sich auf eine Nebenwirkung zu
  * verlassen.
+ *
+ * ── Zugleich der TS-Zwilling der Aktive-Rechnung-SSoT ───────────────────
+ * Diese Funktion ist wörtlich die Negation von `activeInvoiceCondition()` /
+ * `activeInvoiceSqlRaw()` (`server/lib/appointment-invoiced.ts`): dort
+ * `status <> 'storniert' AND invoice_type <> 'stornorechnung'`, hier dasselbe
+ * als Prädikat auf geladenen Objekten.
+ *
+ * Diese Rolle hatte vor dem Umbau `isStorniertInvoice` — sie ging beim
+ * Verengen auf den Status verloren, und `tests/unit/active-invoice-ssot.test.ts`
+ * hat den Bruch gefangen. Wer eine der drei Formen ändert, ändert alle drei.
  */
 export function istAktionsfaehigeRechnung(input: { status: string; invoiceType: string }): boolean {
   return traegtOffeneForderung(input) && !isStorniertInvoice(input);
@@ -380,10 +390,11 @@ function assertNieErreicht(wert: never, wo: string): never {
  */
 export const INVOICE_ACTION_CLUSTERS = [
   "zu_versenden",
-  "avis_ausstehend",
+  // `avis_ausstehend` ist mit dem Empfaenger-Unterschied ENTFALLEN: Kasse und
+  // Selbstzahler warten beide auf Zahlung, der Avis ist eine
+  // Zuordnungs-Mechanik. `teilzahlung` ist ENTFALLEN: sie ist ein Badge.
   "zahlung_ausstehend",
   "zahlung_zugeordnet_pruefung",
-  "teilzahlung",
   "abgeschlossen",
   "storniert",
 ] as const;
@@ -391,10 +402,8 @@ export type InvoiceActionCluster = (typeof INVOICE_ACTION_CLUSTERS)[number];
 
 export const INVOICE_ACTION_CLUSTER_LABELS: Record<InvoiceActionCluster, string> = {
   zu_versenden: "Noch zu versenden",
-  avis_ausstehend: "Avis ausstehend",
   zahlung_ausstehend: "Zahlung ausstehend",
   zahlung_zugeordnet_pruefung: "Zahlung zugeordnet – Prüfung",
-  teilzahlung: "Teilzahlung eingegangen",
   abgeschlossen: "Abgeschlossen",
   storniert: "Storniert",
 };
@@ -414,11 +423,14 @@ export const INVOICE_ACTION_CLUSTER_LABELS: Record<InvoiceActionCluster, string>
  * Weil die Liste (`client/src/features/billing/utils.ts` →
  * `invoiceAgingBucket`) schon immer über den Cluster gatet, lesen mit dieser
  * Funktion beide Seiten dieselbe Wahrheit: sobald eine Zahlung gebunden ist,
- * fällt die Rechnung in `zahlung_zugeordnet_pruefung` bzw. `teilzahlung` — und
- * altert damit auf BEIDEN Seiten nicht mehr.
+ * fällt die Rechnung in `zahlung_zugeordnet_pruefung` — und altert damit auf
+ * BEIDEN Seiten nicht mehr.
  */
 export function isAgingCluster(cluster: InvoiceActionCluster): boolean {
-  return cluster === "avis_ausstehend" || cluster === "zahlung_ausstehend";
+  // Nur noch EIN Warte-Cluster: `avis_ausstehend` ist mit dem
+  // Empfaenger-Unterschied entfallen. Die Regel selbst ist unveraendert —
+  // altern tut, wer auf Zahlung wartet.
+  return cluster === "zahlung_ausstehend";
 }
 
 export interface InvoiceClusterInput {

@@ -37,14 +37,14 @@ const DEFAULT_COLLAPSED: InvoiceActionCluster[] = ["abgeschlossen", "storniert"]
 // Kurze Erklärzeile je Cluster — sagt dem Nutzer, welche Handlung ansteht.
 const CLUSTER_HINTS: Record<InvoiceActionCluster, string> = {
   zu_versenden: "Entwürfe — an Kasse senden oder als versendet markieren",
-  avis_ausstehend: "An Pflegekassen versendet — auf Zahlungsavis warten",
+  // Kasse und Selbstzahler gleichermassen — der Avis ist eine
+  // Zuordnungs-Quelle, kein eigener Wartezustand.
   zahlung_ausstehend: "Auf Zahlungseingang warten",
   // #1897 — die beiden neuen Cluster. Die Gruppen erscheinen dadurch bereits
   // (der Record ist erschöpfend, sonst kompiliert der Client nicht) und mahnen
   // nicht mehr; das eigene Prüf-Badge und der Absprung in den Qonto-Tab kommen
   // im Client-PR nach (#1897, Schritte 6+7).
   zahlung_zugeordnet_pruefung: "Zahlung eingegangen und zugeordnet — bitte prüfen und freigeben",
-  teilzahlung: "Teilzahlung eingegangen — Restbetrag offen",
   abgeschlossen: "Bezahlt — abgeschlossen",
   storniert: "Stornierte Rechnungen und Gutschriften",
 };
