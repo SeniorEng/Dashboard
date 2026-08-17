@@ -132,6 +132,11 @@ describe("bucketize — Wolfgang/Rosali regression (Task #718)", () => {
       const ids = liste.map((i) => i.customerId);
       expect(new Set(ids).size, "innerhalb einer Kategorie doppelt").toBe(ids.length);
     }
+    // Die ZUSTANDS-Seite bleibt exklusiv — hier gilt „genau einer" weiterhin.
+    // Beim Lockern der Aktions-Seite war diese Hälfte zuerst mit weggefallen;
+    // strukturell ist sie heute unmöglich zu verletzen (jeder Zustands-Push hat
+    // sein `continue`), aber der Wächter dafür gehört zurück.
+    expect(new Set(zustand).size, "ein Kunde steht in zwei Zustands-Kategorien").toBe(zustand.length);
     for (const id of aktion) {
       expect(zustand, `Kunde ${id} steht in Aktion UND Zustand`).not.toContain(id);
     }

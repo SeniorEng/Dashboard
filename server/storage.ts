@@ -122,6 +122,7 @@ export interface IStorage {
   isAppointmentLocked(appointmentId: number): Promise<boolean>;
   getAppointmentIdsInServiceRecords(appointmentIds: number[], txClient?: DbOrTx): Promise<number[]>;
   lockAppointmentsForUpdate(appointmentIds: number[], txClient: DbOrTx): Promise<void>;
+  getAppointmentStatusesForUpdate(appointmentIds: number[], txClient: DbOrTx): Promise<Array<{ id: number; status: string }>>;
   lockAndCheckAppointmentLocked(appointmentId: number, txClient: DbOrTx): Promise<boolean>;
   removeAppointmentFromServiceRecords(appointmentId: number, txClient: Tx): Promise<ServiceRecordAppointmentRemoval[]>;
   getServiceRecordForAppointment(appointmentId: number): Promise<MonthlyServiceRecord | undefined>;
@@ -233,6 +234,7 @@ class DatabaseStorage implements IStorage {
   getPendingServiceRecords = serviceRecordsStorage.getPendingServiceRecords;
   getAppointmentIdsInServiceRecords = serviceRecordsStorage.getAppointmentIdsInServiceRecords;
   lockAppointmentsForUpdate = serviceRecordsStorage.lockAppointmentsForUpdate;
+  getAppointmentStatusesForUpdate = serviceRecordsStorage.getAppointmentStatusesForUpdate;
   lockAndCheckAppointmentLocked = serviceRecordsStorage.lockAndCheckAppointmentLocked;
   removeAppointmentFromServiceRecords = serviceRecordsStorage.removeAppointmentFromServiceRecords;
   getServiceRecordForAppointment = serviceRecordsStorage.getServiceRecordForAppointment;

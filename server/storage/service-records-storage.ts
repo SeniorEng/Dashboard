@@ -498,6 +498,28 @@ export async function getAppointmentIdsInServiceRecords(appointmentIds: number[]
  * ServiceRecords mit tx) und bricht ab, falls der Termin zwischenzeitlich
  * abgedeckt wurde. MUSS mit einem Transaktions-Client aufgerufen werden.
  */
+/**
+ * Status der genannten Termine, gelesen INNERHALB der Transaktion — also unter
+ * dem `FOR UPDATE`, das `lockAppointmentsForUpdate` zuvor genommen hat.
+ *
+ * Zweck: der Sammel-LN-Pfad ermittelt seine dokumentierten Termine ausserhalb
+ * der Transaktion. Zwischen diesem Lesen und dem Insert kann ein Reopen einen
+ * Termin auf `documenting` zurückdrehen (erlaubt, solange der Nachweis nur
+ * `pending` ist). Ohne diesen Recheck landete er als undokumentierter im
+ * frischen Nachweis, und das Signieren bräche später ab.
+ *
+ * Kein `activeOnly()`, aus demselben Grund wie beim Lock darüber: ein
+ * ID-gezielter Read auf einen bereits ermittelten Satz, kein Listing.
+ */
+export async function getAppointmentStatusesForUpdate(
+  appointmentIds: number[],
+  txClient: DbOrTx,
+): Promise<Array<{ id: number; status: string }>> {
+  if (appointmentIds.length === 0) return [];
+  return appointmentsRepo.selectColumnsFrom({ id: appointments.id, status: appointments.status }, txClient)
+    .where(inArray(appointments.id, appointmentIds));
+}
+
 export async function lockAppointmentsForUpdate(appointmentIds: number[], txClient: DbOrTx): Promise<void> {
   if (appointmentIds.length === 0) return;
   const ordered = [...new Set(appointmentIds)].sort((a, b) => a - b);

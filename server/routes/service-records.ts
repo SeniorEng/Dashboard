@@ -411,6 +411,27 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
       return null;
     }
 
+    // Unter demselben Lock auch den STATUS nachprüfen, nicht nur die Abdeckung.
+    //
+    // Zwischen dem Lesen der dokumentierten Termine (oben, ausserhalb der
+    // Transaktion) und diesem Insert kann `POST /api/appointments/:id/reopen`
+    // einen Termin auf `documenting` zurückdrehen — das ist erlaubt, solange
+    // der LN nur `pending` ist. Der Termin läge dann als undokumentierter in
+    // einem frischen Nachweis; das Signieren bricht später ab, und die einzige
+    // Reparatur wäre, den Nachweis wieder zu löschen.
+    //
+    // Das Fenster gab es vorher auch — es war nur schmal, weil gebündelt erst
+    // wurde, wenn der ganze Monat fertig war. Seit dem Teil-Bündeln steht es
+    // den ganzen laufenden Monat offen, in dem parallel weitergearbeitet wird.
+    const frischeStatus = await storage.getAppointmentStatusesForUpdate(appointmentIds, tx);
+    const nichtMehrDokumentiert = frischeStatus
+      .filter((a) => a.status !== "completed")
+      .map((a) => a.id);
+    if (nichtMehrDokumentiert.length > 0) {
+      conflictingIds = nichtMehrDokumentiert;
+      return null;
+    }
+
     const rec = await storage.createServiceRecord({
       customerId,
       employeeId: effectiveEmployeeId,
