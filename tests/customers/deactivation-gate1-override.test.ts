@@ -20,6 +20,8 @@
  *  4. der Audit-Eintrag nennt die konkreten Termin-IDs, nicht nur eine Zahl
  *  5. DIE ZUSAGE DES WARNTEXTS: der undokumentierte Termin bleibt danach
  *     bestehen und dokumentierbar — er verschwindet nicht
+ *  6. … und er ist wirklich abrechenbar, nicht nur bündelbar
+ *  7. ein No-Show blockiert gar nicht erst — er IST dokumentiert
  *
  * Punkt 5 ist der eigentliche Grund für diese Datei. Der Dialog verspricht
  * „bleiben bestehen und können weiterhin dokumentiert und abgerechnet werden".
@@ -56,16 +58,37 @@ function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** Werktag im LAUFENDEN Monat — haelt das Monatsabschluss-Gate draussen. */
+/**
+ * Vergangener Werktag, bevorzugt im LAUFENDEN Monat (haelt das
+ * Monatsabschluss-Gate draussen).
+ *
+ * Die erste Fassung suchte NUR im laufenden Monat und fiel sonst auf `heute`
+ * zurueck. Am 1./2. eines Monats gibt es dort keinen Kandidaten, und faellt
+ * dieser Tag selbst aufs Wochenende, lieferte der Fallback ein Wochenenddatum —
+ * `canCreateAppointment` lehnt Wochenenden rollenunabhaengig ab, `beforeAll`
+ * waere gestorben und ALLE Tests der Datei rot. Betroffen waeren rund sechs
+ * Kalendertage in achtzehn Monaten; genau die Sorte Falle, vor der CLAUDE.md
+ * unter „Test-Fallen" warnt.
+ *
+ * Jetzt: erst im laufenden Monat suchen, sonst weiter zurueckgehen. Ein
+ * Werktag im Vormonat ist fuer diesen Test unproblematisch — er prueft das
+ * Vertragsende-Gate, nicht den Monatsabschluss, und der Termin wird nie
+ * dokumentiert.
+ */
 function pastWeekday(): Date {
   const now = new Date();
+  const werktag = (d: Date) => d.getDay() !== 0 && d.getDay() !== 6;
   for (let i = 1; i <= 10; i++) {
     const cand = new Date();
     cand.setDate(cand.getDate() - i);
-    const dow = cand.getDay();
-    if (dow !== 0 && dow !== 6 && cand.getMonth() === now.getMonth()) return cand;
+    if (werktag(cand) && cand.getMonth() === now.getMonth()) return cand;
   }
-  return now;
+  for (let i = 1; i <= 30; i++) {
+    const cand = new Date();
+    cand.setDate(cand.getDate() - i);
+    if (werktag(cand)) return cand;
+  }
+  throw new Error("Kein vergangener Werktag in 30 Tagen gefunden — unmoeglich.");
 }
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -208,6 +231,115 @@ describe("Kundendeaktivierung — Dokumentations-Gate uebergehbar mit Ausweis", 
       `/api/service-records/check-period?customerId=${customerId}&year=${d.getFullYear()}&month=${d.getMonth() + 1}`,
     );
     expect(check.status).toBe(200);
-    expect(check.data.uncoveredDocumentedCount, "abrechenbar trotz inaktivem Kunden").toBeGreaterThan(0);
+    expect(check.data.uncoveredDocumentedCount, "buendelbar trotz inaktivem Kunden").toBeGreaterThan(0);
+  });
+
+  it("6 — und er ist wirklich ABRECHENBAR, nicht nur buendelbar", async () => {
+    // Der Dialog verspricht „dokumentiert UND abgerechnet werden". Test 5
+    // endete bei „buendelbar" — die zweite Haelfte der Zusage blieb ungeprueft.
+    // Ein Regress an `eligible-customers` wuerde den Warntext falsch machen,
+    // ohne dass ein Test rot wird.
+    const d = new Date(terminDatum);
+    const jahr = d.getFullYear();
+    const monat = d.getMonth() + 1;
+
+    const ln = await apiPost<any>("/api/service-records", {
+      customerId, year: jahr, month: monat, employeeId: auth.user.id,
+    });
+    expect(ln.status, JSON.stringify(ln.data)).toBe(201);
+
+    const eligible = await apiGet<any>(
+      `/api/billing/eligible-customers?year=${jahr}&month=${monat}`,
+    );
+    expect(eligible.status).toBe(200);
+    const liste = Array.isArray(eligible.data) ? eligible.data : (eligible.data.customers ?? []);
+    expect(
+      liste.map((c: any) => c.customerId ?? c.id),
+      "der inaktive Kunde muss in der Abrechnungs-Kandidatenliste stehen",
+    ).toContain(customerId);
+  });
+
+  it("7 — ein No-Show blockiert die Deaktivierung NICHT (er ist dokumentiert)", async () => {
+    // Der eigentliche Defekt hinter dem Ticket: `status !== "completed"` zaehlte
+    // `customer_no_show` als „noch nicht dokumentiert". Das ist ein TERMINALER,
+    // vollstaendig dokumentierter Termin — beim Selbstzahler erzeugt er sogar
+    // eine Ausfallrechnung.
+    //
+    // Gemessen an der Referenz-Kopie: von sieben Kunden mit erreichtem
+    // Vertragsende und blockierender Pruefung waren ZWEI allein dadurch
+    // blockiert, ohne einen einzigen echt offenen Termin. Fuer die braucht es
+    // keinen Override, sondern das richtige Praedikat — sonst behauptete der
+    // Audit-Eintrag liegengebliebene Leistung, die es nicht gibt.
+    const cust2 = await createTestCustomer({ nachname: `Gate1NoShow_${uniqueId()}` });
+    const id2 = cust2.id as number;
+    await apiPatch(`/api/admin/customers/${id2}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: employeeId,
+      backupEmployeeId2: null,
+    });
+
+    const appt = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: id2,
+      date: terminDatum,
+      scheduledStart: "16:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+      notes: `gate1-noshow-${uniqueId()}`,
+    });
+    expect(appt.status, JSON.stringify(appt.data)).toBe(201);
+    cleanupApptIds.push(appt.data.id);
+
+    const noShow = await apiPost<any>(`/api/appointments/${appt.data.id}/document-no-show`, {
+      actualStart: "16:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      noShowReason: "nicht_angetroffen",
+      noShowWaitMinutes: 10,
+      performedByEmployeeId: auth.user.id,
+    });
+    expect(noShow.status, JSON.stringify(noShow.data)).toBe(200);
+
+    const start = new Date(terminDatum);
+    start.setMonth(start.getMonth() - 2);
+    await apiPost(`/api/admin/customers/${id2}/contract`, {
+      contractStart: ymd(start),
+      contractEnd: terminDatum,
+    });
+
+    const readiness = await apiGet<any>(`/api/admin/customers/${id2}/deactivation-readiness`);
+    const doku = readiness.data.checks.find((c: any) => c.key === "allDocumented");
+    expect(doku.met, "ein No-Show IST dokumentiert").toBe(true);
+    expect(readiness.data.undocumentedCount).toBe(0);
+
+    // Und der Schreibpfad blockt nicht mehr wegen DOKUMENTATION. Er blockt
+    // weiterhin am Leistungsnachweis — richtig so, ein No-Show erzeugt keinen,
+    // und dieses Gate ist unveraendert (und uebergehbar). Geprueft wird
+    // deshalb der GRUND, nicht der Statuscode: die Meldung darf nicht mehr
+    // von undokumentierten Terminen sprechen.
+    const deakt = await apiPost<any>(`/api/admin/customers/${id2}/complete-deactivation`, {
+      deactivationReason: "verstorben",
+    });
+    expect(deakt.data.message ?? "").not.toContain("nicht dokumentiert");
+    expect(deakt.data.undocumentedCount ?? 0).toBe(0);
+
+    // Mit Override geht sie durch — und der Audit darf `allDocumented` NICHT
+    // als uebersprungen fuehren, sonst behauptete die Spur liegengebliebene
+    // Leistung, die es nicht gibt.
+    const mitOverride = await apiPost<any>(`/api/admin/customers/${id2}/complete-deactivation`, {
+      deactivationReason: "verstorben",
+      overrideBillingGates: true,
+      overrideReason: "Kundin verstorben, kein Leistungsnachweis mehr noetig.",
+    });
+    expect(mitOverride.status, JSON.stringify(mitOverride.data)).toBe(200);
+
+    const spur = await db.select().from(auditLog).where(and(
+      eq(auditLog.entityType, "customer"),
+      eq(auditLog.entityId, id2),
+    ));
+    const eintrag = spur.find((e) => (e.metadata as any)?.action === "complete_deactivation");
+    expect((eintrag!.metadata as any).skippedGates).not.toContain("allDocumented");
+    expect((eintrag!.metadata as any).undocumentedAppointmentIds ?? []).toEqual([]);
+
+    await cleanupCustomer(id2);
   });
 });

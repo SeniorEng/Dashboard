@@ -70,7 +70,7 @@ interface DeactivationCheck {
    * führt — die Doppelung wäre beim Aufnehmen des Dokumentations-Gates still
    * auseinandergelaufen.
    */
-  overridable: boolean;
+  overridable?: boolean;
 }
 
 interface DeactivationReadiness {
@@ -80,8 +80,11 @@ interface DeactivationReadiness {
   checks: DeactivationCheck[];
   futureAppointmentsCount: number;
   futureAppointments: Array<{ id: number; date: string; status: string }>;
-  undocumentedCount: number;
-  undocumentedAppointments: Array<{ id: number; date: string; status: string }>;
+  // Optional deklariert, weil ein aelterer Server sie nicht sendet. Das
+  // Verhalten war auch vorher richtig (`!undefined === true` -> fail-closed),
+  // aber der Typ behauptete eine Garantie, die die Leitung nicht gibt.
+  undocumentedCount?: number;
+  undocumentedAppointments?: Array<{ id: number; date: string; status: string }>;
   message?: string;
 }
 
@@ -118,6 +121,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   const { user } = useAuth();
   const isSuperAdmin = user?.isSuperAdmin ?? false;
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
+  const [undocumentedConfirmed, setUndocumentedConfirmed] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
 
   const contract = customer.currentContract;
@@ -652,8 +656,6 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               </div>
             ) : deactivationReadiness && !deactivationReadiness.ready ? (
               (() => {
-                const checkMet = (key: string) =>
-                  deactivationReadiness.checks.find((c) => c.key === key)?.met ?? false;
                 // Was offen ist, entscheidet der SERVER über `overridable` —
                 // hier wird die Liste nicht mehr von Hand nachgebaut. Vorher
                 // stand hier eine zweite Aufzählung der Gates; sie hätte beim
@@ -710,7 +712,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               <DialogHeader>
                 <DialogTitle>Abrechnungs-Prüfungen überspringen</DialogTitle>
                 <DialogDescription>
-                  Sie überspringen als Hauptadministrator die Abrechnungs-Prüfungen — Dokumentation, Leistungsnachweise und Rechnungen. Das Vertragsende bleibt verpflichtend. Der Vorgang wird vollständig protokolliert.
+                  Sie überspringen als Hauptadministrator die offenen Abrechnungs-Prüfungen. Das Vertragsende bleibt verpflichtend. Der Vorgang wird vollständig protokolliert.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-3">
@@ -726,32 +728,57 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                   Kunde taucht in keiner Tagesarbeit mehr auf. Genau das muss
                   hier stehen und nicht mehr.
                 */}
-                {(deactivationReadiness?.undocumentedCount ?? 0) > 0 && (
+                {(deactivationReadiness?.undocumentedCount ?? 0) > 0 && (() => {
+                  const anzahl = deactivationReadiness?.undocumentedCount ?? 0;
+                  const beispiele = deactivationReadiness?.undocumentedAppointments ?? [];
+                  const einer = anzahl === 1;
+                  return (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="warning-undocumented-override">
                     <p className="text-sm font-medium text-amber-800">
-                      {deactivationReadiness!.undocumentedCount}{" "}
-                      {deactivationReadiness!.undocumentedCount === 1 ? "Termin bleibt" : "Termine bleiben"} unabgerechnet — bitte bestätigen
+                      {anzahl}{" "}
+                      {einer ? "Termin bleibt" : "Termine bleiben"} unabgerechnet — bitte bestätigen
                     </p>
                     <p className="mt-1 text-sm text-amber-700">
-                      {deactivationReadiness!.undocumentedCount === 1 ? "Dieser Termin ist" : "Diese Termine sind"} noch nicht dokumentiert.
-                      {" "}Sie {deactivationReadiness!.undocumentedCount === 1 ? "bleibt" : "bleiben"} nach der Deaktivierung bestehen und {deactivationReadiness!.undocumentedCount === 1 ? "kann" : "können"} weiterhin
+                      {einer ? "Dieser Termin ist" : "Diese Termine sind"} noch nicht dokumentiert.
+                      {" "}Sie {einer ? "bleibt" : "bleiben"} nach der Deaktivierung bestehen und {einer ? "kann" : "können"} weiterhin
                       dokumentiert und abgerechnet werden — der Kunde erscheint danach aber in keiner
                       Tagesübersicht mehr, es erinnert also niemand daran.
                     </p>
-                    {deactivationReadiness!.undocumentedAppointments.length > 0 && (
+                    {beispiele.length > 0 && (
                       <ul className="mt-2 space-y-0.5 text-sm text-amber-700">
-                        {deactivationReadiness!.undocumentedAppointments.map((a) => (
+                        {beispiele.map((a) => (
                           <li key={a.id} data-testid={`undocumented-appt-${a.id}`}>{a.date}</li>
                         ))}
                       </ul>
                     )}
-                    {deactivationReadiness!.undocumentedCount > deactivationReadiness!.undocumentedAppointments.length && (
+                    {anzahl > beispiele.length && (
                       <p className="mt-1 text-sm text-amber-700">
-                        … und {deactivationReadiness!.undocumentedCount - deactivationReadiness!.undocumentedAppointments.length} weitere
+                        … und {anzahl - beispiele.length} weitere
                       </p>
                     )}
+                    {/*
+                      Die Box sagt „bitte bestätigen" — also muss es etwas zu
+                      bestätigen geben. Ohne dieses Häkchen war das eine
+                      Aufforderung ins Leere: der Begründungstext deckt drei
+                      Gates gemeinsam ab und sagt über die liegenbleibende
+                      Dokumentation oft gar nichts („Monate extern abgerechnet"
+                      rechtfertigt keinen undokumentierten Termin).
+                    */}
+                    <label className="mt-3 flex items-start gap-2 text-sm text-amber-800">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={undocumentedConfirmed}
+                        onChange={(e) => setUndocumentedConfirmed(e.target.checked)}
+                        data-testid="checkbox-confirm-undocumented"
+                      />
+                      <span>
+                        Ich habe verstanden, dass {einer ? "dieser Termin" : "diese Termine"} unabgerechnet {einer ? "bleibt" : "bleiben"}.
+                      </span>
+                    </label>
                   </div>
-                )}
+                  );
+                })()}
                 <div className="space-y-2">
                   <Label htmlFor="override-deact-reason">Deaktivierungsgrund *</Label>
                   <Select value={deactivationReason} onValueChange={setDeactivationReason}>
@@ -795,6 +822,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                   disabled={
                     !deactivationReason ||
                     overrideReason.trim().length < 10 ||
+                    ((deactivationReadiness?.undocumentedCount ?? 0) > 0 && !undocumentedConfirmed) ||
                     completeDeactivation.isPending
                   }
                   data-testid="button-confirm-override-deactivation"

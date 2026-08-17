@@ -22,6 +22,7 @@ import {
   invoiceLineItems,
   tasks,
 } from "@shared/schema";
+import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import { requireSuperAdmin } from "../../../middleware/auth";
 import { db } from "../../../lib/db";
 import { appointmentsRepo, monthlyServiceRecordsRepo, customersRepo, prospectsRepo, tasksRepo } from "../../../repos";
@@ -50,11 +51,19 @@ router.post("/customers/:id/anonymize", asyncHandler("Kunde konnte nicht anonymi
     return;
   }
 
+  // „Noch offen?" kommt aus der SSoT, nicht aus einer eigenen Liste.
+  // `NOT IN ('completed','cancelled')` liess `customer_no_show` durchfallen —
+  // einen TERMINALEN, vollstaendig dokumentierten Termin, der beim Selbstzahler
+  // sogar eine Ausfallrechnung erzeugt. Er blockierte die Anonymisierung
+  // dauerhaft, und anders als bei der Deaktivierung gibt es hier keinen
+  // Override. `UNDOCUMENTED_STATUSES` ist als exaktes Komplement von
+  // `FINAL_APPOINTMENT_STATUSES` definiert und beantwortet die Frage fuer alle
+  // Stellen, die sie brauchen.
   const openAppts = await appointmentsRepo.selectColumnsFrom({ id: appointments.id })
     .where(and(
       eq(appointments.customerId, id),
       appointmentsRepo.activeOnly(),
-      sql`${appointments.status} NOT IN ('completed', 'cancelled')`,
+      inArray(appointments.status, UNDOCUMENTED_STATUSES),
     ));
 
   if (openAppts.length > 0) {
@@ -168,7 +177,18 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
       ne(appointments.status, "cancelled"),
     ));
 
-  const undocumented = allAppointments.filter(a => a.status !== "completed");
+  // Dieselbe SSoT wie oben. `status !== "completed"` war die vierte,
+  // abweichende Formulierung derselben Frage — und die einzige, die
+  // `customer_no_show` faelschlich als „noch offen" zaehlte.
+  //
+  // Gemessen an der Referenz-Kopie: von sieben Kunden mit erreichtem
+  // Vertragsende und blockierender Pruefung waren ZWEI allein durch einen
+  // No-Show blockiert, ohne einen einzigen echt offenen Termin. Fuer die ist
+  // der Block schlicht falsch — sie brauchen keinen Override, sondern das
+  // richtige Praedikat.
+  const undocumented = allAppointments.filter(a =>
+    (UNDOCUMENTED_STATUSES as readonly string[]).includes(a.status),
+  );
   const allDocumented = undocumented.length === 0;
 
   const futureAppointments = await appointmentsRepo.selectColumnsFrom({
@@ -391,7 +411,11 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
   // offen, sichtbar und abrechenbar (geprüft: weder die Nachweis-Übersicht
   // noch der Abrechnungspfad filtern auf `customers.status`). Der Override
   // erklärt nur, dass die Deaktivierung nicht darauf wartet.
-  const undocumented = appointmentsBeforeEnd.filter(a => a.status !== "completed");
+  // SSoT, deckungsgleich mit der Readiness oben — sonst zeigte die Oberflaeche
+  // „alles dokumentiert" und der Schreibpfad blockte trotzdem.
+  const undocumented = appointmentsBeforeEnd.filter(a =>
+    (UNDOCUMENTED_STATUSES as readonly string[]).includes(a.status),
+  );
   if (undocumented.length > 0 && !overrideBillingGates) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
@@ -494,29 +518,38 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
       .where(eq(customers.id, id))
       .returning();
 
+    // Audit INNERHALB der Transaktion (`exec: tx`).
+    //
+    // Vorher lief er danach und ohne `exec` — Fehler wurden geloggt und
+    // verschluckt. Das war folgenlos, solange `undocumented.length > 0` in
+    // diesem Pfad unmoeglich war (harter 400). Seit dem Override ist dieser
+    // Eintrag der EINZIGE Ort, an dem steht, welche Leistung beim Deaktivieren
+    // liegen blieb — `deactivationNote` traegt nur Freitext. Der Docstring der
+    // Audit-SSoT sagt es selbst: Mutation committed ohne Audit-Eintrag ist ein
+    // GoBD-Verstoss.
+    await auditService.log(req.user!.id, "customer_updated", "customer", id, {
+      action: "complete_deactivation",
+      contractId: currentContract.id,
+      contractEnd: currentContract.contractEnd,
+      deactivationReason,
+      previousStatus: "aktiv",
+      newStatus: "inaktiv",
+      ...(overrideBillingGates ? {
+        override: true,
+        skippedGates,
+        // Die IDs mitschreiben, nicht nur die Zahl: die GoBD-Spur soll sagen,
+        // WELCHE Leistung beim Deaktivieren unabgerechnet stehen blieb, nicht
+        // nur wie viele.
+        undocumentedCount: undocumented.length,
+        undocumentedAppointmentIds: undocumented.map(a => a.id),
+        monthsWithoutServiceRecord,
+        monthsWithoutInvoice,
+        overrideReason: trimmedOverrideReason,
+      } : {}),
+    }, req.ip, tx);
+
     return result;
   });
-
-  await auditService.log(req.user!.id, "customer_updated", "customer", id, {
-    action: "complete_deactivation",
-    contractId: currentContract.id,
-    contractEnd: currentContract.contractEnd,
-    deactivationReason,
-    previousStatus: "aktiv",
-    newStatus: "inaktiv",
-    ...(overrideBillingGates ? {
-      override: true,
-      skippedGates,
-      // Die IDs mitschreiben, nicht nur die Zahl: die GoBD-Spur soll sagen,
-      // WELCHE Leistung beim Deaktivieren unabgerechnet stehen blieb, nicht
-      // nur wie viele.
-      undocumentedCount: undocumented.length,
-      undocumentedAppointmentIds: undocumented.map(a => a.id),
-      monthsWithoutServiceRecord,
-      monthsWithoutInvoice,
-      overrideReason: trimmedOverrideReason,
-    } : {}),
-  }, req.ip);
 
   birthdaysCache.invalidateAll();
 
