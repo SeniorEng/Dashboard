@@ -339,6 +339,30 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "service-record-bundling",
+    question: "Lässt sich für diesen Kunden-Monat jetzt ein Sammel-Leistungsnachweis erstellen?",
+    canonical: [
+      { symbol: "canBundleDocumentedAppointments", module: "shared/domain/service-record-bundling.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Der Eintrag existiert wegen des Irrtums, der in dieser Formel steckte:
+        // sie trug ein `undocumentedCount === 0` und machte das Bündeln damit
+        // all-or-nothing — ein offener Termin sperrte auch die fertige Arbeit.
+        // Die Formel stand DREIMAL im Code, alle drei Kopien irrten gleich.
+        //
+        // Der Detektor sucht genau diesen Term. Er ist bewusst eng: er soll die
+        // RÜCKKEHR der falschen Regel fangen, nicht jede Erwähnung offener
+        // Termine verbieten (die ist an vielen Stellen legitim).
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "BUNDLING_GATE_ALLOWLIST",
+        allowlist: ["shared/domain/service-record-bundling.ts"],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "month-close-readiness",
     question: "Ist ein Monat für einen Mitarbeiter abschließbar? (Blocker-Aggregation der Readiness)",
     canonical: [

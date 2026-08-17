@@ -327,6 +327,48 @@ export function detectCascadeCallViolations(files: ScanFile[]): GuardViolation[]
 }
 
 // ---------------------------------------------------------------------------
+// Buendelbarkeits-SSoT (Leistungsnachweis)
+// ---------------------------------------------------------------------------
+
+/**
+ * Die Frage „laesst sich fuer diesen Kunden-Monat jetzt ein Sammel-LN
+ * erstellen?" beantwortet ausschliesslich `canBundleDocumentedAppointments`.
+ *
+ * Der Detektor sucht den Term, der den Defekt ausmachte:
+ * `undocumentedCount === 0` als Teil der Buendelbarkeits-Bedingung. Er stand
+ * dreimal im Code und machte das Buendeln all-or-nothing — ein einziger
+ * offener Termin sperrte auch die bereits dokumentierte, abrechenbare Arbeit.
+ *
+ * Bewusst ENG: `undocumentedCount` darf weiter gelesen und angezeigt werden
+ * (die Zahl ist eine legitime Auskunft). Verboten ist der Vergleich auf NULL
+ * als Voraussetzung — das ist die Regel, die falsch war.
+ */
+const BUNDLING_GATE_ALLOWLIST = new Set<string>(
+  ssotGuardAllowlist("service-record-bundling", "BUNDLING_GATE_ALLOWLIST"),
+);
+
+const BUNDLING_GATE_RE = /undocumentedCount\s*===\s*0/;
+
+export function detectBundlingGateViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (BUNDLING_GATE_ALLOWLIST.has(rel)) continue;
+    const code = stripComments(content);
+    if (BUNDLING_GATE_RE.test(code)) {
+      out.push({
+        file: rel,
+        detail:
+          "macht das Buendeln wieder von `undocumentedCount === 0` abhaengig — " +
+          "ein offener Termin sperrt damit auch die bereits dokumentierte Arbeit. " +
+          "`canBundleDocumentedAppointments` benutzen.",
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // A5 — Privatzahler-Entscheidungs-SSoT (Formel-Rand)
 // ---------------------------------------------------------------------------
 
@@ -1025,6 +1067,21 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
       },
     ]);
     expect(v).toEqual([]);
+  });
+
+  it("Die Buendelbarkeit haengt nirgends wieder an `undocumentedCount === 0`", () => {
+    const v = detectBundlingGateViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Buendelbarkeits-SSoT verletzt:\n" +
+          formatViolations(v) +
+          "\n\nDer Term machte das Buendeln all-or-nothing: ein offener Termin " +
+          "sperrte auch die fertige, abrechenbare Arbeit — und die Uebersicht " +
+          "zeigte den dokumentierten Termin dann in gar keiner Kategorie. " +
+          "`canBundleDocumentedAppointments` (shared/domain/service-record-bundling.ts) " +
+          "beantwortet die Frage.",
+      );
+    }
   });
 
   it("A6: das Storno-Paar wird nur in der Aktive-Rechnung-SSoT an `appointment_id` gebunden", () => {

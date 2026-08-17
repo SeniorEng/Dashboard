@@ -22,6 +22,7 @@
  *  3. der offene Termin bleibt offen und bleibt als undokumentiert gezählt —
  *     er wandert NICHT stillschweigend in den Nachweis
  *  4. ein zweiter Sammel-LN für den Rest ist möglich
+ *  5. auch ein `documenting`-Termin sperrt nicht und wandert nicht mit
  *
  * Gegenprobe gegen `main`: 1, 2 und 4 müssen dort ROT sein (400 bzw.
  * `canCreateRecord === false`). 3 ist auch dort grün — er hält fest, dass die
@@ -161,6 +162,14 @@ describe("Teilweises Bündeln — offene Termine sperren die fertige Arbeit nich
     expect(res.status, JSON.stringify(res.data)).toBe(201);
     cleanupRecordIds.push(res.data.id);
 
+    // DIE Zusicherung, die den ersatzlosen Wegfall des Riegels traegt: was
+    // liegt tatsaechlich im Nachweis? Alles andere prueft nur von aussen.
+    const inhalt = await apiGet<any>(`/api/service-records/${res.data.id}/appointments`);
+    expect(inhalt.status).toBe(200);
+    const enthalten = inhalt.data.map((a: any) => a.id ?? a.appointmentId);
+    expect(enthalten).toEqual([dokumentiertA]);
+    expect(enthalten, "der offene Termin darf NICHT im Nachweis liegen").not.toContain(offenerTermin);
+
     const nachher = await checkPeriod();
     expect(nachher.data.uncoveredDocumentedCount, "nur noch der zweite ist offen").toBe(1);
     expect(nachher.data.selectableAppointments.map((a: any) => a.id)).toEqual([dokumentiertB]);
@@ -182,10 +191,49 @@ describe("Teilweises Bündeln — offene Termine sperren die fertige Arbeit nich
     expect(res.status, JSON.stringify(res.data)).toBe(201);
     cleanupRecordIds.push(res.data.id);
 
+    const inhalt = await apiGet<any>(`/api/service-records/${res.data.id}/appointments`);
+    const enthalten = inhalt.data.map((a: any) => a.id ?? a.appointmentId);
+    expect(enthalten).toEqual([dokumentiertB]);
+    expect(enthalten, "auch der Sammel-Default nimmt den offenen nicht mit").not.toContain(offenerTermin);
+
     const nachher = await checkPeriod();
     expect(nachher.data.uncoveredDocumentedCount).toBe(0);
     expect(nachher.data.canCreateRecord, "nichts mehr zu buendeln").toBe(false);
     // Der offene Termin steht immer noch offen — zwei Nachweise spaeter.
     expect(nachher.data.undocumentedCount).toBe(1);
+  });
+
+  it("5 — auch ein begonnener (documenting) Termin sperrt nicht und wandert nicht mit", async () => {
+    // Der entfallene Riegel deckte ueber UNDOCUMENTED_STATUSES BEIDE offenen
+    // Status ab. Tests 1-4 ueben nur `scheduled`; `documenting` ist der Fall,
+    // in dem jemand gerade mitten in der Dokumentation steckt — der heiklere.
+    const begonnen = await termin("10:00");
+    // `start` allein reicht nicht — erst `end` setzt den Status auf
+    // `documenting` (der Zustand „geleistet, Doku offen").
+    await apiPost(`/api/appointments/${begonnen}/start`, {});
+    await apiPost(`/api/appointments/${begonnen}/end`, {});
+    const zustand = await apiGet<any>(`/api/appointments/${begonnen}`);
+    expect(zustand.data.status, "Vorbedingung: der Termin muss documenting sein").toBe("documenting");
+
+    const weiterer = await termin("12:00");
+    await dokumentieren(weiterer, "12:00");
+
+    const check = await checkPeriod();
+    expect(check.data.undocumentedCount, "der begonnene zaehlt als undokumentiert").toBeGreaterThan(0);
+    expect(check.data.canCreateRecord, "und sperrt trotzdem nicht").toBe(true);
+    expect(check.data.selectableAppointments.map((a: any) => a.id)).not.toContain(begonnen);
+
+    const res = await apiPost<any>("/api/service-records", {
+      customerId, year, month, employeeId: auth.user.id, appointmentIds: [weiterer],
+    });
+    expect(res.status, JSON.stringify(res.data)).toBe(201);
+    cleanupRecordIds.push(res.data.id);
+
+    const inhalt = await apiGet<any>(`/api/service-records/${res.data.id}/appointments`);
+    const enthalten = inhalt.data.map((a: any) => a.id ?? a.appointmentId);
+    expect(enthalten, "der begonnene Termin darf NICHT im Nachweis liegen").not.toContain(begonnen);
+
+    const danach = await apiGet<any>(`/api/appointments/${begonnen}`);
+    expect(danach.data.status, "und bleibt unangetastet in Dokumentation").toBe("documenting");
   });
 });
