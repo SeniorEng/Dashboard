@@ -339,6 +339,30 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "series-bulk-floor-date",
+    question: "Ab welchem Datum darf eine Serien-MASSENOPERATION Termine anfassen? (Replit-#1913)",
+    canonical: [
+      { symbol: "seriesBulkFloorDate", module: "shared/domain/appointments.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Der Eintrag existiert genau deshalb, weil die Antwort vorher DREIMAL
+        // handgeschrieben im Code stand — als `mode === "all_future" ? today :
+        // appointment.date` bzw. als Tag nach dem vom Nutzer gesetzten
+        // `newEndDate`. Der `all_future`-Zweig war jedes Mal richtig, der
+        // andere jedes Mal falsch.
+        //
+        // Ohne Waechter haelt nichts einen vierten Aufrufer davon ab, die Zeile
+        // ein viertes Mal hinzuschreiben.
+        test: SSOT_IMPORTS_GUARD,
+        allowlistName: "SERIES_BULK_FLOOR_ALLOWLIST",
+        allowlist: ["server/routes/appointment-series.ts"],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "month-close-readiness",
     question: "Ist ein Monat für einen Mitarbeiter abschließbar? (Blocker-Aggregation der Readiness)",
     canonical: [
