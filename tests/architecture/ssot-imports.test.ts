@@ -327,6 +327,48 @@ export function detectCascadeCallViolations(files: ScanFile[]): GuardViolation[]
 }
 
 // ---------------------------------------------------------------------------
+// Datums-Boden fuer Serien-Massenoperationen (Replit-#1913)
+// ---------------------------------------------------------------------------
+
+/**
+ * Die Frage „Ab welchem Datum darf eine Serien-Massenoperation Termine
+ * anfassen?" beantwortet ausschliesslich `seriesBulkFloorDate`
+ * (shared/domain/appointments.ts).
+ *
+ * Der Detektor sucht die hand-gerollte Form, aus der der Vorfall entstand:
+ * `mode === "all_future" ? today : appointment.date` — der `all_future`-Zweig
+ * war jedes Mal richtig, der andere jedes Mal falsch. Sie stand DREIMAL im
+ * Code — dreimal dieselbe Frage, zweimal falsch beantwortet.
+ *
+ * Allowlist ist die Routendatei selbst, weil dort die drei legitimen Aufrufer
+ * sitzen. Der Guard verhindert einen VIERTEN anderswo — und die Rueckkehr der
+ * Zeile in eine neue Datei ist genau der Weg, auf dem so etwas wiederkommt.
+ */
+const SERIES_BULK_FLOOR_ALLOWLIST = new Set<string>(
+  ssotGuardAllowlist("series-bulk-floor-date", "SERIES_BULK_FLOOR_ALLOWLIST"),
+);
+
+const SERIES_BULK_FLOOR_RE = /all_future"?\s*\?[^;\n]{0,60}:\s*\w+\.date\b/;
+
+export function detectSeriesBulkFloorViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (SERIES_BULK_FLOOR_ALLOWLIST.has(rel)) continue;
+    const code = stripComments(content);
+    if (SERIES_BULK_FLOOR_RE.test(code)) {
+      out.push({
+        file: rel,
+        detail:
+          "schreibt den Serien-Stichtag selbst hin (`mode === \"all_future\" ? today : <termin>.date`) " +
+          "statt `seriesBulkFloorDate` aufzurufen — ohne Boden trifft die Operation vergangene Termine",
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // A5 — Privatzahler-Entscheidungs-SSoT (Formel-Rand)
 // ---------------------------------------------------------------------------
 
@@ -1025,6 +1067,20 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
       },
     ]);
     expect(v).toEqual([]);
+  });
+
+  it("Der Serien-Datums-Boden wird nicht ein viertes Mal handgeschrieben", () => {
+    const v = detectSeriesBulkFloorViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Datums-Boden-SSoT verletzt — eigener Serien-Stichtag gefunden:\n" +
+          formatViolations(v) +
+          "\n\nDie Frage „Ab welchem Datum darf eine Serien-Massenoperation Termine " +
+          "anfassen?\u201c gehoert ausschliesslich in `seriesBulkFloorDate` " +
+          "(shared/domain/appointments.ts). Genau diese Zeile stand dreimal im Code " +
+          "und hat vergangene, bereits geleistete Termine mit abgesagt (Replit-#1913).",
+      );
+    }
   });
 
   it("A6: das Storno-Paar wird nur in der Aktive-Rechnung-SSoT an `appointment_id` gebunden", () => {

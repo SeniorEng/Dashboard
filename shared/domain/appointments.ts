@@ -496,6 +496,63 @@ export function isMoreThan3MonthsInPast(dateStr: string, now: Date = new Date())
   return date < threeMonthsAgo;
 }
 
+/**
+ * SSoT: Ab welchem Datum darf eine Serien-MASSENOPERATION Termine anfassen?
+ *
+ * Antwort: nie vor heute. Vergangene Termine sind geleistete Arbeit — sie
+ * werden dokumentiert und abgerechnet, nicht durch eine Serien-Entscheidung
+ * von morgen mit weggeräumt.
+ *
+ * ── Die Lücke (Replit-#1913) ────────────────────────────────────────────
+ * Drei Aufrufer leiteten ihren Stichtag aus einem Datum ab, das in der
+ * Vergangenheit liegen KANN, und gaben ihn ungefiltert an
+ * `getFutureSeriesAppointments` weiter — die filtert nur `>= fromDate`, sie
+ * kennt „heute" nicht:
+ *
+ *  - Absage `this_and_future`  → `appointment.date` des angeklickten Termins
+ *  - Änderung `this_and_future` → dasselbe
+ *  - Serie verkürzen            → Tag nach dem vom Nutzer gesetzten `newEndDate`
+ *
+ * Klickt jemand auf einem VERGANGENEN Termin „dieser und alle folgenden",
+ * trifft die Operation alle Termine ab jenem vergangenen Tag — also auch
+ * bereits geleistete. Ein abgesagter Termin ist danach nicht dokumentierbar,
+ * nicht abrechenbar und in keiner Liste; die Arbeit verschwindet lautlos.
+ *
+ * Beim Verkürzen ist die Folge härter — dort werden die Termine nicht abgesagt,
+ * sondern gelöscht.
+ *
+ * ── Ehrlich zur Herkunft ────────────────────────────────────────────────
+ * Anlass war ein Ticket über 13 angeblich so verlorene Termine. Die Prüfung
+ * gegen Produktion hat das WIDERLEGT: die 13 erklären sich durch Urlaub,
+ * Verlegungen innerhalb desselben Tages, einen Betreuerwechsel und
+ * Serien-Änderungen (alter Termin abgesagt, neuer angelegt). Es war ein
+ * Fehlalarm, und die betroffene Mitarbeiterin hat bestätigt, dass kein Besuch
+ * fehlt.
+ *
+ * Die LÜCKE bleibt davon unberührt: sie ist am Code ablesbar und im Test
+ * belegt (mit herausgenommenem Boden werden vergangene Termine mit abgesagt
+ * bzw. gelöscht). Wer diesen Boden später in Frage stellt, soll nicht auf eine
+ * Schadenszahl stoßen, die es nie gab — sondern auf den Mechanismus.
+ *
+ * ── Was das ERSETZT ─────────────────────────────────────────────────────
+ * Die dreimal wiederholte Zeile
+ *   `const fromDate = mode === "all_future" ? today : appointment.date;`
+ * bzw. ihr Gegenstück in der Verkürzen-Route. Der `all_future`-Zweig war schon
+ * immer richtig (er nimmt `today`) — die Regel stand also bereits im Code, nur
+ * auf den anderen Zweig nicht angewandt. Ab jetzt beantwortet EINE Funktion die
+ * Frage für alle Aufrufer.
+ *
+ * ── „heute" ist hier richtig, nicht die asOf-Falle ──────────────────────
+ * CLAUDE.md warnt vor `todayISO()` statt `asOf`. Der Fall hier ist der
+ * umgekehrte: die Frage lautet wörtlich „was liegt noch VOR mir?", und die ist
+ * nur gegen den Zeitpunkt der Handlung zu beantworten. `heute` wird deshalb
+ * hereingereicht (über die Uhr-SSoT `todayISO()`, damit Tests es stellen
+ * können) statt hier gelesen.
+ */
+export function seriesBulkFloorDate(gewuenschtesStartdatum: string, heuteIso: string): string {
+  return gewuenschtesStartdatum > heuteIso ? gewuenschtesStartdatum : heuteIso;
+}
+
 // ============================================
 // SERIES DATE GENERATION (SSoT)
 // ============================================
