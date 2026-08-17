@@ -769,31 +769,59 @@ describe("KV-24: DSGVO-Anonymisierung inaktiver Kunden", () => {
   });
 
   it("KV-24.3 – Inaktiven Kunden ohne offene Termine erfolgreich anonymisieren", async () => {
-    const custRes = await apiGet<{ data: any[] }>("/api/admin/customers?limit=500");
-    expect(custRes.status).toBe(200);
-    const inactiveCustomers = custRes.data.data?.filter(
-      (c: any) => c.status === "inaktiv" && !c.isAnonymized
-    ) || [];
+    // Der Test legte seinen Kandidaten frueher NICHT selbst an, sondern griff
+    // `inactiveCustomers[0]` aus der GESAMTEN Datenbank — also irgendeinen
+    // inaktiven Kunden, moeglicherweise das Fixture einer parallel laufenden
+    // Datei. Er anonymisierte ihn und las ihn danach wieder; raeumte die andere
+    // Datei zwischendurch auf, kam ein 404 statt 200.
+    //
+    // Genau das ist passiert, als eine neue Datei anfing, Kunden zu
+    // deaktivieren (`tests/customers/deactivation-gate1-override.test.ts`):
+    // reproduzierbar rot in 3 von 3 Laeufen. Der Test mutiert fremden
+    // globalen Zustand und nimmt danach exklusiven Besitz an — jede kuenftige
+    // Datei, die einen inaktiven Kunden erzeugt, haette ihn wieder gebrochen.
+    //
+    // Jetzt mit EIGENEM Fixture: anlegen, Vertrag mit vergangenem Ende,
+    // deaktivieren, anonymisieren. Deterministisch, ohne fremde Zeilen.
+    const createRes = await apiPost<any>("/api/admin/customers", validCustomerPayload());
+    expect(createRes.status).toBe(201);
+    const custId = createRes.data.id;
+    createdCustomerIds.push(custId);
 
-    if (inactiveCustomers.length > 0) {
-      const custId = inactiveCustomers[0].id;
-      const anonRes = await apiPost<any>(`/api/admin/customers/${custId}/anonymize`, {});
-      if (anonRes.status === 200) {
-        const afterRes = await apiGet<any>(`/api/admin/customers/${custId}`);
-        expect(afterRes.status).toBe(200);
-        expect(afterRes.data.isAnonymized).toBe(true);
-        expect(afterRes.data.vorname).toBeNull();
-        expect(afterRes.data.nachname).toBeNull();
-        expect(afterRes.data.email).toBeNull();
-        expect(afterRes.data.address).toBe("Anonymisiert");
-      } else {
-        expect(anonRes.status).toBe(400);
-        expect(anonRes.data.message).toContain("Termin");
-      }
-    } else {
-      const anonEndpoint = await apiPost<any>("/api/admin/customers/99999/anonymize", {});
-      expect(anonEndpoint.status).toBe(404);
-    }
+    const gestern = new Date();
+    gestern.setDate(gestern.getDate() - 1);
+    const ende = `${gestern.getFullYear()}-${String(gestern.getMonth() + 1).padStart(2, "0")}-${String(gestern.getDate()).padStart(2, "0")}`;
+    const start = new Date(gestern);
+    start.setMonth(start.getMonth() - 2);
+    const startIso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+
+    const vertrag = await apiPost<any>(`/api/admin/customers/${custId}/contract`, {
+      contractStart: startIso,
+      contractEnd: ende,
+    });
+    expect([200, 201], JSON.stringify(vertrag.data)).toContain(vertrag.status);
+
+    const deakt = await apiPost<any>(`/api/admin/customers/${custId}/complete-deactivation`, {
+      deactivationReason: "verstorben",
+    });
+    expect(deakt.status, JSON.stringify(deakt.data)).toBe(200);
+    expect(deakt.data.status).toBe("inaktiv");
+
+    const anonRes = await apiPost<any>(`/api/admin/customers/${custId}/anonymize`, {});
+    expect(anonRes.status, JSON.stringify(anonRes.data)).toBe(200);
+
+    // `/api/admin/customers/:id` gibt es NICHT (nur die Liste und DELETE).
+    // Der Erfolgspfad dieses Tests lief nie: er wurde nur betreten, wenn ein
+    // fremder inaktiver Kunde zufaellig anonymisierbar war — und dann waere er
+    // an genau diesem 404 gescheitert. Die Zusicherungen darunter, das
+    // eigentliche Anliegen des Tests, sind bis heute nie gelaufen.
+    const afterRes = await apiGet<any>(`/api/customers/${custId}`);
+    expect(afterRes.status, JSON.stringify(afterRes.data)).toBe(200);
+    expect(afterRes.data.isAnonymized).toBe(true);
+    expect(afterRes.data.vorname).toBeNull();
+    expect(afterRes.data.nachname).toBeNull();
+    expect(afterRes.data.email).toBeNull();
+    expect(afterRes.data.address).toBe("Anonymisiert");
   });
 });
 
