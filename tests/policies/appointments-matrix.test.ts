@@ -18,6 +18,7 @@ import {
   canViewAppointment,
   canCreateAppointment,
   canEditAppointment,
+  canCancelAppointment,
   canDeleteAppointment,
   canDocumentAppointment,
   canReopenAppointment,
@@ -115,6 +116,8 @@ function evalAction(
       return canEditAppointment(user, appt).allowed;
     case "delete":
       return canDeleteAppointment(user, appt).allowed;
+    case "cancel":
+      return canCancelAppointment(user, appt).allowed;
     case "document":
       return canDocumentAppointment(user, appt).allowed;
     case "reopen":
@@ -190,7 +193,7 @@ const DOC_PATH = path.resolve(__dirname, "..", "..", "docs", "permissions-matrix
 describe("Berechtigungs-Matrix Termine", () => {
   it("APPOINTMENT_ACTIONS deckt alle Policy-Funktionen ab", () => {
     expect([...APPOINTMENT_ACTIONS].sort()).toEqual([
-      "create", "delete", "document", "edit", "overrideClosedMonth", "reopen", "view",
+      "cancel", "create", "delete", "document", "edit", "overrideClosedMonth", "reopen", "view",
     ]);
   });
 

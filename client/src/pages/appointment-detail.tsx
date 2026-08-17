@@ -121,7 +121,6 @@ export default function AppointmentDetail() {
   // Aufruf MIT Flag führt aus.
   const [discardConfirm, setDiscardConfirm] = useState<{
     mode: "single" | "this_and_future" | "all_future";
-    message: string;
     anzahl: number;
   } | null>(null);
 
@@ -134,9 +133,11 @@ export default function AppointmentDetail() {
       const result = await api.post(`/appointment-series/${seriesId}/appointments/${id}/cancel`, data);
       if (!result.success && result.error.status === 409) {
         const betroffene = result.error.details?.appointments;
+        // Den darunterliegenden Serien-Dialog schliessen: sonst stehen zwei
+        // modale Dialoge uebereinander (Gate-2-Notiz).
+        setShowSeriesDeleteDialog(false);
         setDiscardConfirm({
           mode: data.mode,
-          message: result.error.message,
           anzahl: Array.isArray(betroffene) ? betroffene.length : 1,
         });
         return null;
@@ -680,6 +681,11 @@ export default function AppointmentDetail() {
             <AlertDialogCancel data-testid="button-discard-cancel">Abbrechen</AlertDialogCancel>
             <AlertDialogAction
               data-testid="button-discard-confirm"
+              // `onSelect` + preventDefault: Radix schliesst den Dialog sonst
+              // sofort beim Klick — dann waeren `disabled` und der Spinner nie
+              // sichtbar, und bei einem Fehler im zweiten Aufruf haette der
+              // Nutzer keinen Kontext mehr (Gate-2-Notiz).
+              onSelect={(e) => e.preventDefault()}
               onClick={() => {
                 if (!discardConfirm) return;
                 seriesCancelMutation.mutate({

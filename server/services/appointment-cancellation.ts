@@ -1,18 +1,17 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, type Tx } from "../lib/db";
 import { appointments } from "@shared/schema";
+import { appointmentsRepo } from "../repos";
 import { AppError } from "../lib/errors";
 import { storage } from "../storage";
 import { budgetStorage } from "../storage/budget-storage";
-import { timeTrackingStorage } from "../storage/time-tracking";
 import { auditService } from "./audit";
 import {
   canCancelAppointment,
   discardsDocumentation,
-  type PolicyAppointment,
   type PolicyUser,
 } from "@shared/policies/appointments";
-import type { AppointmentStatus } from "@shared/domain/appointments";
+import { toPolicyAppointment, loadPolicyFlags } from "../lib/appointment-policy-adapter";
 
 /**
  * SSoT für „einen Termin absagen": entscheiden → prüfen → rückabwickeln →
@@ -90,32 +89,21 @@ export interface CancelResult {
   uebersprungen: Array<{ id: number; grund: string }>;
 }
 
-async function ladeEntscheidungsdaten(id: number) {
-  const appt = await storage.getAppointment(id);
+/**
+ * Laedt die Entscheidungsgrundlage. `tx` gesetzt = Lesen UNTER dem FOR-UPDATE
+ * der laufenden Transaktion (siehe B3-Kommentar in `cancelAppointments`).
+ */
+async function ladeEntscheidungsdaten(id: number, tx?: Tx) {
+  // Ueber die Repo-Schicht, nicht per direktem `select` — der Soft-Delete-Filter
+  // ist dort verankert und ein Architektur-Waechter erzwingt das
+  // (`tests/architecture/soft-delete-coverage.test.ts`).
+  const [appt] = tx
+    ? await appointmentsRepo.selectFrom(tx).where(and(eq(appointments.id, id), isNull(appointments.deletedAt)))
+    : [await storage.getAppointment(id)];
   if (!appt) return null;
 
-  const isLocked = await storage.isAppointmentLocked(id);
-  let isMonthClosed = false;
-  const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
-  if (employeeId && appt.date) {
-    isMonthClosed = await timeTrackingStorage.isMonthClosed(employeeId, appt.date);
-  }
-
-  const policyAppt: PolicyAppointment = {
-    assignedEmployeeId: appt.assignedEmployeeId ?? null,
-    performedByEmployeeId: appt.performedByEmployeeId ?? null,
-    customerId: appt.customerId ?? null,
-    prospectId: appt.prospectId ?? null,
-    status: appt.status as AppointmentStatus,
-    date: appt.date,
-    appointmentType: appt.appointmentType ?? null,
-    isStarted: !!appt.actualStart || !!appt.actualEnd || appt.status !== "scheduled",
-    isLocked,
-    isMonthClosed,
-    hasSignature: !!appt.signatureData,
-  };
-
-  return { appt, policyAppt };
+  const flags = await loadPolicyFlags(id, appt);
+  return { appt, policyAppt: toPolicyAppointment(appt, flags) };
 }
 
 /**
@@ -171,12 +159,51 @@ export async function cancelAppointments(
 
   const run = async (tx: Tx) => {
     for (const id of erlaubt) {
-      // Race-sichere Re-Prüfung IN der Transaktion — wie im Delete-Pfad. Ohne
-      // sie könnte eine gleichzeitig committende Unterschrift den LN zwischen
-      // Entscheidung und Ausführung versiegeln, und wir würden einen
-      // versiegelten GoBD-Nachweis mutieren.
+      // ── Race-sichere Re-Prüfung IN der Transaktion (Gate-2-Fund B3) ──────
+      //
+      // `lockAndCheckAppointmentLocked` nimmt ein FOR UPDATE auf die
+      // Terminzeile und prüft die LN-Sperre. Eine frühere Fassung liess es
+      // dabei bewenden — und behauptete im Kommentar, damit sei „die
+      // Entscheidung" abgesichert. War sie nicht: Status und Policy wurden
+      // AUSSERHALB der Transaktion ausgewertet, das UPDATE lief danach
+      // bedingungslos. Zwei belegbare Löcher:
+      //
+      //  - `scheduled` → `documenting` im Zwischenraum: kein 409, die begonnene
+      //    Dokumentation wäre wieder STILL vernichtet worden — der Defekt, den
+      //    diese Routine behebt, nur schmaler.
+      //  - `documenting` → `completed` nach bestätigtem Flag: ein
+      //    abgeschlossener Termin wäre abgesagt und seine Consumption
+      //    zurückgedreht worden. Storno-first umgangen, also genau die
+      //    Invariante, die `canCancelAppointment` „ausnahmslos" nennt.
+      //
+      // Das Fenster ist nicht theoretisch: die Entscheidungsschleife oben macht
+      // drei Queries je Termin über die ganze Kandidatenliste, bevor die
+      // Transaktion überhaupt aufgeht.
+      //
+      // Deshalb wird hier ALLES neu ausgewertet, nicht nur die Sperre. Ein
+      // zwischenzeitlich veränderter Termin wird ÜBERSPRUNGEN, nicht abgesagt —
+      // niemals still verworfen.
       if (await storage.lockAndCheckAppointmentLocked(id, tx)) {
         uebersprungen.push({ id, grund: "Wurde zwischenzeitlich Teil eines unterschriebenen Leistungsnachweises." });
+        continue;
+      }
+
+      const frisch = await ladeEntscheidungsdaten(id, tx);
+      if (!frisch) {
+        uebersprungen.push({ id, grund: "Termin ist zwischenzeitlich verschwunden." });
+        continue;
+      }
+      const erneut = canCancelAppointment(user, frisch.policyAppt);
+      if (!erneut.allowed) {
+        uebersprungen.push({ id, grund: `Zwischenzeitlich geändert: ${erneut.reason}` });
+        continue;
+      }
+      if (discardsDocumentation(frisch.policyAppt) && !opts.confirmDiscardDocumentation) {
+        uebersprungen.push({
+          id,
+          grund: "Für diesen Termin wurde zwischenzeitlich eine Dokumentation begonnen. " +
+            "Bitte erneut absagen und das Verwerfen bestätigen.",
+        });
         continue;
       }
 

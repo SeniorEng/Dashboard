@@ -202,19 +202,27 @@ export function canEditAppointment(
 }
 
 // ============================================
-// POLICIES — DOKUMENTATIONS-VERLUST (geteilt: Absage UND Löschen)
+// POLICIES — DOKUMENTATIONS-VERLUST
 // ============================================
 
 /**
  * Verwirft dieser Eingriff eine begonnene Dokumentation?
  *
- * EINE Quelle für Absage UND Löschen. Beide Wege konnten einen Termin im Status
- * `documenting` — Arbeit geleistet, Dokumentation begonnen — ohne jede Rückfrage
- * entwerten; danach verweigert `canDocumentAppointment` dauerhaft
+ * Gedacht als EINE Quelle für Absage UND Löschen — beide Wege konnten einen
+ * Termin im Status `documenting` — Arbeit geleistet, Dokumentation begonnen —
+ * ohne jede Rückfrage entwerten; danach verweigert `canDocumentAppointment` dauerhaft
  * („Stornierte oder abgelaufene Termine können nicht dokumentiert werden"), die
  * Leistung ist weder abrechenbar noch wiederherstellbar. Gemessen am
  * Beweis-Harness: `documenting` → Absage → HTTP 200, Status `cancelled`,
  * dokumentierbar danach `false`.
+ *
+ * STAND: benutzt aktuell NUR der Absage-Pfad
+ * (`server/services/appointment-cancellation.ts`). Der Löschpfad hat den Gate
+ * bewusst noch nicht — sein Client (`use-appointments.ts#deleteAppointment`)
+ * kennt keine 409→Dialog→Flag-Kette, und ein Gate ohne UI machte das Löschen
+ * eines `documenting`-Termins schlicht unmöglich statt bewusst. Das wäre
+ * schlechter als der Zustand vorher. Die Übernahme kommt als eigener PR MIT
+ * der zugehörigen UI; diese Funktion ist dafür da und wartet.
  *
  * Der Eingriff wird NICHT verboten — er ist fachlich legitim (ein Termin fällt
  * eben aus). Er darf nur nicht STILL passieren. Muster wie der
@@ -424,6 +432,7 @@ export const APPOINTMENT_ACTIONS = [
   "create",
   "edit",
   "delete",
+  "cancel",
   "document",
   "reopen",
   "overrideClosedMonth",

@@ -365,12 +365,18 @@ router.delete("/:id", asyncHandler("Serie konnte nicht beendet werden", async (r
     return sendBadRequest(res, "Diese Serie ist bereits beendet.");
   }
 
-  // Muster #1883 — auch das Beenden einer Serie kann begonnene Dokumentationen
-  // treffen; dieselbe Bestaetigung wie bei der Einzel-/Bulk-Absage.
-  const endSchema = z.object({ confirmDiscardDocumentation: z.boolean().optional().default(false) });
-  const endParsed = endSchema.safeParse(req.body ?? {});
-  if (!endParsed.success) return sendBadRequest(res, "Validierungsfehler");
-  const { confirmDiscardDocumentation } = endParsed.data;
+  // Task-Grenze (Gate-2-Funde B1/B2): „Serie beenden" bekommt den
+  // Bestaetigungs-Gate NICHT, solange sein Client (`useEndSeries`) keine
+  // 409→Dialog→Flag-Kette hat. Ein Gate ohne UI machte den Vorgang
+  // unausfuehrbar, sobald irgendein Termin ab heute `documenting` ist — also im
+  // Normalfall. Das ist schlechter als der Zustand vorher. Die Uebernahme
+  // kommt als eigener PR MIT UI.
+  //
+  // `confirmDiscardDocumentation: true` heisst hier deshalb: Verhalten wie
+  // bisher, kein neuer 409. Die Rueckabwicklung und das Audit der SSoT-Routine
+  // greifen trotzdem — das ist die Verbesserung, die ohne UI-Aenderung sicher
+  // ist.
+  const confirmDiscardDocumentation = true;
 
   const today = todayISO();
   const kandidaten = await collectSeriesAppointmentIds(id, today, { includeExceptions: true });
@@ -740,6 +746,14 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
   // dort ist Teilerfolg der Normalfall.
   if (mode === "single" && ergebnis.cancelled.length === 0) {
     const grund = ergebnis.uebersprungen[0]?.grund ?? "Termin konnte nicht abgesagt werden.";
+    // Gate-2-Fund S3: Fuer „liegt auf einem unterschriebenen Leistungsnachweis"
+    // ist der etablierte Vertrag im Repo 409 + APPOINTMENT_LOCKED
+    // (appointments.ts:2266, :1327, appointment-documentation.ts:123). Clients
+    // verzweigen auf diesen Code (`handleDelete`, `handleDecouple`); ein 400
+    // INVALID_REQUEST haette den Fall unkenntlich gemacht.
+    if (/Leistungsnachweis/.test(grund)) {
+      return res.status(409).json({ code: "APPOINTMENT_LOCKED", message: grund });
+    }
     return sendBadRequest(res, grund);
   }
 
