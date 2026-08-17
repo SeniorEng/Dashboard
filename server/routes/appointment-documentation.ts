@@ -13,7 +13,7 @@ import { timeTrackingStorage } from "../storage/time-tracking";
 import { db } from "../lib/db";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { canDocumentAppointment as policyCanDocument } from "@shared/policies/appointments";
-import { toPolicyAppointment, toPolicyUser } from "./appointments";
+import { toPolicyAppointment, toPolicyUser } from "../lib/appointment-policy-adapter";
 import { formatEuroDE } from "@shared/utils/money";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { formatTimeHHMMSS, todayISO } from "@shared/utils/datetime";

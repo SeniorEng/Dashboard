@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { toPolicyUser, toPolicyAppointment, loadPolicyFlags } from "../lib/appointment-policy-adapter";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { storage } from "../storage";
@@ -62,6 +63,7 @@ import {
   canDeleteAppointment as policyCanDelete,
   canDocumentAppointment as policyCanDocument,
   canReopenAppointment as policyCanReopen,
+  discardsDocumentation,
   isAdminLike,
   type PolicyUser,
   type PolicyAppointment,
@@ -72,64 +74,8 @@ import type { ServiceRecordAppointmentRemoval } from "../storage/service-records
 
 const router = Router();
 
-/**
- * Adapter: Express-User → PolicyUser.
- * Admin/SuperAdmin sind absichtlich KEINE Teamleitungen (vgl. server/lib/team-lead.ts).
- */
-function toPolicyUser(user: {
-  id: number;
-  isAdmin: boolean;
-  isSuperAdmin?: boolean | null;
-  isTeamLead?: boolean | null;
-  isActive?: boolean | null;
-  isAnonymized?: boolean | null;
-  roles?: readonly string[];
-}): PolicyUser {
-  const adminLike = !!user.isAdmin || !!user.isSuperAdmin;
-  return {
-    id: user.id,
-    isAdmin: !!user.isAdmin,
-    isSuperAdmin: !!user.isSuperAdmin,
-    isTeamLead: !adminLike && !user.isAnonymized && !!user.isTeamLead,
-    isActive: user.isActive !== false,
-    roles: user.roles ?? [],
-  };
-}
-
-/** Adapter: DB-Termin → PolicyAppointment. */
-function toPolicyAppointment(
-  appt: {
-    assignedEmployeeId: number | null;
-    performedByEmployeeId: number | null;
-    customerId: number | null;
-    prospectId?: number | null;
-    status: string;
-    date: string;
-    appointmentType?: string | null;
-    actualStart?: string | null;
-    actualEnd?: string | null;
-    signatureData?: string | null;
-  },
-  flags: { isLocked: boolean; isMonthClosed: boolean },
-): PolicyAppointment {
-  const status = appt.status as AppointmentStatus;
-  const isStarted = !!appt.actualStart || !!appt.actualEnd || status === "documenting";
-  return {
-    assignedEmployeeId: appt.assignedEmployeeId,
-    performedByEmployeeId: appt.performedByEmployeeId,
-    customerId: appt.customerId,
-    prospectId: appt.prospectId ?? null,
-    status,
-    date: appt.date,
-    appointmentType: appt.appointmentType ?? null,
-    isStarted,
-    isLocked: flags.isLocked,
-    isMonthClosed: flags.isMonthClosed,
-    hasSignature: !!appt.signatureData,
-  };
-}
-
-export { toPolicyUser, toPolicyAppointment };
+// Adapter + Flags-Loader liegen in `server/lib/appointment-policy-adapter.ts`
+// (SSoT, geteilt mit dem Absage-Pfad — siehe Docstring dort).
 
 async function checkEmployeeBlocker(
   employeeId: number,
@@ -1313,6 +1259,40 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   // werden mitgezogen; Partner mit eigenem Ausgang bleiben unangetastet.
   const isCancelling =
     validatedData.status === "cancelled" && existingAppointment.status !== "cancelled";
+
+  // Gate-2-Fund S1 — dieser Pfad kann ebenfalls absagen und umging den
+  // Dokumentations-Schutz. Er bekommt DENSELBEN Gate wie die Absage-SSoT.
+  //
+  // Bewusst NUR der Gate, KEIN Vollblock: dieser Pfad traegt die
+  // Co-Visit-Absage-Kaskade (#1615, unten), die die Absage-Routine nicht hat.
+  // Ein Block wuerde drei Co-Visit-Tests brechen und Funktion ersatzlos
+  // entfernen — in genau dem Bereich, der fuer diesen PR ausgeklammert ist
+  // (Halbzustand-Task 6h9XF3crCPFhrC3F).
+  //
+  // Ein 409 strandet hier niemanden: dieser Pfad ist aus der UI nicht
+  // erreichbar (kein Client setzt `status: "cancelled"`), anders als die
+  // DELETE-Routen, an denen der Gate deshalb wieder herausgenommen wurde.
+  //
+  // OFFEN und im PR-Body vermerkt: Budget-Rueckabwicklung und der
+  // `appointment_cancelled`-Audit-Typ fehlen diesem Pfad weiterhin. Das
+  // aufzuloesen heisst, ihn auf `cancelAppointments` zu ziehen — und das geht
+  // erst, wenn die Co-Visit-Frage entschieden ist.
+  if (isCancelling && discardsDocumentation(policyAppt) && req.body?.confirmDiscardDocumentation !== true) {
+    return res.status(409).json({
+      code: "CANCEL_DISCARDS_DOCUMENTATION",
+      message:
+        "Für diesen Termin wurde bereits eine Dokumentation begonnen. Beim Absagen wird sie " +
+        "verworfen und kann nicht wiederhergestellt werden. Bitte ausdrücklich bestätigen.",
+      details: {
+        appointments: [{
+          id,
+          date: existingAppointment.date,
+          status: existingAppointment.status,
+          verworfen: "Dokumentation",
+        }],
+      },
+    });
+  }
   const cascadedCancelledLegIds: number[] = [];
 
   const updated = await db.transaction(async (tx) => {
@@ -1545,15 +1525,6 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
  * Zentralisiert die zwei DB-Lookups, die jede Mutation braucht, damit
  * die Policy mit konsistenten Werten entscheiden kann.
  */
-async function loadPolicyFlags(appointmentId: number, appt: { date: string; assignedEmployeeId: number | null; performedByEmployeeId: number | null }): Promise<{ isLocked: boolean; isMonthClosed: boolean }> {
-  const isLocked = await storage.isAppointmentLocked(appointmentId);
-  let isMonthClosed = false;
-  const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
-  if (employeeId && appt.date) {
-    isMonthClosed = await timeTrackingStorage.isMonthClosed(employeeId, appt.date);
-  }
-  return { isLocked, isMonthClosed };
-}
 
 function denyByPolicy(
   res: Response,

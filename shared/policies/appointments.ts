@@ -202,6 +202,102 @@ export function canEditAppointment(
 }
 
 // ============================================
+// POLICIES — DOKUMENTATIONS-VERLUST
+// ============================================
+
+/**
+ * Verwirft dieser Eingriff eine begonnene Dokumentation?
+ *
+ * Gedacht als EINE Quelle für Absage UND Löschen — beide Wege konnten einen
+ * Termin im Status `documenting` — Arbeit geleistet, Dokumentation begonnen —
+ * ohne jede Rückfrage entwerten; danach verweigert `canDocumentAppointment` dauerhaft
+ * („Stornierte oder abgelaufene Termine können nicht dokumentiert werden"), die
+ * Leistung ist weder abrechenbar noch wiederherstellbar. Gemessen am
+ * Beweis-Harness: `documenting` → Absage → HTTP 200, Status `cancelled`,
+ * dokumentierbar danach `false`.
+ *
+ * STAND: zwei Aufrufer — die Absage-SSoT
+ * (`server/services/appointment-cancellation.ts`) und der PATCH-Zweig
+ * `status: "cancelled"` in `server/routes/appointments.ts`, der ebenfalls
+ * absagen kann. Der Löschpfad hat den Gate
+ * bewusst noch nicht — sein Client (`use-appointments.ts#deleteAppointment`)
+ * kennt keine 409→Dialog→Flag-Kette, und ein Gate ohne UI machte das Löschen
+ * eines `documenting`-Termins schlicht unmöglich statt bewusst. Das wäre
+ * schlechter als der Zustand vorher. Die Übernahme kommt als eigener PR MIT
+ * der zugehörigen UI; diese Funktion ist dafür da und wartet.
+ *
+ * Der Eingriff wird NICHT verboten — er ist fachlich legitim (ein Termin fällt
+ * eben aus). Er darf nur nicht STILL passieren. Muster wie der
+ * `confirmPartial`-Guard aus Task #1883: ohne Bestätigung 409 mit Ausweis der
+ * betroffenen Termine, mit Bestätigung Ausführung inkl. Audit und
+ * Rückabwicklung.
+ *
+ * Bewusst NUR `documenting`: `completed` ist über die Storno-first-Regel
+ * ohnehin gesperrt, und `customer_no_show` ist ein eigener dokumentierter
+ * Ausgang, dessen Absage-Semantik hier nicht mitentschieden wird (offener Punkt
+ * im PR-Body).
+ */
+export function discardsDocumentation(appt: Pick<PolicyAppointment, "status">): boolean {
+  return appt.status === "documenting";
+}
+
+// ============================================
+// POLICIES — ABSAGE
+// ============================================
+
+/**
+ * Darf dieser Termin abgesagt werden?
+ *
+ * ERSETZT zwei divergente Guard-Sets, die dieselbe Frage unterschiedlich
+ * beantworteten: das Inline-Set im `single`-Zweig
+ * (`server/routes/appointment-series.ts`, prüfte NUR `completed`) und die
+ * Eignungsprüfung in `collectEligibleFutureIds` (prüfte zusätzlich
+ * Monatsabschluss und Sperre, dafür kein `documenting`).
+ *
+ * Die Schranken folgen `canDeleteAppointment` — Absagen und Löschen sind
+ * dieselbe Klasse Eingriff und dürfen nicht verschieden streng sein. Einziger
+ * bewusster Unterschied: `completed` bleibt AUSNAHMSLOS gesperrt (auch für
+ * Admins), weil ein abgeschlossener Termin über Storno-first zu korrigieren ist
+ * — das war schon bisher so und bleibt.
+ */
+export function canCancelAppointment(
+  user: PolicyUser,
+  appt: PolicyAppointment,
+): PolicyDecision {
+  if (!user.isActive) return deny("Ihr Konto ist deaktiviert.");
+
+  const adminLike = isAdminLike(user);
+  const lead = user.isTeamLead && user.isActive;
+
+  if (!adminLike) {
+    if (lead) {
+      if (appt.isStarted && !isAssignedEmployee(user, appt)) {
+        return deny("Bereits gestartete Termine anderer Mitarbeiter können nicht abgesagt werden.");
+      }
+    } else if (!isAssignedEmployee(user, appt)) {
+      return deny("Nur der zugewiesene Mitarbeiter darf diesen Termin absagen.");
+    }
+  }
+
+  if (appt.status === "completed") {
+    return deny("Abgeschlossene Termine können nicht abgesagt werden.");
+  }
+  if (appt.status === "cancelled") {
+    return deny("Dieser Termin ist bereits abgesagt.");
+  }
+
+  if (appt.isMonthClosed && !user.isSuperAdmin) {
+    return deny("Der Monat ist bereits abgeschlossen. Absagen sind nur noch durch die Geschäftsführung möglich.");
+  }
+
+  if (appt.isLocked) {
+    return deny("Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Bitte zuerst den Nachweis stornieren.");
+  }
+
+  return ALLOW;
+}
+
+// ============================================
 // POLICIES — DELETE
 // ============================================
 
@@ -338,6 +434,7 @@ export const APPOINTMENT_ACTIONS = [
   "create",
   "edit",
   "delete",
+  "cancel",
   "document",
   "reopen",
   "overrideClosedMonth",

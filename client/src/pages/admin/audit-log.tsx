@@ -25,6 +25,7 @@ const ACTION_LABELS: Record<string, string> = {
   appointment_revoked: "Termin storniert",
   appointment_updated: "Termin bearbeitet",
   appointment_deleted: "Termin gelöscht",
+  appointment_cancelled: "Termin abgesagt",
   // Task #1906 — ohne Eintrag hier wäre der eigene Audit-Typ weder filterbar
   // noch lesbar (die Liste fällt auf den Roh-Key zurück). Der Typ existiert
   // gerade deshalb, damit im Verlauf unterscheidbar bleibt, ob ein
