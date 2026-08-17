@@ -1,7 +1,6 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, type Tx } from "../lib/db";
 import { appointments } from "@shared/schema";
-import { appointmentsRepo } from "../repos";
 import { AppError } from "../lib/errors";
 import { storage } from "../storage";
 import { budgetStorage } from "../storage/budget-storage";
@@ -11,7 +10,7 @@ import {
   discardsDocumentation,
   type PolicyUser,
 } from "@shared/policies/appointments";
-import { toPolicyAppointment, loadPolicyFlags } from "../lib/appointment-policy-adapter";
+import { ladeEntscheidungsdaten } from "../lib/appointment-policy-adapter";
 
 /**
  * SSoT für „einen Termin absagen": entscheiden → prüfen → rückabwickeln →
@@ -87,23 +86,6 @@ export interface CancelResult {
   cancelled: number[];
   /** Übersprungene mit Begründung (z.B. bereits abgesagt, gesperrt). */
   uebersprungen: Array<{ id: number; grund: string }>;
-}
-
-/**
- * Laedt die Entscheidungsgrundlage. `tx` gesetzt = Lesen UNTER dem FOR-UPDATE
- * der laufenden Transaktion (siehe B3-Kommentar in `cancelAppointments`).
- */
-async function ladeEntscheidungsdaten(id: number, tx?: Tx) {
-  // Ueber die Repo-Schicht, nicht per direktem `select` — der Soft-Delete-Filter
-  // ist dort verankert und ein Architektur-Waechter erzwingt das
-  // (`tests/architecture/soft-delete-coverage.test.ts`).
-  const [appt] = tx
-    ? await appointmentsRepo.selectFrom(tx).where(and(eq(appointments.id, id), isNull(appointments.deletedAt)))
-    : [await storage.getAppointment(id)];
-  if (!appt) return null;
-
-  const flags = await loadPolicyFlags(id, appt);
-  return { appt, policyAppt: toPolicyAppointment(appt, flags) };
 }
 
 /**

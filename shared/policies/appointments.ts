@@ -297,6 +297,63 @@ export function canCancelAppointment(
   return ALLOW;
 }
 
+/**
+ * Darf dieser Nutzer die Absage dieses Termins ZURÜCKNEHMEN?
+ *
+ * ── Wozu es das gibt (Replit-#1913) ─────────────────────────────────────
+ * Eine Serien-Absage hat in Produktion 13 bereits GELEISTETE Termine
+ * mitgenommen. Danach gab es keinen Weg zurück: ein abgesagter Termin ist
+ * nicht dokumentierbar, nicht abrechenbar, nicht sichtbar. Die Arbeit war
+ * getan und im System nicht mehr vorhanden. Aufgeräumt wurde von Hand über
+ * ein Einmal-Skript.
+ *
+ * CLAUDE.md sagt dazu: „Wiederverwendbare Fähigkeiten als echtes Feature
+ * bauen, nicht als Skript." Diese Policy ERSETZT das Skript als Weg, eine
+ * Fehlabsage zu korrigieren — das Skript bleibt nur für die 13 Altfälle, die
+ * vor dieser Funktion entstanden sind, und wird danach gelöscht.
+ *
+ * ── Schranken ───────────────────────────────────────────────────────────
+ * Bewusst SPIEGELBILDLICH zu `canCancelAppointment` — wer absagen darf, darf
+ * die eigene Absage auch zurücknehmen. Zwei verschieden strenge Antworten auf
+ * „darf dieser Nutzer über diesen Termin bestimmen?" wären genau der
+ * Zweitbegriff, den die SSoT-Regel verbietet.
+ *
+ * Der Monatsabschluss ist KEIN Sonderfall, den man hier aufweichen dürfte: in
+ * einen geschlossenen Monat zurückzuholen heißt, Lohn und Stunden nachträglich
+ * zu bewegen. Das darf nur die Geschäftsführung, und zwar indem sie den Monat
+ * FORMAL öffnet — nicht, indem eine Route ihn still übergeht.
+ */
+export function canRestoreAppointment(
+  user: PolicyUser,
+  appt: PolicyAppointment,
+): PolicyDecision {
+  if (!user.isActive) return deny("Ihr Konto ist deaktiviert.");
+
+  const adminLike = isAdminLike(user);
+  const lead = user.isTeamLead && user.isActive;
+
+  if (!adminLike && !lead && !isAssignedEmployee(user, appt)) {
+    return deny("Nur der zugewiesene Mitarbeiter darf diese Absage zurücknehmen.");
+  }
+
+  if (appt.status !== "cancelled") {
+    return deny("Nur abgesagte Termine können zurückgeholt werden.");
+  }
+
+  if (appt.isMonthClosed && !user.isSuperAdmin) {
+    return deny(
+      "Der Monat ist bereits abgeschlossen. Der Termin kann erst zurückgeholt werden, " +
+      "wenn die Geschäftsführung den Monat wieder öffnet.",
+    );
+  }
+
+  if (appt.isLocked) {
+    return deny("Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Bitte zuerst den Nachweis stornieren.");
+  }
+
+  return ALLOW;
+}
+
 // ============================================
 // POLICIES — DELETE
 // ============================================
@@ -435,6 +492,7 @@ export const APPOINTMENT_ACTIONS = [
   "edit",
   "delete",
   "cancel",
+  "restore",
   "document",
   "reopen",
   "overrideClosedMonth",

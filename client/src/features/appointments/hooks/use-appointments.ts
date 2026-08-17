@@ -136,6 +136,29 @@ export function useDecoupleCoVisit() {
   });
 }
 
+/**
+ * Nimmt eine Absage zurück (Replit-#1913).
+ *
+ * onError-waived: Der Aufrufer unterscheidet die fachliche Ablehnung
+ * (`APPOINTMENT_RESTORE_BLOCKED` — Nachweis unterschrieben, Monat geschlossen)
+ * von einem echten Fehler und zeigt den Server-Klartext. Ein generisches
+ * `onError` hier überdeckte die Begründung, an der der Nutzer gerade hängt: sie
+ * sagt ihm, WEN er fragen muss.
+ */
+export function useRestoreAppointment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const result = await api.post<{ restored: number }>(`/appointments/${id}/restore`, {});
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "appointments");
+    },
+  });
+}
+
 export function useDeleteAppointment() {
   const queryClient = useQueryClient();
   const { toast } = useToast();

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment, useAppointmentBudgetFit } from "@/features/appointments";
-import { useDeleteAppointment, useDecoupleCoVisit } from "@/features/appointments/hooks";
+import { useDeleteAppointment, useDecoupleCoVisit, useRestoreAppointment } from "@/features/appointments/hooks";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -216,6 +216,7 @@ export default function AppointmentDetail() {
   });
 
   const deleteMutation = useDeleteAppointment();
+  const restoreMutation = useRestoreAppointment();
   // Task #1906 — Ausweg aus dem Löschdialog: statt beide Legs zu entfernen, nur
   // DIESES herauslösen. Der Partner bleibt mit allem, was er hat.
   const decoupleMutation = useDecoupleCoVisit();
@@ -395,6 +396,44 @@ export default function AppointmentDetail() {
                   Zur Serie <ArrowRight className="w-3 h-3 ml-1" />
                 </Button>
               </Link>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/*
+        Replit-#1913 — Ausweg aus einer Fehlabsage. Nur hier, nicht in der
+        Terminliste: Zurückholen ist eine Korrektur, keine Routine-Handlung, und
+        soll den Termin vor Augen haben, den sie betrifft.
+
+        Die Policy entscheidet über die Sichtbarkeit; ist sie ablehnend, steht
+        statt des Knopfes ihre BEGRÜNDUNG da. Die sagt dem Nutzer, wen er fragen
+        muss („die Geschäftsführung muss den Monat wieder öffnen") — genau die
+        Auskunft, die im Vorfall gefehlt hat.
+      */}
+      {appointment.status === "cancelled" && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg" data-testid="banner-cancelled-restore">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className={`${iconSize.sm} text-amber-600 shrink-0`} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-amber-800 font-medium">Dieser Termin ist abgesagt.</p>
+              <p className="text-sm text-amber-700">
+                {policy?.restore.allowed
+                  ? "Wurde er versehentlich abgesagt, obwohl er stattgefunden hat, kann die Absage zurückgenommen werden — der Termin ist danach wieder dokumentierbar."
+                  : policy?.restore.reason}
+              </p>
+            </div>
+            {policy?.restore.allowed && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                disabled={restoreMutation.isPending}
+                onClick={() => restoreMutation.mutate(appointment.id)}
+                data-testid="button-restore-appointment"
+              >
+                {restoreMutation.isPending ? "Wird zurückgeholt …" : "Absage zurücknehmen"}
+              </Button>
             )}
           </div>
         </div>

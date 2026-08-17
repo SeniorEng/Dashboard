@@ -15,6 +15,11 @@ export const AUDIT_ACTIONS = [
   "appointment_updated",
   "appointment_deleted",
   "appointment_cancelled",
+  // Replit-#1913 — Absage zurueckgenommen (`appointment-restore.ts`). Eigener
+  // Typ, weil die GoBD-Spur zeigen muss, dass ein Termin aus der Absage
+  // ZURUECK kam; `appointment_updated` wuerde das unter beliebigen
+  // Feldaenderungen begraben.
+  "appointment_restored",
   // Task #1906 — Zwei-Kräfte-Einsatz entkoppelt: ein Leg weicht, das andere
   // bleibt als Einzeltermin. Eigener Typ, weil im Verlauf unterscheidbar
   // bleiben muss, ob ein Paar AUFGELÖST oder ein Einzeltermin gelöscht wurde.

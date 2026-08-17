@@ -50,9 +50,6 @@ exports[`Architektur — Soft-Delete-Coverage in server/routes/** > Snapshot: pr
 
 exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) > Snapshot: pro Service-Datei sind nur Repo-vermittelte Reads registriert 1`] = `
 {
-  "server/services/appointment-cancellation.ts": [
-    "appointmentsRepo",
-  ],
   "server/services/appointment-import-reconcile.ts": [
     "appointmentsRepo",
   ],

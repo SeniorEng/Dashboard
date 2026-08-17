@@ -6,6 +6,7 @@ import {
   canDocumentAppointment,
   canEditAppointment,
   canReopenAppointment,
+  canRestoreAppointment,
   canViewAppointment,
   type PolicyAppointment,
   type PolicyDecision,
@@ -59,6 +60,7 @@ export interface AppointmentPolicy {
   delete: PolicyDecision;
   document: PolicyDecision;
   reopen: PolicyDecision;
+  restore: PolicyDecision;
 }
 
 /**
@@ -91,6 +93,7 @@ export function useAppointmentPolicy(
       delete: canDeleteAppointment(policyUser, policyAppt),
       document: canDocumentAppointment(policyUser, policyAppt),
       reopen: canReopenAppointment(policyUser, policyAppt),
+      restore: canRestoreAppointment(policyUser, policyAppt),
     };
   }, [user, appointment, isAssignedToCustomer]);
 }

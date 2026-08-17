@@ -496,6 +496,51 @@ export function isMoreThan3MonthsInPast(dateStr: string, now: Date = new Date())
   return date < threeMonthsAgo;
 }
 
+/**
+ * SSoT: Ab welchem Datum darf eine Serien-MASSENOPERATION Termine anfassen?
+ *
+ * Antwort: nie vor heute. Vergangene Termine sind geleistete Arbeit — sie
+ * werden dokumentiert und abgerechnet, nicht durch eine Serien-Entscheidung
+ * von morgen mit weggeräumt.
+ *
+ * ── Der Vorfall, aus dem diese Funktion entstand (Replit-#1913) ──────────
+ * Drei Aufrufer leiteten ihren Stichtag aus einem Datum ab, das in der
+ * Vergangenheit liegen KANN, und gaben ihn ungefiltert an
+ * `getFutureSeriesAppointments` weiter — die filtert nur `>= fromDate`, sie
+ * kennt „heute" nicht:
+ *
+ *  - Absage `this_and_future`  → `appointment.date` des angeklickten Termins
+ *  - Änderung `this_and_future` → dasselbe
+ *  - Serie verkürzen            → Tag nach dem vom Nutzer gesetzten `newEndDate`
+ *
+ * Klickt jemand auf einem vergangenen Termin „dieser und alle folgenden", trifft
+ * die Operation alle Termine ab jenem vergangenen Tag. In Produktion sind so
+ * 13 bereits geleistete Termine aus 3 Serien abgesagt worden (1080 Minuten,
+ * rund 684,00 €). Danach kamen die Mitarbeiterinnen nicht mehr an sie heran:
+ * nicht dokumentierbar, nicht abrechenbar, nicht sichtbar.
+ *
+ * Beim Verkürzen ist die Folge härter — dort werden die Termine nicht abgesagt,
+ * sondern gelöscht.
+ *
+ * ── Was das ERSETZT ─────────────────────────────────────────────────────
+ * Die dreimal wiederholte Zeile
+ *   `const fromDate = mode === "all_future" ? today : appointment.date;`
+ * bzw. ihr Gegenstück in der Verkürzen-Route. Der `all_future`-Zweig war schon
+ * immer richtig (er nimmt `today`) — die Regel stand also bereits im Code, nur
+ * auf den anderen Zweig nicht angewandt. Ab jetzt beantwortet EINE Funktion die
+ * Frage für alle Aufrufer.
+ *
+ * ── „heute" ist hier richtig, nicht die asOf-Falle ──────────────────────
+ * CLAUDE.md warnt vor `todayISO()` statt `asOf`. Der Fall hier ist der
+ * umgekehrte: die Frage lautet wörtlich „was liegt noch VOR mir?", und die ist
+ * nur gegen den Zeitpunkt der Handlung zu beantworten. `heute` wird deshalb
+ * hereingereicht (über die Uhr-SSoT `todayISO()`, damit Tests es stellen
+ * können) statt hier gelesen.
+ */
+export function seriesBulkFloorDate(gewuenschtesStartdatum: string, heuteIso: string): string {
+  return gewuenschtesStartdatum > heuteIso ? gewuenschtesStartdatum : heuteIso;
+}
+
 // ============================================
 // SERIES DATE GENERATION (SSoT)
 // ============================================

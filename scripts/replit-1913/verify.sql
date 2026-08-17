@@ -157,11 +157,18 @@ WHERE a.id IN (915,917,918,919,922,923,924,925,926,1123,1754,1755,1756)
 --     Undo, das den Monatsabschluss respektiert (so will es das Ticket),
 --     saemtliche 13 ueberspringen — die Reparatur liefe ins Leere.
 --
---     Das ist eine Entscheidung fuer Alrik, keine technische: entweder die
---     betroffenen Monate werden vorher wieder geoeffnet (GF-Aktion, im Audit
---     sichtbar), oder das Skript bekommt einen ausdruecklich dokumentierten
---     Superadmin-Override. Beides sind Prod-Schreibvorgaenge und brauchen
---     eigene Freigabe. NICHT still uebergehen.
+--     ENTSCHIEDEN (Alrik, 17.08.2026): die betroffenen Mitarbeiter-Monate
+--     werden von der GF FORMAL wieder geoeffnet — auditierbar. KEIN Override
+--     im Skript. Ein Skript, das sich still ueber einen Monatsabschluss
+--     hinwegsetzt, waere genau die stille Schreiboperation, gegen die der
+--     ganze Vorgang laeuft.
+--
+--     Diese Abfrage sagt also, WELCHE Monate zu oeffnen sind. Erwartet nach
+--     dem Trockenlauf gegen die Referenz-Kopie: Kraft 11 Mai+Juni+Juli,
+--     Kraft 24 Mai, Kraft 21 Juli. Weicht Prod davon ab, gilt Prod.
+--
+--     Ablauf danach: Monate oeffnen -> Trockenlauf -> Freigabe -> --apply ->
+--     Mitarbeiterinnen dokumentieren -> Monate wieder schliessen.
 -- ---------------------------------------------------------------------------
 SELECT a.id, a.date, a.assigned_employee_id,
        EXISTS (SELECT 1 FROM employee_month_closings mc

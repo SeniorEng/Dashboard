@@ -41,6 +41,7 @@ import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetStorage } from "../storage/budget-storage";
 import { reopenAppointmentForRedocumentation, type AppointmentReopenFacts } from "../lib/appointment-reopen";
 import { getPlannedHoldInputs } from "../storage/budget/appointment-cost-calculator";
+import { restoreAppointments } from "../services/appointment-restore";
 import { rebookAppointmentConsumption, type RebookKmResult } from "../storage/budget/km-rebook";
 import { buildBudgetWarning } from "../lib/budget-warning";
 import type { Response } from "express";
@@ -1794,6 +1795,47 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
 }));
 
 router.use(appointmentDocumentationRouter);
+
+// ============================================
+// ABSAGE ZURÜCKNEHMEN (Replit-#1913)
+// ============================================
+/**
+ * Nimmt eine Absage zurück: `cancelled` → `scheduled`.
+ *
+ * Die eigentliche Arbeit macht die SSoT `restoreAppointments` — hier steht nur
+ * die HTTP-Hülle. Bewusst EIN Termin je Aufruf: es gibt keinen fachlichen Fall,
+ * in dem jemand mehrere Absagen auf einmal zurücknimmt, und ein Bulk-Eingang
+ * lüde dazu ein, das nächste Mal versehentlich eine ganze Serie zurückzuholen —
+ * spiegelbildlich zu dem Vorfall, aus dem diese Route entstanden ist.
+ *
+ * Ein abgelehnter Einzelfall ist ein FEHLER, kein leeres Erfolgsergebnis: die
+ * Routine meldet ihn über `uebersprungen`, die Route macht daraus 409 bzw. 403.
+ * Ein 200 mit `restored: 0` wäre genau die stille Rückmeldung, die PR #100 im
+ * Absage-Pfad beseitigt hat.
+ */
+router.post("/:id/restore", asyncHandler("Absage konnte nicht zurückgenommen werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const ergebnis = await restoreAppointments(
+    [id],
+    toPolicyUser(req.user!),
+    { userId: req.user!.id, ipAddress: req.ip || req.socket.remoteAddress },
+  );
+
+  if (ergebnis.restored.length === 0) {
+    const grund = ergebnis.uebersprungen[0]?.grund ?? "Der Termin konnte nicht zurückgeholt werden.";
+    // Sperre, Monatsabschluss und „ist gar nicht abgesagt" sind Zustands-
+    // Konflikte (409); fehlende Berechtigung ist eine Zugriffsfrage (403).
+    const konflikt = !/^Nur der zugewiesene Mitarbeiter|^Ihr Konto/.test(grund);
+    return res.status(konflikt ? 409 : 403).json({
+      code: konflikt ? "APPOINTMENT_RESTORE_BLOCKED" : "ACCESS_DENIED",
+      message: grund,
+    });
+  }
+
+  res.json({ restored: ergebnis.restored.length });
+}));
 
 // ============================================
 // CO-VISIT ENTKOPPELN (Task #1906)

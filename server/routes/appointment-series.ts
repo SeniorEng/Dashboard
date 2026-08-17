@@ -25,6 +25,7 @@ import {
   type PolicyAppointment,
   type PolicyUser,
 } from "@shared/policies/appointments";
+import { seriesBulkFloorDate } from "@shared/domain/appointments";
 import { isTeamLead } from "../lib/team-lead";
 import { isHoliday } from "@shared/utils/holidays";
 
@@ -562,7 +563,9 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
   }
 
   const today = todayISO();
-  const fromDate = mode === "all_future" ? today : appointment.date;
+  // Datums-Boden (Replit-#1913): `appointment.date` kann in der Vergangenheit
+  // liegen — dann zöge diese Massen-Änderung geleistete Termine mit.
+  const fromDate = seriesBulkFloorDate(mode === "all_future" ? today : appointment.date, today);
   const futureAppointments = await seriesStorage.getFutureSeriesAppointments(
     seriesId, fromDate, { includeExceptions },
   );
@@ -719,11 +722,16 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
 
   // EIN Weg fuer single und bulk — vorher hatte `single` ein eigenes,
   // schwaecheres Guard-Set (nur `completed`) und keinerlei Rueckabwicklung.
+  //
+  // Der Datums-Boden (Replit-#1913) gilt nur fuer die BULK-Zweige. `single`
+  // bleibt ungefiltert: das ist eine bewusste Handlung an genau dem Termin, den
+  // der Nutzer vor sich hat, kein Sog aus einer Serien-Entscheidung. Wer einen
+  // vergangenen Einzeltermin absagt, meint ihn auch.
   const kandidaten = mode === "single"
     ? [appointmentId]
     : await collectSeriesAppointmentIds(
         seriesId,
-        mode === "all_future" ? todayISO() : appointment.date,
+        seriesBulkFloorDate(mode === "all_future" ? todayISO() : appointment.date, todayISO()),
         { includeExceptions },
       );
 
@@ -909,7 +917,11 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
 
   const dayAfterNewEnd = parseLocalDate(newEndDate);
   dayAfterNewEnd.setDate(dayAfterNewEnd.getDate() + 1);
-  const cutoffDate = formatDateFromObj(dayAfterNewEnd);
+  // Datums-Boden (Replit-#1913): `newEndDate` kommt vom Nutzer und darf in der
+  // Vergangenheit liegen. Ohne Boden löscht das Verkürzen bereits geleistete
+  // Termine — dieselbe Ursache wie bei Absage/Änderung, nur mit härterer Folge:
+  // hier wird nicht abgesagt, sondern gelöscht.
+  const cutoffDate = seriesBulkFloorDate(formatDateFromObj(dayAfterNewEnd), todayISO());
 
   const futureAppointments = await seriesStorage.getFutureSeriesAppointments(
     id,
