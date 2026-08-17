@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { cancelAppointments, CancelDiscardsDocumentationError } from "../services/appointment-cancellation";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler, sendBadRequest, sendNotFound, sendForbidden } from "../lib/errors";
@@ -83,30 +84,36 @@ function canBypassMonthClose(user: PolicyUser): boolean {
   return policyCanOverrideClosedMonth(user).allowed;
 }
 
-async function collectEligibleFutureIds(
+/**
+ * Reiner SELEKTOR: WELCHE Termine der Serie sind ab `fromDate` gemeint?
+ *
+ * Die Frage „darf der weg?" beantwortet ausschliesslich `cancelAppointments`
+ * (`server/services/appointment-cancellation.ts`). Vorher stand sie hier ein
+ * zweites Mal — mit anderem Ergebnis als im `single`-Zweig, und ohne Schutz fuer
+ * `documenting`. Genau aus dieser Doppelung entstand der Defekt.
+ */
+async function collectSeriesAppointmentIds(
   seriesId: number,
   fromDate: string,
-  options?: { includeExceptions?: boolean; bypassMonthClose?: boolean },
+  options?: { includeExceptions?: boolean },
 ): Promise<number[]> {
   const futureAppointments = await seriesStorage.getFutureSeriesAppointments(seriesId, fromDate, options);
-  const eligibleIds: number[] = [];
+  return futureAppointments.map(a => a.id);
+}
 
-  for (const apt of futureAppointments) {
-    if (apt.status === "completed") continue;
-
-    const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
-    if (employeeId && !options?.bypassMonthClose) {
-      const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
-      if (monthClosed) continue;
-    }
-
-    const isLocked = await storage.isAppointmentLocked(apt.id);
-    if (isLocked) continue;
-
-    eligibleIds.push(apt.id);
-  }
-
-  return eligibleIds;
+/**
+ * Muster Task #1883: den Bestaetigungs-Bedarf als 409 MIT Ausweis der
+ * betroffenen Termine ausliefern, statt ihn zu einem nackten 500/400 zu
+ * verschlucken. Die Nutzlast liegt unter `details`, weil der Client-Parser
+ * (`client/src/lib/api/client.ts#parseErrorResponse`) genau von dort in
+ * `ApiError.details` uebernimmt — ein Top-Level-Feld kaeme nicht an.
+ */
+function sendCancelConfirmationRequired(res: Response, err: CancelDiscardsDocumentationError): void {
+  res.status(409).json({
+    code: err.code,
+    message: err.message,
+    details: { appointments: err.betroffene },
+  });
 }
 
 function formatDateFromObj(d: Date): string {
@@ -358,18 +365,41 @@ router.delete("/:id", asyncHandler("Serie konnte nicht beendet werden", async (r
     return sendBadRequest(res, "Diese Serie ist bereits beendet.");
   }
 
+  // Task-Grenze (Gate-2-Funde B1/B2): „Serie beenden" bekommt den
+  // Bestaetigungs-Gate NICHT, solange sein Client (`useEndSeries`) keine
+  // 409→Dialog→Flag-Kette hat. Ein Gate ohne UI machte den Vorgang
+  // unausfuehrbar, sobald irgendein Termin ab heute `documenting` ist — also im
+  // Normalfall. Das ist schlechter als der Zustand vorher. Die Uebernahme
+  // kommt als eigener PR MIT UI.
+  //
+  // `confirmDiscardDocumentation: true` heisst hier deshalb: Verhalten wie
+  // bisher, kein neuer 409. Die Rueckabwicklung und das Audit der SSoT-Routine
+  // greifen trotzdem — das ist die Verbesserung, die ohne UI-Aenderung sicher
+  // ist.
+  const confirmDiscardDocumentation = true;
+
   const today = todayISO();
-  const eligibleIds = await collectEligibleFutureIds(id, today, {
-    includeExceptions: true,
-    bypassMonthClose: canBypassMonthClose(toSeriesPolicyUser(user)),
-  });
+  const kandidaten = await collectSeriesAppointmentIds(id, today, { includeExceptions: true });
 
-  await db.transaction(async (tx) => {
-    await seriesStorage.bulkCancelSeriesAppointments(eligibleIds, tx);
-    await seriesStorage.updateSeries(id, { status: "ended" }, tx);
-  });
+  // Absage-SSoT statt nacktem Status-Update: Policy, Lock-Re-Check,
+  // Budget-Rueckabwicklung und Audit kommen von dort.
+  let ergebnis: Awaited<ReturnType<typeof cancelAppointments>>;
+  try {
+    await db.transaction(async (tx) => {
+      ergebnis = await cancelAppointments(
+        kandidaten,
+        toSeriesPolicyUser(user),
+        { userId: user.id, confirmDiscardDocumentation, ipAddress: req.ip || req.socket.remoteAddress },
+        tx,
+      );
+      await seriesStorage.updateSeries(id, { status: "ended" }, tx);
+    });
+  } catch (err) {
+    if (err instanceof CancelDiscardsDocumentationError) return sendCancelConfirmationRequired(res, err);
+    throw err;
+  }
 
-  res.json({ cancelled: eligibleIds.length, status: "ended" });
+  res.json({ cancelled: ergebnis!.cancelled.length, uebersprungen: ergebnis!.uebersprungen, status: "ended" });
 }));
 
 const seriesAppointmentActionSchema = z.object({
@@ -672,40 +702,66 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
 
   const cancelSchema = seriesAppointmentActionSchema.extend({
     includeExceptions: z.boolean().optional().default(false),
+    // Muster #1883: ohne dieses Flag verweigert die Absage-SSoT mit 409, wenn
+    // sie eine begonnene Dokumentation verwerfen wuerde.
+    confirmDiscardDocumentation: z.boolean().optional().default(false),
   });
   const parsed = cancelSchema.safeParse(req.body);
   if (!parsed.success) {
     return sendBadRequest(res, "Validierungsfehler");
   }
 
-  const { mode, includeExceptions } = parsed.data;
+  const { mode, includeExceptions, confirmDiscardDocumentation } = parsed.data;
   const appointment = await storage.getAppointment(appointmentId);
   if (!appointment || appointment.seriesId !== seriesId) {
     return sendNotFound(res, "Termin nicht in dieser Serie gefunden.");
   }
 
-  if (mode === "single") {
-    if (appointment.status === "completed") {
-      return sendBadRequest(res, "Abgeschlossene Termine können nicht abgesagt werden.");
-    }
-    await storage.updateAppointment(appointmentId, { status: "cancelled" });
-    return res.json({ cancelled: 1 });
+  // EIN Weg fuer single und bulk — vorher hatte `single` ein eigenes,
+  // schwaecheres Guard-Set (nur `completed`) und keinerlei Rueckabwicklung.
+  const kandidaten = mode === "single"
+    ? [appointmentId]
+    : await collectSeriesAppointmentIds(
+        seriesId,
+        mode === "all_future" ? todayISO() : appointment.date,
+        { includeExceptions },
+      );
+
+  let ergebnis: Awaited<ReturnType<typeof cancelAppointments>>;
+  try {
+    ergebnis = await cancelAppointments(
+      kandidaten,
+      toSeriesPolicyUser(user),
+      { userId: user.id, confirmDiscardDocumentation, ipAddress: req.ip || req.socket.remoteAddress },
+    );
+  } catch (err) {
+    if (err instanceof CancelDiscardsDocumentationError) return sendCancelConfirmationRequired(res, err);
+    throw err;
   }
 
-  const today = todayISO();
-  const fromDate = mode === "all_future" ? today : appointment.date;
-  const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate, {
-    includeExceptions,
-    bypassMonthClose: canBypassMonthClose(toSeriesPolicyUser(user)),
-  });
-
-  const count = await seriesStorage.bulkCancelSeriesAppointments(eligibleIds);
+  // Vertrag bewahren: bei `single` geht es um GENAU EINEN Termin. Wird der
+  // abgelehnt, ist das ein Fehler und kein Teilergebnis — sonst meldete die
+  // Route 200 „Erfolg", waehrend nichts passiert ist. Genau die Klasse stiller
+  // Meldung, die dieser PR beseitigt. Bulk behaelt die Uebersprungen-Liste,
+  // dort ist Teilerfolg der Normalfall.
+  if (mode === "single" && ergebnis.cancelled.length === 0) {
+    const grund = ergebnis.uebersprungen[0]?.grund ?? "Termin konnte nicht abgesagt werden.";
+    // Gate-2-Fund S3: Fuer „liegt auf einem unterschriebenen Leistungsnachweis"
+    // ist der etablierte Vertrag im Repo 409 + APPOINTMENT_LOCKED
+    // (appointments.ts:2266, :1327, appointment-documentation.ts:123). Clients
+    // verzweigen auf diesen Code (`handleDelete`, `handleDecouple`); ein 400
+    // INVALID_REQUEST haette den Fall unkenntlich gemacht.
+    if (/Leistungsnachweis/.test(grund)) {
+      return res.status(409).json({ code: "APPOINTMENT_LOCKED", message: grund });
+    }
+    return sendBadRequest(res, grund);
+  }
 
   if (mode === "all_future") {
     await seriesStorage.updateSeries(seriesId, { status: "ended" });
   }
 
-  res.json({ cancelled: count });
+  res.json({ cancelled: ergebnis.cancelled.length, uebersprungen: ergebnis.uebersprungen });
 }));
 
 router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden", async (req, res) => {

@@ -213,8 +213,24 @@ export function useEndSeries() {
       const result = await api.delete(`/appointment-series/${id}`);
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidateRelated(queryClient, "appointments", "appointment-series");
+      // Die Route meldet seit der Absage-Konsolidierung, welche Termine sie
+      // NICHT absagen konnte (gesperrt, Monat zu, fremde Kraft). Das stumm zu
+      // schlucken und trotzdem „beendet" zu melden, wäre derselbe stille
+      // Teilerfolg, den dieser PR im Einzel-Pfad beseitigt: die Serie stünde
+      // auf `ended`, einzelne Termine blieben aktiv im Kalender.
+      const uebersprungen = (data as { uebersprungen?: Array<{ id: number; grund: string }> } | undefined)?.uebersprungen;
+      if (uebersprungen && uebersprungen.length > 0) {
+        toast({
+          title: "Serie beendet — nicht alle Termine abgesagt",
+          description:
+            `${uebersprungen.length} ${uebersprungen.length === 1 ? "Termin blieb" : "Termine blieben"} bestehen: ` +
+            uebersprungen.map(u => u.grund).join(" · "),
+          variant: "destructive",
+        });
+        return;
+      }
       toast({ title: "Erfolg", description: "Serie wurde beendet" });
     },
     onError: (error: Error) => {

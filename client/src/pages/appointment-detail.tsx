@@ -114,16 +114,64 @@ export default function AppointmentDetail() {
     ? [appointment.coVisitPartnerName]
     : [];
 
+  // Absage-Bestätigung (Muster #1883): Der Server verweigert mit 409, wenn eine
+  // begonnene Dokumentation verworfen würde, und weist die betroffenen Termine
+  // aus. Ohne diesen Dialog sähe der Mitarbeiter nur eine kryptische Blockade —
+  // das wäre schlechter als die stille Vernichtung vorher. Erst der zweite
+  // Aufruf MIT Flag führt aus.
+  const [discardConfirm, setDiscardConfirm] = useState<{
+    mode: "single" | "this_and_future" | "all_future";
+    anzahl: number;
+  } | null>(null);
+
   const seriesCancelMutation = useMutation({
-    mutationFn: async (data: { mode: "single" | "this_and_future" | "all_future" }) => {
+    mutationFn: async (data: {
+      mode: "single" | "this_and_future" | "all_future";
+      confirmDiscardDocumentation?: boolean;
+    }) => {
       if (!seriesId) throw new Error("Kein Serien-ID");
       const result = await api.post(`/appointment-series/${seriesId}/appointments/${id}/cancel`, data);
+      // Auf den CODE prüfen, nicht nur auf 409: die Route wirft seit dem
+      // Re-Cut ZWEI verschiedene 409er. `APPOINTMENT_LOCKED` (Termin liegt auf
+      // einem unterschriebenen Leistungsnachweis) darf hier NICHT landen —
+      // sonst fragt der Dialog nach dem Verwerfen einer Dokumentation, die gar
+      // nicht verworfen wird, und der zweite Aufruf mit Flag scheitert erneut:
+      // `return null` → `onSuccess` steigt aus → kein Toast, kein Fehler, der
+      // Dialog bleibt stehen. Genau die stille Sackgasse, gegen die dieser PR
+      // gebaut ist. Alles andere geht über `unwrapResult` in den Fehler-Toast.
+      if (!result.success && result.error.code === "CANCEL_DISCARDS_DOCUMENTATION") {
+        const betroffene = result.error.details?.appointments;
+        // Den darunterliegenden Serien-Dialog schliessen: sonst stehen zwei
+        // modale Dialoge uebereinander (Gate-2-Notiz).
+        setShowSeriesDeleteDialog(false);
+        setDiscardConfirm({
+          mode: data.mode,
+          anzahl: Array.isArray(betroffene) ? betroffene.length : 1,
+        });
+        return null;
+      }
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // `null` = Bestätigung nötig, der Dialog ist offen. Kein Erfolgs-Toast,
+      // kein Wegnavigieren — sonst verschwände die Rückfrage sofort wieder.
+      if (data === null) return;
       invalidateRelated(queryClient, "appointments", "appointment-series");
-      toast({ title: "Serientermine abgesagt" });
+      // Auch hier keinen stillen Teilerfolg melden — siehe `useEndSeries`.
+      const uebersprungen = (data as { uebersprungen?: Array<{ id: number; grund: string }> } | undefined)?.uebersprungen;
+      if (uebersprungen && uebersprungen.length > 0) {
+        toast({
+          title: "Nicht alle Termine abgesagt",
+          description:
+            `${uebersprungen.length} ${uebersprungen.length === 1 ? "Termin blieb" : "Termine blieben"} bestehen: ` +
+            uebersprungen.map(u => u.grund).join(" · "),
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Serientermine abgesagt" });
+      }
       setShowSeriesDeleteDialog(false);
+      setDiscardConfirm(null);
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
     },
     onError: (error: Error) => {
@@ -625,6 +673,50 @@ export default function AppointmentDetail() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Absage verwirft begonnene Dokumentation — Muster #1883: nicht
+          verbieten, aber bewusst bestaetigen lassen. Ohne diesen Dialog waere
+          der 409 fuer den Mitarbeiter eine kryptische Blockade. */}
+      <AlertDialog
+        open={discardConfirm !== null}
+        onOpenChange={(offen) => { if (!offen) setDiscardConfirm(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className={`${iconSize.md} text-amber-500`} />
+              Begonnene Dokumentation verwerfen?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {discardConfirm?.anzahl === 1
+                ? "Für diesen Termin wurde bereits dokumentiert. Beim Absagen wird die begonnene Dokumentation verworfen und kann nicht wiederhergestellt werden."
+                : `Für ${discardConfirm?.anzahl ?? 0} Termine wurde bereits dokumentiert. Beim Absagen werden die begonnenen Dokumentationen verworfen und können nicht wiederhergestellt werden.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-discard-cancel">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="button-discard-confirm"
+              // `onSelect` + preventDefault: Radix schliesst den Dialog sonst
+              // sofort beim Klick — dann waeren `disabled` und der Spinner nie
+              // sichtbar, und bei einem Fehler im zweiten Aufruf haette der
+              // Nutzer keinen Kontext mehr (Gate-2-Notiz).
+              onSelect={(e) => e.preventDefault()}
+              onClick={() => {
+                if (!discardConfirm) return;
+                seriesCancelMutation.mutate({
+                  mode: discardConfirm.mode,
+                  confirmDiscardDocumentation: true,
+                });
+              }}
+              disabled={seriesCancelMutation.isPending}
+            >
+              {seriesCancelMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Verwerfen und absagen
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
