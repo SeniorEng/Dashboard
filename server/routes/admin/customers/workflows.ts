@@ -237,6 +237,9 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
   const checks = [
     {
       key: "contractEndReached",
+      // Nicht übergehbar und bleibt es: ein laufender Vertrag ist kein
+      // Abrechnungs-Rückstand, sondern ein Vertrag.
+      overridable: false,
       label: "Vertragsende erreicht",
       met: contractEndReached,
       detail: contractEndReached ? `Vertragsende: ${contractEnd}` : `Vertragsende am ${contractEnd} noch nicht erreicht`,
@@ -245,12 +248,21 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
       key: "allDocumented",
       label: "Alle Termine dokumentiert",
       met: allDocumented,
+      // `overridable` sagt der Oberfläche, welche Prüfungen die
+      // Geschäftsführung bewusst übergehen kann. Bis hierher war
+      // `allDocumented` als EINZIGE Prüfung des Systems auch per Override
+      // unüberwindbar — härter als „Rechnung fehlt", was fachlich schwerer
+      // wiegt. Blieb ein undokumentierter Termin stehen (verstorbene Kundin,
+      // Mitarbeiterin ausgeschieden), war die Deaktivierung dauerhaft
+      // blockiert, ohne Ausweg.
+      overridable: true,
       detail: allDocumented
         ? `${allAppointments.length} Termine abgeschlossen`
         : `${undocumented.length} von ${allAppointments.length} Terminen noch nicht dokumentiert`,
     },
     {
       key: "allServiceRecords",
+      overridable: true,
       label: "Leistungsnachweise erstellt",
       met: allServiceRecords,
       detail: allServiceRecords
@@ -259,6 +271,7 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
     },
     {
       key: "allInvoiced",
+      overridable: true,
       label: "Rechnungen erstellt",
       met: allInvoiced,
       detail: allInvoiced
@@ -274,6 +287,15 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
     hasContractEnd: true,
     contractEnd,
     checks,
+    // Was ein Override konkret liegen liesse — die Oberfläche baut daraus die
+    // Bestätigungs-Warnung (Hauslinie #1883: den Eingriff ausweisen, nicht
+    // verbieten). Zahl UND Beispiele, damit „12 Termine" nicht abstrakt bleibt.
+    undocumentedCount: undocumented.length,
+    undocumentedAppointments: undocumented.slice(0, 10).map(a => ({
+      id: a.id,
+      date: a.date,
+      status: a.status,
+    })),
     futureAppointmentsCount: futureAppointments.length,
     futureAppointments: futureAppointments.slice(0, 10).map(a => ({
       id: a.id,
@@ -286,8 +308,14 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
 const completeDeactivationSchema = z.object({
   deactivationReason: z.string().min(1, "Grund ist erforderlich"),
   deactivationNote: z.string().max(1000).optional(),
-  // Task #1220: Superadmin-Override, der ausschließlich die Leistungsnachweis-
-  // und Rechnungs-Gates überspringt (Vertragsende + Dokumentation bleiben hart).
+  // Task #1220: Superadmin-Override über die ABRECHNUNGS-Gates —
+  // Dokumentation, Leistungsnachweis und Rechnung. Das Vertragsende bleibt
+  // hart: ein laufender Vertrag ist kein Abrechnungs-Rückstand.
+  //
+  // Das Dokumentations-Gate kam erst nachträglich dazu. Es war das einzige
+  // Gate, an dem auch die Geschäftsführung nicht vorbeikam — härter als
+  // „Rechnung fehlt", obwohl das fachlich schwerer wiegt.
+  //
   // Erfordert Superadmin-Rechte (Server-Check) UND eine Pflicht-Begründung
   // (≥10 Zeichen), die im Audit-Log und an der Deaktivierungs-Notiz hinterlegt
   // wird.
@@ -348,10 +376,28 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
       appointmentsRepo.activeOnly(),
       ne(appointments.status, "cancelled"),
     ));
-  // Hartes Gate (auch per Override nicht überspringbar): alle Termine dokumentiert.
+  // Dokumentations-Gate — seit dieser Änderung per Superadmin-Override
+  // überspringbar, wie die LN- und Rechnungs-Gates darunter.
+  //
+  // Vorher war es das EINZIGE Gate des Systems, an dem auch die
+  // Geschäftsführung nicht vorbeikam — härter als „Rechnung fehlt", obwohl das
+  // fachlich schwerer wiegt. Blieb ein undokumentierter Termin stehen
+  // (verstorbene Kundin, ausgeschiedene Mitarbeiterin), liess sich der Kunde
+  // dauerhaft nicht deaktivieren, und der einzige Ausweg wäre gewesen, den
+  // Termin rückwirkend zu dokumentieren oder abzusagen — also die Akte
+  // hübsch zu machen, damit ein Knopf funktioniert.
+  //
+  // Was der Override NICHT tut: die Termine verschwinden nicht. Sie bleiben
+  // offen, sichtbar und abrechenbar (geprüft: weder die Nachweis-Übersicht
+  // noch der Abrechnungspfad filtern auf `customers.status`). Der Override
+  // erklärt nur, dass die Deaktivierung nicht darauf wartet.
   const undocumented = appointmentsBeforeEnd.filter(a => a.status !== "completed");
-  if (undocumented.length > 0) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: `${undocumented.length} Termin(e) noch nicht dokumentiert. Bitte alle Termine vor dem Vertragsende abschließen.` });
+  if (undocumented.length > 0 && !overrideBillingGates) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: `${undocumented.length} Termin(e) noch nicht dokumentiert. Bitte alle Termine vor dem Vertragsende abschließen.`,
+      undocumentedCount: undocumented.length,
+    });
     return;
   }
 
@@ -416,6 +462,7 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
 
   const skippedGates: string[] = [];
   if (overrideBillingGates) {
+    if (undocumented.length > 0) skippedGates.push("allDocumented");
     if (monthsWithoutServiceRecord.length > 0) skippedGates.push("allServiceRecords");
     if (monthsWithoutInvoice.length > 0) skippedGates.push("allInvoiced");
   }
@@ -460,6 +507,11 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     ...(overrideBillingGates ? {
       override: true,
       skippedGates,
+      // Die IDs mitschreiben, nicht nur die Zahl: die GoBD-Spur soll sagen,
+      // WELCHE Leistung beim Deaktivieren unabgerechnet stehen blieb, nicht
+      // nur wie viele.
+      undocumentedCount: undocumented.length,
+      undocumentedAppointmentIds: undocumented.map(a => a.id),
       monthsWithoutServiceRecord,
       monthsWithoutInvoice,
       overrideReason: trimmedOverrideReason,

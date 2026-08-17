@@ -64,6 +64,13 @@ interface DeactivationCheck {
   label: string;
   met: boolean;
   detail: string;
+  /**
+   * Darf die Geschäftsführung diese Prüfung bewusst übergehen? Kommt vom
+   * Server, damit die Oberfläche die Gate-Liste nicht ein zweites Mal von Hand
+   * führt — die Doppelung wäre beim Aufnehmen des Dokumentations-Gates still
+   * auseinandergelaufen.
+   */
+  overridable: boolean;
 }
 
 interface DeactivationReadiness {
@@ -73,6 +80,8 @@ interface DeactivationReadiness {
   checks: DeactivationCheck[];
   futureAppointmentsCount: number;
   futureAppointments: Array<{ id: number; date: string; status: string }>;
+  undocumentedCount: number;
+  undocumentedAppointments: Array<{ id: number; date: string; status: string }>;
   message?: string;
 }
 
@@ -645,10 +654,19 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               (() => {
                 const checkMet = (key: string) =>
                   deactivationReadiness.checks.find((c) => c.key === key)?.met ?? false;
-                const hardGatesMet = checkMet("contractEndReached") && checkMet("allDocumented");
-                const onlyBillingGatesOpen =
-                  hardGatesMet && (!checkMet("allServiceRecords") || !checkMet("allInvoiced"));
-                const canOverride = isSuperAdmin && onlyBillingGatesOpen;
+                // Was offen ist, entscheidet der SERVER über `overridable` —
+                // hier wird die Liste nicht mehr von Hand nachgebaut. Vorher
+                // stand hier eine zweite Aufzählung der Gates; sie hätte beim
+                // Aufnehmen des Dokumentations-Gates still danebengelegen und
+                // den Override weiterhin verweigert.
+                const offeneNichtUebergehbare = deactivationReadiness.checks.filter(
+                  (c) => !c.met && !c.overridable,
+                );
+                const offeneUebergehbare = deactivationReadiness.checks.filter(
+                  (c) => !c.met && c.overridable,
+                );
+                const canOverride =
+                  isSuperAdmin && offeneNichtUebergehbare.length === 0 && offeneUebergehbare.length > 0;
                 return (
                   <div className="pt-3 border-t space-y-3">
                     <p className="text-sm text-gray-500">
@@ -663,7 +681,10 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                               Superadmin-Override verfügbar
                             </p>
                             <p className="text-xs text-amber-700 mt-0.5">
-                              Vertragsende und Dokumentation sind erfüllt. Sie können die offenen Leistungsnachweis-/Rechnungs-Prüfungen mit Begründung überspringen — z. B. wenn die Monate extern abgerechnet wurden.
+                              Das Vertragsende ist erreicht. Sie können die offenen Abrechnungs-Prüfungen
+                              ({offeneUebergehbare.map((c) => c.label).join(", ")}) mit Begründung
+                              überspringen — z. B. wenn die Monate extern abgerechnet wurden oder eine
+                              Dokumentation nicht mehr nachzuholen ist.
                             </p>
                           </div>
                         </div>
@@ -689,10 +710,48 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               <DialogHeader>
                 <DialogTitle>Abrechnungs-Prüfungen überspringen</DialogTitle>
                 <DialogDescription>
-                  Sie überspringen als Hauptadministrator die Prüfung auf Leistungsnachweise und/oder Rechnungen. Vertragsende und vollständige Dokumentation bleiben verpflichtend. Der Vorgang wird vollständig protokolliert.
+                  Sie überspringen als Hauptadministrator die Abrechnungs-Prüfungen — Dokumentation, Leistungsnachweise und Rechnungen. Das Vertragsende bleibt verpflichtend. Der Vorgang wird vollständig protokolliert.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-3">
+                {/*
+                  Muster #1883: den Eingriff AUSWEISEN, nicht verbieten. Wer
+                  hier klickt, soll wissen, welche Leistung unabgerechnet
+                  stehen bleibt — mit Zahl und Beispielen, nicht abstrakt.
+
+                  Ausdrücklich KEINE Verlust-Warnung: die Termine verschwinden
+                  nicht. Sie bleiben offen, sichtbar und abrechenbar; weder die
+                  Nachweis-Übersicht noch der Abrechnungspfad filtern auf den
+                  Kundenstatus. Was wegfällt, ist die Erinnerung daran — der
+                  Kunde taucht in keiner Tagesarbeit mehr auf. Genau das muss
+                  hier stehen und nicht mehr.
+                */}
+                {(deactivationReadiness?.undocumentedCount ?? 0) > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="warning-undocumented-override">
+                    <p className="text-sm font-medium text-amber-800">
+                      {deactivationReadiness!.undocumentedCount}{" "}
+                      {deactivationReadiness!.undocumentedCount === 1 ? "Termin bleibt" : "Termine bleiben"} unabgerechnet — bitte bestätigen
+                    </p>
+                    <p className="mt-1 text-sm text-amber-700">
+                      {deactivationReadiness!.undocumentedCount === 1 ? "Dieser Termin ist" : "Diese Termine sind"} noch nicht dokumentiert.
+                      {" "}Sie {deactivationReadiness!.undocumentedCount === 1 ? "bleibt" : "bleiben"} nach der Deaktivierung bestehen und {deactivationReadiness!.undocumentedCount === 1 ? "kann" : "können"} weiterhin
+                      dokumentiert und abgerechnet werden — der Kunde erscheint danach aber in keiner
+                      Tagesübersicht mehr, es erinnert also niemand daran.
+                    </p>
+                    {deactivationReadiness!.undocumentedAppointments.length > 0 && (
+                      <ul className="mt-2 space-y-0.5 text-sm text-amber-700">
+                        {deactivationReadiness!.undocumentedAppointments.map((a) => (
+                          <li key={a.id} data-testid={`undocumented-appt-${a.id}`}>{a.date}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {deactivationReadiness!.undocumentedCount > deactivationReadiness!.undocumentedAppointments.length && (
+                      <p className="mt-1 text-sm text-amber-700">
+                        … und {deactivationReadiness!.undocumentedCount - deactivationReadiness!.undocumentedAppointments.length} weitere
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="override-deact-reason">Deaktivierungsgrund *</Label>
                   <Select value={deactivationReason} onValueChange={setDeactivationReason}>
