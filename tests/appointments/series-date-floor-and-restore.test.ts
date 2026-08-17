@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../../server/lib/db";
-import { appointments, auditLog, employeeMonthClosings } from "@shared/schema";
+import { appointments, auditLog } from "@shared/schema";
 import { seriesBulkFloorDate } from "@shared/domain/appointments";
 import {
   apiDelete,
@@ -36,7 +36,9 @@ import {
  *  4. Verkürzen auf ein vergangenes Enddatum löscht keine geleisteten Termine
  *  5. Undo holt eine Absage zurück, mit Audit-Eintrag
  *  6. Undo verweigert einen Termin, der gar nicht abgesagt ist — als Fehler,
- *     nicht als stiller Teilerfolg
+ *     nicht als stiller Teilerfolg, mit sprechendem Code
+ *  7. unbekannte ID → 404, nicht 409 (die Klassifikation haengt am Code, nicht
+ *     am Meldungstext)
  *
  * Gegenprobe gegen den Vorzustand: 2, 3 und 4 müssen ohne den Boden ROT sein,
  * 5 und 6 mangels Route ebenfalls. Sonst messen sie nichts.
@@ -133,24 +135,23 @@ beforeAll(async () => {
   });
   expect(zuweisung.status).toBe(200);
 
-  // VORBEDINGUNG, laut statt still: die Tests unten belegen den Boden damit,
-  // dass vergangene Termine STEHEN BLEIBEN. Waere der laufende Monat fuer
-  // diese Kraft geschlossen, blieben sie auch ohne Boden stehen — der
-  // Monatsabschluss-Filter griffe vorher. Der Test wuerde dann gruen sein, ohne
-  // irgendetwas zu messen, und auch auf dem Vorzustand nicht rot werden.
-  const heute = new Date();
-  const abschluss = await db.select().from(employeeMonthClosings).where(and(
-    eq(employeeMonthClosings.userId, auth.user.id),
-    eq(employeeMonthClosings.year, heute.getFullYear()),
-    eq(employeeMonthClosings.month, heute.getMonth() + 1),
-  ));
-  const offen = abschluss.filter(a => !a.reopenedAt);
+  // VORBEDINGUNG: der Testnutzer muss am Monatsabschluss VORBEIKOMMEN, sonst
+  // messen die Boden-Tests den falschen Filter.
+  //
+  // Eine fruehere Fassung pruefte hier, dass kein Abschluss existiert. Das war
+  // die falsche Frage: der CI-Nutzer ist Superadmin (`ci-seed-superadmin.ts`),
+  // und sowohl `canCancelAppointment` als auch `canBypassMonthClose` lassen den
+  // Superadmin ohnehin durch. Die Zusicherung haette also nie gegriffen und
+  // eine Sicherheit vorgetaeuscht, die sie nicht hatte.
+  //
+  // Richtig ist die Eigenschaft, auf die es ankommt: kommt dieser Nutzer am
+  // Monatsabschluss vorbei? Ist er es NICHT, blieben vergangene Termine auch
+  // ohne Boden stehen, und die Tests waeren gruen, ohne etwas zu messen.
   expect(
-    offen.length,
-    "Der laufende Monat ist fuer den Testnutzer geschlossen — dann messen die " +
-    "Boden-Tests den Monatsabschluss statt den Boden. Abschluss entfernen oder " +
-    "Test auf einen anderen Nutzer legen.",
-  ).toBe(0);
+    auth.user.isSuperAdmin === true,
+    "Testnutzer ist kein Superadmin — dann greift der Monatsabschluss-Filter " +
+    "vor dem Boden, und die Boden-Tests messen ihn statt des Bodens.",
+  ).toBe(true);
 });
 
 afterAll(async () => {
@@ -223,20 +224,24 @@ describe("Replit-#1913 — Datums-Boden fuer Serien-Massenoperationen", () => {
   it("4 — Verkuerzen auf ein vergangenes Enddatum loescht keine geleisteten Termine", async () => {
     const { seriesId, vergangene, kuenftige } = await serieMitVergangenheit(3);
 
-    const res = await apiPost(`/api/appointment-series/${seriesId}/shorten`, {
+    const res = await apiPost<{ message?: string }>(`/api/appointment-series/${seriesId}/shorten`, {
       newEndDate: vergangene[0].date,
     });
-    expect([200, 400]).toContain(res.status);
 
-    // Ohne Boden waeren die beiden spaeteren vergangenen Termine GELOESCHT —
+    // Klare Absage statt stillem Zuschnitt: wuerde die Route den Boden nur auf
+    // den Loesch-Stichtag anwenden, setzte sie `series.endDate` trotzdem in die
+    // Vergangenheit — die Serie behauptete dann, im Juli geendet zu haben, und
+    // haette August-Termine im Kalender.
+    expect(res.status, JSON.stringify(res.data)).toBe(400);
+    expect(res.data.message).toContain("Vergangenheit");
+
+    // Ohne Boden waeren die spaeteren vergangenen Termine GELOESCHT —
     // geleistete Arbeit, unwiederbringlich aus dem Kalender.
     for (const v of vergangene) {
       expect(await statusVon(v.id), `vergangener Termin ${v.id} (${v.date})`).not.toBe("WEG");
     }
-    // Die Zukunft raeumt das Verkuerzen weiterhin ab.
-    if (res.status === 200) {
-      expect(await statusVon(kuenftige[kuenftige.length - 1].id)).toBe("WEG");
-    }
+    // Und die Zukunft ebenfalls nicht — die Ablehnung gilt fuer den ganzen Aufruf.
+    expect(await statusVon(kuenftige[kuenftige.length - 1].id)).not.toBe("WEG");
   });
 });
 
@@ -275,8 +280,23 @@ describe("Replit-#1913 — Undo: eine Absage zuruecknehmen", () => {
     );
     // Kein 200 mit `restored: 0` — das waere die stille Rueckmeldung, die
     // PR #100 im Absage-Pfad ausdruecklich beseitigt hat.
+    //
+    // Und ein SPRECHENDER Code, kein Sammelcode: er kommt aus dem geprueften
+    // Zustand (`RestoreSkipCode`), nicht aus einer Regex auf dem deutschen
+    // Meldungstext. Eine Umformulierung der Policy-Meldung darf den Statuscode
+    // nicht kippen.
     expect(undo.status).toBe(409);
-    expect(undo.data.code).toBe("APPOINTMENT_RESTORE_BLOCKED");
+    expect(undo.data.code).toBe("APPOINTMENT_NOT_CANCELLED");
     expect(await statusVon(ziel.id)).toBe("scheduled");
+  });
+
+  it("7 — unbekannte ID ist 404, nicht 409", async () => {
+    // Belegt, dass die Klassifikation wirklich am Code haengt: `not_found` ist
+    // keine Zustands-Kollision, sondern eine fehlende Ressource. Die frueheste
+    // Fassung der Route lieferte hier 409, weil ihr Default-Zweig alles ausser
+    // zwei deutschen Satzanfaengen als Konflikt behandelte.
+    const undo = await apiPost<{ code?: string }>("/api/appointments/99999999/restore", {});
+    expect(undo.status).toBe(404);
+    expect(undo.data.code).toBe("APPOINTMENT_NOT_FOUND");
   });
 });

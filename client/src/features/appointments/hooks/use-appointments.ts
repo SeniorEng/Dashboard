@@ -139,11 +139,12 @@ export function useDecoupleCoVisit() {
 /**
  * Nimmt eine Absage zurück (Replit-#1913).
  *
- * onError-waived: Der Aufrufer unterscheidet die fachliche Ablehnung
- * (`APPOINTMENT_RESTORE_BLOCKED` — Nachweis unterschrieben, Monat geschlossen)
- * von einem echten Fehler und zeigt den Server-Klartext. Ein generisches
- * `onError` hier überdeckte die Begründung, an der der Nutzer gerade hängt: sie
- * sagt ihm, WEN er fragen muss.
+ * onError-waived: Der Aufrufer (`appointment-detail.tsx`) haengt sein eigenes
+ * `onError` an den `mutate`-Aufruf und zeigt den Server-Klartext. Der ist hier
+ * die eigentliche Nutzlast — er sagt dem Nutzer, WEN er fragen muss ("… wenn
+ * die Geschaeftsfuehrung den Monat wieder oeffnet"). Ein generisches `onError`
+ * an dieser Stelle wuerde ihn mit einem zweiten, nichtssagenden "Fehler"
+ * ueberdecken.
  */
 export function useRestoreAppointment() {
   const queryClient = useQueryClient();

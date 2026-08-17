@@ -56,9 +56,11 @@ import {
   invoiceLineItems,
   monthlyServiceRecords,
   serviceRecordAppointments,
+  users,
 } from "@shared/schema";
 import { appointmentsRepo } from "../repos";
-import { auditService } from "../services/audit";
+import { restoreAppointments } from "../services/appointment-restore";
+import { toPolicyUser } from "../lib/appointment-policy-adapter";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 
 /** Wer den Lauf verantwortet — landet im Audit-Eintrag. */
@@ -249,26 +251,40 @@ async function main() {
     return;
   }
 
-  await db.transaction(async tx => {
-    for (const b of zuTun) {
-      await tx.update(appointments).set({ status: "scheduled" }).where(eq(appointments.id, b.id));
-      await auditService.log(
-        ACTING_USER_ID,
-        "appointment_updated",
-        "appointment",
-        b.id,
-        {
-          korrektur: "Replit-1913",
-          grund: "Rückwirkend fälschlich abgesagter Serientermin — auf scheduled zurückgesetzt, damit die Leistung dokumentiert werden kann.",
-          vorher: { status: "cancelled" },
-          nachher: { status: "scheduled" },
-          monatsabschlussUebergangen: false,
-        },
-      );
-    }
-  });
+  // Ausgefuehrt wird ueber die FEATURE-Routine, nicht per eigenem UPDATE.
+  //
+  // Ein Nachbau hier waere ein Zweitbegriff derselben Frage — und er war es in
+  // der ersten Fassung auch schon: der schrieb `appointment_updated` statt
+  // `appointment_restored`, setzte keinen Hold und protokollierte ausserhalb
+  // der Transaktion. Das Skript waere damit an manchen Stellen strenger und an
+  // anderen schwaecher gewesen als das Feature, das es laut Docstring ersetzt.
+  //
+  // Die Auswahl (Fingerabdruck, Zielliste) bleibt Sache des Skripts — das ist
+  // das Einmalige daran. Das AUSFUEHREN macht `restoreAppointments`: Policy,
+  // Lock-Recheck unter FOR UPDATE, Rechnungs-Guard, `planHold`, Audit in
+  // derselben Transaktion.
+  const [akteur] = await db.select().from(users).where(eq(users.id, ACTING_USER_ID));
+  if (!akteur) abbruch(`Akteur ${ACTING_USER_ID} nicht gefunden (REPLIT_1913_ACTOR_USER_ID setzen).`);
+  if (!akteur.isSuperAdmin) {
+    abbruch(
+      `Akteur ${ACTING_USER_ID} ist kein Superadmin. Die Routine laesst nur ihn an fremde ` +
+      `Termine, und der Monatsabschluss-Zweig gilt fuer alle anderen ohnehin.`,
+    );
+  }
 
-  console.log(`\n${zuTun.length} Termine zurückgesetzt. Die Mitarbeiterinnen können jetzt dokumentieren.`);
+  const ergebnis = await restoreAppointments(
+    zuTun.map(b => b.id),
+    toPolicyUser(akteur),
+    { userId: ACTING_USER_ID },
+  );
+
+  for (const u of ergebnis.uebersprungen) {
+    console.log(`  #${u.id}  von der Routine abgelehnt (${u.code}): ${u.grund}`);
+  }
+  console.log(`\n${ergebnis.restored.length} Termine zurückgesetzt. Die Mitarbeiterinnen können jetzt dokumentieren.`);
+  if (ergebnis.uebersprungen.length > 0) {
+    console.log(`${ergebnis.uebersprungen.length} von der Routine abgelehnt — oben nachlesen, NICHT von Hand nachziehen.`);
+  }
   console.log("Danach: Monate wieder schließen, dieses Skript löschen, Protokoll unter docs/corrections/ ablegen.");
 }
 

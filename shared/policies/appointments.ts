@@ -332,8 +332,22 @@ export function canRestoreAppointment(
   const adminLike = isAdminLike(user);
   const lead = user.isTeamLead && user.isActive;
 
-  if (!adminLike && !lead && !isAssignedEmployee(user, appt)) {
-    return deny("Nur der zugewiesene Mitarbeiter darf diese Absage zurücknehmen.");
+  if (!adminLike) {
+    if (lead) {
+      // Dieselbe Schranke wie in `canCancelAppointment`. Sie fehlte hier
+      // zuerst, und die Folge stand im selben Diff in der generierten Matrix:
+      // eine Teamleitung durfte einen fremden, bereits BEGONNENEN Termin
+      // zurückholen, den sie nicht hätte absagen dürfen. „Spiegelbildlich" muss
+      // in beide Richtungen gelten, sonst ist es nur eine Behauptung.
+      //
+      // `isStarted` bleibt am zurückgeholten Termin wahr: ein aus `documenting`
+      // abgesagter Termin trägt `actualStart`.
+      if (appt.isStarted && !isAssignedEmployee(user, appt)) {
+        return deny("Bereits gestartete Termine anderer Mitarbeiter können nicht zurückgeholt werden.");
+      }
+    } else if (!isAssignedEmployee(user, appt)) {
+      return deny("Nur der zugewiesene Mitarbeiter darf diese Absage zurücknehmen.");
+    }
   }
 
   if (appt.status !== "cancelled") {

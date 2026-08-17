@@ -914,6 +914,25 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
   if (newEndDate >= series.endDate) {
     return sendBadRequest(res, "Das neue Enddatum muss vor dem aktuellen Enddatum liegen.");
   }
+  // Datums-Boden (Replit-#1913), hier als ABLEHNUNG statt als stiller Zuschnitt.
+  //
+  // Der Boden unten schuetzt die vergangenen Termine vor dem Loeschen — aber
+  // `series.endDate` wuerde trotzdem auf das vergangene Datum gesetzt. Dann
+  // stuende `endDate < max(appointment.date)`: die Serie behauptet, im Juli
+  // geendet zu haben, und hat August-Termine im Kalender. Ein anschliessendes
+  // `/extend` fuehre bei `endDate + 1` los und legte Termine in der
+  // Vergangenheit an.
+  //
+  // Eine Serie rueckwirkend zu beenden ist fachlich ohnehin keine Verkuerzung,
+  // sondern eine Korrektur der Vergangenheit. Deshalb hier eine klare Absage
+  // mit Begruendung statt eines Ergebnisses, das der Nutzer nicht erwartet.
+  if (newEndDate < todayISO()) {
+    return sendBadRequest(
+      res,
+      "Das neue Enddatum liegt in der Vergangenheit. Bereits geleistete Termine werden nicht entfernt — " +
+      "bitte frühestens auf heute verkürzen. Einzelne vergangene Termine können gezielt abgesagt werden.",
+    );
+  }
 
   const dayAfterNewEnd = parseLocalDate(newEndDate);
   dayAfterNewEnd.setDate(dayAfterNewEnd.getDate() + 1);

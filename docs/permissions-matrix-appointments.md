@@ -39,7 +39,7 @@ Annahmen pro Zelle:
 | Teamleitung | `scheduled` | ✓ | ✓ | ✓ | ✓ | ✓ | – | – | – | – |
 | Teamleitung | `documenting` | ✓ | ✓ | ✓ | – | – | – | – | – | – |
 | Teamleitung | `completed` | ✓ | ✓ | ✓ | – | – | – | – | – | – |
-| Teamleitung | `cancelled` | ✓ | ✓ | ✓ | – | – | ✓ | – | – | – |
+| Teamleitung | `cancelled` | ✓ | ✓ | ✓ | – | – | – | – | – | – |
 | Teamleitung | `expired_unsigned` | ✓ | ✓ | ✓ | – | – | – | – | – | – |
 | Admin | `scheduled` | ✓ | ✓ | ✓ | ✓ | ✓ | – | ✓ | – | – |
 | Admin | `documenting` | ✓ | ✓ | ✓ | ✓ | ✓ | – | ✓ | – | – |

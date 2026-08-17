@@ -57,6 +57,9 @@ exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) 
     "appointmentsRepo",
     "customersRepo",
   ],
+  "server/services/appointment-policy-data.ts": [
+    "appointmentsRepo",
+  ],
   "server/services/auto-breaks.ts": [
     "appointmentsRepo",
     "employeeTimeEntriesRepo",

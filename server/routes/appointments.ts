@@ -583,8 +583,18 @@ router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req
 
   const isLocked = await storage.isAppointmentLocked(id);
 
+  // Fuer JEDEN Status berechnen, nicht nur `completed`. Der Client speist damit
+  // `useAppointmentPolicy`, und mehrere Policies haengen am Monatsabschluss —
+  // nicht nur die auf abgeschlossenen Terminen.
+  //
+  // Der Zuschnitt auf `completed` liess den Monatszweig client-seitig fuer alle
+  // anderen Status still ins Leere laufen. Am sichtbarsten am Undo-Pfad
+  // (Replit-#1913): ein abgesagter Termin in einem geschlossenen Monat bekam
+  // `isMonthClosed: false`, also zeigte die Oberflaeche den Knopf statt der
+  // Begruendung — und der Server lehnte danach ab. Genau die Sackgasse, aus
+  // der der Undo herausfuehren soll.
   let isMonthClosed = false;
-  if (appointment.status === "completed" && appointment.date) {
+  if (appointment.date) {
     const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
     if (employeeId) {
       isMonthClosed = await timeTrackingStorage.isMonthClosed(employeeId, appointment.date);
@@ -1817,21 +1827,39 @@ router.post("/:id/restore", asyncHandler("Absage konnte nicht zurückgenommen we
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
 
+  // `planHold` kann einen Hard-Block werfen (Budget inzwischen anderweitig
+  // verbraucht). Das ist eine fachliche Ablehnung mit Betrag, kein Serverfehler
+  // — dieselbe Abbildung wie im Anlage-Pfad. Ohne sie machte `asyncHandler`
+  // daraus ein nichtssagendes 500. Die Transaktion ist zu diesem Zeitpunkt
+  // bereits zurueckgerollt, der Termin bleibt also abgesagt.
   const ergebnis = await restoreAppointments(
     [id],
     toPolicyUser(req.user!),
     { userId: req.user!.id, ipAddress: req.ip || req.socket.remoteAddress },
-  );
+  ).catch((err) => {
+    if (err instanceof BudgetHardBlockError) throw new AppError(422, err.code, err.message);
+    throw err;
+  });
 
   if (ergebnis.restored.length === 0) {
-    const grund = ergebnis.uebersprungen[0]?.grund ?? "Der Termin konnte nicht zurückgeholt werden.";
-    // Sperre, Monatsabschluss und „ist gar nicht abgesagt" sind Zustands-
-    // Konflikte (409); fehlende Berechtigung ist eine Zugriffsfrage (403).
-    const konflikt = !/^Nur der zugewiesene Mitarbeiter|^Ihr Konto/.test(grund);
-    return res.status(konflikt ? 409 : 403).json({
-      code: konflikt ? "APPOINTMENT_RESTORE_BLOCKED" : "ACCESS_DENIED",
-      message: grund,
-    });
+    const skip = ergebnis.uebersprungen[0];
+    const grund = skip?.grund ?? "Der Termin konnte nicht zurückgeholt werden.";
+    // Der Status kommt aus dem CODE der Routine, nicht aus ihrem Meldungstext.
+    // `APPOINTMENT_LOCKED` ist der etablierte Vertrag im Repo fuer „liegt auf
+    // einem unterschriebenen Leistungsnachweis" — Clients verzweigen darauf,
+    // deshalb hier derselbe Code und kein eigener.
+    const { status, code } = ((): { status: number; code: string } => {
+      switch (skip?.code) {
+        case "not_found":     return { status: 404, code: "APPOINTMENT_NOT_FOUND" };
+        case "forbidden":     return { status: 403, code: "ACCESS_DENIED" };
+        case "locked":        return { status: 409, code: "APPOINTMENT_LOCKED" };
+        case "month_closed":  return { status: 409, code: "MONTH_CLOSED" };
+        case "not_cancelled": return { status: 409, code: "APPOINTMENT_NOT_CANCELLED" };
+        case "invoiced":      return { status: 409, code: "APPOINTMENT_INVOICED" };
+        default:              return { status: 409, code: "APPOINTMENT_RESTORE_BLOCKED" };
+      }
+    })();
+    return res.status(status).json({ code, message: grund });
   }
 
   res.json({ restored: ergebnis.restored.length });

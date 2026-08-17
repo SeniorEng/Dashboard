@@ -429,7 +429,19 @@ export default function AppointmentDetail() {
                 size="sm"
                 className="shrink-0"
                 disabled={restoreMutation.isPending}
-                onClick={() => restoreMutation.mutate(appointment.id)}
+                onClick={() => {
+                  // Der Server ist die letzte Instanz: die Client-Policy rechnet
+                  // mit dem Payload von `GET /appointments/:id`, der Server mit
+                  // dem frischen Stand unter dem Lock. Weicht er ab, MUSS sein
+                  // Klartext sichtbar werden — er sagt dem Nutzer, wen er fragen
+                  // muss. Ihn zu verschlucken hiesse, den Knopf zu zeigen und
+                  // beim Klick nichts zu tun; genau die Sackgasse, aus der
+                  // dieser Pfad herausfuehren soll.
+                  restoreMutation.mutate(appointment.id, {
+                    onSuccess: () => toast({ title: "Absage zurückgenommen", description: "Der Termin kann wieder dokumentiert werden." }),
+                    onError: (error: Error) => toast({ title: "Nicht zurückgeholt", description: error.message, variant: "destructive" }),
+                  });
+                }}
                 data-testid="button-restore-appointment"
               >
                 {restoreMutation.isPending ? "Wird zurückgeholt …" : "Absage zurücknehmen"}

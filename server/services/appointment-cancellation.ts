@@ -10,7 +10,7 @@ import {
   discardsDocumentation,
   type PolicyUser,
 } from "@shared/policies/appointments";
-import { ladeEntscheidungsdaten } from "../lib/appointment-policy-adapter";
+import { ladeEntscheidungsdaten } from "./appointment-policy-data";
 
 /**
  * SSoT für „einen Termin absagen": entscheiden → prüfen → rückabwickeln →

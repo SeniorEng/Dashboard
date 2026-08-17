@@ -6,7 +6,8 @@ import { budgetStorage } from "../storage/budget-storage";
 import { getPlannedHoldInputs } from "../storage/budget/appointment-cost-calculator";
 import { auditService } from "./audit";
 import { canRestoreAppointment, type PolicyUser } from "@shared/policies/appointments";
-import { ladeEntscheidungsdaten } from "../lib/appointment-policy-adapter";
+import { ladeEntscheidungsdaten } from "./appointment-policy-data";
+import { findActiveInvoicesForAppointments } from "../lib/appointment-invoiced";
 
 /**
  * SSoT für „eine Absage zurücknehmen": prüfen → Status zurück → Hold wieder
@@ -47,11 +48,29 @@ export interface RestoreOptions {
   ipAddress?: string;
 }
 
+/**
+ * Warum ein Termin nicht zurückgeholt wurde — als CODE, nicht als Prosa.
+ *
+ * Die Route leitet daraus den HTTP-Status ab. Eine frühere Fassung erkannte den
+ * Fall per Regex am deutschen Meldungstext; damit hing der Statuscode an einer
+ * Formulierung, und ein neuer Deny-Grund wäre stillschweigend als
+ * Zustandskonflikt ausgeliefert worden — auch wenn er eine Berechtigungsfrage
+ * ist. Dasselbe Muster steht im Absage-Pfad als FINDING; hier wird es nicht
+ * wiederholt.
+ */
+export type RestoreSkipCode =
+  | "not_found"
+  | "forbidden"
+  | "locked"
+  | "month_closed"
+  | "not_cancelled"
+  | "invoiced";
+
 export interface RestoreResult {
   /** Tatsächlich zurückgeholte Termine. */
   restored: number[];
-  /** Übersprungene mit Begründung. */
-  uebersprungen: Array<{ id: number; grund: string }>;
+  /** Übersprungene mit Begründung und Code. */
+  uebersprungen: Array<{ id: number; grund: string; code: RestoreSkipCode }>;
 }
 
 /**
@@ -71,7 +90,7 @@ export async function restoreAppointments(
   if (ids.length === 0) return { restored: [], uebersprungen: [] };
 
   const restored: number[] = [];
-  const uebersprungen: Array<{ id: number; grund: string }> = [];
+  const uebersprungen: RestoreResult["uebersprungen"] = [];
 
   const run = async (tx: Tx) => {
     for (const id of ids) {
@@ -81,20 +100,48 @@ export async function restoreAppointments(
       if (await storage.lockAndCheckAppointmentLocked(id, tx)) {
         uebersprungen.push({
           id,
-          grund: "Der Termin liegt auf einem unterschriebenen Leistungsnachweis.",
+          code: "locked",
+          grund: "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis. Bitte zuerst den Nachweis stornieren.",
         });
         continue;
       }
 
       const daten = await ladeEntscheidungsdaten(id, tx);
       if (!daten) {
-        uebersprungen.push({ id, grund: "Termin nicht gefunden." });
+        uebersprungen.push({ id, code: "not_found", grund: "Termin nicht gefunden." });
         continue;
       }
 
       const entscheidung = canRestoreAppointment(user, daten.policyAppt);
       if (!entscheidung.allowed) {
-        uebersprungen.push({ id, grund: entscheidung.reason });
+        // Der Code kommt aus dem GEPRÜFTEN Zustand, nicht aus dem Meldungstext.
+        const code: RestoreSkipCode =
+          daten.policyAppt.status !== "cancelled" ? "not_cancelled"
+          : daten.policyAppt.isLocked ? "locked"
+          : daten.policyAppt.isMonthClosed ? "month_closed"
+          : "forbidden";
+        uebersprungen.push({ id, code, grund: entscheidung.reason });
+        continue;
+      }
+
+      // Aktive Rechnung? Dann NICHT zurueckholen. Denselben Guard fuehren der
+      // Loesch- und der Entkoppel-Pfad, und das Einmal-Skript fuehrt ihn auch —
+      // das Feature, das es ersetzen soll, darf nicht schwaecher sein.
+      //
+      // Erreichbar ueber `customer_no_show`: der erzeugt Rechnungsposten
+      // ("Vergebliche Anfahrt") und darf trotzdem abgesagt werden. Ein Restore
+      // ohne diesen Guard stellte den Termin auf `scheduled`, waehrend die
+      // gestellte Rechnung ihn weiter ausweist — die naechste Abrechnung des
+      // Kunden braeche dann an `assertNotAlreadyInvoiced` ab, und zwar
+      // vollstaendig, nicht nur fuer diesen Termin.
+      const aktiveRechnungen = await findActiveInvoicesForAppointments([id], tx);
+      if (aktiveRechnungen.length > 0) {
+        const nummern = [...new Set(aktiveRechnungen.map(i => i.invoiceNumber))].join(", ");
+        uebersprungen.push({
+          id,
+          code: "invoiced",
+          grund: `Zu diesem Termin gibt es eine aktive Rechnung (${nummern}). Bitte zuerst stornieren.`,
+        });
         continue;
       }
 
