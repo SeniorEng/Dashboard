@@ -21,8 +21,15 @@ import {
   type PaymentDifferenceInput,
 } from "./payment-difference";
 
-/** Ausschließlich die aus einer Zahlung ABLEITBAREN Rechnungs-Status. */
-export type InvoicePaymentDerivedStatus = "teilweise_bezahlt" | "bezahlt";
+/**
+ * Der EINZIGE Status, den eine Zahlung noch setzen kann.
+ *
+ * Bis zum Status-Umbau stand hier zusätzlich `teilweise_bezahlt`. Der ist jetzt
+ * ein BADGE (`shared/domain/invoice-badges.ts`) und wird nicht mehr
+ * geschrieben: eine Teilzahlung ändert den Zustand der Rechnung nicht — sie
+ * wartet weiterhin auf Zahlung, nur eben nicht mehr auf die volle.
+ */
+export type InvoicePaymentDerivedStatus = "bezahlt";
 
 export interface InvoicePaymentStatusResult {
   /**
@@ -44,7 +51,8 @@ export interface InvoicePaymentStatusResult {
  *
  *  - keine Zahlung (`paidCents <= 0`)          ⇒ `null`  (Status unverändert)
  *  - voll gedeckt (`exact`/`tolerated`)        ⇒ `"bezahlt"`
- *  - Unterzahlung mit positiver Zahlung        ⇒ `"teilweise_bezahlt"`
+ *  - Unterzahlung mit positiver Zahlung        ⇒ `null`  (Status unverändert,
+ *                                                 Badge „Teilweise bezahlt")
  *  - Über-Toleranz-Überzahlung (`overpaid`)    ⇒ `null`  (flaggen, NIE still „bezahlt")
  */
 export function resolveInvoicePaymentStatus(
@@ -59,7 +67,15 @@ export function resolveInvoicePaymentStatus(
     return { status: "bezahlt", classification };
   }
   if (classification.result === "underpaid") {
-    return { status: "teilweise_bezahlt", classification };
+    // Unterzahlung setzt KEINEN Status mehr. Die Rechnung bleibt `versendet`
+    // und trägt das Badge „Teilweise bezahlt", das sich bei jedem Lesen aus
+    // der Zahlungssumme ergibt.
+    //
+    // Der frühere Status hatte einen konkreten Fehler zur Folge:
+    // `assignInvoiceStage` kannte ihn nicht und schickte ihn auf
+    // `rechnung_erstellt` — der Betrag zählte im Cockpit-Board neben den
+    // Entwürfen. Als Badge kann das nicht mehr passieren.
+    return { status: null, classification };
   }
   // `overpaid`: Über-Toleranz-Überzahlung — zur Prüfung markieren, nicht setzen.
   return { status: null, classification };

@@ -20,6 +20,7 @@ import {
 } from "@shared/domain/qonto/payment-difference";
 import { resolveInvoicePaymentStatus } from "@shared/domain/qonto/invoice-payment-status";
 import { evaluateAmountOnlyMatch, AMOUNT_MATCH_REVIEW_CONFIDENCE } from "@shared/domain/qonto/amount-match-guard";
+import { statusesAllowedToTransitionTo } from "@shared/domain/invoice-status";
 
 const QONTO_BASE_URL = "https://thirdparty.qonto.com/v2";
 
@@ -339,12 +340,13 @@ class QontoService {
   async autoMatch(userId: number, ipAddress?: string): Promise<{ matched: number; skipped: number; review: number }> {
     const unmatched = await qontoStorage.getUnmatchedTransactions();
 
-    // Task #1284 — "avis_erhalten" zählt als offen: ein Qonto-Zahlungseingang
-    // darf eine bereits über ein Avis als "avis_erhalten" markierte Rechnung
+    // Offen = alles, was noch nach `bezahlt` wechseln darf, PLUS Entwuerfe
+    // (die sind noch nicht raus, sollen aber als Zuordnungs-Kandidat sichtbar
+    // sein). Liste aus der Uebergangs-SSoT statt handgeschrieben.
     // auf "bezahlt" hochstufen.
     const openInvoices = await db.select()
       .from(invoices)
-      .where(inArray(invoices.status, ["versendet", "avis_erhalten", "entwurf"]));
+      .where(inArray(invoices.status, [...statusesAllowedToTransitionTo("bezahlt"), "entwurf"]));
 
     const invoiceByNumber = new Map(openInvoices.map(inv => [inv.invoiceNumber.toLowerCase(), inv]));
     const invoiceByAmount = new Map<number, typeof openInvoices>();
@@ -544,7 +546,7 @@ class QontoService {
               : { status: "teilweise_bezahlt" })
             .where(and(
               eq(invoices.id, match.invoiceId),
-              inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
+              inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
             ))
             .returning({ id: invoices.id });
 
@@ -625,7 +627,7 @@ class QontoService {
    * Sammel-Avis zuzuordnen. Triple-Equality + Eindeutigkeits-/Diskriminator-Logik
    * liegen pur in shared/domain (SSoT). Auf Treffer: transaktion → Avis binden
    * (guarded, XOR/billing-irrelevant respektiert), alle offenen Avis-Rechnungen
-   * `versendet|avis_erhalten → bezahlt` (guarded), ein Audit je Rechnung + ein
+   * `versendet → bezahlt` (guarded ueber die Uebergangs-SSoT), ein Audit je Rechnung + ein
    * Avis-Level-Audit. Idempotent: geguardete Updates greifen auf 0 Zeilen, wenn
    * bereits gebunden/geschlossen. Liefert das getroffene Avis oder null.
    */
@@ -678,7 +680,7 @@ class QontoService {
         .set({ status: "bezahlt", paidAt: qtx.emittedAt })
         .where(and(
           inArray(invoices.id, advice.openInvoiceIds),
-          inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
+          inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
         ))
         .returning({ id: invoices.id });
 

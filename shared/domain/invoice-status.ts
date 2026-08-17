@@ -6,11 +6,18 @@
  * als auch der neue Sammel-Statuswechsel (`POST /billing/bulk-status`) lesen
  * dieselbe Quelle, damit beide Pfade niemals auseinanderdriften.
  *
- * Lebenszyklus (Task #1284):
- *   Entwurf → Versendet → Avis erhalten → Bezahlt (+ Storniert).
- * "avis_erhalten" liegt zwischen Versendet und Bezahlt. Manuell darf von
- * versendet/avis_erhalten direkt auf bezahlt gesprungen werden;
- * bezahlt/storniert werden nie herabgestuft.
+ * Lebenszyklus (Status-Umbau, `docs/rechnungsstatus-zielmodell.md`):
+ *   Entwurf → Versendet → Bezahlt (+ Storniert als Terminal fuer alles
+ *   Terminale). Storno-DOKUMENTE stehen auf `abgeschlossen` und bewegen sich
+ *   nicht.
+ *
+ * `avis_erhalten` ist ENTFALLEN: der Zahlungsavis ist eine Zuordnungs-Mechanik,
+ * kein Zustand. `teilweise_bezahlt` ist ENTFALLEN: es ist ein Badge aus der
+ * Zahlungssumme.
+ *
+ * Diese Map gilt jetzt fuer ALLE Schreibpfade — auch den Zahlungsabgleich, der
+ * seine zulaessigen Ausgangs-Status ueber `statusesAllowedToTransitionTo`
+ * daraus ableitet statt sie handzuschreiben.
  *
  * Task #1434 / #66: "versendet" → "entwurf" ist ENTFERNT. Der Übergang war der
  * Einstieg in die Belegnummern-Wiedervergabe: zurücksetzen leerte `sentAt`,
@@ -35,14 +42,40 @@
  */
 export const INVOICE_STATUS_TRANSITIONS: Record<string, string[]> = {
   entwurf: ["versendet", "storniert"],
-  versendet: ["avis_erhalten", "bezahlt", "storniert"],
-  avis_erhalten: ["bezahlt", "storniert"],
-  teilweise_bezahlt: ["bezahlt", "storniert"],
+  versendet: ["bezahlt", "storniert"],
   bezahlt: ["storniert"],
   storniert: [],
+  // Storno-DOKUMENTE entstehen auf `abgeschlossen` und bleiben dort. Es gibt
+  // keinen Uebergang hinaus — ein Storno-Dokument zu stornieren ist kein
+  // Vorgang, den das Modell kennt. Wer den Storno rueckgaengig machen will,
+  // stellt neu aus.
+  abgeschlossen: [],
 };
 
 /** Ist der Übergang `from → to` laut SSoT erlaubt? */
 export function isAllowedInvoiceStatusTransition(from: string, to: string): boolean {
   return INVOICE_STATUS_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+/**
+ * Aus welchen Status heraus darf `ziel` erreicht werden? — die UMKEHRUNG der
+ * Übergangs-Map.
+ *
+ * ── Wozu ────────────────────────────────────────────────────────────────
+ * Die Zahlungs-Schreibpfade setzen den Status per Compare-and-Swap:
+ * `UPDATE … SET status = 'bezahlt' WHERE id = ? AND status IN (…)`, danach
+ * ein Längen-Check auf `returning()`. Das ist der richtige Weg — er ist
+ * atomar und serialisiert konkurrierende Abgleiche ohne zusätzlichen Lock.
+ *
+ * Falsch war nur, dass die Liste der zulässigen Ausgangs-Status an SECHS
+ * Stellen handgeschrieben stand — inklusive `avis_erhalten` und
+ * `teilweise_bezahlt`, die es nach dem Umbau nicht mehr gibt. Die
+ * Übergangs-SSoT beschrieb damit nur den manuellen Weg (Bestandsaufnahme, W3).
+ *
+ * Jetzt kommt die Liste aus derselben Map, und die Atomarität bleibt.
+ */
+export function statusesAllowedToTransitionTo(ziel: string): string[] {
+  return Object.entries(INVOICE_STATUS_TRANSITIONS)
+    .filter(([, ziele]) => ziele.includes(ziel))
+    .map(([von]) => von);
 }

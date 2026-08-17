@@ -34,30 +34,17 @@ import {
   computeProposals,
   applyProposals,
 } from "../../../scripts/verify-advice-backfill";
+import { updateInvoiceStatusTx } from "../../storage/billing-storage";
+import { statusesAllowedToTransitionTo } from "@shared/domain/invoice-status";
 
 const router = Router();
 router.use(requireSuperAdmin);
 
 // Task #1284 — Hat eine Rechnung noch eine aktive (nicht soft-deletete) Avis-
-// Zuordnung, ist ihr "zurückgesetzter" Status `avis_erhalten`, sonst
+// Zuordnung, ist ihr "zurueckgesetzter" Status seit dem Umbau immer
 // `versendet`. Wird beim Aufheben einer Zahlungs-Zuordnung (Qonto-Unmatch /
 // Avis-Löschen) genutzt, damit eine Rechnung nicht versehentlich an einer noch
 // vorhandenen Avis-Zuordnung vorbei auf `versendet` herabfällt.
-async function resolveAvisBackedStatus(
-  exec: DbOrTx,
-  invoiceId: number,
-): Promise<"avis_erhalten" | "versendet"> {
-  const rows = await exec
-    .select({ id: paymentAdviceItems.id })
-    .from(paymentAdviceItems)
-    .innerJoin(paymentAdvices, eq(paymentAdviceItems.paymentAdviceId, paymentAdvices.id))
-    .where(and(
-      eq(paymentAdviceItems.matchedInvoiceId, invoiceId),
-      isNull(paymentAdvices.deletedAt),
-    ))
-    .limit(1);
-  return rows.length > 0 ? "avis_erhalten" : "versendet";
-}
 
 router.get("/status", asyncHandler("Qonto-Status konnte nicht geladen werden", async (_req, res) => {
   const configured = await qontoService.isConfigured();
@@ -292,18 +279,18 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
     });
 
     if (decision.status === "bezahlt") {
-      // Vollständig gedeckt (exakt/tolerierbar). Task #1284 — auch aus
-      // „avis_erhalten" bzw. „teilweise_bezahlt" heraus abschließbar.
+      // Vollstaendig gedeckt (exakt/tolerierbar). Die zulaessigen
+      // Ausgangs-Status kommen aus der Uebergangs-SSoT.
       const invoiceUpdate = await dbTx.update(invoices)
         .set({ status: "bezahlt", paidAt: tx.emittedAt })
         .where(and(
           eq(invoices.id, invoiceId),
-          inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
+          inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
         ))
         .returning({ id: invoices.id });
 
       if (invoiceUpdate.length === 0) {
-        throw badRequest("Rechnung ist nicht in einem offenen Status (versendet/avis_erhalten/teilweise bezahlt) und kann nicht abgeglichen werden.");
+        throw badRequest("Rechnung ist nicht in einem offenen Status und kann nicht abgeglichen werden.");
       }
 
       audit.record({
@@ -325,22 +312,22 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
         },
         ipAddress: req.ip,
       });
-    } else if (decision.status === "teilweise_bezahlt") {
-      // Task #1822 — Teilzahlung: binden + Rechnung als „teilweise_bezahlt"
-      // führen (kein paidAt, noch offen). Bewusst KEIN Mismatch-Flag — die
-      // Unterzahlung ist ein erwarteter Zwischenstand, keine Abweichung.
-      const invoiceUpdate = await dbTx.update(invoices)
-        .set({ status: "teilweise_bezahlt" })
-        .where(and(
-          eq(invoices.id, invoiceId),
-          inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
-        ))
-        .returning({ id: invoices.id });
-
-      if (invoiceUpdate.length === 0) {
-        throw badRequest("Rechnung ist nicht in einem offenen Status (versendet/avis_erhalten/teilweise bezahlt) und kann nicht abgeglichen werden.");
-      }
-
+    } else if (decision.classification.result === "underpaid") {
+      // Teilzahlung: Zahlung binden, Status NICHT anfassen.
+      //
+      // Bis zum Status-Umbau wurde hier `teilweise_bezahlt` geschrieben. Der
+      // Status ist entfallen — eine Teilzahlung aendert den Zustand der
+      // Rechnung nicht: sie ist weiterhin `versendet` und wartet auf Zahlung,
+      // nur eben nicht mehr auf die volle. Sichtbar wird sie ueber das BADGE
+      // „Teilweise bezahlt", das sich bei jedem Lesen aus der Zahlungssumme
+      // ergibt (`shared/domain/invoice-badges.ts`).
+      //
+      // Bewusst KEIN Mismatch-Flag — die Unterzahlung ist ein erwarteter
+      // Zwischenstand, keine Abweichung. Das bleibt wie vorher.
+      //
+      // Der Audit-Eintrag bleibt ebenfalls: er haelt fest, DASS eine
+      // Teilzahlung gebunden wurde. Genau dafuer ist er da; er beschreibt ein
+      // Ereignis, keinen Zustand.
       audit.record({
         userId: req.user!.id,
         action: "invoice_partial_payment",
@@ -393,7 +380,10 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
   res.json({
     ...updated,
     invoiceMarkedPaid: decision.status === "bezahlt",
-    invoicePartiallyPaid: decision.status === "teilweise_bezahlt",
+    // Teilzahlung ist kein Status mehr, sondern ein Badge aus der
+    // Zahlungssumme. Die Antwort meldet sie weiterhin — sie kommt jetzt aus
+    // der Betrags-Klassifikation statt aus einem gesetzten Status.
+    invoicePartiallyPaid: decision.classification.result === "underpaid",
     paymentDifferenceCents: decision.classification.differenceCents,
     paymentDifferenceResult: decision.classification.result,
   });
@@ -519,15 +509,15 @@ router.post("/transactions/:id/bulk-match", asyncHandler("Mehrfach-Zuordnung feh
     }
 
     if (fullyCovered) {
-      // Rechnungen geguarded auf bezahlt setzen (nur offene versendet/avis_erhalten).
+      // Rechnungen geguarded auf bezahlt setzen (zulaessige Ausgangs-Status aus der SSoT).
       // Nur, wenn die Σ Brutto zum Zahlungsbetrag passt (exakt oder tolerierbar).
       const flipped = await dbTx.update(invoices)
         .set({ status: "bezahlt", paidAt: emitted })
-        .where(and(inArray(invoices.id, invoiceIds), inArray(invoices.status, ["versendet", "avis_erhalten"])))
+        .where(and(inArray(invoices.id, invoiceIds), inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt"))))
         .returning({ id: invoices.id });
 
       if (flipped.length !== invoiceIds.length) {
-        throw badRequest("Mindestens eine Rechnung ist nicht im Status 'versendet' oder 'avis_erhalten' und kann nicht abgeglichen werden.");
+        throw badRequest("Mindestens eine Rechnung ist nicht in einem offenen Status und kann nicht abgeglichen werden.");
       }
 
       for (const invId of invoiceIds) {
@@ -639,7 +629,7 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
 
   // Task #1672 — Sammel-Avis-Zuordnung (Sammelzahlung) reversibel aufheben:
   // Bindung an das Avis lösen, alle über das Avis bezahlten offenen Rechnungen
-  // `bezahlt → avis_erhalten` zurücksetzen (Avis bleibt bestehen).
+  // `bezahlt → versendet` zuruecksetzen (Avis bleibt bestehen).
   if (tx.matchedPaymentAdviceId) {
     const previousAdviceId = tx.matchedPaymentAdviceId;
     const previousConfidence = tx.matchConfidence;
@@ -647,7 +637,7 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
     // Mehrfach-Zuordnung) wird beim Aufheben wieder soft-gelöscht und seine
     // Mitglieder pro Rechnung auf ihren avis-gestützten Vorstatus zurückgesetzt
     // (versendet, sofern nicht noch durch ein anderes Avis gedeckt). Importierte
-    // Avise bleiben bestehen ⇒ bisheriges Verhalten `bezahlt → avis_erhalten`.
+    // Avise bleiben bestehen; der Status geht auf `versendet` zurueck.
     const isAdHocBulk = previousConfidence === MANUAL_BULK_ADVICE_CONFIDENCE;
 
     const updated = await withAudit(async (dbTx, audit) => {
@@ -675,30 +665,30 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
         .map(r => r.invoiceId)
         .filter((v): v is number => v !== null);
 
-      // Bei einem ad-hoc Bulk-Avis zuerst das Avis soft-löschen, damit
-      // resolveAvisBackedStatus die Mitglieder korrekt nicht mehr als
-      // avis-gedeckt zählt (sofern keine andere Zuordnung existiert).
+      // Bei einem ad-hoc Bulk-Avis das Avis soft-loeschen. (Frueher war das
+      // noetig, damit die Avis-Deckung beim Zuruecksetzen richtig berechnet
+      // wurde — die Berechnung gibt es nicht mehr, das Soft-Loeschen des
+      // ad-hoc-Avis bleibt aber richtig: es war nur ein Zuordnungs-Behelf.)
       if (isAdHocBulk) {
         await dbTx.update(paymentAdvices)
           .set({ deletedAt: new Date() })
           .where(and(eq(paymentAdvices.id, previousAdviceId), isNull(paymentAdvices.deletedAt)));
       }
 
+      // Zuruecksetzen fuehrt IMMER nach `versendet`.
+      //
+      // Vorher wurde hier je Rechnung unterschieden, ob noch eine Avis-Deckung
+      // besteht (`avis_erhalten`) oder nicht (`versendet`) — inklusive einer
+      // Schleife mit einer Query je Rechnung. Beides entfaellt: der Avis ist
+      // eine Zuordnungs-Mechanik, kein Zustand. Faellt die Zahlung weg, wartet
+      // die Rechnung wieder auf Zahlung, ob ein Avis vorliegt oder nicht.
+      //
+      // Der Avis selbst bleibt unberuehrt bestehen — er ist weiterhin die
+      // Zuordnungs-Quelle, nur eben nicht mehr im Status abgebildet.
       const reverted: number[] = [];
-      if (adviceInvoiceIds.length > 0 && isAdHocBulk) {
-        // Pro Rechnung individuell zurücksetzen (versendet vs. avis_erhalten je
-        // nach verbleibender Avis-Deckung).
-        for (const invId of adviceInvoiceIds) {
-          const resetStatus = await resolveAvisBackedStatus(dbTx, invId);
-          const revertUpdate = await dbTx.update(invoices)
-            .set({ status: resetStatus, paidAt: null })
-            .where(and(eq(invoices.id, invId), eq(invoices.status, "bezahlt")))
-            .returning({ id: invoices.id });
-          reverted.push(...revertUpdate.map(r => r.id));
-        }
-      } else if (adviceInvoiceIds.length > 0) {
+      if (adviceInvoiceIds.length > 0) {
         const revertUpdate = await dbTx.update(invoices)
-          .set({ status: "avis_erhalten", paidAt: null })
+          .set({ status: "versendet", paidAt: null })
           .where(and(inArray(invoices.id, adviceInvoiceIds), eq(invoices.status, "bezahlt")))
           .returning({ id: invoices.id });
         reverted.push(...revertUpdate.map(r => r.id));
@@ -780,17 +770,18 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
         skontoCents: remaining.skontoCents,
       });
 
-      if (remaining.paidCents <= 0) {
-        // Keine gebundene Zahlung mehr ⇒ avis-gestützter Vorstatus.
-        resultingStatus = await resolveAvisBackedStatus(dbTx, previousInvoiceId);
+      // Beide Zweige fuehren zum selben Zustand: die Rechnung ist nicht mehr
+      // voll gedeckt und wartet wieder auf Zahlung. Ob gar nichts mehr gebunden
+      // ist oder noch eine Teilzahlung steht, unterscheidet nur das BADGE.
+      //
+      // Der Statuswechsel geht durch `updateInvoiceStatusTx` — denselben
+      // geguardeten Engpass wie der manuelle Weg. Genau das war vorher nicht so:
+      // hier stand ein Direkt-Update, das die Uebergangs-SSoT umging.
+      if (remaining.paidCents <= 0 || decision.classification.result === "underpaid") {
+        resultingStatus = "versendet";
+        await updateInvoiceStatusTx(dbTx, previousInvoiceId, "versendet", req.user!.id);
         await dbTx.update(invoices)
-          .set({ status: resultingStatus, paidAt: null })
-          .where(eq(invoices.id, previousInvoiceId));
-      } else if (decision.status === "teilweise_bezahlt") {
-        // Noch Teilzahlung(en) vorhanden ⇒ teilweise_bezahlt (paidAt zurücksetzen).
-        resultingStatus = "teilweise_bezahlt";
-        await dbTx.update(invoices)
-          .set({ status: "teilweise_bezahlt", paidAt: null })
+          .set({ paidAt: null })
           .where(eq(invoices.id, previousInvoiceId));
       }
       // Sonst (weiterhin voll gedeckt / Über-Toleranz-Rest) ⇒ Status unverändert
@@ -950,7 +941,7 @@ router.post("/transactions/:id/confirm-paid", asyncHandler("Rechnung konnte nich
       .set({ status: "bezahlt", paidAt: emitted })
       .where(and(
         inArray(invoices.id, boundInvoiceIds),
-        inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
+        inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
       ))
       .returning({ id: invoices.id });
 
@@ -1341,7 +1332,7 @@ async function autoMatchAvisItems(
         .from(invoices)
         .where(and(
           eq(invoices.grossAmountCents, item.betragCents),
-          inArray(invoices.status, ["versendet", "avis_erhalten"]),
+          inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
         ))
         .limit(2);
       const unique = resolveUniqueMatch(byAmount);
@@ -1651,7 +1642,7 @@ router.post("/payment-advices/:id/mark-paid", asyncHandler("Avis konnte nicht al
           .set({ status: "bezahlt", paidAt })
           .where(and(
             inArray(invoices.id, coveredIds),
-            inArray(invoices.status, ["versendet", "avis_erhalten", "teilweise_bezahlt"]),
+            inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
           ))
           .returning({ id: invoices.id });
 

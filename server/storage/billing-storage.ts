@@ -128,6 +128,24 @@ export async function createInvoice(data: Record<string, unknown>, lineItems: Re
   return await db.transaction(async (tx) => createInvoiceTx(tx, data, lineItems, userId));
 }
 
+/**
+ * DER Engpass für jeden Rechnungs-Statuswechsel — mit Übergangs-Prüfung.
+ *
+ * ── Was das ERSETZT ─────────────────────────────────────────────────────
+ * Das ZWEITE Schreib-Regime des Zahlungsabgleichs. Bis zum Status-Umbau ging
+ * der manuelle Weg (`PATCH /billing/:id/status`, `POST /bulk-status`) über
+ * `isAllowedInvoiceStatusTransition`, der Qonto-Abgleich dagegen über eigene
+ * Direkt-Updates mit handgeschriebenem `WHERE`-Guard. Die Übergangs-SSoT
+ * beschrieb damit nur die halbe Wirklichkeit — wer sie las und für vollständig
+ * hielt, irrte (Bestandsaufnahme, W3).
+ *
+ * Jetzt prüft dieser Engpass, und alle Pfade gehen hindurch.
+ *
+ * `erlaubeGleichstand`: ein Schreibvorgang, der den Status NICHT ändert
+ * (z.B. Zahlung nachtragen bei bereits `bezahlt`), ist kein Übergang und
+ * wird durchgelassen. Ohne diese Ausnahme müsste jeder Aufrufer vorher selbst
+ * vergleichen — und genau dort entstünde das nächste Zweitregime.
+ */
 export async function updateInvoiceStatusTx(
   exec: DbOrTx,
   id: number,
@@ -136,6 +154,24 @@ export async function updateInvoiceStatusTx(
 ): Promise<Invoice> {
   const { invoices } = await import("@shared/schema");
   const { eq, sql } = await import("drizzle-orm");
+  const { isAllowedInvoiceStatusTransition } = await import("@shared/domain/invoice-status");
+
+  // Ist-Status unter FOR UPDATE lesen: serialisiert konkurrierende Wechsel und
+  // liest den tatsaechlichen Stand, nicht den, den der Aufrufer zu kennen glaubt.
+  const [ist] = await exec
+    .select({ status: invoices.status })
+    .from(invoices)
+    .where(eq(invoices.id, id))
+    .for("update");
+  if (!ist) {
+    throw new Error(`Rechnung ${id} nicht gefunden.`);
+  }
+  if (ist.status !== status && !isAllowedInvoiceStatusTransition(ist.status, status)) {
+    throw new Error(
+      `Unzulaessiger Statuswechsel fuer Rechnung ${id}: "${ist.status}" -> "${status}". ` +
+      `Erlaubte Uebergaenge: shared/domain/invoice-status.ts`,
+    );
+  }
   const updateData: Partial<Invoice> = { status: status as Invoice["status"] };
   if (status === "versendet") {
     updateData.sentAt = new Date();
