@@ -1727,6 +1727,36 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
   await archive.finalize();
 }));
 
+/**
+ * Weicht der Leistungsnachweis wirklich ab?
+ *
+ * Der gespeicherte Fingerprint wird gegen ZWEI Live-Werte gehalten: den
+ * vollstaendigen und den, der nur die auf DIESER Rechnung liegenden Nachweise
+ * umfasst. Drift gilt erst, wenn er zu keinem von beiden passt.
+ *
+ * Grund: der volle Fingerprint hasht auch Nachweise mit, deren Termine gar
+ * nicht auf dieser Rechnung liegen — der Renderer ueberspringt die. Ein nach
+ * dem Rechnungsdruck signierter weiterer LN erzeugte damit einen Drift-Alarm
+ * bei byte-identischem PDF, und die Oberflaeche forderte "Storno +
+ * Neuerstellung" fuer eine korrekte, gestellte Rechnung.
+ *
+ * Beide Live-Werte zu pruefen deckt die zwei Altfaelle ab, ohne einen einzigen
+ * gespeicherten Fingerprint anzufassen — eine korrigierte Formel allein wuerde
+ * Rechnungen treffen, die MIT dem fremden Eintrag eingefroren wurden.
+ *
+ * Stopgap. Die Aufloesung (Formel korrigieren + Backfill) ist ein eigener Task.
+ */
+function istLeistungsnachweisDrift(
+  gespeichert: string | null | undefined,
+  live: { leistungsnachweisFingerprint: string | null; leistungsnachweisFingerprintOnlyRelevant: string | null },
+): boolean {
+  if (!gespeichert) return false;
+  const kandidaten = [live.leistungsnachweisFingerprint, live.leistungsnachweisFingerprintOnlyRelevant]
+    .filter((f): f is string => !!f);
+  if (kandidaten.length === 0) return false;
+  return !kandidaten.includes(gespeichert);
+}
+
 router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
@@ -1746,11 +1776,7 @@ router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (r
       if (invoice.pdfDataFingerprint && live.pdfFingerprint && invoice.pdfDataFingerprint !== live.pdfFingerprint) {
         pdfDrift = true;
       }
-      if (
-        invoice.leistungsnachweisDataFingerprint &&
-        live.leistungsnachweisFingerprint &&
-        invoice.leistungsnachweisDataFingerprint !== live.leistungsnachweisFingerprint
-      ) {
+      if (istLeistungsnachweisDrift(invoice.leistungsnachweisDataFingerprint, live)) {
         leistungsnachweisDrift = true;
       }
     } catch (err) {
@@ -2002,10 +2028,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
     if (invoice.leistungsnachweisDataFingerprint) {
       try {
         const live = await computeLiveInvoiceFingerprints(invoice);
-        if (
-          live.leistungsnachweisFingerprint &&
-          live.leistungsnachweisFingerprint !== invoice.leistungsnachweisDataFingerprint
-        ) {
+        if (istLeistungsnachweisDrift(invoice.leistungsnachweisDataFingerprint, live)) {
           res.setHeader("X-Pdf-Drift", "true");
         }
       } catch (err) {
