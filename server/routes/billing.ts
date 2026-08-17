@@ -58,7 +58,7 @@ import {
 } from "../storage/billing-storage";
 import { stornoInvoiceCascade } from "../services/invoice-storno";
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
-import { isStorniertInvoice } from "@shared/domain/billing-pipeline";
+import { isStorniertInvoice, istAktionsfaehigeRechnung } from "@shared/domain/billing-pipeline";
 import { readBillingEconomics } from "../storage/billing/economics-reader";
 import { readBillingTermine } from "../storage/billing/termine-reader";
 import { auditService } from "../services/audit";
@@ -232,7 +232,7 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   // `getInvoicePaymentTotals` WIE VIEL gebunden ist, `classifyPaymentDifference`
   // rechnet die Differenz. Hier wird nichts nachgerechnet.
   const openInvoices = invoices.filter(inv =>
-    inv.status !== "bezahlt" && !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }),
+    inv.status !== "bezahlt" && istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }),
   );
   if (openInvoices.length === 0) {
     res.json(invoices);
@@ -293,7 +293,7 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
 // dieselbe Rechnung zwei Zahlungen zufällt.
 router.get("/open-for-match", asyncHandler("Offene Rechnungen konnten nicht geladen werden", async (_req, res) => {
   const candidates = (await storage.getInvoices({ statuses: ["versendet", "avis_erhalten"] }))
-    .filter(inv => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }));
+    .filter(inv => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }));
   const claimed = await qontoStorage.getClaimedInvoiceIds(db, candidates.map(inv => inv.id));
   res.json(candidates.filter(inv => !claimed.has(inv.id)));
 }));
@@ -1589,7 +1589,7 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
   // Druck-Bündel raus — der Admin will den postalischen Stapel für die
   // Kasse drucken, nicht Storno-Belege.
   const printable = allInvoices
-    .filter(inv => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }))
+    .filter(inv => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }))
     .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
 
   if (printable.length === 0) {

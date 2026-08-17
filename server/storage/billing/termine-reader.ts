@@ -34,6 +34,7 @@ import {
 } from "@shared/domain/billing-pipeline";
 import { attributeAppointmentToEmployees } from "@shared/domain/appointment-attribution";
 import type { AppointmentStatus } from "@shared/domain/appointments";
+import { parseInvoiceStatus } from "@shared/schema/billing";
 import type {
   BillingTermineResponse,
   BillingTermineAppointment,
@@ -175,7 +176,7 @@ export async function readBillingTermine(
       }
     } else if (apptAssignment.kind === "excluded" && apptAssignment.reason === "invoiced") {
       const invAssignment = assignInvoiceStage({
-        status: String(raw.invoice_status),
+        status: parseInvoiceStatus(String(raw.invoice_status)),
         invoiceType: String(raw.invoice_type),
       });
       // Späte Stufen (rechnung_erstellt/versendet/avis_erhalten/bezahlt) sind

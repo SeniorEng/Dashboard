@@ -5,23 +5,79 @@ import { customers } from "./customers";
 import { users } from "./users";
 import { appointments } from "./appointments";
 
-// Task #1822 — "teilweise_bezahlt" (Teilzahlung): eine Rechnung, auf die schon
-// Geld eingegangen ist, aber weniger als die Brutto-Forderung (über der
-// Zahlungs-Toleranz). Liegt im Lebenszyklus zwischen "avis_erhalten" und
-// "bezahlt". Der Status ist ABGELEITET (Zahlungsabgleich), nie manuell setzbar —
-// er wird ausschließlich über die geguardeten Schreibpfade des Qonto-Abgleichs
-// vergeben (siehe shared/domain/qonto/invoice-payment-status.ts).
-export const INVOICE_STATUSES = ["entwurf", "versendet", "avis_erhalten", "teilweise_bezahlt", "bezahlt", "storniert"] as const;
+/**
+ * Rechnungs-Status — die EINZIGE gespeicherte Wahrheit über den Zustand einer
+ * Rechnung. Spezifikation: `docs/rechnungsstatus-zielmodell.md`.
+ *
+ * Normale Rechnungen durchlaufen vier: `entwurf` → `versendet` → `bezahlt`,
+ * dazu `storniert` als Terminal für ALLES Terminale (uneinbringlich, abgelehnt,
+ * zurückgezogen — es gibt keinen zweiten Weg aus dem Vorgang heraus).
+ *
+ * `abgeschlossen` ist ausschließlich für STORNO-DOKUMENTE
+ * (`invoice_type = 'stornorechnung'`). Sie entstehen darin: kein Entwurf
+ * (nichts zu entscheiden), nie bezahlt (sie fordern nichts), nie storniert
+ * (sie SIND der Storno). Der Vorgang ist am Original verbucht, dort steht
+ * `storniert`.
+ *
+ * ── Was hier ERSETZT wurde ──────────────────────────────────────────────
+ *  - `avis_erhalten`: der Zahlungsavis ist eine ZUORDNUNGS-Mechanik, kein
+ *    Zustand. Er verbindet einen Geldeingang mit einer Rechnung, genau wie
+ *    eine Qonto-Banktransaktion. Bis zur Zahlung steht `versendet`.
+ *  - `teilweise_bezahlt`: ist ein BADGE aus der Zahlungssumme
+ *    (`shared/domain/invoice-badges.ts`), kein Status. Er war zugleich
+ *    abgeleiteter Wert UND persistierter Zustand — zwei Wahrheiten über
+ *    dieselbe Frage.
+ *
+ * Beide Altwerte existieren nach der Migration nicht mehr in der Spalte.
+ */
+export const INVOICE_STATUSES = ["entwurf", "versendet", "bezahlt", "storniert", "abgeschlossen"] as const;
 export type InvoiceStatus = typeof INVOICE_STATUSES[number];
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   entwurf: "Entwurf",
   versendet: "Versendet",
-  avis_erhalten: "Avis erhalten",
-  teilweise_bezahlt: "Teilweise bezahlt",
   bezahlt: "Bezahlt",
   storniert: "Storniert",
+  abgeschlossen: "Abgeschlossen",
 };
+
+/**
+ * Die Status, die es VOR dem Umbau gab und die die Migration abbildet.
+ *
+ * Ausschließlich für den Migrations-Lauf und die Zähl-Abfragen. Kein
+ * Produktions-Code darf gegen diese Liste programmieren — nach dem Lauf
+ * existiert keiner dieser Werte mehr in der Spalte.
+ */
+export const LEGACY_INVOICE_STATUSES = ["avis_erhalten", "teilweise_bezahlt"] as const;
+
+/**
+ * DIE Grenze zwischen Datenbank und Modell.
+ *
+ * Die Spalte ist `text` — die Datenbank kann jeden String liefern, auch einen
+ * Altwert, den die Migration übersehen hat, oder einen Tippfehler aus einem
+ * Direkt-Update. Diese Funktion ist der einzige Ort, an dem aus einem solchen
+ * String ein `InvoiceStatus` wird.
+ *
+ * Bewusst WERFEND statt auffangend: ein unbekannter Status ist ein
+ * Datenfehler, und ein Datenfehler in der Abrechnung soll auffallen, nicht
+ * konservativ eingeordnet werden. Genau die frühere „konservative" Einordnung
+ * hat den Fehler erzeugt, den dieser Umbau behebt.
+ *
+ * Wer sie aufruft, hat die Verantwortung dafür, dass der Wert aus der
+ * `invoices.status`-Spalte kommt — nicht aus einer Nutzereingabe. Für
+ * Nutzereingaben ist das Zod-Schema zuständig.
+ */
+export function parseInvoiceStatus(wert: string, kontext?: string): InvoiceStatus {
+  if ((INVOICE_STATUSES as readonly string[]).includes(wert)) {
+    return wert as InvoiceStatus;
+  }
+  const hinweis = (LEGACY_INVOICE_STATUSES as readonly string[]).includes(wert)
+    ? ` — das ist ein ALTWERT; die Status-Migration (docs/rechnungsstatus-zielmodell.md, Abschnitt 5) ist für diese Zeile nicht gelaufen`
+    : "";
+  throw new Error(
+    `Unbekannter Rechnungs-Status "${wert}"${kontext ? ` (${kontext})` : ""}${hinweis}.`,
+  );
+}
 
 // Task #585: "nachberechnung" wurde als Rechnungstyp abgeschafft. Der Wert
 // bleibt in der Union erhalten, weil historische DB-Zeilen ihn weiterhin

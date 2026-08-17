@@ -21,6 +21,7 @@ import {
   INVOICE_ACTION_CLUSTERS,
   INVOICE_ACTION_CLUSTER_LABELS,
   isStorniertInvoice,
+  istAktionsfaehigeRechnung,
   type InvoiceActionCluster,
 } from "@shared/domain/billing-pipeline";
 import { InvoiceRow } from "./invoice-row";
@@ -224,7 +225,7 @@ export function InvoiceList({
     // Task #1890: Storno-Belege sind nicht sammel-auswählbar; „Alle auswählen"
     // bezieht sich nur auf die aktionsfähigen (nicht-stornierten) Rechnungen.
     const selectableInvoices = invoices.filter(
-      (inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }),
+      (inv) => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }),
     );
     const allSelected =
       selectableInvoices.length > 0 &&

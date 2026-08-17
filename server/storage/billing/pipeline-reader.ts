@@ -25,6 +25,7 @@
  * verwenden `netAmountCents`, damit die Basis über die Hybrid-Kante konsistent
  * bleibt (Pflegekassen-Töpfe sind USt-befreit ⇒ netto == brutto).
  */
+import { parseInvoiceStatus } from "@shared/schema/billing";
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
@@ -209,7 +210,7 @@ export async function readBillingPipeline(
 
   for (const inv of invoices) {
     const cents = inv.netAmountCents ?? 0;
-    const assignment = assignInvoiceStage({ status: inv.status, invoiceType: inv.invoiceType });
+    const assignment = assignInvoiceStage({ status: parseInvoiceStatus(inv.status), invoiceType: inv.invoiceType });
     units.push({ assignment, cents });
 
     if (assignment.kind === "stage") {
@@ -228,7 +229,7 @@ export async function readBillingPipeline(
       // gatet schon immer über den Cluster. Mit `isAgingCluster` lesen beide
       // Seiten jetzt dieselbe Funktion und können nicht mehr auseinanderdriften.
       const cluster = assignInvoiceActionCluster({
-        status: inv.status,
+        status: parseInvoiceStatus(inv.status),
         invoiceType: inv.invoiceType,
         billingType: inv.billingType,
         hasBoundPayment: claimedInvoiceIds.has(inv.id),

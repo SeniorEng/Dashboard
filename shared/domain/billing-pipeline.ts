@@ -16,6 +16,7 @@
  * Geldbeträge sind ausnahmslos Integer-Cents.
  */
 import type { AppointmentStatus } from "./appointments";
+import type { InvoiceStatus } from "../schema/billing";
 import { parseLocalDate } from "../utils/datetime";
 import {
   isPflegekasseBillingType,
@@ -59,6 +60,11 @@ export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
  */
 export const PIPELINE_SIDE_STATES = [
   "storniert",
+  // Storno-DOKUMENT (`invoice_type = 'stornorechnung'`, Status
+  // `abgeschlossen`). Eigener Zustand, nicht mit „storniert" vermischt: eine
+  // stornierte RECHNUNG und das STORNO-DOKUMENT dazu sind zwei verschiedene
+  // Dinge, und die Trennung ist der Punkt (siehe `storniertesDokumentTraegtKeineForderung`).
+  "storno_dokument",
   "kunde_nicht_angetroffen",
   "nicht_abgerechnet",
   "wartet_auf_kundenunterschrift",
@@ -85,6 +91,7 @@ export const EXPECTED_REVENUE_SIDE_STATES = [
 
 export const PIPELINE_SIDE_STATE_LABELS: Record<PipelineSideState, string> = {
   storniert: "Storniert",
+  storno_dokument: "Storno-Dokument",
   kunde_nicht_angetroffen: "Kunde nicht angetroffen",
   nicht_abgerechnet: "Nicht abgerechnet",
   // Task #1874: Pflegekasse-Termin ist nur vom Mitarbeiter unterschrieben
@@ -230,10 +237,62 @@ export function assignAppointmentStage(input: AppointmentPipelineInput): Pipelin
 // ============================================
 
 export interface InvoicePipelineInput {
-  /** Rechnungs-Status (`INVOICE_STATUSES`). */
-  status: string;
+  /**
+   * Rechnungs-Status. TYPISIERT, nicht `string` — und das ist der halbe Punkt
+   * des Umbaus: solange hier `string` stand, war `INVOICE_STATUSES` eine
+   * Dekoration. Der erschöpfende `switch` unten fängt einen vergessenen Zweig
+   * nur, wenn der Eingang die Union kennt.
+   */
+  status: InvoiceStatus;
   /** Rechnungs-Typ (`INVOICE_TYPES`): rechnung | stornorechnung | nachberechnung. */
   invoiceType: string;
+}
+
+/**
+ * SSoT: **Trägt dieses Dokument einen offenen Forderungsbetrag?**
+ *
+ * Nein für Storno-Dokumente — ausdrückliche Regel, kein Nebeneffekt einer
+ * Enum-Zuordnung (Spec, Abschnitt 4.4).
+ *
+ * Der Betrag, den ein Storno-Dokument aufhebt, ist bereits am ORIGINAL
+ * herausgerechnet: dort steht `storniert`, und stornierte Rechnungen zählen in
+ * keine Stufe. Beide mitzuzählen wäre eine Doppelzählung — auf der
+ * Referenz-Kopie −15.884,35 €, was die Stufe `versendet` von 23.748,53 € auf
+ * rund 7.864 € drücken würde. Eine Zahl, die nichts Reales beschreibt.
+ *
+ * Warum das eine eigene Funktion ist und kein `if` im Zuordnungs-Code: bis zu
+ * diesem Umbau folgte der Ausschluss IMPLIZIT daraus, dass der Typ
+ * `stornorechnung` in den Side-Zustand „storniert" fiel. Sobald der Typ
+ * aufhört, den Zustand zu bestimmen, verschwände er lautlos mit ihm — ohne
+ * dass ein Test rot würde. Verankert in
+ * `tests/billing/storno-ohne-forderung.test.ts`.
+ */
+export function traegtOffeneForderung(input: { invoiceType: string }): boolean {
+  return input.invoiceType !== "stornorechnung";
+}
+
+/**
+ * SSoT: **Ist dieses Dokument aktionsfähig?** — also weder storniert noch ein
+ * Storno-Beleg. Genau die Menge, aus der Listen auswählen, Massenaktionen
+ * schöpfen und Drucklisten sich speisen.
+ *
+ * ── Warum es diese Funktion GEBEN MUSS ──────────────────────────────────
+ * Bis zum Status-Umbau beantwortete `isStorniertInvoice` diese Frage
+ * mit — es prüfte `status = 'storniert' ODER invoiceType = 'stornorechnung'`.
+ * Sieben Aufrufer schrieben deshalb `!isStorniertInvoice(...)` und meinten
+ * damit „aktionsfähig".
+ *
+ * Seit der Typ nichts mehr über den Zustand aussagt, prüft
+ * `isStorniertInvoice` nur noch den Status — und `!isStorniertInvoice(...)`
+ * hätte Storno-BELEGE plötzlich als aktionsfähig durchgelassen: auswählbar in
+ * der Liste, Kandidat für Massenaktionen, in der Druckliste. Lautlos, weil
+ * kein Typ mehr widerspricht.
+ *
+ * Der Name sagt jetzt, was gemeint ist, statt sich auf eine Nebenwirkung zu
+ * verlassen.
+ */
+export function istAktionsfaehigeRechnung(input: { status: string; invoiceType: string }): boolean {
+  return traegtOffeneForderung(input) && !isStorniertInvoice(input);
 }
 
 /**
@@ -243,8 +302,12 @@ export interface InvoicePipelineInput {
  * (`/billing/open-for-match`) genutzt, damit „was ist eine stornierte
  * Rechnung?" nur an EINER Stelle definiert ist.
  */
-export function isStorniertInvoice(input: InvoicePipelineInput): boolean {
-  return input.status === "storniert" || input.invoiceType === "stornorechnung";
+export function isStorniertInvoice(input: { status: string }): boolean {
+  // NUR noch der Status. Der Typ sagt seit dem Umbau nichts mehr über den
+  // Zustand aus: ein Storno-DOKUMENT ist `abgeschlossen`, nicht storniert.
+  // Wer wissen will, ob ein Dokument eine offene Forderung trägt, fragt
+  // `traegtOffeneForderung`.
+  return input.status === "storniert";
 }
 
 /**
@@ -256,23 +319,46 @@ export function isStorniertInvoice(input: InvoicePipelineInput): boolean {
  * ausblenden" und der Umsatz-Statistik, die stornierte Rechnungen ausschließt).
  */
 export function assignInvoiceStage(input: InvoicePipelineInput): PipelineAssignment {
-  if (isStorniertInvoice(input)) {
-    return { kind: "side", state: "storniert" };
+  // Storno-DOKUMENT zuerst: es trägt keine offene Forderung (siehe
+  // `traegtOffeneForderung`) und gehört deshalb in keine Stufe — unabhängig
+  // davon, welchen Status es trägt.
+  if (!traegtOffeneForderung(input)) {
+    return { kind: "side", state: "storno_dokument" };
   }
   switch (input.status) {
     case "entwurf":
       return { kind: "stage", stage: "rechnung_erstellt" };
     case "versendet":
       return { kind: "stage", stage: "versendet" };
-    case "avis_erhalten":
-      return { kind: "stage", stage: "avis_erhalten" };
     case "bezahlt":
       return { kind: "stage", stage: "bezahlt" };
+    case "storniert":
+      return { kind: "side", state: "storniert" };
+    case "abgeschlossen":
+      // `abgeschlossen` ist Storno-Dokumenten vorbehalten — die sind oben
+      // schon abgefangen. Trägt eine normale Rechnung diesen Status, ist das
+      // ein Datenfehler und kein Anzeigefall.
+      throw new Error(
+        `Status "abgeschlossen" ist Storno-Dokumenten vorbehalten, hier aber auf invoiceType="${input.invoiceType}"`,
+      );
     default:
-      // Unbekannter Status: konservativ als „Rechnung erstellt" behandeln,
-      // damit die Zuordnung total bleibt (kein stiller Verlust eines €).
-      return { kind: "stage", stage: "rechnung_erstellt" };
+      // KEIN stiller Auffang mehr. Die frühere „konservative" Einordnung auf
+      // `rechnung_erstellt` hat genau den Fehler erzeugt, den dieser Umbau
+      // behebt: `teilweise_bezahlt` fiel bei seiner Einführung unbemerkt hier
+      // hinein und zählte im Cockpit-Board neben den Entwürfen.
+      //
+      // `never` erzwingt, dass jeder neue Status einen Zweig bekommt — der
+      // Compiler bricht, sobald `INVOICE_STATUSES` wächst.
+      return assertNieErreicht(input.status, "assignInvoiceStage");
   }
+}
+
+/**
+ * Erschöpfungs-Wächter. Im Typsystem unerreichbar; zur Laufzeit die zweite
+ * Lage für Werte, die aus der Datenbank kommen und die Union verletzen.
+ */
+function assertNieErreicht(wert: never, wo: string): never {
+  throw new Error(`${wo}: unbekannter Wert "${String(wert)}" — Union und Daten laufen auseinander.`);
 }
 
 // ============================================
@@ -338,11 +424,15 @@ export function isAgingCluster(cluster: InvoiceActionCluster): boolean {
 }
 
 export interface InvoiceClusterInput {
-  /** Rechnungs-Status (`INVOICE_STATUSES`). */
-  status: string;
+  /** Rechnungs-Status, typisiert wie bei `InvoicePipelineInput`. */
+  status: InvoiceStatus;
   /** Rechnungs-Typ (`INVOICE_TYPES`). */
   invoiceType: string;
-  /** Zahler-Typ (`billingType`): selbstzahler | pflegekasse_gesetzlich | pflegekasse_privat. */
+  /**
+   * Zahler-Typ. Fuer den CLUSTER nicht mehr gebraucht (Empfaenger-Unterschied
+   * raus aus dem Modell), bleibt aber im Eingang: der Aging-Anker braucht ihn,
+   * und die Aufrufer reichen dasselbe Objekt in beide Funktionen.
+   */
   billingType: string;
   /**
    * Hängt an dieser Rechnung eine gebundene Qonto-Zahlung? Quelle ist
@@ -374,26 +464,17 @@ export function assignInvoiceActionCluster(input: InvoiceClusterInput): InvoiceA
   // tritt für Rechnungen nicht auf (nur Termin-Pfad) — wird aber, falls er je
   // entstünde, ebenfalls dem Storniert-Cluster zugeordnet, damit die Zuordnung
   // total bleibt.
+  if (assignment.kind === "side") {
+    // Ein Storno-DOKUMENT ist fertig — dieselbe Aussage wie bei einer bezahlten
+    // Rechnung, deshalb derselbe Cluster. Der Status sagt WARUM etwas fertig
+    // ist, der Cluster sagt DASS.
+    return assignment.state === "storno_dokument" ? "abgeschlossen" : "storniert";
+  }
   if (assignment.kind !== "stage") return "storniert";
 
-  // Teilzahlung ZUERST — vor der Stufen-Auswertung. `assignInvoiceStage` kennt
-  // den Status `teilweise_bezahlt` nicht (er kam mit Task #1822 dazu, ohne dass
-  // die Stufen-Zuordnung erweitert wurde) und schickt ihn über den
-  // `default`-Zweig auf `rechnung_erstellt`. Ohne diesen Vorgriff stünde eine
-  // teilbezahlte Rechnung in der Liste unter „Noch zu versenden" — ausgerechnet
-  // dort, wo sie am wenigsten hingehört.
-  // Die STUFEN-Zuordnung bleibt davon unberührt (eigene Frage, eigener
-  // Blast-Radius: sie trägt die €-Summen des Cockpit-Boards).
-  if (input.status === "teilweise_bezahlt") return "teilzahlung";
-
   // Gebundene Zahlung schlägt den Wartelauf: Das Geld ist da, es fehlt nur die
-  // Entscheidung (Volldeckung freigeben, Überzahlung klären). Gilt für BEIDE
-  // Warte-Stufen — auch für `versendet`, weil eine Pflegekassen-Rechnung eine
-  // Zahlung erhalten kann, bevor das Avis eingelesen wurde.
-  if (
-    input.hasBoundPayment === true &&
-    (assignment.stage === "versendet" || assignment.stage === "avis_erhalten")
-  ) {
+  // Entscheidung (Volldeckung freigeben, Überzahlung klären).
+  if (input.hasBoundPayment === true && assignment.stage === "versendet") {
     return "zahlung_zugeordnet_pruefung";
   }
 
@@ -401,12 +482,10 @@ export function assignInvoiceActionCluster(input: InvoiceClusterInput): InvoiceA
     case "rechnung_erstellt":
       return "zu_versenden";
     case "versendet":
-      // Selbstzahler/Privat warten direkt auf Zahlung; Pflegekassen warten
-      // zuerst auf die Zahlungsavis.
-      return agingModelForBillingType(input.billingType) === "selbstzahler"
-        ? "zahlung_ausstehend"
-        : "avis_ausstehend";
-    case "avis_erhalten":
+      // Der ZAHLER-TYP kommt hier nicht mehr vor. Das ist die konkrete Wirkung
+      // von „Empfänger-Unterschied raus aus dem Modell": Kasse und Selbstzahler
+      // warten beide auf Zahlung. Der Avis ist eine Zuordnungs-Quelle, kein
+      // eigener Wartezustand.
       return "zahlung_ausstehend";
     case "bezahlt":
       return "abgeschlossen";

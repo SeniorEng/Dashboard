@@ -26,7 +26,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { ArrowLeft, CalendarDays, FileText, Printer, Loader2, Ban } from "lucide-react";
 import type { InvoiceItem } from "@shared/api";
 import { isBulkActionableDraft, isPflegekasseBatchDraft } from "@shared/domain/billing-drafts";
-import { isStorniertInvoice } from "@shared/domain/billing-pipeline";
+import { isStorniertInvoice, istAktionsfaehigeRechnung } from "@shared/domain/billing-pipeline";
 import {
   useBillingInvoices,
   useEligibleCustomers,
@@ -128,7 +128,7 @@ export default function AdminBilling() {
   const visibleInvoices = showStorno
     ? invoices
     : invoices?.filter(
-        (inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }),
+        (inv) => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }),
       );
 
   const { data: customers, isLoading: customersLoading } = useEligibleCustomers(
@@ -357,7 +357,7 @@ export default function AdminBilling() {
       // unverändert, auch wenn die Stornos gerade eingeblendet sind.
       invoiceSelection.setAll(
         (visibleInvoices ?? [])
-          .filter((inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }))
+          .filter((inv) => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }))
           .map((inv) => inv.id),
       );
     } else {

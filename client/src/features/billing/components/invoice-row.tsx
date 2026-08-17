@@ -33,7 +33,8 @@ import {
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
-import { isStorniertInvoice, type AgingBucket } from "@shared/domain/billing-pipeline";
+import { isStorniertInvoice,
+  istAktionsfaehigeRechnung, type AgingBucket } from "@shared/domain/billing-pipeline";
 import {
   STATUS_LABELS,
   STATUS_COLORS,
@@ -170,7 +171,7 @@ export function InvoiceRow({
   const showSeparateRecipient =
     customerDisplay && customerDisplay.trim() !== invoice.recipientName.trim();
   // „Stornierbar?" ist die Aktiv-Frage — über die SSoT, nicht handgeschrieben.
-  const canStorno = !isStorniertInvoice({
+  const canStorno = istAktionsfaehigeRechnung({
     status: invoice.status,
     invoiceType: invoice.invoiceType,
   });
