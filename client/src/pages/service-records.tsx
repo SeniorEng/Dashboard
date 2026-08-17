@@ -552,7 +552,7 @@ function CustomerDetailView({
                         {undocumentedCount} {undocumentedCount === 1 ? "Termin" : "Termine"} noch nicht dokumentiert
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        Termine dokumentieren, damit der Leistungsnachweis erstellt werden kann.
+                        Termine dokumentieren, um sie in einen Leistungsnachweis aufnehmen zu können.
                       </p>
                       {deadline && (
                         <div className="mt-1">

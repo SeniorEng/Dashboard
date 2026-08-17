@@ -723,19 +723,58 @@ async function renderLeistungsnachweisOnly(invoice: Invoice, companySettings: Co
 export async function computeLiveInvoiceFingerprints(invoice: Invoice): Promise<{
   pdfFingerprint: string;
   leistungsnachweisFingerprint: string | null;
+  /**
+   * Zweiter LN-Fingerprint, berechnet NUR über die Nachweise, deren Termine
+   * tatsächlich auf DIESER Rechnung liegen.
+   *
+   * ── Wozu (Stopgap, Weiche von Alrik) ──────────────────────────────────
+   * `enrichPdfDataWithSignatures` lädt ALLE signierten Sammel-LN des
+   * Kunden-Monats. Liegen die Termine eines davon nicht auf dieser Rechnung,
+   * bleibt der Eintrag trotzdem in `pdfData.signatures` — nur seine
+   * `appointmentIds` sind leer. Der Renderer überspringt solche Einträge
+   * (`pdf-generator.ts`, `sectionItems.length === 0`), der Fingerprint hasht
+   * sie mit.
+   *
+   * Folge: wird nach dem Rechnungsdruck ein weiterer LN signiert, weicht der
+   * Live-Fingerprint ab, und die Oberfläche fordert wörtlich „Storno +
+   * Neuerstellung" — bei BYTE-IDENTISCHEM PDF. Ein Storno-Aufruf auf eine
+   * korrekte, gestellte Rechnung, also GoBD-relevant.
+   *
+   * ── Warum nicht einfach die Formel korrigieren ────────────────────────
+   * Weil die gespeicherten Fingerprints eingefroren sind. Rechnungen, die
+   * ENTSTANDEN sind, als der fremde LN bereits existierte, tragen ihn im
+   * gespeicherten Wert; eine korrigierte Formel erzeugte dort einen NEUEN
+   * Fehlalarm, wo heute keiner ist. An der Referenz-Kopie gemessen ist das
+   * kein Randfall: 42 Kunden-Monate mit 2+ signierten Sammel-LN, 33 davon mit
+   * Rechnung.
+   *
+   * Deshalb hier ZUSÄTZLICH statt STATTDESSEN: der Aufrufer meldet Drift nur,
+   * wenn der gespeicherte Wert zu KEINEM der beiden passt. Beide Altfälle
+   * sind damit abgedeckt, ohne einen einzigen gespeicherten Wert anzufassen.
+   *
+   * Das ist ein Stopgap, kein Fix — die eigentliche Auflösung (Formel
+   * korrigieren + Backfill) steht als eigener Task.
+   */
+  leistungsnachweisFingerprintOnlyRelevant: string | null;
 }> {
   const companySettings = await getCachedCompanySettings();
   if (!companySettings) {
-    return { pdfFingerprint: "", leistungsnachweisFingerprint: null };
+    return { pdfFingerprint: "", leistungsnachweisFingerprint: null, leistungsnachweisFingerprintOnlyRelevant: null };
   }
   const { pdfData, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
   const pdfFingerprint = computeInvoicePdfFingerprint(pdfData);
   let leistungsnachweisFingerprint: string | null = null;
+  let leistungsnachweisFingerprintOnlyRelevant: string | null = null;
   if (isPflegekasseInvoice) {
     await enrichPdfDataWithSignatures(pdfData, invoice);
     leistungsnachweisFingerprint = computeLeistungsnachweisFingerprint(pdfData);
+    // Dieselbe Auswahl, die der Renderer trifft.
+    const relevante = (pdfData.signatures ?? []).filter(sig => sig.appointmentIds.length > 0);
+    leistungsnachweisFingerprintOnlyRelevant = relevante.length === (pdfData.signatures?.length ?? 0)
+      ? leistungsnachweisFingerprint
+      : computeLeistungsnachweisFingerprint({ ...pdfData, signatures: relevante });
   }
-  return { pdfFingerprint, leistungsnachweisFingerprint };
+  return { pdfFingerprint, leistungsnachweisFingerprint, leistungsnachweisFingerprintOnlyRelevant };
 }
 
 /**

@@ -369,7 +369,11 @@ describe("LN-9: Monatlicher Leistungsnachweis", () => {
     expect(createRes.status).toBe(400);
   });
 
-  it("LN-9.2 – Monatlicher LN blockiert wenn undokumentierte Termine vorhanden", async () => {
+  // Umbenannt: die Regel, die der alte Titel behauptete, gibt es nicht mehr —
+  // offene Termine sperren das Buendeln nicht. Gruen ist der Test seither nur
+  // noch, weil die Fixture gar keine dokumentierten Termine hat; das ist der
+  // Fall „nichts zu buendeln", nicht „durch Offene blockiert".
+  it("LN-9.2 – Monatlicher LN ohne dokumentierte Termine im eigenen Umfang wird abgelehnt", async () => {
     const timeSlots = ["04:30", "03:30", "02:30", "21:30", "22:30"];
     const dateOffsets = [291, 311, 331, 341, 346];
     let createRes: any = null;

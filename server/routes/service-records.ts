@@ -13,6 +13,7 @@ import { isAdminLike } from "@shared/policies/appointments";
 import { appointmentsRepo, monthlyServiceRecordsRepo } from "../repos";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
 import { appointmentBelongsToEmployeeScope, serviceRecordEmployeeId } from "@shared/domain/service-record-scope";
+import { canBundleDocumentedAppointments } from "@shared/domain/service-record-bundling";
 import { invalidateDraftInvoicePdfCache } from "../storage/service-records-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { timeTrackingStorage } from "../storage/time-tracking";
@@ -126,9 +127,10 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
       status = "ready";
     }
 
-    const canCreateRecord = item.undocumentedCount === 0
-      && item.documentedCount > 0
-      && uncoveredDocumentedCount > 0;
+    const canCreateRecord = canBundleDocumentedAppointments({
+      documentedCount: item.documentedCount,
+      uncoveredDocumentedCount,
+    });
 
     return {
       customerId: item.customerId,
@@ -242,7 +244,10 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     coveredBySingleCount,
     coveredByMonthlyCount,
     uncoveredDocumentedCount,
-    canCreateRecord: counts.undocumentedCount === 0 && counts.documentedCount > 0 && uncoveredDocumentedCount > 0,
+    canCreateRecord: canBundleDocumentedAppointments({
+      documentedCount: counts.documentedCount,
+      uncoveredDocumentedCount,
+    }),
     noShowAppointments: noShows,
     selectableAppointments,
   });
@@ -330,14 +335,22 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     });
   }
 
-  const undocumentedAppointments = await storage.getUndocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month);
-  if (undocumentedAppointments.length > 0) {
-    return res.status(400).json({ 
-      message: `Es gibt noch ${undocumentedAppointments.length} nicht dokumentierte Termine in diesem Monat. Bitte dokumentieren Sie alle Termine, bevor Sie den Leistungsnachweis erstellen.`,
-      undocumentedCount: undocumentedAppointments.length
-    });
-  }
-  
+  // Hier stand ein Riegel: „irgendein Termin des Monats noch offen -> 400".
+  //
+  // Er machte das Buendeln all-or-nothing und sperrte damit auch die BEREITS
+  // dokumentierte Arbeit, bis der ganze Monat fertig war. Zusammen mit der
+  // Bucket-Priorität der Übersicht fiel ein dokumentierter, noch nicht
+  // gebündelter Termin dadurch in gar keine sichtbare Kategorie — unsichtbar
+  // und unabrechenbar zugleich.
+  //
+  // Ersatzlos entfallen, nicht durch einen schwächeren Check ersetzt: die
+  // Auswahl unten arbeitet ohnehin ausschliesslich auf `remainingAppointments`
+  // (dokumentiert UND noch nicht abgedeckt). Ein offener Termin kann also gar
+  // nicht in den Nachweis geraten — er bleibt offen und bleibt in der
+  // „noch zu dokumentieren"-Liste stehen.
+  //
+  // Weiche von Alrik entschieden: teilweises Bündeln ist erlaubt, mehrere
+  // Sammel-LN pro Monat sind seit #1542 ohnehin vorgesehen.
   const documentedAppointments = await storage.getDocumentedAppointmentsForPeriod(customerId, effectiveEmployeeId, year, month);
   if (documentedAppointments.length === 0) {
     return res.status(400).json({ 
@@ -395,6 +408,27 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     const nowCovered = await storage.getAppointmentIdsInServiceRecords(appointmentIds, tx);
     if (nowCovered.length > 0) {
       conflictingIds = nowCovered;
+      return null;
+    }
+
+    // Unter demselben Lock auch den STATUS nachprüfen, nicht nur die Abdeckung.
+    //
+    // Zwischen dem Lesen der dokumentierten Termine (oben, ausserhalb der
+    // Transaktion) und diesem Insert kann `POST /api/appointments/:id/reopen`
+    // einen Termin auf `documenting` zurückdrehen — das ist erlaubt, solange
+    // der LN nur `pending` ist. Der Termin läge dann als undokumentierter in
+    // einem frischen Nachweis; das Signieren bricht später ab, und die einzige
+    // Reparatur wäre, den Nachweis wieder zu löschen.
+    //
+    // Das Fenster gab es vorher auch — es war nur schmal, weil gebündelt erst
+    // wurde, wenn der ganze Monat fertig war. Seit dem Teil-Bündeln steht es
+    // den ganzen laufenden Monat offen, in dem parallel weitergearbeitet wird.
+    const frischeStatus = await storage.getAppointmentStatusesForUpdate(appointmentIds, tx);
+    const nichtMehrDokumentiert = frischeStatus
+      .filter((a) => a.status !== "completed")
+      .map((a) => a.id);
+    if (nichtMehrDokumentiert.length > 0) {
+      conflictingIds = nichtMehrDokumentiert;
       return null;
     }
 

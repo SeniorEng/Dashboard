@@ -75,6 +75,33 @@ describe("bucketize — Wolfgang/Rosali regression (Task #718)", () => {
     uncoveredDocumentedCount: 4,
   });
 
+  // Der Mischzustand, der im laufenden Monat der Normalfall ist: etwas schon
+  // im Nachweis, eines dokumentiert aber noch nicht gebuendelt, eines offen.
+  const gemischt = makeItem({
+    customerId: 6,
+    customerName: "Sonja Zwischen",
+    monthlyRecords: [{ id: 91, status: "completed" }],
+    documentedCount: 4,
+    undocumentedCount: 1,
+    totalAppointments: 5,
+    coveredByMonthlyCount: 3,
+    uncoveredDocumentedCount: 1,
+  });
+
+  it("Mischzustand: derselbe Kunde steht in BEIDEN Aktions-Kategorien", () => {
+    // Vorher brach die Einordnung bei `needsDoc` ab; der dokumentierte, noch
+    // nicht gebuendelte Termin war in keiner sichtbaren Kategorie — unsichtbar
+    // und dadurch unabrechenbar. Beide Handlungen sind moeglich, also muessen
+    // beide sichtbar sein.
+    const buckets = bucketize([gemischt]);
+    expect(buckets.needsDoc.map((i) => i.customerId)).toEqual([6]);
+    expect(buckets.ready.map((i) => i.customerId)).toEqual([6]);
+    // Und NICHT zusaetzlich in einer Zustands-Kategorie: solange es etwas zu
+    // tun gibt, ist „wartet auf Unterschrift" nicht die Aussage der Zeile.
+    expect(buckets.awaitingSignature).toEqual([]);
+    expect(buckets.completed).toEqual([]);
+  });
+
   it("puts Wolfgang and Rosali into the awaiting-signature bucket exactly once", () => {
     const buckets = bucketize([wolfgang, rosali, completedOnly, onlyOpenAppointments, readyToCreate]);
     const awaitingIds = buckets.awaitingSignature.map((i) => i.customerId);
@@ -84,22 +111,36 @@ describe("bucketize — Wolfgang/Rosali regression (Task #718)", () => {
     expect(buckets.ready.map((i) => i.customerId)).toEqual([5]);
   });
 
-  it("invariant: every customer with activity ends up in exactly one bucket", () => {
-    const items = [wolfgang, rosali, completedOnly, onlyOpenAppointments, readyToCreate];
+  it("invariant: jeder Kunde taucht auf, und Aktion und Zustand schliessen sich aus", () => {
+    // Die Invariante war frueher „genau ein Bucket". Das gilt seit der
+    // Lockerung nicht mehr: die beiden AKTIONS-Kategorien duerfen sich
+    // ueberlappen, weil ein Kunde gleichzeitig offene und buendelbare Termine
+    // haben kann. Was weiterhin gilt und hier gemessen wird:
+    //   1. kein Kunde mit Aktivitaet faellt heraus
+    //   2. wer in einer Aktions-Kategorie steht, steht in KEINER Zustands-
+    //      Kategorie — sonst behauptete die Uebersicht „fertig" und „zu tun"
+    //      ueber dieselbe Zeile
+    //   3. innerhalb einer Kategorie steht niemand doppelt
+    const items = [wolfgang, rosali, completedOnly, onlyOpenAppointments, readyToCreate, gemischt];
     const buckets = bucketize(items);
-    const seen = new Set<number>();
-    const all = [
-      ...buckets.needsDoc,
-      ...buckets.ready,
-      ...buckets.awaitingSignature,
-      ...buckets.completed,
-      ...buckets.orphans,
-    ];
-    for (const it of all) {
-      expect(seen.has(it.customerId)).toBe(false);
-      seen.add(it.customerId);
+
+    const aktion = [...buckets.needsDoc, ...buckets.ready].map((i) => i.customerId);
+    const zustand = [...buckets.awaitingSignature, ...buckets.completed, ...buckets.orphans]
+      .map((i) => i.customerId);
+
+    for (const liste of [buckets.needsDoc, buckets.ready, buckets.awaitingSignature, buckets.completed, buckets.orphans]) {
+      const ids = liste.map((i) => i.customerId);
+      expect(new Set(ids).size, "innerhalb einer Kategorie doppelt").toBe(ids.length);
     }
-    expect(seen.size).toBe(items.length);
+    // Die ZUSTANDS-Seite bleibt exklusiv — hier gilt „genau einer" weiterhin.
+    // Beim Lockern der Aktions-Seite war diese Hälfte zuerst mit weggefallen;
+    // strukturell ist sie heute unmöglich zu verletzen (jeder Zustands-Push hat
+    // sein `continue`), aber der Wächter dafür gehört zurück.
+    expect(new Set(zustand).size, "ein Kunde steht in zwei Zustands-Kategorien").toBe(zustand.length);
+    for (const id of aktion) {
+      expect(zustand, `Kunde ${id} steht in Aktion UND Zustand`).not.toContain(id);
+    }
+    expect(new Set([...aktion, ...zustand])).toEqual(new Set(items.map((i) => i.customerId)));
   });
 
   it("action buckets keep priority over awaiting-signature when the customer ALSO has open work", () => {
