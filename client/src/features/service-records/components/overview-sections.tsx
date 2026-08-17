@@ -56,14 +56,26 @@ export function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
   const completed: CustomerOverviewItem[] = [];
   const orphans: CustomerOverviewItem[] = [];
   for (const it of items) {
-    if (it.undocumentedCount > 0) {
-      needsDoc.push(it);
-      continue;
-    }
-    if (it.uncoveredDocumentedCount > 0) {
-      ready.push(it);
-      continue;
-    }
+    // Die beiden Aktions-Kategorien schliessen sich NICHT aus.
+    //
+    // Vorher war das eine `continue`-Kette: ein einziger offener Termin liess
+    // die Einordnung bei `needsDoc` abbrechen, und `uncoveredDocumentedCount`
+    // wurde zwar berechnet, aber nie angezeigt. Ein dokumentierter, noch nicht
+    // gebuendelter Termin fiel damit in gar keine sichtbare Kategorie — er war
+    // weder als „zu dokumentieren" noch als „bereit" zu sehen. Genau in dem
+    // Mischzustand, der im laufenden Monat der Normalfall ist.
+    //
+    // Jetzt darf derselbe Kunde in BEIDEN Listen stehen: „noch 2 Termine
+    // dokumentieren" UND „3 dokumentierte buendeln". Zwei verschiedene
+    // Handlungen, beide moeglich, beide sichtbar.
+    const hatOffene = it.undocumentedCount > 0;
+    const hatBuendelbare = it.uncoveredDocumentedCount > 0;
+    if (hatOffene) needsDoc.push(it);
+    if (hatBuendelbare) ready.push(it);
+    // Die Zustands-Kategorien unten gelten weiterhin nur, wenn NICHTS zu tun
+    // ist — sonst stuende ein Kunde mit offener Arbeit zusaetzlich unter
+    // „wartet auf Unterschrift" und die Uebersicht verloere ihre Ordnung.
+    if (hatOffene || hatBuendelbare) continue;
     // No open work. Records still awaiting signatures (pending/employee_signed)
     // get their own bucket so the customer never disappears completely — even
     // if there is also a finished single-record alongside the pending monthly
@@ -177,7 +189,13 @@ function ActionCustomerCard({ item, selectedYear, selectedMonth, variant }: Acti
       ? "text-red-600"
       : "text-amber-700"
     : "text-primary";
-  const ctaLabel = isNeedsDoc ? "Termine dokumentieren" : "Leistungsnachweis erstellen";
+  // „N dokumentierte buendeln" statt „Leistungsnachweis erstellen": seit der
+  // Lockerung kann die Kachel neben einer `needsDoc`-Kachel desselben Kunden
+  // stehen. Dann muss auf einen Blick klar sein, dass sie sich auf die BEREITS
+  // dokumentierten Termine bezieht und nicht auf den ganzen Monat.
+  const ctaLabel = isNeedsDoc
+    ? "Termine dokumentieren"
+    : `${count} ${count === 1 ? "dokumentierten Termin" : "dokumentierte Termine"} bündeln`;
 
   return (
     <Link href={href}>
