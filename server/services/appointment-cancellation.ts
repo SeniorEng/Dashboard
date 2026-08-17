@@ -227,7 +227,12 @@ export async function cancelAppointments(
         {
           reversedTransactionIds: transaktionen.map((t: { id: number }) => t.id),
           holdsReleased: budgetStorage.hardHoldsEnabled(),
-          documentationDiscarded: verwerfen.some(v => v.id === id),
+          // Aus dem FRISCHEN Stand, nicht aus der Vor-Transaktions-Runde
+          // (`verwerfen`): wurde der Termin erst im Race-Fenster `documenting`
+          // und lief mit gesetztem Flag durch, stünde dort `false`, obwohl eine
+          // begonnene Dokumentation vernichtet wurde. Für die GoBD-Spur ist
+          // genau das die Frage.
+          documentationDiscarded: discardsDocumentation(frisch.policyAppt),
         },
         opts.ipAddress,
         tx,

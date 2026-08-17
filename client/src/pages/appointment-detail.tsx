@@ -131,7 +131,15 @@ export default function AppointmentDetail() {
     }) => {
       if (!seriesId) throw new Error("Kein Serien-ID");
       const result = await api.post(`/appointment-series/${seriesId}/appointments/${id}/cancel`, data);
-      if (!result.success && result.error.status === 409) {
+      // Auf den CODE prüfen, nicht nur auf 409: die Route wirft seit dem
+      // Re-Cut ZWEI verschiedene 409er. `APPOINTMENT_LOCKED` (Termin liegt auf
+      // einem unterschriebenen Leistungsnachweis) darf hier NICHT landen —
+      // sonst fragt der Dialog nach dem Verwerfen einer Dokumentation, die gar
+      // nicht verworfen wird, und der zweite Aufruf mit Flag scheitert erneut:
+      // `return null` → `onSuccess` steigt aus → kein Toast, kein Fehler, der
+      // Dialog bleibt stehen. Genau die stille Sackgasse, gegen die dieser PR
+      // gebaut ist. Alles andere geht über `unwrapResult` in den Fehler-Toast.
+      if (!result.success && result.error.code === "CANCEL_DISCARDS_DOCUMENTATION") {
         const betroffene = result.error.details?.appointments;
         // Den darunterliegenden Serien-Dialog schliessen: sonst stehen zwei
         // modale Dialoge uebereinander (Gate-2-Notiz).
@@ -149,7 +157,19 @@ export default function AppointmentDetail() {
       // kein Wegnavigieren — sonst verschwände die Rückfrage sofort wieder.
       if (data === null) return;
       invalidateRelated(queryClient, "appointments", "appointment-series");
-      toast({ title: "Serientermine abgesagt" });
+      // Auch hier keinen stillen Teilerfolg melden — siehe `useEndSeries`.
+      const uebersprungen = (data as { uebersprungen?: Array<{ id: number; grund: string }> } | undefined)?.uebersprungen;
+      if (uebersprungen && uebersprungen.length > 0) {
+        toast({
+          title: "Nicht alle Termine abgesagt",
+          description:
+            `${uebersprungen.length} ${uebersprungen.length === 1 ? "Termin blieb" : "Termine blieben"} bestehen: ` +
+            uebersprungen.map(u => u.grund).join(" · "),
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Serientermine abgesagt" });
+      }
       setShowSeriesDeleteDialog(false);
       setDiscardConfirm(null);
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");

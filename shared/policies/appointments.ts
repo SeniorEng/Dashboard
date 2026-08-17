@@ -216,8 +216,10 @@ export function canEditAppointment(
  * Beweis-Harness: `documenting` → Absage → HTTP 200, Status `cancelled`,
  * dokumentierbar danach `false`.
  *
- * STAND: benutzt aktuell NUR der Absage-Pfad
- * (`server/services/appointment-cancellation.ts`). Der Löschpfad hat den Gate
+ * STAND: zwei Aufrufer — die Absage-SSoT
+ * (`server/services/appointment-cancellation.ts`) und der PATCH-Zweig
+ * `status: "cancelled"` in `server/routes/appointments.ts`, der ebenfalls
+ * absagen kann. Der Löschpfad hat den Gate
  * bewusst noch nicht — sein Client (`use-appointments.ts#deleteAppointment`)
  * kennt keine 409→Dialog→Flag-Kette, und ein Gate ohne UI machte das Löschen
  * eines `documenting`-Termins schlicht unmöglich statt bewusst. Das wäre
