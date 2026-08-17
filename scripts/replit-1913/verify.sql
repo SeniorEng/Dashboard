@@ -218,6 +218,16 @@ SELECT
   (SELECT count(*) FROM appointments o
     WHERE o.deleted_at IS NULL AND o.performed_by_employee_id = a.assigned_employee_id
       AND o.date = a.date AND o.status = 'completed') AS geleistet_am_tag,
+  -- Besuch bei DERSELBEN Kundin am selben Tag, egal zu welcher Uhrzeit.
+  -- Diese Spalte fehlte zuerst, und ohne sie war der Befund falsch: Termin 919
+  -- (Mi 15:00) galt als Opfer, obwohl dieselbe Kundin am selben Tag um 11:00
+  -- besucht wurde. Die Absage war die FOLGE einer Verlegung, kein Verlust.
+  -- Eine reine Zeit-Ueberlappungspruefung sieht das nicht — 11:00-11:45
+  -- ueberlappt 15:00-16:30 nicht.
+  (SELECT o.id FROM appointments o
+    WHERE o.deleted_at IS NULL AND o.id <> a.id
+      AND o.customer_id = a.customer_id AND o.date = a.date
+      AND o.status = 'completed' LIMIT 1) AS besuch_selber_tag,
   CASE
     WHEN (SELECT 1 FROM employee_time_entries e
            WHERE e.deleted_at IS NULL AND e.user_id = a.assigned_employee_id
@@ -227,6 +237,11 @@ SELECT
       THEN 'KEIN OPFER — Besuch fand statt, andere Termin-ID (Serien-Aenderung)'
     WHEN k.id IS NOT NULL
       THEN 'KEIN OPFER — Kraft war zur selben Zeit bei anderer Kundin'
+    WHEN (SELECT 1 FROM appointments o
+           WHERE o.deleted_at IS NULL AND o.id <> a.id
+             AND o.customer_id = a.customer_id AND o.date = a.date
+             AND o.status = 'completed' LIMIT 1) IS NOT NULL
+      THEN 'KEIN OPFER — Kundin wurde am selben Tag besucht (verlegt)'
     WHEN (SELECT count(*) FROM appointments o
            WHERE o.deleted_at IS NULL AND o.performed_by_employee_id = a.assigned_employee_id
              AND o.date = a.date AND o.status = 'completed') > 0
