@@ -25,7 +25,6 @@ import {
   Eye,
   Printer,
   MoreHorizontal,
-  MailCheck,
   Banknote,
   Undo2,
   Scissors,
@@ -33,10 +32,12 @@ import {
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
-import { isStorniertInvoice, type AgingBucket } from "@shared/domain/billing-pipeline";
+import { istAktionsfaehigeRechnung, type AgingBucket } from "@shared/domain/billing-pipeline";
 import {
   STATUS_LABELS,
   STATUS_COLORS,
+  BADGE_COLORS,
+  BADGE_LABELS,
   TYPE_LABELS,
   TYPE_COLORS,
   AGING_BADGE,
@@ -50,6 +51,7 @@ import {
   paymentBadgeTitle,
 } from "../utils";
 import { InvoiceDetail } from "./invoice-detail";
+import type { InvoiceStatus } from "@shared/schema/billing";
 
 interface InvoiceRowProps {
   invoice: InvoiceItem;
@@ -170,7 +172,7 @@ export function InvoiceRow({
   const showSeparateRecipient =
     customerDisplay && customerDisplay.trim() !== invoice.recipientName.trim();
   // „Stornierbar?" ist die Aktiv-Frage — über die SSoT, nicht handgeschrieben.
-  const canStorno = !isStorniertInvoice({
+  const canStorno = istAktionsfaehigeRechnung({
     status: invoice.status,
     invoiceType: invoice.invoiceType,
   });
@@ -213,12 +215,29 @@ export function InvoiceRow({
               >
                 {TYPE_LABELS[invoice.invoiceType] || invoice.invoiceType}
               </Badge>
+              {/* Status — EIN Wert, immer sichtbar. `parseInvoiceStatus` ist
+                  hier bewusst NICHT im Einsatz: eine Liste soll nicht wegen
+                  einer einzelnen kaputten Zeile weiß bleiben. Ein unbekannter
+                  Wert wird angezeigt wie er ist, damit er auffällt. */}
               <Badge
                 variant="outline"
-                className={STATUS_COLORS[invoice.status] || "bg-gray-100 text-gray-600 border-gray-200"}
+                className={STATUS_COLORS[invoice.status as InvoiceStatus] ?? "bg-gray-100 text-gray-600 border-gray-200"}
               >
-                {STATUS_LABELS[invoice.status] || invoice.status}
+                {STATUS_LABELS[invoice.status as InvoiceStatus] ?? invoice.status}
               </Badge>
+              {/* Badges — KEINE Zustände, sondern Sichten auf Zahlen. Null bis
+                  drei Stück, je nach Zahlungsstand, Frist und Versand. Sie
+                  stehen NEBEN dem Status, nie an seiner Stelle. */}
+              {(invoice.badges ?? []).map((b) => (
+                <Badge
+                  key={b}
+                  variant="outline"
+                  className={`hidden sm:inline-flex ${BADGE_COLORS[b]}`}
+                  data-testid={`badge-${b}-${invoice.id}`}
+                >
+                  {BADGE_LABELS[b]}
+                </Badge>
+              ))}
               {/* Task #1890: Verknüpfung Original ↔ Stornorechnung. Eine
                   Stornorechnung zeigt die stornierte Originalrechnung, ein
                   storniertes Original seine Gutschrift — beide anklickbar
@@ -259,8 +278,15 @@ export function InvoiceRow({
               {/* Task #1822: Offener Rest bei Teilzahlung — die Summe der bereits
                   eingegangenen Zahlungen deckt die Rechnung noch nicht. Der Betrag
                   stammt aus derselben SSoT wie der Statuswechsel
-                  (openAmountCents = Brutto − Skonto − gezahlt). */}
-              {invoice.status === "teilweise_bezahlt" && invoice.openAmountCents != null && (
+                  (openAmountCents = Brutto − Skonto − gezahlt).
+
+                  Gatet auf das BADGE, nicht mehr auf den Status `teilweise_bezahlt`:
+                  den gibt es nicht mehr. Waere die Bedingung stehengeblieben,
+                  haette sie nie wieder zugetroffen — und die konkrete Zahl waere
+                  aus der Liste verschwunden, ohne dass es auffaellt. Das Badge
+                  daneben sagt nur DASS teilweise bezahlt wurde, nicht WIE VIEL
+                  offen ist. */}
+              {(invoice.badges ?? []).includes("teilweise_bezahlt") && invoice.openAmountCents != null && (
                 <Badge
                   variant="outline"
                   className="bg-cyan-50 text-cyan-700 border-cyan-200"
@@ -475,19 +501,9 @@ export function InvoiceRow({
                       Zwischenschritt ohne Bestätigung; „Als bezahlt markieren"
                       ist endgültig und läuft über den Bestätigungsdialog. So
                       kann „versendet" nie still zu „bezahlt" werden. */}
-                  {(invoice.status === "versendet" || invoice.status === "avis_erhalten") && (
+                  {invoice.status === "versendet" && (
                     <>
                       <DropdownMenuSeparator />
-                      {invoice.status === "versendet" && (
-                        <DropdownMenuItem
-                          onSelect={() => statusMutation.mutate({ id: invoice.id, status: "avis_erhalten" })}
-                          disabled={statusMutation.isPending}
-                          data-testid={`button-status-avis-${invoice.id}`}
-                        >
-                          <MailCheck className={`${iconSize.sm} mr-2`} />
-                          Avis erhalten
-                        </DropdownMenuItem>
-                      )}
                       <DropdownMenuItem
                         onSelect={() => onMarkPaid(invoice)}
                         disabled={statusMutation.isPending}
@@ -530,6 +546,29 @@ export function InvoiceRow({
                       >
                         <Check className={`${iconSize.sm} mr-2`} />
                         Als versendet markieren
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  {/* Storno-Dokument als versandt markieren.
+                      Es bleibt `abgeschlossen` — der Server setzt nur `sent_at`.
+                      Ohne diesen Eintrag wäre die Fähigkeit weg: beide anderen
+                      Einstiege gaten auf `entwurf`, und ein Storno-Dokument
+                      steht seit dem Status-Umbau nie mehr darauf. Der
+                      Server-Zweig allein reicht nicht — er wäre von der
+                      Oberfläche aus unerreichbar, und das Badge „Versandt"
+                      damit weiterhin totes Gewicht. */}
+                  {invoice.invoiceType === "stornorechnung"
+                    && invoice.status === "abgeschlossen"
+                    && !invoice.sentAt && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => markSentMutation.mutate(invoice.id)}
+                        disabled={markSentMutation.isPending}
+                        data-testid={`button-mark-storno-sent-${invoice.id}`}
+                      >
+                        <Check className={`${iconSize.sm} mr-2`} />
+                        Als versandt markieren
                       </DropdownMenuItem>
                     </>
                   )}

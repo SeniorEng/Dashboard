@@ -14,14 +14,16 @@
  *      gewinnt (Task #1788): der ganze Stapel wird bezahlt statt Einzel-Bind+Flag.
  *  (e2) Zahlung mit Rechnungsnummer, Betrag passt zu KEINEM Avis ⇒ Einzel-Bind+Flag
  *      bleibt (kein Regress).
+ *  (e4) Zahlung deckt die genannte Rechnung nur teilweise ⇒ `invoice_partial_payment`,
+ *      NICHT `invoice_payment_mismatch` (Unterzahlung ist kein Prüffall).
  *  (e3) Zahlung nennt eine Rechnung, die in KEINEM Avis liegt, ihr Betrag ginge aber
  *      bei einem FREMD-Avis triple-equal auf ⇒ der Fremd-Avis gewinnt NICHT; die
  *      genannte Rechnung wird gebunden + geflaggt (Task #1788 Enthaltensein-Gate).
  *  (f) Storno einer Mitglieds-Rechnung ⇒ Triple-Equality bricht ⇒ manuell.
  *  (g) Eine Mitglieds-Rechnung bereits einzeln bezahlt (Σ offen < Gesamt) ⇒ manuell,
  *      kein doppeltes `bezahlt` (K2).
- *  (h) Unmatch stellt `avis_erhalten` wieder her und stuft eine stornierte Rechnung
- *      NICHT herab.
+ *  (h) Unmatch nimmt die Zahlung zurück (⇒ `versendet`) und stuft eine stornierte
+ *      Rechnung NICHT herab.
  *  (i) Idempotenz — ein zweiter Auto-Match-Lauf ist ein No-op (kein zusätzlicher
  *      Match, keine doppelten Audit-Zeilen) (K5).
  *  (j) XOR-Constraint lehnt gleichzeitige Bindung an Rechnung UND Avis ab.
@@ -287,9 +289,11 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
       iban: IBAN_A,
       caseId: "a",
     });
-    // Items sind zugeordnet ⇒ Rechnungen auf avis_erhalten.
-    expect(await getInvoiceStatus(invA)).toBe("avis_erhalten");
-    expect(await getInvoiceStatus(invB)).toBe("avis_erhalten");
+    // Items sind zugeordnet. Vor dem Status-Umbau hob das die Rechnungen auf
+    // `avis_erhalten`; jetzt ist die Zuordnung von ihrem Zustand getrennt — sie
+    // warten weiter auf Zahlung, denn Geld ist keines geflossen.
+    expect(await getInvoiceStatus(invA)).toBe("versendet");
+    expect(await getInvoiceStatus(invB)).toBe("versendet");
 
     const txId = await insertQontoTx({ amountCents: 90100 });
     await autoMatch();
@@ -352,10 +356,10 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     const tx = await getTxMatch(txId);
     expect(tx.matchedPaymentAdviceId).toBeNull();
-    expect(await getInvoiceStatus(i1)).toBe("avis_erhalten");
-    expect(await getInvoiceStatus(i2)).toBe("avis_erhalten");
-    expect(await getInvoiceStatus(i3)).toBe("avis_erhalten");
-    expect(await getInvoiceStatus(i4)).toBe("avis_erhalten");
+    expect(await getInvoiceStatus(i1)).toBe("versendet");
+    expect(await getInvoiceStatus(i2)).toBe("versendet");
+    expect(await getInvoiceStatus(i3)).toBe("versendet");
+    expect(await getInvoiceStatus(i4)).toBe("versendet");
     expect(await countAdviceAudit("advice_payment_reconciled", a1.adviceId)).toBe(0);
     expect(await countAdviceAudit("advice_payment_reconciled", a2.adviceId)).toBe(0);
   });
@@ -388,8 +392,8 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
     expect(await getInvoiceStatus(i1)).toBe("bezahlt");
     expect(await getInvoiceStatus(i2)).toBe("bezahlt");
     // Avis B unangetastet.
-    expect(await getInvoiceStatus(i3)).toBe("avis_erhalten");
-    expect(await getInvoiceStatus(i4)).toBe("avis_erhalten");
+    expect(await getInvoiceStatus(i3)).toBe("versendet");
+    expect(await getInvoiceStatus(i4)).toBe("versendet");
     expect(await countAdviceAudit("advice_payment_reconciled", aB.adviceId)).toBe(0);
   });
 
@@ -441,6 +445,44 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
     expect(await countInvoiceAudit("invoice_payment_mismatch", invA)).toBe(1);
   });
 
+  it("(e4) Zahlung deckt die genannte Rechnung nur teilweise ⇒ Teilzahlung, KEIN Mismatch", async () => {
+    // ── Warum dieser Fall eigenstaendig geprueft wird ──────────────────────
+    // (e2) daneben prueft die UEBERZAHLUNG: sie ist ein Prueffall und wird als
+    // `invoice_payment_mismatch` geflaggt. Die UNTERZAHLUNG ist das Gegenteil —
+    // voellig normal, es fehlt nur noch Geld — und muss als
+    // `invoice_partial_payment` verbucht werden.
+    //
+    // Vor dem Status-Umbau hielt der Auto-Match die beiden ueber den
+    // abgeleiteten Status auseinander: Unterzahlung ergab `teilweise_bezahlt`,
+    // Ueberzahlung ergab `null`. Seit die Unterzahlung keinen Status mehr setzt,
+    // ergeben BEIDE `null` — und ein Zweig, der auf `null` prueft, wirft sie
+    // zusammen. Der Auto-Match meldete daraufhin jede Teilzahlung zur manuellen
+    // Pruefung, und `invoice_partial_payment` konnte hier gar nicht mehr
+    // entstehen.
+    //
+    // Kein Test war rot geworden: die Statuszeile blieb in beiden Faellen
+    // `versendet`, nur die Audit-Art kippte. Deshalb prueft dieser Fall die
+    // Audit-Art in BEIDE Richtungen.
+    const numT = nextInvoiceNumber();
+    const invT = await insertInvoice({ amountCents: 51500, invoiceNumber: numT });
+
+    // 300 EUR auf 515 EUR: klar unter Brutto, weit ausserhalb der Toleranz.
+    const txId = await insertQontoTx({ amountCents: 30000, reference: `Zahlung ${numT}` });
+    await autoMatch();
+
+    const tx = await getTxMatch(txId);
+    expect(tx.matchedInvoiceId, "Teilzahlung muss gebunden werden").toBe(invT);
+
+    // Der Zustand bleibt „wartet auf Zahlung" — eine Teilzahlung schliesst
+    // nichts ab. (Diese Zeile allein wuerde den Regress NICHT fangen.)
+    expect(await getInvoiceStatus(invT)).toBe("versendet");
+
+    // Und die eigentliche Aussage: als Teilzahlung verbucht, NICHT als
+    // Prueffall. Faellt die Unterscheidung, kippt genau dieses Paar.
+    expect(await countInvoiceAudit("invoice_partial_payment", invT)).toBe(1);
+    expect(await countInvoiceAudit("invoice_payment_mismatch", invT)).toBe(0);
+  });
+
   it("(e3) Rechnung in KEINEM Avis, aber Betrag = Fremd-Avis-Gesamt ⇒ Fremd-Avis gewinnt NICHT (Enthaltensein-Gate)", async () => {
     const numX = nextInvoiceNumber();
     const numY = nextInvoiceNumber();
@@ -469,8 +511,8 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
     expect(await getInvoiceStatus(invX)).toBe("versendet");
     expect(await countInvoiceAudit("invoice_payment_mismatch", invX)).toBe(1);
     // Der Fremd-Avis bleibt unangetastet.
-    expect(await getInvoiceStatus(invY)).toBe("avis_erhalten");
-    expect(await getInvoiceStatus(invZ)).toBe("avis_erhalten");
+    expect(await getInvoiceStatus(invY)).toBe("versendet");
+    expect(await getInvoiceStatus(invZ)).toBe("versendet");
     expect(await countAdviceAudit("advice_payment_reconciled", foreignAdviceId)).toBe(0);
   });
 
@@ -495,7 +537,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     const tx = await getTxMatch(txId);
     expect(tx.matchedPaymentAdviceId).toBeNull();
-    expect(await getInvoiceStatus(invA)).toBe("avis_erhalten");
+    expect(await getInvoiceStatus(invA)).toBe("versendet");
     expect(await getInvoiceStatus(invB)).toBe("storniert");
     expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(0);
   });
@@ -522,12 +564,12 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
     const tx = await getTxMatch(txId);
     expect(tx.matchedPaymentAdviceId).toBeNull();
     // invA darf NICHT über die (divergierende) Sammelzahlung geschlossen werden.
-    expect(await getInvoiceStatus(invA)).toBe("avis_erhalten");
+    expect(await getInvoiceStatus(invA)).toBe("versendet");
     expect(await getInvoiceStatus(invB)).toBe("bezahlt");
     expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(0);
   });
 
-  it("(h) Unmatch stellt avis_erhalten wieder her und stuft eine stornierte Rechnung nicht herab", async () => {
+  it("(h) Unmatch nimmt die Zahlung zurueck und stuft eine stornierte Rechnung nicht herab", async () => {
     const numA = nextInvoiceNumber();
     const numB = nextInvoiceNumber();
     const invA = await insertInvoice({ amountCents: 50800, invoiceNumber: numA });
@@ -549,14 +591,22 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
       tx.update(invoices).set({ status: "storniert", paidAt: null }).where(eq(invoices.id, invB)),
     );
 
-    // Unmatch: bezahlte offene Rechnung ⇒ zurück auf avis_erhalten; storniert bleibt.
+    // Unmatch: die offene Rechnung faellt auf `versendet` — sie wartet wieder
+    // auf Zahlung. (Frueher fiel sie auf `avis_erhalten`, weil der Avis noch
+    // lag; diesen Zwischenstand gibt es nicht mehr.)
+    //
+    // Die stornierte bleibt storniert, und DAS ist der eigentliche Prueffall:
+    // die Ruecknahme faehrt seit dem Umbau ueber
+    // `INVOICE_STATUS_REVERSAL_TRANSITIONS`, die ausschliesslich `bezahlt` als
+    // Ausgangs-Status kennt. Griffe die Ruecknahme breiter, wuerde hier eine
+    // stornierte Rechnung wiederbelebt.
     const unmatch = await apiDelete(`/api/admin/qonto/transactions/${txId}/match`);
     expect(unmatch.status).toBe(200);
 
     const tx = await getTxMatch(txId);
     expect(tx.matchedPaymentAdviceId).toBeNull();
     expect(tx.matchConfidence).toBeNull();
-    expect(await getInvoiceStatus(invA)).toBe("avis_erhalten");
+    expect(await getInvoiceStatus(invA)).toBe("versendet");
     expect(await getInvoiceStatus(invB)).toBe("storniert");
   });
 

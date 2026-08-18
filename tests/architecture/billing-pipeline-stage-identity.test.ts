@@ -126,29 +126,46 @@ describe("billing-pipeline stage identity (total + disjunkt)", () => {
       .toEqual({ kind: "side", state: "nicht_abgerechnet" });
   });
 
-  it("assignInvoiceStage bildet jede (Status × Typ)-Kombination auf genau einen Ausgang ab", () => {
+  it("assignInvoiceStage bildet jede GUELTIGE (Status × Typ)-Kombination auf genau einen Ausgang ab", () => {
     for (const status of INVOICE_STATUSES) {
       for (const invoiceType of INVOICE_TYPES) {
+        // `abgeschlossen` ist Storno-Dokumenten vorbehalten. Die Kombination
+        // mit einem anderen Typ ist kein Anzeigefall, sondern ein Datenfehler —
+        // sie wird unten eigens geprueft.
+        if (status === "abgeschlossen" && invoiceType !== "stornorechnung") continue;
         assertWellFormed(assignInvoiceStage({ status, invoiceType }));
       }
     }
   });
 
-  it("Rechnungs-Mapping: Status→Stufe, Storno/Gutschrift→Side", () => {
+  it("ein unmoeglicher Zustand wirft, statt still eingeordnet zu werden", () => {
+    // Das ist der Kern des Umbaus: der frueher „konservative" `default`-Zweig
+    // hat `teilweise_bezahlt` bei seiner Einfuehrung unbemerkt auf
+    // `rechnung_erstellt` geschickt — der Betrag zaehlte im Cockpit-Board neben
+    // den Entwuerfen. Unbekanntes MUSS auffallen.
+    expect(() => assignInvoiceStage({ status: "abgeschlossen", invoiceType: "rechnung" }))
+      .toThrow(/Storno-Dokumenten vorbehalten/);
+    expect(() => assignInvoiceStage({
+      status: "avis_erhalten" as never,
+      invoiceType: "rechnung",
+    })).toThrow(/unbekannter Wert/);
+  });
+
+  it("Rechnungs-Mapping: Status→Stufe, Storno→Side, Storno-Dokument→eigener Side", () => {
     expect(assignInvoiceStage({ status: "entwurf", invoiceType: "rechnung" }))
       .toEqual({ kind: "stage", stage: "rechnung_erstellt" });
     expect(assignInvoiceStage({ status: "versendet", invoiceType: "rechnung" }))
       .toEqual({ kind: "stage", stage: "versendet" });
-    expect(assignInvoiceStage({ status: "avis_erhalten", invoiceType: "rechnung" }))
-      .toEqual({ kind: "stage", stage: "avis_erhalten" });
     expect(assignInvoiceStage({ status: "bezahlt", invoiceType: "rechnung" }))
       .toEqual({ kind: "stage", stage: "bezahlt" });
-    // storniert (egal welcher Typ) → Side
+    // storniert → Side. Der TYP spielt dafuer keine Rolle mehr.
     expect(assignInvoiceStage({ status: "storniert", invoiceType: "rechnung" }))
       .toEqual({ kind: "side", state: "storniert" });
-    // Gutschrift → Side, auch wenn der Status noch „versendet" ist
-    expect(assignInvoiceStage({ status: "versendet", invoiceType: "stornorechnung" }))
-      .toEqual({ kind: "side", state: "storniert" });
+    // Ein Storno-DOKUMENT ist ein eigener Side-Zustand — nicht „storniert“.
+    // Eine stornierte RECHNUNG und das STORNO-DOKUMENT dazu sind zwei
+    // verschiedene Dinge, und die Trennung traegt die EUR-Ausschluss-Regel.
+    expect(assignInvoiceStage({ status: "abgeschlossen", invoiceType: "stornorechnung" }))
+      .toEqual({ kind: "side", state: "storno_dokument" });
   });
 
   it("summarizePipelineCents zählt jeden € genau einmal; excluded trägt nichts bei", () => {
@@ -219,6 +236,7 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
           // #1897: `hasBoundPayment` ist eine weitere Achse der Zuordnung — die
           // Totalitaet muss ueber BEIDE Auspraegungen halten, sonst faellt eine
           // gebundene Rechnung durch.
+          if (status === "abgeschlossen" && invoiceType !== "stornorechnung") continue;
           for (const hasBoundPayment of [false, true]) {
             const cluster = assignInvoiceActionCluster({ status, invoiceType, billingType, hasBoundPayment });
             expect(CLUSTER_SET.has(cluster)).toBe(true);
@@ -234,32 +252,43 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
       .toBe("zu_versenden");
     expect(assignInvoiceActionCluster({ status: "entwurf", invoiceType: "rechnung", billingType: "pflegekasse_gesetzlich" }))
       .toBe("zu_versenden");
-    // versendet: Pflegekasse → Avis ausstehend, Selbstzahler/Privat → Zahlung ausstehend
-    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "pflegekasse_gesetzlich" }))
-      .toBe("avis_ausstehend");
-    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "pflegekasse_privat" }))
-      .toBe("avis_ausstehend");
-    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "selbstzahler" }))
-      .toBe("zahlung_ausstehend");
-    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "privat" }))
-      .toBe("zahlung_ausstehend");
-    // avis_erhalten (immer Pflegekasse) → Zahlung ausstehend
-    expect(assignInvoiceActionCluster({ status: "avis_erhalten", invoiceType: "rechnung", billingType: "pflegekasse_gesetzlich" }))
-      .toBe("zahlung_ausstehend");
+    // versendet → Zahlung ausstehend, UNABHAENGIG vom Zahler-Typ.
+    //
+    // Das ist die konkrete Wirkung von „Empfaenger-Unterschied raus aus dem
+    // Modell": vorher fiel die Pflegekasse hier auf `avis_ausstehend`, weil der
+    // Avis als eigener Wartezustand galt. Er ist eine Zuordnungs-Mechanik —
+    // beide warten auf Zahlung.
+    for (const billingType of ALL_BILLING_TYPES) {
+      expect(
+        assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType }),
+        `versendet/${billingType}`,
+      ).toBe("zahlung_ausstehend");
+    }
     // bezahlt → abgeschlossen
     expect(assignInvoiceActionCluster({ status: "bezahlt", invoiceType: "rechnung", billingType: "selbstzahler" }))
       .toBe("abgeschlossen");
-    // storniert / Gutschrift → eigener Storniert-Cluster (Totalität)
+    // Eine stornierte RECHNUNG → Storniert-Cluster.
     expect(assignInvoiceActionCluster({ status: "storniert", invoiceType: "rechnung", billingType: "selbstzahler" }))
       .toBe("storniert");
-    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "stornorechnung", billingType: "pflegekasse_gesetzlich" }))
+    // Ein STORNO-DOKUMENT → Storniert-Cluster, zu den Gutschriften.
+    //
+    // Ein früherer Entwurf schickte es nach „abgeschlossen" („es ist fertig,
+    // dieselbe Aussage wie bei einer bezahlten Rechnung"). Das verwechselte
+    // STATUS und CLUSTER: der Status beschreibt das Dokument, der Cluster
+    // gruppiert die Liste und trägt je Gruppe eine €-Summe — und
+    // Storno-Dokumente tragen NEGATIVE Beträge. Im Cluster „Bezahlt —
+    // abgeschlossen" hätten sie die Summe um −15.884,35 € (Prod) verfälscht,
+    // während „Stornierte Rechnungen und Gutschriften" die Gegenbuchung
+    // verloren hätte, die sich dort gegen die Originale aufhebt.
+    expect(assignInvoiceActionCluster({ status: "abgeschlossen", invoiceType: "stornorechnung", billingType: "pflegekasse_gesetzlich" }))
       .toBe("storniert");
   });
 
   // ---------------------------------------------------------------- #1897 ---
-  it("gebundene Zahlung schlaegt den Wartelauf — beide Warte-Stufen, beide Zahler-Typen", () => {
+  it("gebundene Zahlung schlaegt den Wartelauf — beide Zahler-Typen", () => {
     for (const billingType of ALL_BILLING_TYPES) {
-      for (const status of ["versendet", "avis_erhalten"] as const) {
+      // Nur noch EINE Warte-Stufe: `avis_erhalten` ist entfallen.
+      for (const status of ["versendet"] as const) {
         expect(
           assignInvoiceActionCluster({ status, invoiceType: "rechnung", billingType, hasBoundPayment: true }),
           `${status}/${billingType} mit gebundener Zahlung`,
@@ -276,6 +305,7 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
     for (const status of INVOICE_STATUSES) {
       for (const invoiceType of INVOICE_TYPES) {
         for (const billingType of ALL_BILLING_TYPES) {
+          if (status === "abgeschlossen" && invoiceType !== "stornorechnung") continue;
           const withFlag = assignInvoiceActionCluster({ status, invoiceType, billingType, hasBoundPayment: false });
           const withoutFlag = assignInvoiceActionCluster({ status, invoiceType, billingType });
           expect(withFlag, `${status}/${invoiceType}/${billingType}`).toBe(withoutFlag);
@@ -284,56 +314,39 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
     }
   });
 
-  it("ohne Bindung gilt die Zuordnung von VOR #1897 — als Tabelle festgenagelt", () => {
-    // Die Abbildung, wie sie auf `main` vor diesem PR war. Genau EIN Eintrag
-    // weicht bewusst ab und ist unten getrennt ausgewiesen.
-    const VOR_1897: Record<string, InvoiceActionCluster> = {
+  it("ohne Bindung gilt die Zuordnung als Tabelle festgenagelt", () => {
+    // Die vollstaendige Abbildung ohne Zahlungsbindung, Zeile fuer Zeile.
+    const OHNE_BINDUNG: Record<string, InvoiceActionCluster> = {
       entwurf: "zu_versenden",
-      versendet: "zahlung_ausstehend", // Selbstzahler-Pfad; Pflegekasse separat
-      avis_erhalten: "zahlung_ausstehend",
+      versendet: "zahlung_ausstehend",
       bezahlt: "abgeschlossen",
       storniert: "storniert",
     };
-    for (const [status, expected] of Object.entries(VOR_1897)) {
+    for (const [status, expected] of Object.entries(OHNE_BINDUNG)) {
       expect(
         assignInvoiceActionCluster({ status, invoiceType: "rechnung", billingType: "selbstzahler" }),
         `${status} ohne Bindung`,
       ).toBe(expected);
     }
-    // Pflegekassen-Abzweig im `versendet`-Fall, ebenfalls unveraendert.
+    // Die Pflegekasse folgt jetzt derselben Zeile — kein eigener Abzweig mehr.
     expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "pflegekasse_gesetzlich" }))
-      .toBe("avis_ausstehend");
-
-    // DIE EINE bewusste Abweichung: `teilweise_bezahlt` fiel vorher ueber den
-    // `default`-Zweig von `assignInvoiceStage` auf `rechnung_erstellt` und
-    // landete damit in „Noch zu versenden". Das war ein Fehler (der Status kam
-    // mit #1822 dazu, ohne die Zuordnung zu erweitern) und ist jetzt behoben.
-    expect(assignInvoiceActionCluster({ status: "teilweise_bezahlt", invoiceType: "rechnung", billingType: "selbstzahler" }))
-      .toBe("teilzahlung");
+      .toBe("zahlung_ausstehend");
   });
 
   it("Storno schlaegt die Zahlungsbindung (eine stornierte Rechnung ist kein Pruef-Fall)", () => {
     expect(assignInvoiceActionCluster({ status: "storniert", invoiceType: "rechnung", billingType: "selbstzahler", hasBoundPayment: true }))
       .toBe("storniert");
-    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "stornorechnung", billingType: "selbstzahler", hasBoundPayment: true }))
+    // Ein Storno-Dokument ebenfalls nicht — es liegt bei den Gutschriften.
+    expect(assignInvoiceActionCluster({ status: "abgeschlossen", invoiceType: "stornorechnung", billingType: "selbstzahler", hasBoundPayment: true }))
       .toBe("storniert");
   });
 
-  it("teilweise_bezahlt hat einen eigenen Cluster — nie mehr \"Noch zu versenden\"", () => {
-    for (const billingType of ALL_BILLING_TYPES) {
-      for (const hasBoundPayment of [false, true]) {
-        expect(
-          assignInvoiceActionCluster({ status: "teilweise_bezahlt", invoiceType: "rechnung", billingType, hasBoundPayment }),
-          `teilweise_bezahlt/${billingType}/bound=${hasBoundPayment}`,
-        ).toBe("teilzahlung");
-      }
-    }
-  });
-
-  it("nur die beiden Warte-Cluster altern (geteilte Regel fuer Cockpit UND Liste)", () => {
+  it("nur der Warte-Cluster altert (geteilte Regel fuer Cockpit UND Liste)", () => {
+    // Vorher waren es ZWEI (`avis_ausstehend` + `zahlung_ausstehend`). Der
+    // Avis-Cluster ist mit dem Empfaenger-Unterschied entfallen; die Regel
+    // selbst ist unveraendert — altern tut, wer auf Zahlung wartet.
     const aging = INVOICE_ACTION_CLUSTERS.filter(isAgingCluster);
-    expect(aging).toEqual(["avis_ausstehend", "zahlung_ausstehend"]);
+    expect(aging).toEqual(["zahlung_ausstehend"]);
     expect(isAgingCluster("zahlung_zugeordnet_pruefung")).toBe(false);
-    expect(isAgingCluster("teilzahlung")).toBe(false);
   });
 });

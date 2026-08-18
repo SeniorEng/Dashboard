@@ -24,7 +24,6 @@ const STAGE_ORDER: BillingTermineStage[] = [
   "nachgewiesen",
   "rechnung_erstellt",
   "versendet",
-  "avis_erhalten",
   "bezahlt",
   "kunde_nicht_angetroffen",
 ];
@@ -35,7 +34,6 @@ const STAGE_LABELS: Record<BillingTermineStage, string> = {
   nachgewiesen: "Leistungsnachweis",
   rechnung_erstellt: "Rechnung erstellt",
   versendet: "Versendet",
-  avis_erhalten: "Avis erhalten",
   bezahlt: "Bezahlt",
   kunde_nicht_angetroffen: "Kunde nicht angetroffen",
 };
@@ -46,7 +44,6 @@ const STAGE_BADGE: Record<BillingTermineStage, string> = {
   nachgewiesen: "bg-blue-50 text-blue-700 border-blue-200",
   rechnung_erstellt: "bg-teal-50 text-teal-700 border-teal-200",
   versendet: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  avis_erhalten: "bg-purple-50 text-purple-700 border-purple-200",
   bezahlt: "bg-green-50 text-green-700 border-green-200",
   kunde_nicht_angetroffen: "bg-rose-50 text-rose-700 border-rose-200",
 };

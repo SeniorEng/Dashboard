@@ -40,7 +40,7 @@ import {
   deactivateTestEmployee,
 } from "../test-utils";
 import { db } from "../../server/lib/db";
-import { auditLog } from "@shared/schema";
+import { auditLog, qontoTransactions } from "@shared/schema";
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -772,9 +772,20 @@ describe("BF-3: Storno (Stornorechnung + Audit + Schutz)", () => {
     for (const li of stornoDetail.lineItems) {
       expect(li.totalCents).toBeLessThanOrEqual(0);
     }
-    // BL-12: Stornorechnung wird als "entwurf" angelegt; Versand erfolgt
-    // durch den Buchhalter aktiv über den Send-Pfad.
-    expect(stornoDetail.status).toBe("entwurf");
+    // Vor dem Status-Umbau (BL-12) startete die Stornorechnung als "entwurf" —
+    // mit der Begründung, der Buchhalter versende sie aktiv über den Send-Pfad.
+    //
+    // Das vermischte zwei Fragen. "Entwurf" heißt: das Dokument kann noch
+    // geändert oder verworfen werden. Auf ein Storno-Dokument trifft das nie zu:
+    // es entsteht als Spiegelbild eines bereits gestellten Belegs, ist im selben
+    // Moment inhaltlich fertig und darf danach nichts anderes mehr werden.
+    // In Produktion standen deshalb 114 solcher Dokumente dauerhaft auf
+    // "entwurf" — ein Zustand, den keines von ihnen je verließ.
+    //
+    // Der Versand bleibt davon unberührt: dass ein fertiges Dokument noch
+    // verschickt werden kann, sagt jetzt das Badge `versandt` (`sent_at`),
+    // nicht der Status.
+    expect(stornoDetail.status).toBe("abgeschlossen");
   });
 
   it("BF-3.2 — Stornorechnung kann NICHT erneut storniert werden", async () => {
@@ -1723,6 +1734,50 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(after.data.status, "bezahlte Rechnung darf NICHT zurückgesetzt werden").toBe("bezahlt");
   });
 
+  it("BF-10.10 — das Ventil greift NICHT, wenn Geld auf der Rechnung gebunden ist", async () => {
+    // ── Warum dieser Fall dazukam ──────────────────────────────────────────
+    // Das Ventil hielt Rechnungen mit Zahlungsbezug frueher ohne eigene Regel
+    // fern: ein Geldeingang hob den Status auf `teilweise_bezahlt` oder
+    // `bezahlt`, und die Bedingung „nur aus versendet" fing sie ab. Der
+    // Kommentar am Endpunkt sagte das ausdruecklich.
+    //
+    // Seit dem Status-Umbau schreibt die Teilzahlung KEINEN Status mehr — die
+    // Rechnung bleibt `versendet` und waere hier durchgelaufen. Sie waere zum
+    // Entwurf geworden, waehrend Geld auf sie gebucht ist: der Zahlungseingang
+    // haengt an einem Dokument, das es formal nicht gibt, und laesst sich auch
+    // keiner anderen Rechnung mehr zuordnen.
+    //
+    // Die Bedingung ist damit von einer Nebenwirkung zu einer eigenen Regel
+    // geworden — und braucht einen eigenen Test.
+    const inv = await createDraftSzInvoice("VENTIL-GEBUNDEN");
+    await finalizeInvoice(inv.id, "versendet");
+
+    const [tx] = await db.insert(qontoTransactions).values({
+      qontoTransactionId: `bf1010-${inv.invoiceNumber}`,
+      amountCents: 1000,
+      currency: "EUR",
+      side: "credit",
+      status: "completed",
+      emittedAt: new Date(),
+      matchedInvoiceId: inv.id,
+      matchConfidence: "test",
+    } as any).returning({ id: qontoTransactions.id });
+
+    try {
+      const res = await apiPost<any>(`/api/billing/${inv.id}/revoke-sent-mark`, {
+        reason: "Versehentlich markiert, es wurde nichts versandt.",
+      });
+      expect(res.status, `Ventil muss ablehnen: ${JSON.stringify(res.data)}`).toBe(400);
+
+      // Und wirklich nichts angefasst haben.
+      const after = await apiGet<any>(`/api/billing/${inv.id}`);
+      expect(after.data.status).toBe("versendet");
+      expect(after.data.sentAt, "Versanddatum muss stehenbleiben").toBeTruthy();
+    } finally {
+      await db.delete(qontoTransactions).where(eq(qontoTransactions.id, tx.id));
+    }
+  });
+
   // BF-10.9 — Task #1434 / #66: Das Sammel-Rücksetzen auf „entwurf" ist mit
   // dem generischen Übergang entfallen. Der Fall hielt vorher fest, dass eine
   // versendete Rechnung zurückgesetzt WIRD; er hält jetzt fest, dass sie es
@@ -1746,7 +1801,18 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     // UND dass nichts angefasst wurde.
     expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(400);
     // BEIDE werden jetzt uebersprungen — versendet wie bezahlt.
-    expect(JSON.stringify(res.data)).toMatch(/versendet, avis_erhalten, bezahlt/);
+    //
+    // Geprüft wird, dass die Absage die ZULÄSSIGEN Ziele nennt (sonst rät der
+    // Aufrufer). Die Liste wird bewusst nicht als ein Stück gematcht: sie stand
+    // hier als `/versendet, avis_erhalten, bezahlt/` und war damit eine zweite,
+    // stille Kopie des Zod-Enums — beim Status-Umbau fiel sie genau deshalb um.
+    const meldung = JSON.stringify(res.data);
+    expect(meldung).toMatch(/versendet/);
+    expect(meldung).toMatch(/bezahlt/);
+    // Und der entfallene Wert taucht nicht mehr auf. Das ist die Aussage, die
+    // der Umbau hier hinterlässt: `avis_erhalten` ist als Ziel nicht mehr
+    // anfragbar, weil es ihn nicht mehr gibt.
+    expect(meldung).not.toMatch(/avis_erhalten/);
 
     const sentAfter = await apiGet<any>(`/api/billing/${sent.id}`);
     expect(sentAfter.data.status, "versendete Rechnung bleibt versendet").toBe("versendet");

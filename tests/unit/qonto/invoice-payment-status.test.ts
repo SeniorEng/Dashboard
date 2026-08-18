@@ -32,9 +32,18 @@ describe("resolveInvoicePaymentStatus", () => {
     expect(r.classification.result).toBe("tolerated");
   });
 
-  it("Unterzahlung mit positiver Zahlung ⇒ teilweise_bezahlt (offener Rest = differenceCents)", () => {
+  it("Unterzahlung setzt KEINEN Status — sie ist ein Badge (offener Rest = differenceCents)", () => {
+    // Bis zum Status-Umbau gab diese Funktion hier `teilweise_bezahlt` zurueck,
+    // und der Aufrufer schrieb es in die Spalte. Der Status war damit zugleich
+    // abgeleiteter Wert UND persistierter Zustand — und `assignInvoiceStage`
+    // kannte ihn nicht, schickte ihn ueber `default` auf `rechnung_erstellt`
+    // und zaehlte seinen Betrag im Cockpit-Board neben den Entwuerfen.
+    //
+    // Jetzt: die Rechnung bleibt `versendet` und traegt das Badge
+    // „Teilweise bezahlt" (`shared/domain/invoice-badges.ts`). Die
+    // Betrags-Klassifikation ist unveraendert — sie ist die Quelle des Badges.
     const r = resolveInvoicePaymentStatus({ invoiceGrossCents: 50000, paidCents: 30000 });
-    expect(r.status).toBe("teilweise_bezahlt");
+    expect(r.status, "kein Statuswechsel bei Unterzahlung").toBeNull();
     expect(r.classification.result).toBe("underpaid");
     expect(r.classification.differenceCents).toBe(20000); // offener Rest
   });

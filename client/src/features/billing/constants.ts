@@ -1,24 +1,48 @@
+import type { InvoiceStatus } from "@shared/schema/billing";
+import { INVOICE_BADGE_LABELS, type InvoiceBadge } from "@shared/domain/invoice-badges";
+
 export const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
   "Juli", "August", "September", "Oktober", "November", "Dezember",
 ];
 
-export const STATUS_LABELS: Record<string, string> = {
+/**
+ * Beschriftung der Rechnungs-Status.
+ *
+ * ERSETZT die frühere Liste mit `avis_erhalten` und `teilweise_bezahlt` — beide
+ * sind keine Status mehr (`docs/rechnungsstatus-zielmodell.md`): der Avis ist
+ * eine Zuordnungs-Mechanik, die Teilzahlung ein Badge.
+ *
+ * Bewusst über `InvoiceStatus` typisiert statt `Record<string, string>`: eine
+ * lose Map hätte den Wegfall stillschweigend überlebt und hier weiterhin
+ * Beschriftungen für Werte gehalten, die es nicht mehr gibt. Kommt ein Status
+ * dazu, bricht der Compiler hier.
+ */
+export const STATUS_LABELS: Record<InvoiceStatus, string> = {
   entwurf: "Entwurf",
   versendet: "Versendet",
-  avis_erhalten: "Avis erhalten",
-  teilweise_bezahlt: "Teilweise bezahlt",
   bezahlt: "Bezahlt",
   storniert: "Storniert",
+  abgeschlossen: "Abgeschlossen",
 };
 
-export const STATUS_COLORS: Record<string, string> = {
+export const STATUS_COLORS: Record<InvoiceStatus, string> = {
   entwurf: "bg-amber-50 text-amber-700 border-amber-200",
   versendet: "bg-blue-50 text-blue-700 border-blue-200",
-  avis_erhalten: "bg-purple-50 text-purple-700 border-purple-200",
-  teilweise_bezahlt: "bg-cyan-50 text-cyan-700 border-cyan-200",
   bezahlt: "bg-green-50 text-green-700 border-green-200",
   storniert: "bg-red-50 text-red-700 border-red-200",
+  // Storno-Dokument: fertig, aber kein Geldeingang — bewusst neutral, nicht
+  // grün wie „bezahlt".
+  abgeschlossen: "bg-slate-50 text-slate-700 border-slate-200",
+};
+
+/** Beschriftung und Farbe der BADGES (Sichten auf Zahlen, keine Zustände). */
+export const BADGE_LABELS: Record<InvoiceBadge, string> = INVOICE_BADGE_LABELS;
+
+export const BADGE_COLORS: Record<InvoiceBadge, string> = {
+  teilweise_bezahlt: "bg-cyan-50 text-cyan-700 border-cyan-200",
+  ueberfaellig: "bg-red-50 text-red-700 border-red-200",
+  versandt: "bg-blue-50 text-blue-700 border-blue-200",
 };
 
 // Abrechnungstyp eines Kunden lesbar machen (Selbstzahler / Pflegekasse).

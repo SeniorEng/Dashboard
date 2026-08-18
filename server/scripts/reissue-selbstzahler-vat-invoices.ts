@@ -45,7 +45,7 @@
  *     genau den Beleg hart löschen, um dessen Schutz es in #66 geht. Eine
  *     ausgegebene Rechnung gehört auch hier in den Storno-Pfad darunter.
  *     (Die frühere Fassung dieses Absatzes behauptete das Gegenteil.)
- *   - AUSGESTELLT (`versendet`/`avis_erhalten`/`bezahlt`): GoBD-konforme
+ *   - AUSGESTELLT (`versendet`/`bezahlt`): GoBD-konforme
  *     Storno-und-Neuausstellung — `stornoInvoiceCascade` legt die
  *     Stornorechnung an (kopiert & negiert das buggy Original 1:1, KEINE
  *     Neuberechnung → Storno-Symmetrie bleibt gewahrt), danach erzeugt

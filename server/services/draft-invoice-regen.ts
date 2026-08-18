@@ -52,6 +52,11 @@ export async function discardAndRegenerateDrafts(params: {
           eq(invoicesTable.billingYear, year),
           eq(invoicesTable.billingMonth, month),
           eq(invoicesTable.status, "entwurf"),
+          // Seit dem Status-Umbau entstehen Storno-Dokumente auf
+          // `abgeschlossen`, koennen also gar nicht mehr in diese Menge fallen.
+          // Der Guard bleibt trotzdem: auf einem LOESCHPFAD ist eine
+          // ueberfluessige Schranke billiger als eine fehlende, und
+          // Altbestand vor der Migration traegt weiterhin `entwurf`.
           ne(invoicesTable.invoiceType, "stornorechnung"),
           neverIssuedCondition(),
         ))

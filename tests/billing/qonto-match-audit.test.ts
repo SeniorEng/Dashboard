@@ -40,6 +40,21 @@ interface Seeded {
 
 const seeded: Seeded = { customerId: 0, invoiceIds: [], qontoTxIds: [] };
 
+/**
+ * Summe aller auf eine Rechnung gebundenen Qonto-Zahlungen, in Cent.
+ *
+ * Seit dem Status-Umbau traegt diese Zahl die Aussage, die vorher der Status
+ * `teilweise_bezahlt` trug — und sie traegt sie genauer: der Status kannte nur
+ * „etwas" und „alles", die Summe kennt den Betrag.
+ */
+async function gebundeneSumme(invoiceId: number): Promise<number> {
+  const [row] = await db
+    .select({ summe: sql<number>`coalesce(sum(${qontoTransactions.amountCents}), 0)::int` })
+    .from(qontoTransactions)
+    .where(eq(qontoTransactions.matchedInvoiceId, invoiceId));
+  return row.summe;
+}
+
 async function insertCustomer(): Promise<number> {
   const tag = uniqueId();
   const [row] = await db.insert(customers).values({
@@ -290,7 +305,7 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
       .where(inArray(qontoTransactions.id, [txA, txB]));
   });
 
-  it("Task #1822: eine Teilüberweisung setzt die Rechnung auf teilweise_bezahlt (kein bezahlt, kein Mismatch)", async () => {
+  it("Task #1822: eine Teilüberweisung laesst die Rechnung offen (kein bezahlt, kein Mismatch)", async () => {
     const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix: "TP1" });
     const txId = await insertQontoTx({ amountCents: 30000 });
     seeded.invoiceIds.push(invoiceId);
@@ -311,7 +326,12 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
 
     const [inv] = await db.select({ status: invoices.status, paidAt: invoices.paidAt })
       .from(invoices).where(eq(invoices.id, invoiceId));
-    expect(inv.status).toBe("teilweise_bezahlt");
+    // Frueher stand hier `teilweise_bezahlt` als STATUS. Der Zustand des
+    // Vorgangs ist unveraendert „wartet auf Zahlung" — dass schon Geld da ist,
+    // sagt die gebundene Summe, nicht die Status-Spalte. `invoicePartiallyPaid`
+    // oben ist genau diese abgeleitete Aussage; das Badge derselben Frage ist
+    // in `payment-bound-read-side` (d) verankert.
+    expect(inv.status).toBe("versendet");
     expect(inv.paidAt).toBeNull();
 
     // Genau ein invoice_partial_payment-Audit; bewusst KEIN reconciled/mismatch.
@@ -327,7 +347,7 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
     seeded.invoiceIds.push(invoiceId);
     seeded.qontoTxIds.push(txA, txB);
 
-    // 1. Teilzahlung → teilweise_bezahlt.
+    // 1. Teilzahlung — deckt nicht, Rechnung wartet weiter.
     const resA = await apiPost<{ invoicePartiallyPaid: boolean }>(
       `/api/admin/qonto/transactions/${txA}/match`, { invoiceId });
     expect(resA.status).toBe(200);
@@ -335,7 +355,7 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
 
     let [inv] = await db.select({ status: invoices.status })
       .from(invoices).where(eq(invoices.id, invoiceId));
-    expect(inv.status).toBe("teilweise_bezahlt");
+    expect(inv.status).toBe("versendet");
 
     // 2. Teilzahlung deckt den Rest → bezahlt.
     const resB = await apiPost<{
@@ -366,7 +386,18 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
     expect(md.differenceCents).toBe(0);
   });
 
-  it("Task #1822: Unmatch einer Teilzahlung setzt den Status symmetrisch zurück (bezahlt → teilweise_bezahlt → versendet)", async () => {
+  it("Task #1822: Unmatch nimmt die Zahlung symmetrisch zurueck (gebundene Summe 50000 → 30000 → 0)", async () => {
+    // ── Was diese Pruefung frueher behauptete ────────────────────────────
+    // Sie hiess „setzt den Status symmetrisch zurueck (bezahlt →
+    // teilweise_bezahlt → versendet)" und las die Symmetrie an der
+    // Status-Spalte ab. Nach dem Status-Umbau faellt der mittlere Schritt mit
+    // dem letzten zusammen — beide enden auf `versendet` —, und die Pruefung
+    // koennte die zwei Schritte nicht mehr auseinanderhalten.
+    //
+    // Der Verlust ist nur scheinbar: die Symmetrie war nie eine Aussage ueber
+    // den Status, sondern ueber das GELD. Sie wird deshalb dort gemessen, wo
+    // sie sitzt — an der kumuliert gebundenen Summe. Das ist zugleich die
+    // Groesse, aus der das Badge entsteht.
     const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix: "UP1" });
     const txA = await insertQontoTx({ amountCents: 30000 });
     const txB = await insertQontoTx({ amountCents: 20000 });
@@ -380,19 +411,58 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
       .from(invoices).where(eq(invoices.id, invoiceId));
     expect(inv.status).toBe("bezahlt");
 
-    // Zweite Teilzahlung lösen → verbleibt 30000 von 50000 → teilweise_bezahlt.
+    expect(await gebundeneSumme(invoiceId)).toBe(50000);
+
+    // Zweite Teilzahlung lösen → 30000 bleiben gebunden. Die Rechnung wartet
+    // wieder auf Zahlung — mit Geld darauf, aber nicht genug.
     expect((await apiDelete(`/api/admin/qonto/transactions/${txB}/match`)).status).toBe(200);
     [inv] = await db.select({ status: invoices.status, paidAt: invoices.paidAt })
       .from(invoices).where(eq(invoices.id, invoiceId));
-    expect(inv.status).toBe("teilweise_bezahlt");
+    expect(inv.status).toBe("versendet");
     expect(inv.paidAt).toBeNull();
+    expect(await gebundeneSumme(invoiceId)).toBe(30000);
 
-    // Letzte Teilzahlung lösen → keine gebundene Zahlung mehr → versendet.
+    // Letzte Teilzahlung lösen → nichts mehr gebunden. Derselbe Status wie
+    // eben, aber eine andere Zahl — genau die Unterscheidung, die vorher im
+    // Status steckte.
     expect((await apiDelete(`/api/admin/qonto/transactions/${txA}/match`)).status).toBe(200);
     [inv] = await db.select({ status: invoices.status, paidAt: invoices.paidAt })
       .from(invoices).where(eq(invoices.id, invoiceId));
     expect(inv.status).toBe("versendet");
     expect(inv.paidAt).toBeNull();
+    expect(await gebundeneSumme(invoiceId)).toBe(0);
+  });
+
+  it("eine STORNIERTE Rechnung nimmt kein Geld mehr an — weder Teil- noch Ueberzahlung", async () => {
+    // ── Warum dieser Fall existiert ────────────────────────────────────────
+    // Bis zum Status-Umbau schuetzte den Bindungs-Pfad sein eigener
+    // Schreibvorgang: `UPDATE … WHERE status IN (…)` lief auf 0 Zeilen und der
+    // Handler warf 400. Der Statuswechsel entfiel mit dem Umbau — und der
+    // Guard ersatzlos mit ihm. Eine Zahlung liess sich danach per 200 an eine
+    // stornierte Rechnung binden.
+    //
+    // Kein Test wurde rot: es gab keinen. Genau deshalb gibt es ihn jetzt —
+    // sonst verschwindet der Guard beim naechsten Umbau wieder lautlos.
+    for (const [suffix, betrag] of [["SGT", 30000], ["SGU", 90000]] as const) {
+      const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix });
+      const txId = await insertQontoTx({ amountCents: betrag });
+      seeded.invoiceIds.push(invoiceId);
+      seeded.qontoTxIds.push(txId);
+
+      await withGobdMutation((tx) =>
+        tx.update(invoices).set({ status: "storniert" }).where(eq(invoices.id, invoiceId)),
+      );
+
+      const res = await apiPost(`/api/admin/qonto/transactions/${txId}/match`, { invoiceId });
+      expect(res.status, `Betrag ${betrag} muss abgelehnt werden`).toBe(400);
+
+      // Und die Bindung darf NICHT bestehen bleiben: der Wurf liegt innerhalb
+      // der Transaktion, also rollt sie das Binden mit zurueck. Ohne diese
+      // Zeile waere der Test auch dann gruen, wenn die Zahlung haengen bliebe.
+      const [tx] = await db.select({ matchedInvoiceId: qontoTransactions.matchedInvoiceId })
+        .from(qontoTransactions).where(eq(qontoTransactions.id, txId));
+      expect(tx.matchedInvoiceId, `Betrag ${betrag}: keine Bindung nach Ablehnung`).toBeNull();
+    }
   });
 
   it("Task #1822: Über-Toleranz-Überzahlung bleibt Mismatch (nicht bezahlt, nicht teilweise)", async () => {

@@ -16,8 +16,9 @@ export async function getInvoices(filters: { year?: number; month?: number; cust
   if (filters.month) conditions.push(eq(invoices.billingMonth, filters.month));
   if (filters.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
   if (filters.status) conditions.push(eq(invoices.status, filters.status as string));
-  // Task #1859 — Mehr-Status-Filter (z.B. versendet + avis_erhalten für den
-  // Zahlungs-Zuordnungs-Picker). Wirkt zusätzlich zum Einzel-`status`.
+  // Task #1859 — Mehr-Status-Filter für den Zahlungs-Zuordnungs-Picker.
+  // Wirkt zusätzlich zum Einzel-`status`. (Er trug ursprünglich `versendet` +
+  // `avis_erhalten`; seit dem Status-Umbau ist nur noch `versendet` gemeint.)
   if (filters.statuses && filters.statuses.length > 0) {
     conditions.push(inArray(invoices.status, filters.statuses));
   }
@@ -128,17 +129,113 @@ export async function createInvoice(data: Record<string, unknown>, lineItems: Re
   return await db.transaction(async (tx) => createInvoiceTx(tx, data, lineItems, userId));
 }
 
+/**
+ * DER Engpass für jeden Rechnungs-Statuswechsel — mit Übergangs-Prüfung.
+ *
+ * ── Was das ERSETZT ─────────────────────────────────────────────────────
+ * Das ZWEITE Schreib-Regime des Zahlungsabgleichs. Bis zum Status-Umbau ging
+ * der manuelle Weg (`PATCH /billing/:id/status`, `POST /bulk-status`) über
+ * `isAllowedInvoiceStatusTransition`, der Qonto-Abgleich dagegen über eigene
+ * Direkt-Updates mit handgeschriebenem `WHERE`-Guard. Die Übergangs-SSoT
+ * beschrieb damit nur die halbe Wirklichkeit — wer sie las und für vollständig
+ * hielt, irrte (Bestandsaufnahme, W3).
+ *
+ * Jetzt prüft dieser Engpass, und alle Pfade gehen hindurch.
+ *
+ * GLEICHSTAND: ein Aufruf, der den Status NICHT ändert, ist kein Übergang und
+ * wird durchgelassen (`ist.status !== status` in der Prüfung unten). Ohne diese
+ * Ausnahme müsste jeder Aufrufer vorher selbst vergleichen — und genau dort
+ * entstünde das nächste Zweitregime.
+ *
+ * Alle vier Zeitstempel (`sentAt`, `issuedAt`, `paidAt`, `storniertAt`) sind
+ * per `COALESCE` gegen Überschreiben geschützt: sie halten den URSPRUNGS-
+ * zeitpunkt. Wer einen davon bewusst neu setzen will, leert ihn vorher (so
+ * macht es die Zahlungs-Rücknahme mit `paid_at`) — stillschweigend über einen
+ * Gleichstand-Aufruf passiert es nicht mehr.
+ */
+/**
+ * Ist die Rechnung noch in einem Zustand, in dem eine Zahlung auf sie gebucht
+ * werden darf? Liest unter `FOR UPDATE` **innerhalb** der laufenden Transaktion.
+ *
+ * ── Was das ERSETZT ─────────────────────────────────────────────────────
+ * Die Schutzwirkung, die vorher als Nebenprodukt am Schreibvorgang hing:
+ * `UPDATE … WHERE id = ? AND status IN (…) RETURNING` lief auf 0 Zeilen, wenn
+ * die Rechnung zwischenzeitlich storniert wurde, und der Aufrufer brach ab.
+ *
+ * Seit die Teilzahlung KEINEN Status mehr schreibt, gibt es dieses `WHERE`
+ * nicht mehr — und damit fiel der Schutz an zwei Stellen ersatzlos weg
+ * (Auto-Match und manueller Match). Er steht jetzt hier, einmal, ausdrücklich.
+ *
+ * `FOR UPDATE` ist nicht optional: ein nacktes `SELECT` sieht unter READ
+ * COMMITTED die letzte committete Version und nimmt keine Sperre. Ein parallel
+ * laufender Storno würde durchrutschen — genau das Rennen, das das frühere
+ * `UPDATE … WHERE` per Konstruktion nicht zuließ.
+ *
+ * Die zulässigen Zustände kommen aus der Übergangs-SSoT (was nach `bezahlt`
+ * darf, ist offen), nicht aus einer eigenen Liste.
+ */
+export async function istRechnungNochOffenTx(exec: DbOrTx, id: number): Promise<boolean> {
+  const { invoices } = await import("@shared/schema");
+  const { and, eq, inArray } = await import("drizzle-orm");
+  const { statusesAllowedToTransitionTo } = await import("@shared/domain/invoice-status");
+
+  const [zeile] = await exec
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(and(
+      eq(invoices.id, id),
+      inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
+    ))
+    .for("update");
+  return Boolean(zeile);
+}
+
 export async function updateInvoiceStatusTx(
   exec: DbOrTx,
   id: number,
   status: string,
   _userId: number,
+  opts?: { zahlungsRuecknahme?: boolean },
 ): Promise<Invoice> {
   const { invoices } = await import("@shared/schema");
   const { eq, sql } = await import("drizzle-orm");
+  const { isAllowedInvoiceStatusTransition } = await import("@shared/domain/invoice-status");
+
+  // Ist-Status unter FOR UPDATE lesen: serialisiert konkurrierende Wechsel und
+  // liest den tatsaechlichen Stand, nicht den, den der Aufrufer zu kennen glaubt.
+  const [ist] = await exec
+    .select({ status: invoices.status })
+    .from(invoices)
+    .where(eq(invoices.id, id))
+    .for("update");
+  if (!ist) {
+    throw new Error(`Rechnung ${id} nicht gefunden.`);
+  }
+  if (ist.status !== status && !isAllowedInvoiceStatusTransition(ist.status, status, opts)) {
+    throw new Error(
+      `Unzulaessiger Statuswechsel fuer Rechnung ${id}: "${ist.status}" -> "${status}". ` +
+      `Erlaubte Uebergaenge: shared/domain/invoice-status.ts`,
+    );
+  }
   const updateData: Partial<Invoice> = { status: status as Invoice["status"] };
   if (status === "versendet") {
-    updateData.sentAt = new Date();
+    // `COALESCE` wie bei `issuedAt` — und aus demselben Grund.
+    //
+    // Bis zur Zahlungs-Ruecknahme (`INVOICE_STATUS_REVERSAL_TRANSITIONS`) fuehrte
+    // JEDER Weg nach `versendet` von einem frueheren Zustand her, in dem noch
+    // nie versandt wurde: `entwurf -> versendet` ist eine Ausgabe, und ein
+    // zweiter Aufruf auf einer bereits versendeten Rechnung war ein Gleichstand
+    // ohne Bedeutung. „Jetzt" war deshalb immer richtig.
+    //
+    // Die Ruecknahme bricht das: `bezahlt -> versendet` faellt auf einen
+    // Zustand ZURUECK, den die Rechnung schon einmal hatte. Sie wurde vor
+    // Monaten versandt; dass eine Zahlung wieder geloest wurde, aendert daran
+    // nichts. Ein frisches `sent_at` waere gleich dreifach falsch: es
+    // verschiebt den Aging-Anker der Kassen-Rechnungen (die Forderung sieht neu
+    // aus und faellt aus dem Mahnwesen), es verschiebt das Ueberfaellig-Badge,
+    // und es aendert das Rechnungsdatum auf einem bereits ausgegebenen Beleg,
+    // der ohne Snapshot neu gerendert wird.
+    updateData.sentAt = sql`COALESCE(${invoices.sentAt}, now())` as unknown as Date;
     // #66 — Die Ausgabe-Marke gehoert an DIESEN Engpass, nicht an die einzelnen
     // Aufrufer: jeder Weg nach `versendet` ist eine Ausgabe, ob ueber
     // `mark-sent`, den Sammelversand oder den generischen Statuswechsel.
@@ -153,8 +250,18 @@ export async function updateInvoiceStatusTx(
   // Entwurfs-Loeschpfad gab ihre Belegnummer frei. Die Marke nimmt allein das
   // ausdrueckliche Fehlmarkierungs-Ventil zurueck.
   if (status === "entwurf") updateData.sentAt = null;
-  if (status === "bezahlt") updateData.paidAt = new Date();
-  if (status === "storniert") updateData.storniertAt = new Date();
+  // Wie `sentAt`: `COALESCE` schuetzt den URSPRUNGSZEITPUNKT.
+  //
+  // Ohne ihn ist der Gleichstand-Durchlass ein Datenverlust-Pfad, und zwar
+  // ueber ein echtes Rennen: `PATCH /billing/:id/status` prueft den Uebergang
+  // AUSSERHALB der Transaktion. Bestaetigt parallel jemand einen Qonto-Match,
+  // liest dieser Aufruf drinnen `bezahlt`, faellt in den Gleichstand — und
+  // ersetzte das echte Bankdatum (`qtx.emittedAt`) durch „jetzt".
+  //
+  // Die Zahlungs-Ruecknahme leert `paid_at` ausdruecklich; ein spaeterer,
+  // legitimer Weg nach `bezahlt` trifft also NULL und bekommt sein Datum.
+  if (status === "bezahlt") updateData.paidAt = sql`COALESCE(${invoices.paidAt}, now())` as unknown as Date;
+  if (status === "storniert") updateData.storniertAt = sql`COALESCE(${invoices.storniertAt}, now())` as unknown as Date;
   const [updated] = await exec.update(invoices).set(updateData).where(eq(invoices.id, id)).returning();
   return updated;
 }

@@ -20,7 +20,7 @@ import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } 
 import {
   INVOICE_ACTION_CLUSTERS,
   INVOICE_ACTION_CLUSTER_LABELS,
-  isStorniertInvoice,
+  istAktionsfaehigeRechnung,
   type InvoiceActionCluster,
 } from "@shared/domain/billing-pipeline";
 import { InvoiceRow } from "./invoice-row";
@@ -36,14 +36,14 @@ const DEFAULT_COLLAPSED: InvoiceActionCluster[] = ["abgeschlossen", "storniert"]
 // Kurze Erklärzeile je Cluster — sagt dem Nutzer, welche Handlung ansteht.
 const CLUSTER_HINTS: Record<InvoiceActionCluster, string> = {
   zu_versenden: "Entwürfe — an Kasse senden oder als versendet markieren",
-  avis_ausstehend: "An Pflegekassen versendet — auf Zahlungsavis warten",
+  // Kasse und Selbstzahler gleichermassen — der Avis ist eine
+  // Zuordnungs-Quelle, kein eigener Wartezustand.
   zahlung_ausstehend: "Auf Zahlungseingang warten",
   // #1897 — die beiden neuen Cluster. Die Gruppen erscheinen dadurch bereits
   // (der Record ist erschöpfend, sonst kompiliert der Client nicht) und mahnen
   // nicht mehr; das eigene Prüf-Badge und der Absprung in den Qonto-Tab kommen
   // im Client-PR nach (#1897, Schritte 6+7).
   zahlung_zugeordnet_pruefung: "Zahlung eingegangen und zugeordnet — bitte prüfen und freigeben",
-  teilzahlung: "Teilzahlung eingegangen — Restbetrag offen",
   abgeschlossen: "Bezahlt — abgeschlossen",
   storniert: "Stornierte Rechnungen und Gutschriften",
 };
@@ -57,9 +57,12 @@ const CLUSTER_HINTS: Record<InvoiceActionCluster, string> = {
 // einzeln und mit Begründung über „Markierung zurücknehmen" korrigiert — eine
 // Sammelaktion wäre dafür der falsche Ort, weil jede Rücknahme eine eigene
 // Begründung ins Audit-Log schreibt.
-const BULK_STATUS_OPTIONS: { value: "versendet" | "avis_erhalten" | "bezahlt"; label: string }[] = [
+// `avis_erhalten` stand hier bis zum Status-Umbau. Der Wert ist entfallen — der
+// Avis ist eine Zuordnungs-Mechanik, kein Zustand —, und das Zod-Schema des
+// Endpunkts kennt ihn nicht mehr. Der Menuepunkt haette also einen 400
+// ausgeloest; er wird nicht ersetzt, weil es nichts zu ersetzen gibt.
+const BULK_STATUS_OPTIONS: { value: "versendet" | "bezahlt"; label: string }[] = [
   { value: "versendet", label: "Versendet" },
-  { value: "avis_erhalten", label: "Avis erhalten" },
   { value: "bezahlt", label: "Bezahlt" },
 ];
 
@@ -224,7 +227,7 @@ export function InvoiceList({
     // Task #1890: Storno-Belege sind nicht sammel-auswählbar; „Alle auswählen"
     // bezieht sich nur auf die aktionsfähigen (nicht-stornierten) Rechnungen.
     const selectableInvoices = invoices.filter(
-      (inv) => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }),
+      (inv) => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }),
     );
     const allSelected =
       selectableInvoices.length > 0 &&

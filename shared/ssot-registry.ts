@@ -87,6 +87,8 @@ export interface SsotEntry {
 
 const SSOT_IMPORTS_GUARD = "tests/architecture/ssot-imports.test.ts";
 const SINGLE_READER_GUARD = "tests/architecture/budget-single-reader.test.ts";
+const STATUS_WRITE_REGIME_GUARD = "tests/architecture/invoice-status-write-regime.test.ts";
+const INVOICE_BADGES_GUARD = "tests/unit/invoice-badges.test.ts";
 
 /**
  * Der Seed. Jede Allowlist ist BYTE-IDENTISCH aus der heutigen Guard-Konstante
@@ -270,6 +272,66 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    // Status-Umbau (`docs/rechnungsstatus-zielmodell.md`). Ein eigener Eintrag,
+    // weil die Frage NICHT „welchen Zustand hat die Rechnung?" ist, sondern
+    // „was sagen die ZAHLEN über sie?". Badges werden nie geschrieben, nie
+    // migriert und nie als Übergang geprüft — sie entstehen bei jedem Lesen neu.
+    id: "invoice-badges",
+    question: "Ist diese Rechnung teilweise bezahlt / überfällig / versandt? (Status-Umbau)",
+    canonical: [
+      { symbol: "invoiceBadges", module: "shared/domain/invoice-badges.ts" },
+      // `istUeberfaellig` trägt die EINZIGE verbliebene Empfänger-Unterscheidung
+      // des Zustands-/Alterungs-Modells (Selbstzahler ab Fälligkeit, Kasse ab
+      // Versand) und muss mit der Aging-Ampel im Gleichschritt bleiben — es
+      // komponiert sie, statt eine zweite Frist zu führen.
+      { symbol: "istUeberfaellig", module: "shared/domain/invoice-badges.ts" },
+      { symbol: "istTeilweiseBezahlt", module: "shared/domain/invoice-badges.ts" },
+      { symbol: "istVersandt", module: "shared/domain/invoice-badges.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Haelt die Ampel-Schwellen (14/30 bzw. 21/45) hartkodiert fest UND
+        // rechnet nach, dass `istUeberfaellig` die Aging-SSoT komponiert statt
+        // eine zweite Frist zu fuehren. Beides war vorher unbelegt.
+        test: INVOICE_BADGES_GUARD,
+      },
+    ],
+    eslintRules: [],
+  },
+  {
+    // Status-Umbau. ERSETZT die sechs handgeschriebenen Statuslisten, die der
+    // Zahlungsabgleich neben der Übergangs-Map führte — inklusive Werten, die es
+    // nach dem Umbau nicht mehr gibt.
+    id: "invoice-status-transitions",
+    question: "Welcher Rechnungs-Statuswechsel ist zulässig? (Status-Umbau)",
+    canonical: [
+      { symbol: "INVOICE_STATUS_TRANSITIONS", module: "shared/domain/invoice-status.ts" },
+      { symbol: "isAllowedInvoiceStatusTransition", module: "shared/domain/invoice-status.ts" },
+      // Die Umkehrung. Die Compare-and-Swap-Pfade leiten daraus ihre
+      // Ausgangs-Statusliste ab, statt sie hinzuschreiben.
+      { symbol: "statusesAllowedToTransitionTo", module: "shared/domain/invoice-status.ts" },
+      // Getrennte Map für die ZAHLUNGS-RÜCKNAHME. `bezahlt -> versendet` ist
+      // legitim, wenn eine gebundene Zahlung wegfällt — aber nicht als Handgriff
+      // im Status-Menü, sonst verschleiert er einen Zahlungseingang. Wer das
+      // Opt-in `zahlungsRuecknahme` an einer neuen Stelle setzt, weicht die
+      // Trennung auf; Wächter 8 hält die Allow-List.
+      { symbol: "INVOICE_STATUS_REVERSAL_TRANSITIONS", module: "shared/domain/invoice-status.ts" },
+      { symbol: "statusesAllowedToReverseTo", module: "shared/domain/invoice-status.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Prueft: die Map deckt jeden Status ab, die Umkehrung driftet nicht,
+        // terminale Zustaende lassen niemanden heraus, keine handgeschriebene
+        // Statusliste ausserhalb der SSoT — und die Allow-List fuer das
+        // Ruecknahme-Opt-in `zahlungsRuecknahme`.
+        test: STATUS_WRITE_REGIME_GUARD,
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     // Task #1908 — die BASIS-Frage. Bewusst ein EIGENER Eintrag neben
     // `appointment-active-invoice`: jene Frage ist DIESE plus einen Join über
     // `invoice_line_items.appointment_id`. Verschiedene Antworttypen,
@@ -287,7 +349,17 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
       // … und das reine TS-Prädikat auf bereits geladenen Objekten. Alle drei
       // MÜSSEN im Gleichschritt bleiben; festgehalten in
       // `tests/unit/active-invoice-ssot.test.ts`.
-      { symbol: "isStorniertInvoice", module: "shared/domain/billing-pipeline.ts" },
+      //
+      // Hier stand bis zum Status-Umbau `isStorniertInvoice`. Der Umbau hat
+      // dieses Symbol auf `status === "storniert"` VERENGT — der Typ sagt seither
+      // nichts mehr über den Zustand. Damit war es die Negation der SQL-Form
+      // nicht mehr: eine Gutschrift wäre wieder als „zählt noch" durchgelaufen,
+      // also genau der Bug, den dieser Eintrag verhindern soll.
+      //
+      // Der Meta-Wächter konnte das nicht fangen: er prüft rein textuell, ob das
+      // Symbol existiert und exportiert wird — und das tat es weiterhin. Ein
+      // Katalog, der still falsch wird, ist schlimmer als keiner.
+      { symbol: "istAktionsfaehigeRechnung", module: "shared/domain/billing-pipeline.ts" },
     ],
     ownedLiterals: [],
     guards: [

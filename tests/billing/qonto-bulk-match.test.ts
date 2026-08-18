@@ -469,16 +469,26 @@ describe("Task #1712 — Teil-Aufhebung einer Sammelzahlung (partial-unmatch)", 
  * JEDE noch nicht mit einer echten Bank-Zahlung abgeglichene Rechnung anbieten.
  *
  * Vorher: nur `versendet` + „nicht Mitglied irgendeines Avis" — dadurch fielen
- * Rechnungen, deren Avis importiert (Status `avis_erhalten`), aber noch nicht mit
- * einer Zahlung verknüpft war, still aus dem Picker.
+ * Rechnungen, deren Avis importiert war, aber noch nicht mit einer Zahlung
+ * verknüpft, still aus dem Picker.
+ *
+ * ── Was der Status-Umbau an dieser Datei geändert hat ───────────────────
+ * Es gab hier ZWEI Wege, auf denen eine Rechnung aus dem Picker fiel: der
+ * Status `avis_erhalten` und die Avis-Mitgliedschaft. Der Status ist entfallen
+ * (der Avis ist eine Zuordnung, kein Zustand) — und mit ihm der Test, der nur
+ * ihn prüfte. Er hätte danach nicht mehr fehlschlagen können: sein Fixture wäre
+ * eine gewöhnliche `versendet`-Rechnung ohne Besonderheit gewesen, also
+ * dieselbe Aussage wie Punkt 3 unten. Ein Test, der nichts mehr messen kann,
+ * ist irreführender als keiner.
+ *
+ * Der Weg über die Avis-Mitgliedschaft besteht weiter — er ist der einzige, der
+ * noch etwas ausblenden könnte, und Punkt 1 deckt ihn ab.
  *
  *  1. Rechnung in einem NICHT an eine Transaktion gebundenen (importierten) Avis
- *     ist auswählbar.
- *  2. Rechnung mit Status `avis_erhalten` (ohne Avis-Mitgliedschaft) ist
- *     auswählbar.
- *  3. Storniert / bezahlt / Gutschrift (`stornorechnung`) sind ausgeblendet.
- *  4. Nachberechnung (`invoiceType='nachberechnung'`, versendet) ist auswählbar.
- *  5. Invariante gegen Doppelzuordnung: eine im Picker 1:1 gebundene Rechnung,
+ *     ist auswählbar. (Trägt seit dem Umbau die volle Aussage von #1859.)
+ *  2. Storniert / bezahlt / Gutschrift (`stornorechnung`) sind ausgeblendet.
+ *  3. Nachberechnung (`invoiceType='nachberechnung'`, versendet) ist auswählbar.
+ *  4. Invariante gegen Doppelzuordnung: eine im Picker 1:1 gebundene Rechnung,
  *     die zufällig auch in einem noch unabgeglichenen Avis liegt, gilt für den
  *     Avis→Zahlung-Abgleich nicht mehr als „offen".
  */
@@ -516,14 +526,17 @@ async function insertInvoiceWith(
     recipientName: "Test",
     grossAmountCents: opts.amountCents,
     netAmountCents: opts.amountCents,
-    status: (opts.status ?? "versendet") as "versendet" | "avis_erhalten" | "bezahlt" | "storniert",
+    status: (opts.status ?? "versendet") as "versendet" | "bezahlt" | "storniert",
   }).returning({ id: invoices.id });
   return row.id;
 }
 
 describe("Task #1859 — open-for-match zeigt alle noch nicht bank-abgeglichenen Rechnungen", () => {
   it("Rechnung in einem NICHT gebundenen (importierten) Avis ist auswählbar", async () => {
-    const inv = await insertInvoiceWith(seeded.customerId, { amountCents: 4200, suffix: "1859-IMP", status: "avis_erhalten" });
+    // `versendet` + Avis-Mitgliedschaft: genau die Lage, die #1859 auslöste.
+    // Vor dem Status-Umbau trug diese Zeile zusätzlich `avis_erhalten` — der
+    // Status ist weg, die Mitgliedschaft (und damit der Prüfgegenstand) bleibt.
+    const inv = await insertInvoiceWith(seeded.customerId, { amountCents: 4200, suffix: "1859-IMP", status: "versendet" });
     seeded.invoiceIds.push(inv);
     const adviceId = await insertUnmatchedAdvice();
     seeded.adviceIds.push(adviceId);
@@ -531,14 +544,6 @@ describe("Task #1859 — open-for-match zeigt alle noch nicht bank-abgeglichenen
 
     const res = await apiGet<Array<{ id: number }>>(`/api/billing/open-for-match`);
     expect(res.status).toBe(200);
-    expect(new Set(res.data.map(r => r.id)).has(inv)).toBe(true);
-  });
-
-  it("Rechnung mit Status avis_erhalten (ohne Avis-Mitgliedschaft) ist auswählbar", async () => {
-    const inv = await insertInvoiceWith(seeded.customerId, { amountCents: 3300, suffix: "1859-AV", status: "avis_erhalten" });
-    seeded.invoiceIds.push(inv);
-
-    const res = await apiGet<Array<{ id: number }>>(`/api/billing/open-for-match`);
     expect(new Set(res.data.map(r => r.id)).has(inv)).toBe(true);
   });
 
@@ -558,7 +563,7 @@ describe("Task #1859 — open-for-match zeigt alle noch nicht bank-abgeglichenen
   });
 
   it("Invariante: 1:1 gebundene Rechnung in unabgeglichenem Avis gilt nicht mehr als offen fürs Avis", async () => {
-    const inv = await insertInvoiceWith(seeded.customerId, { amountCents: 5500, suffix: "1859-DBL", status: "avis_erhalten" });
+    const inv = await insertInvoiceWith(seeded.customerId, { amountCents: 5500, suffix: "1859-DBL", status: "versendet" });
     seeded.invoiceIds.push(inv);
     const adviceId = await insertUnmatchedAdvice();
     seeded.adviceIds.push(adviceId);

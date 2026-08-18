@@ -99,8 +99,16 @@ describe("#1897 — Zahlungs-Badge in der Rechnungsliste", () => {
     expect(paymentBadgeLabel(ohne, euro)).toBe("Zahlung zugeordnet");
   });
 
-  it("(e) Teilzahlung altert ebenfalls nicht (entschieden, kein Bug)", () => {
-    const teil = invoice({ status: "teilweise_bezahlt", dueDate: "2026-01-02" });
+  it("(e) eine teilbezahlte Rechnung altert weiterhin nicht — jetzt ueber die Bindung", () => {
+    // Vorher trug den Fall der STATUS `teilweise_bezahlt`, der in den Cluster
+    // `teilzahlung` fiel und damit aus dem Wartelauf. Beides ist entfallen.
+    //
+    // Die Aussage bleibt trotzdem richtig, und zwar aus dem Grund, der schon
+    // immer der eigentliche war: das Geld ist da. Eine teilbezahlte Rechnung
+    // hat eine gebundene Zahlung, faellt damit in
+    // `zahlung_zugeordnet_pruefung` und altert nicht. Gemahnt wird nicht, was
+    // auf dem Konto liegt.
+    const teil = invoice({ status: "versendet", dueDate: "2026-01-02", hasBoundPayment: true });
     expect(invoiceAgingBucket(teil, "2026-06-30")).toBe("none");
   });
 });
