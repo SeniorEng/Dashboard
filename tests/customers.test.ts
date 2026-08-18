@@ -108,13 +108,31 @@ describe("KV-0: CRUD-Grundfunktionen", () => {
   });
 
   it("KV-0.2 – GET /api/customers/:id liefert einzelne Kundendetails", async () => {
+    // ── Warum der Fall seinen Kunden selbst anlegt ───────────────────────
+    // Er verlangte `length > 0`, legte aber nichts an — er hing an Kunden, die
+    // ANDERE Testdateien in der geteilten Leg-DB hinterlassen hatten. Damit war
+    // er von der Shard-Verteilung abhaengig: kommt eine Testdatei dazu,
+    // verschiebt sich, welche Dateien sich eine Datenbank teilen, und der Fall
+    // kippt ohne jeden Bezug zur Aenderung. Genau das ist hier passiert.
+    //
+    // CLAUDE.md fuehrt ihn als bekannten Flake („isoliert rot, im Vollauf meist
+    // gruen"). „Meist" ist fuer ein Gate keine Eigenschaft — der Fall braucht
+    // seine eigene Voraussetzung.
+    const angelegt = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      nachname: "KV02-" + uniqueId(),
+    }));
+    expect(angelegt.status).toBe(201);
+    createdCustomerIds.push(angelegt.data.id);
+
     const listRes = await apiGet<any[]>("/api/customers");
     expect(listRes.status).toBe(200);
     expect(listRes.data.length).toBeGreaterThan(0);
-    const firstCustomer = listRes.data[0];
-    const res = await apiGet<any>(`/api/customers/${firstCustomer.id}`);
+
+    // Gezielt DEN angelegten Kunden lesen, nicht `data[0]`: sonst prueft der
+    // Fall je nach Sortierung und Fremddaten ein anderes Objekt.
+    const res = await apiGet<any>(`/api/customers/${angelegt.data.id}`);
     expect(res.status).toBe(200);
-    expect(res.data.id).toBe(firstCustomer.id);
+    expect(res.data.id).toBe(angelegt.data.id);
     expect(res.data).toHaveProperty("vorname");
     expect(res.data).toHaveProperty("nachname");
   });
