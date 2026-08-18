@@ -34,15 +34,19 @@ import {
 type CustomerTab = "kunden" | "geburtstage";
 
 // Task #1194 — Lebenszyklus aktiver Kunden über die zentrale, reine
-// Klassifikation ableiten. `contractTerminated` wird auf den Vertragsstatus
-// abgebildet, den der Classifier erwartet.
+// Klassifikation ableiten. Der Vertragsstatus kommt unverändert aus der
+// Antwort — er ist die Eingabe, die der Classifier erwartet.
 type LifecycleFilter = "alle" | ActiveCustomerLifecycle;
 
 function customerLifecycle(c: CustomerWithAccess): ActiveCustomerLifecycle | null {
   return classifyActiveCustomerLifecycle({
     status: c.status,
     contractEnd: c.contractEnd,
-    contractStatus: c.contractTerminated ? "terminated" : null,
+    // Direkt durchgereicht. Vorher wurde hier aus einem Boolean ein
+    // Vertragsstatus REKONSTRUIERT (`contractTerminated ? "terminated" : null`)
+    // — und dabei konnte „paused" nicht entstehen, egal was in der Datenbank
+    // stand. Die Liste wies pausierte Kunden deshalb als „Laufend" aus.
+    contractStatus: c.contractStatus ?? null,
   });
 }
 

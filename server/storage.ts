@@ -13,6 +13,7 @@ import {
   monthlyServiceRecords,
   users,
 } from "@shared/schema";
+import type { BirthdayCustomerRow } from "./storage/customers-storage";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { eq } from "drizzle-orm";
 import { db, type DbOrTx, type Tx } from "./lib/db";
@@ -71,7 +72,8 @@ export interface IStorage {
 
   // Birthday queries
   getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; createdAt: Date }[]>;
-  getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null; createdAt: Date }[]>;
+  getCustomersWithBirthday(): Promise<BirthdayCustomerRow[]>;
+  getCustomersWithBirthdayByIds(ids: number[]): Promise<BirthdayCustomerRow[]>;
   getAdminUserIds(): Promise<number[]>;
   
   // Optimized search
@@ -189,7 +191,8 @@ class DatabaseStorage implements IStorage {
   getCustomersForEmployee = customersStorage.getCustomersForEmployee;
   getCustomersByIds = customersStorage.getCustomersByIds;
   getActiveEmployeesWithBirthday = customersStorage.getActiveEmployeesWithBirthday;
-  getActiveCustomersWithBirthday = customersStorage.getActiveCustomersWithBirthday;
+  getCustomersWithBirthday = customersStorage.getCustomersWithBirthday;
+  getCustomersWithBirthdayByIds = customersStorage.getCustomersWithBirthdayByIds;
   getAdminUserIds = customersStorage.getAdminUserIds;
   searchCustomers = customersStorage.searchCustomers;
   searchAppointmentsWithCustomers = customersStorage.searchAppointmentsWithCustomers;

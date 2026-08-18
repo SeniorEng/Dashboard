@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { isLaufenderAktiverKunde } from "@shared/domain/customers/lifecycle";
 import { z } from "zod";
 import { authService } from "../services/auth";
 import {
@@ -130,7 +131,10 @@ router.get("/me", asyncHandler("Benutzerinformationen konnten nicht geladen werd
         if (isAdmin) {
           const [employees, customers] = await Promise.all([
             storage.getActiveEmployeesWithBirthday(),
-            storage.getActiveCustomersWithBirthday(),
+            // Derselbe Filter wie in der Liste selbst (`routes/birthdays.ts`).
+            // Zaehlt der Badge mehr als die Liste zeigt, sucht der Bediener
+            // einen Geburtstag, den es nicht gibt.
+            storage.getCustomersWithBirthday().then(rows => rows.filter(isLaufenderAktiverKunde)),
           ]);
           for (const emp of employees) {
             if (emp.geburtsdatum && calculateDaysUntilBirthday(emp.geburtsdatum) <= 7) count++;

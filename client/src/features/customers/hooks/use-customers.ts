@@ -6,6 +6,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ActiveCustomerLifecycle } from "@shared/domain/customers/lifecycle";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -156,7 +157,7 @@ export function useCustomerLifecycleCounts() {
   return useQuery({
     queryKey: [...customerKeys.all, "lifecycle-counts"] as const,
     queryFn: async ({ signal }) => {
-      const result = await api.get<{ laufend: number; gekuendigt: number }>(
+      const result = await api.get<Record<ActiveCustomerLifecycle, number>>(
         "/admin/customers/lifecycle-counts",
         signal
       );

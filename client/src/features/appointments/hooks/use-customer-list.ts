@@ -11,7 +11,7 @@ export type CustomerWithAccess = Customer & {
   // Task #1194 — Vertragsende + Kündigungs-Status des jüngsten Vertrags für
   // die Lebenszyklus-Klassifikation (laufend vs. gekündigt) aktiver Kunden.
   contractEnd?: string | null;
-  contractTerminated?: boolean;
+  contractStatus?: string | null;
 };
 
 export function useCustomerList(status?: string) {

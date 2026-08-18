@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { ACTIVE_CUSTOMER_LIFECYCLES, type ActiveCustomerLifecycle } from "@shared/domain/customers/lifecycle";
 import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { birthdaysCache } from "../../services/cache";
@@ -208,22 +209,24 @@ router.get("/customers/budget-setup-missing-count", asyncHandler("Zählung konnt
   res.json({ count: result.total });
 }));
 
-// Task #1194 — Aufteilung der aktiven Kunden in „laufend" vs. „gekündigt"
+// Task #1194 — Aufteilung der aktiven Kunden nach Lebenszyklus
 // (gesamt, nicht nur die aktuelle Seite). Spiegelt die reine Klassifikation in
 // shared/domain/customers/lifecycle.ts. Speist die Filter-Chips + Split-Badge
 // der server-paginierten Admin-Kundenliste.
 router.get("/customers/lifecycle-counts", asyncHandler("Zählung konnte nicht geladen werden", async (_req: Request, res: Response) => {
-  const [laufendResult, gekuendigtResult] = await Promise.all([
-    customerManagementStorage.getCustomersPaginated(
-      { status: "aktiv", lifecycle: "laufend" },
+  // Ueber die Union iterieren, nicht aufzaehlen: ein vierter Lebenszyklus-Wert
+  // waere sonst in den Chips unsichtbar, obwohl die Klassifikation ihn kennt.
+  const werte = ACTIVE_CUSTOMER_LIFECYCLES;
+  const ergebnisse = await Promise.all(
+    werte.map(w => customerManagementStorage.getCustomersPaginated(
+      { status: "aktiv", lifecycle: w },
       { limit: 1, offset: 0 },
-    ),
-    customerManagementStorage.getCustomersPaginated(
-      { status: "aktiv", lifecycle: "gekuendigt" },
-      { limit: 1, offset: 0 },
-    ),
-  ]);
-  res.json({ laufend: laufendResult.total, gekuendigt: gekuendigtResult.total });
+    )),
+  );
+  const zaehlung = Object.fromEntries(
+    werte.map((w, i) => [w, ergebnisse[i].total]),
+  ) as Record<ActiveCustomerLifecycle, number>;
+  res.json(zaehlung);
 }));
 
 // Einzelkunden-Lesen läuft über `GET /api/customers/:id` (server/routes/customers.ts,

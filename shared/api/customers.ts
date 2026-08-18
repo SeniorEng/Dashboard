@@ -31,15 +31,21 @@ export interface CustomerListItem {
   budgetSetupMissing: boolean;
   /**
    * Task #1194 — Vertragsende des jüngsten Vertrags (`customer_contracts.contract_end`).
-   * `null` = unbefristet/laufend. Zusammen mit `contractTerminated` Basis für die
+   * `null` = unbefristet/laufend. Zusammen mit `contractStatus` Basis für die
    * Lebenszyklus-Klassifikation aktiver Kunden (laufend vs. gekündigt).
    */
   contractEnd: string | null;
   /**
    * Task #1194 — true, wenn der jüngste Vertrag den Status `terminated` hat.
-   * Aktiver Kunde mit `contractEnd` ODER `contractTerminated` ⇒ „gekündigt".
+   * Status des jüngsten Vertrags (`active | paused | terminated`), `null` wenn
+   * kein Vertrag existiert.
+   *
+   * Ersetzt das frühere `contractTerminated: boolean`. Das Boolean konnte
+   * „pausiert" nicht ausdrücken, weshalb ein pausierter Kunde in den Listen als
+   * „Laufend" erschien. Der Lebenszyklus braucht den Status, nicht seine
+   * Verdichtung.
    */
-  contractTerminated: boolean;
+  contractStatus: string | null;
   createdAt: string;
 }
 

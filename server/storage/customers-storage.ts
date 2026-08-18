@@ -16,7 +16,7 @@ import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appoin
 import type { SearchOptions } from "../storage";
 import { appointmentsRepo, customersRepo } from "../repos";
 
-export async function getCustomers(options?: { status?: string; search?: string }): Promise<(Customer & { versichertennummer: string | null; contractEnd: string | null; contractTerminated: boolean })[]> {
+export async function getCustomers(options?: { status?: string; search?: string }): Promise<(Customer & { versichertennummer: string | null; contractEnd: string | null; contractStatus: string | null })[]> {
   const conditions = [isNull(customers.deletedAt)];
 
   if (options?.status) {
@@ -81,7 +81,7 @@ async function enrichWithCurrentVersichertennummer<T extends { id: number }>(
  */
 async function enrichWithLatestContract<T extends { id: number }>(
   rows: T[],
-): Promise<(T & { contractEnd: string | null; contractTerminated: boolean })[]> {
+): Promise<(T & { contractEnd: string | null; contractStatus: string | null })[]> {
   if (rows.length === 0) return [];
   const ids = rows.map(r => r.id);
   const contractRows = await db
@@ -101,12 +101,19 @@ async function enrichWithLatestContract<T extends { id: number }>(
   for (const r of contractRows) {
     map.set(r.customerId, { contractEnd: r.contractEnd ?? null, contractStatus: r.contractStatus });
   }
+  // Vertragsstatus DURCHREICHEN statt auf ein Boolean verdichten.
+  //
+  // Vorher stand hier `contractTerminated: c?.contractStatus === "terminated"`.
+  // Damit war die Information „paused" schon vor der Klassifikation weg — der
+  // Lebenszyklus KONNTE einen pausierten Kunden gar nicht erkennen und wies ihn
+  // als „laufend" aus. Die Verdichtung war die eigentliche Ursache, nicht die
+  // Klassifikation.
   return rows.map(r => {
     const c = map.get(r.id);
     return {
       ...r,
       contractEnd: c?.contractEnd ?? null,
-      contractTerminated: c?.contractStatus === "terminated",
+      contractStatus: c?.contractStatus ?? null,
     };
   });
 }
@@ -209,7 +216,7 @@ export async function getAssignedCustomerIds(employeeId: number): Promise<number
   return ids;
 }
 
-export async function getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean; versichertennummer: string | null; contractEnd: string | null; contractTerminated: boolean })[]> {
+export async function getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean; versichertennummer: string | null; contractEnd: string | null; contractStatus: string | null })[]> {
   const assignedIds = await getAssignedCustomerIds(employeeId);
   if (assignedIds.length === 0) return [];
 
@@ -257,8 +264,43 @@ export async function getActiveEmployeesWithBirthday(): Promise<{ id: number; di
     ));
 }
 
-export async function getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null; createdAt: Date }[]> {
-  return await customersRepo.selectColumnsFrom({
+/**
+ * Kunden mit Geburtsdatum — samt der Eingaben für die Lebenszyklus-SSoT.
+ *
+ * ── Was das ERSETZT ─────────────────────────────────────────────────────
+ * `getActiveCustomersWithBirthday`. Der Name behauptete einen Aktiv-Filter, die
+ * Bedingung war aber nur `deleted_at IS NULL` — gekündigte, pausierte und auf
+ * `inaktiv` gesetzte Kunden waren allesamt enthalten. Wer den Namen las und ihm
+ * glaubte, irrte; genau das ist in den Geburtstags-Ansichten passiert.
+ *
+ * Die Funktion filtert jetzt bewusst NICHT selbst, sondern liefert `status`,
+ * `contractEnd` und `contractStatus`. Wer aktiv braucht, fragt die SSoT
+ * (`isLaufenderAktiverKunde`) — eine Bedingung, an einer Stelle, für beide
+ * Ansichten.
+ */
+export interface BirthdayCustomerRow {
+  id: number;
+  name: string;
+  geburtsdatum: string | null;
+  strasse: string | null;
+  hausnummer: string | null;
+  plz: string | null;
+  stadt: string | null;
+  createdAt: Date;
+  /** Zuweisungen — vom Benachrichtigungs-Dienst gebraucht, nicht von den Ansichten. */
+  primaryEmployeeId: number | null;
+  backupEmployeeId: number | null;
+  backupEmployeeId2: number | null;
+  /** Eingaben der Lebenszyklus-SSoT (`classifyActiveCustomerLifecycle`). */
+  status: string | null;
+  contractEnd: string | null;
+  contractStatus: string | null;
+}
+
+async function selectBirthdayCustomers(
+  zusatzBedingung?: ReturnType<typeof and>,
+): Promise<BirthdayCustomerRow[]> {
+  const rows = await customersRepo.selectColumnsFrom({
       id: customers.id,
       name: customers.name,
       geburtsdatum: customers.geburtsdatum,
@@ -266,12 +308,32 @@ export async function getActiveCustomersWithBirthday(): Promise<{ id: number; na
       hausnummer: customers.nr,
       plz: customers.plz,
       stadt: customers.stadt,
+      createdAt: customers.createdAt,
       primaryEmployeeId: customers.primaryEmployeeId,
       backupEmployeeId: customers.backupEmployeeId,
       backupEmployeeId2: customers.backupEmployeeId2,
-      createdAt: customers.createdAt,
+      status: customers.status,
     }, db)
-    .where(and(isNotNull(customers.geburtsdatum), isNull(customers.deletedAt)));
+    .where(and(isNotNull(customers.geburtsdatum), isNull(customers.deletedAt), zusatzBedingung));
+  return await enrichWithLatestContract(rows);
+}
+
+/** Alle nicht gelöschten Kunden mit Geburtsdatum (Admin-Sicht). */
+export async function getCustomersWithBirthday(): Promise<BirthdayCustomerRow[]> {
+  return await selectBirthdayCustomers();
+}
+
+/**
+ * Dieselbe Form, eingegrenzt auf eine ID-Menge (Mitarbeiter-Sicht).
+ *
+ * Die Eingrenzung ist AUSSCHLIESSLICH die übergebene ID-Menge — welche IDs das
+ * sind, entscheidet weiterhin `getAssignedCustomerIds`. Diese Funktion weiß
+ * nichts über Zuweisungen und darf es auch nicht: sonst wanderte das Scoping in
+ * zwei Funktionen.
+ */
+export async function getCustomersWithBirthdayByIds(ids: number[]): Promise<BirthdayCustomerRow[]> {
+  if (ids.length === 0) return [];
+  return await selectBirthdayCustomers(and(inArray(customers.id, ids)));
 }
 
 export async function getAdminUserIds(): Promise<number[]> {
