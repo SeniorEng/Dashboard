@@ -1,7 +1,11 @@
 # Rechnungsstatus — Ziel-Modell (Spezifikation)
 
 **Schritt 2 zum Aufräum-Task. Design-Doc, kein Code.** Erst nach Freigabe dieser
-Spec wird gebaut.
+Spec wurde gebaut.
+
+**Umgesetzt.** Was davon abweicht und was beim Bauen dazukam, steht im
+[Umsetzungs-Nachtrag](#9-umsetzungs-nachtrag-19082026) am Ende — die Spec selbst
+ist der Stand vor der Umsetzung und wurde nicht rückwirkend geglättet.
 
 Grundlage ist die Bestandsaufnahme in [`statusmodell-karte.md`](./statusmodell-karte.md)
 — dort steht, was es heute gibt und wo es sich widerspricht. Hier steht, was es
@@ -431,3 +435,75 @@ Rest.
 - **Wie viele gestellte Rechnungen auf Produktion betroffen sind.** Alle Zahlen
   hier stammen aus der Referenz-Kopie vom 13.08.; vor dem Migrations-Lauf ist
   auf Prod zu zählen.
+
+---
+
+## 9. Umsetzungs-Nachtrag (19.08.2026)
+
+Gebaut in PR #108, nachgezogen in #111/#112. Das Modell aus Abschnitt 1 ist
+unverändert umgesetzt. Hier steht nur, was davon abweicht oder beim Bauen
+dazukam — damit diese Spec nicht mehr verspricht, als in `main` steht.
+
+### 9.1 Korrektur in dieser Spec
+
+Die Überschrift in Abschnitt 1 sagt „zwei Badges". Es sind **drei**; die Tabelle
+darunter listet sie korrekt (Teilweise bezahlt · Überfällig · Versandt).
+
+### 9.2 „Migration vor Deploy" ist keine Anweisung mehr, sondern eine Bedingung
+
+Abschnitt 5 nennt die Reihenfolge — Migration zuerst, dann Deploy —, weil der
+neue Code die Altwerte nicht mehr lesen kann. Am 18.08.2026 lief der Publish
+trotzdem **28 Minuten vor** der Migration. 54 Zeilen trugen weiter
+`avis_erhalten`; `parseInvoiceStatus` warf, und der Wurf riss nicht die einzelne
+Zeile mit, sondern den ganzen Lesepfad: Rechnungsliste und Cockpit-Board
+antworteten rund eine Stunde mit 500.
+
+Die Reihenfolge steht deshalb nicht mehr nur hier. Ein Boot-Gate
+(`server/startup/assert-invoice-status-domain.ts`, PR #112) schickt vor dem
+Serving jeden vorkommenden `invoices.status`-Wert durch `parseInvoiceStatus` und
+beendet den Prozess bei einem Treffer — der Deploy schlägt fehl, die alte
+Version bleibt online.
+
+### 9.3 Verfeinerungen aus dem Review
+
+Elf bestätigte Blocker über zwei Runden. Drei betreffen das Modell selbst:
+
+**Die Zahlungs-Rücknahme brauchte eine eigene Übergangs-Map.** Abschnitt 4
+beschreibt ein Übergangs-Regime für alle Schreibpfade. Beim Vereinheitlichen
+zeigte sich, dass die Map nur den **manuellen** Weg beschrieb: der Qonto-Unmatch
+(`bezahlt → versendet`) fiel durch. Der Übergang ist legitim, wenn eine
+gebundene Zahlung wegfällt — aber nicht als Handgriff im Status-Menü, sonst
+verschleiert er einen Zahlungseingang. Umgesetzt als eigene, benannte
+`INVOICE_STATUS_REVERSAL_TRANSITIONS` mit ausdrücklichem Opt-in, aus der beide
+Rücknahme-Pfade ableiten.
+
+**`isStorniertInvoice` ist auf den Status verengt worden**, weil der Typ nach
+dem Umbau nichts mehr über den Zustand sagt. Der TS-Zwilling von
+`activeInvoiceCondition()` heißt seither `istAktionsfaehigeRechnung`; die
+SSoT-Registry ist entsprechend nachgezogen. Wer „zählt diese Rechnung noch?"
+fragt, greift zu dieser Funktion, nicht mehr zu `isStorniertInvoice`.
+
+**`resolveInvoicePaymentStatus` liefert nur noch `"bezahlt" | null`** — die
+Unterzahlung setzt keinen Status mehr (Abschnitt 3). Damit bedeutet `null` seit
+dem Umbau **zwei** Dinge: Unterzahlung (normal) und Über-Toleranz-Überzahlung
+(Prüffall). Wer weiter auf `status === null` verzweigt, wirft beide zusammen und
+meldet jede Teilzahlung als Mismatch. Die Schreibpfade verzweigen deshalb über
+`classification.result`, nicht über den Status.
+
+**Storno-Dokumente bleiben im Cluster `storniert`.** Der Status `abgeschlossen`
+(7.1) beschreibt das Dokument; der Cluster gruppiert die Rechnungsliste und
+trägt je Gruppe eine €-Summe. Storno-Dokumente tragen negative Beträge — in
+„Bezahlt — abgeschlossen" hätten sie die Summe um −15.884,35 € verfälscht,
+während „Stornierte Rechnungen und Gutschriften" die Gegenbuchung verloren
+hätte, die sich dort gegen die Originale aufhebt.
+
+### 9.4 Nicht Gegenstand dieser Spec: der Leistungsnachweis-Fingerprint
+
+Der `leistungsnachweisDataFingerprint` (Drift-Anzeige) wird hier nirgends
+geregelt und ist auch nicht Teil des Status-Modells. Er wurde parallel als
+**Stopgap** umgesetzt: `istLeistungsnachweisDrift` (`server/routes/billing.ts`)
+vergleicht den gespeicherten Wert gegen **beide** Live-Fingerprints und meldet
+Drift nur, wenn er zu keinem passt — kein Backfill, kein gespeicherter Wert wird
+angefasst. Grund: eine korrigierte Formel allein träfe Rechnungen, die mit dem
+alten Wert eingefroren wurden. Die Auflösung (Formel korrigieren + Backfill) ist
+ein eigener Task; sie gehört nicht in diese Spec.
