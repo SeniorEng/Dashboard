@@ -116,9 +116,21 @@ export async function stornoInvoiceCascade(
       vatAmountCents: -locked.vatAmountCents,
       grossAmountCents: -locked.grossAmountCents,
       vatRate: locked.vatRate,
-      // T10/BL-12: Stornorechnung startet als Entwurf, nicht als versendet —
-      // der Versand-Pfad setzt status erst nach erfolgreicher Zustellung.
-      status: "entwurf",
+      // Storno-Dokumente entstehen FERTIG (`docs/rechnungsstatus-zielmodell.md`).
+      //
+      // Vorher stand hier `entwurf` — mit der Begruendung, der Versand-Pfad
+      // setze den Status nach der Zustellung. Nur: dieser Pfad hat sie nie
+      // erreicht. In Produktion standen 114 Storno-Dokumente auf `entwurf`,
+      // ausnahmslos mit `sent_at = NULL` und gesetztem `pdf_path`. Sie waren
+      // nie Entwuerfe — es gab bloss kein Wort fuer ihren Zustand.
+      //
+      // Ein Storno-Dokument ist die Belegseite eines Vorgangs, der am ORIGINAL
+      // verbucht ist (dort steht `storniert`). Es ist kein Entwurf (nichts zu
+      // entscheiden), wird nie bezahlt (es fordert nichts) und wird nie
+      // storniert (es IST der Storno).
+      //
+      // Ob es verschickt wurde, sagt `sent_at` als Badge — kein Zustandswechsel.
+      status: "abgeschlossen",
       stornierteRechnungId: rootInvoiceId,
       // Task #562 — Storno-Rechnung spiegelt die Pflichtfelder der
       // Originalrechnung. Fälligkeit wird auf das aktuelle Datum + N Tage

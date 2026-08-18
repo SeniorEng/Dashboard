@@ -112,6 +112,7 @@ function CustomersContent({ qs, year, month }: { qs: string; year: number; month
           <p className="text-xs text-muted-foreground" data-testid="text-active-breakdown">
             Davon {data.activeBreakdown.laufend.toLocaleString("de-DE")} laufend
             {" · "}
+            {data.activeBreakdown.pausiert.toLocaleString("de-DE")} pausiert ·{" "}
             {data.activeBreakdown.gekuendigt.toLocaleString("de-DE")} gekündigt
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs" data-testid="funnel-conversion-rates">

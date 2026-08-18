@@ -58,7 +58,7 @@ import {
 } from "../storage/billing-storage";
 import { stornoInvoiceCascade } from "../services/invoice-storno";
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
-import { isStorniertInvoice } from "@shared/domain/billing-pipeline";
+import { istAktionsfaehigeRechnung } from "@shared/domain/billing-pipeline";
 import { readBillingEconomics } from "../storage/billing/economics-reader";
 import { readBillingTermine } from "../storage/billing/termine-reader";
 import { auditService } from "../services/audit";
@@ -98,6 +98,9 @@ import {
   doubleBeihilfePdfs,
   buildCustomerPostAddress,
 } from "../services/invoice-delivery";
+import { invoiceBadges } from "@shared/domain/invoice-badges";
+import { parseInvoiceStatus } from "@shared/schema/billing";
+import { statusesAllowedToTransitionTo } from "@shared/domain/invoice-status";
 
 const router = Router();
 router.use(requireAuth);
@@ -232,12 +235,10 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   // `getInvoicePaymentTotals` WIE VIEL gebunden ist, `classifyPaymentDifference`
   // rechnet die Differenz. Hier wird nichts nachgerechnet.
   const openInvoices = invoices.filter(inv =>
-    inv.status !== "bezahlt" && !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }),
+    inv.status !== "bezahlt" && istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }),
   );
-  if (openInvoices.length === 0) {
-    res.json(invoices);
-    return;
-  }
+  // Kein frueher Ausstieg mehr: auch ohne offene Rechnung tragen die Zeilen
+  // Badges (z.B. `versandt` auf einem Storno-Dokument).
 
   const openIds = openInvoices.map(inv => inv.id);
   const [claimed, totals] = await Promise.all([
@@ -247,7 +248,35 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
 
   const openIdSet = new Set(openIds);
   const enriched = invoices.map(inv => {
-    if (!openIdSet.has(inv.id)) return inv;
+    if (!openIdSet.has(inv.id)) {
+      // Nicht offen — also keine Zahlungs-Anreicherung. BADGES bekommt die
+      // Zeile trotzdem, denn sie sind nicht an „offen" gebunden.
+      //
+      // Das war der Fehler der ersten Fassung: Badges entstanden nur im
+      // Zweig darunter, und `istVersandt` feuert ausschliesslich fuer
+      // `stornorechnung` — eine Kombination, die es hier per Definition nicht
+      // gibt (`istAktionsfaehigeRechnung` schliesst Gutschriften aus). Das
+      // Badge war damit unerreichbar, und die Begruendung „ob ein
+      // Storno-Dokument verschickt wurde, sagt das Badge" trug nicht.
+      return {
+        ...inv,
+        badges: invoiceBadges({
+          status: parseInvoiceStatus(inv.status),
+          invoiceType: inv.invoiceType,
+          grossAmountCents: inv.grossAmountCents,
+          // Ohne Anreicherung ist ueber gebundene Zahlungen nichts bekannt.
+          // `bezahlt`/`storniert` schliessen das Teilzahlungs-Badge ohnehin aus,
+          // und `ueberfaellig` verlangt `versendet` — beide Badges koennen hier
+          // also nicht falsch-positiv werden. Erreichbar ist `versandt`.
+          paidCents: 0,
+          hasBoundPayment: false,
+          dueDate: inv.dueDate ?? null,
+          sentAt: inv.sentAt ? new Date(inv.sentAt).toISOString().slice(0, 10) : null,
+          billingType: inv.billingType,
+          asOfIso: todayISO(),
+        }),
+      };
+    }
 
     const hasBoundPayment = claimed.has(inv.id);
     const t = totals.get(inv.id) ?? { paidCents: 0, skontoCents: 0 };
@@ -271,13 +300,36 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
             paymentDifferenceResult: cls.result,
           }
         : {}),
-      // Bestandsvertrag aus Task #1822: `teilweise_bezahlt` trägt `paidCents`
-      // und `openAmountCents` — UNABHÄNGIG davon, ob eine Bindung vorliegt.
-      // (Ohne diese Zeile verlor eine teilbezahlte Rechnung ohne gebundene
-      // Zahlung ihre Beträge; genau das hat Fall (d) gefangen.)
-      ...(inv.status === "teilweise_bezahlt"
+      // Bestandsvertrag aus Task #1822: eine TEILBEZAHLTE Rechnung trägt
+      // `paidCents` und `openAmountCents` — unabhängig davon, ob eine Bindung
+      // vorliegt. (Ohne diese Zeile verlor eine teilbezahlte Rechnung ohne
+      // gebundene Zahlung ihre Beträge.)
+      //
+      // Die Bedingung fragt jetzt die ZAHLUNGSSUMME statt einen Status: seit
+      // dem Umbau gibt es `teilweise_bezahlt` als Status nicht mehr, die Frage
+      // dahinter aber schon.
+      ...(cls.result === "underpaid" && t.paidCents > 0
         ? { paidCents: t.paidCents, openAmountCents: cls.differenceCents }
         : {}),
+      // Die Badges — SERVERSEITIG berechnet. Die Überfälligkeits-Regel trägt
+      // die einzige verbliebene Empfänger-Unterscheidung; rechnete der Client
+      // nach, wäre sie sofort wieder zweimal formuliert.
+      badges: invoiceBadges({
+        status: parseInvoiceStatus(inv.status),
+        invoiceType: inv.invoiceType,
+        grossAmountCents: inv.grossAmountCents,
+        paidCents: t.paidCents,
+        // Dieselben Eingaben wie `classifyPaymentDifference` oben — sonst
+        // beantworten Badge und Restbetrags-Zahl dieselbe Frage verschieden.
+        skontoCents: t.skontoCents,
+        // #1897: eine gebundene Zahlung stoppt das Altern. Ohne diese Zahl
+        // haette das Badge den Bug wiederholt, den #1897 behoben hat.
+        hasBoundPayment,
+        dueDate: inv.dueDate ?? null,
+        sentAt: inv.sentAt ? new Date(inv.sentAt).toISOString().slice(0, 10) : null,
+        billingType: inv.billingType,
+        asOfIso: todayISO(),
+      }),
     };
   });
   res.json(enriched);
@@ -285,15 +337,18 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
 
 // Task #1710/#1859 — Rechnungen, die für die manuelle (Mehrfach-)Zuordnung zu
 // einer Qonto-Zahlung offen sind: JEDE Rechnung, die noch nicht mit einer echten
-// Bank-Zahlung abgeglichen ist. Das umfasst `versendet` UND `avis_erhalten`
-// (importiertes, aber noch nicht mit einer Zahlung abgeglichenes Avis). Entwurf,
+// Bank-Zahlung abgeglichen ist — also `versendet`, einschliesslich der
+// Rechnungen, deren Avis zwar importiert, aber noch nicht mit einer Zahlung
+// abgeglichen ist. (Die trugen vor dem Status-Umbau `avis_erhalten` und fielen
+// dadurch aus dem Picker; der Status ist entfallen, die Zusicherung bleibt.)
+// Entwurf,
 // bezahlt und storniert fallen raus; Gutschriften (`stornorechnung`) ebenso über
 // das geteilte Storno-Prädikat. „Beansprucht" = 1:1-Match ODER Mitglied eines an
 // eine Transaktion gebundenen Avis (getClaimedInvoiceIds, SSoT). Verhindert, dass
 // dieselbe Rechnung zwei Zahlungen zufällt.
 router.get("/open-for-match", asyncHandler("Offene Rechnungen konnten nicht geladen werden", async (_req, res) => {
-  const candidates = (await storage.getInvoices({ statuses: ["versendet", "avis_erhalten"] }))
-    .filter(inv => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }));
+  const candidates = (await storage.getInvoices({ statuses: statusesAllowedToTransitionTo("bezahlt") }))
+    .filter(inv => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }));
   const claimed = await qontoStorage.getClaimedInvoiceIds(db, candidates.map(inv => inv.id));
   res.json(candidates.filter(inv => !claimed.has(inv.id)));
 }));
@@ -990,7 +1045,7 @@ router.post("/discard-drafts", asyncHandler("Entwürfe konnten nicht verworfen w
 }));
 
 // Task #1376 — Sammel-Löschen: löscht ausschließlich Entwürfe (GoBD).
-// Finalisierte Rechnungen (versendet/avis_erhalten/bezahlt/storniert) und
+// Finalisierte Rechnungen (versendet/bezahlt/storniert/abgeschlossen) und
 // Storno-Belege werden defensiv per WHERE-Guard übersprungen und im Ergebnis
 // als "skipped" gemeldet — niemals hart gelöscht (die werden storniert).
 router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht werden", async (req, res) => {
@@ -1062,8 +1117,10 @@ router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht wer
   res.json(response);
 }));
 
-// Task #1376 — Sammel-Statuswechsel auf "entwurf"/"versendet"/"avis_erhalten"/
-// "bezahlt". "storniert" ist NICHT erlaubt (Sammel-Storno ist eine separate
+// Task #1376 — Sammel-Statuswechsel auf "versendet"/"bezahlt". "entwurf" ist
+// seit #66 kein Ziel mehr (kein Rückweg aus einem gestellten Beleg),
+// "avis_erhalten" seit dem Status-Umbau nicht mehr vorhanden.
+// "storniert" ist NICHT erlaubt (Sammel-Storno ist eine separate
 // Aufgabe und erfordert die Cascade-Logik aus `PATCH /:id/status`). Pro Rechnung
 // gilt dieselbe Übergangs-SSoT wie der Einzel-Statuswechsel; ungültige Übergänge
 // werden übersprungen und gemeldet. Audit analog zum Einzelpfad.
@@ -1075,7 +1132,8 @@ router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht wer
 router.post("/bulk-status", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
   const parsed = z.object({
     invoiceIds: z.array(z.number().int().positive()).min(1).max(200),
-    status: z.enum(["versendet", "avis_erhalten", "bezahlt"]),
+    // `avis_erhalten` ist als Ziel entfallen — der Avis ist kein Status mehr.
+    status: z.enum(["versendet", "bezahlt"]),
   }).safeParse(req.body);
   if (!parsed.success) {
     throw badRequest(fromError(parsed.error).toString());
@@ -1589,7 +1647,7 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
   // Druck-Bündel raus — der Admin will den postalischen Stapel für die
   // Kasse drucken, nicht Storno-Belege.
   const printable = allInvoices
-    .filter(inv => !isStorniertInvoice({ status: inv.status, invoiceType: inv.invoiceType }))
+    .filter(inv => istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }))
     .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
 
   if (printable.length === 0) {
@@ -2508,7 +2566,25 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
 
-  if (invoice.status !== "entwurf") {
+  // Zwei zulaessige Ausgangslagen, und sie meinen Verschiedenes:
+  //
+  //  - `entwurf` (normale Rechnung): das Markieren IST der Uebergang. Der
+  //    Status wandert nach `versendet`, die Ausgabe-Marke entsteht.
+  //  - `abgeschlossen` (Storno-DOKUMENT): das Dokument ist fertig und bleibt
+  //    es. Hier wird NUR `sent_at` gesetzt — dass eine Gutschrift verschickt
+  //    wurde, ist ein Kennzeichen am Beleg, kein Zustandswechsel. Sichtbar
+  //    ueber das Badge `versandt`.
+  //
+  // Der zweite Fall ersetzt den Weg, den der Status-Umbau zugeschuettet hatte:
+  // vorher standen Storno-Dokumente auf `entwurf` und liefen deshalb durch den
+  // ersten Zweig. Mit `abgeschlossen` (und `[]` als Ausgaengen) waere die
+  // Faehigkeit ersatzlos entfallen.
+  const istStornoDokument = invoice.invoiceType === "stornorechnung";
+  if (istStornoDokument) {
+    if (invoice.status !== "abgeschlossen") {
+      throw badRequest(`Storno-Dokument hat Status "${invoice.status}" — erwartet wird "abgeschlossen".`);
+    }
+  } else if (invoice.status !== "entwurf") {
     throw badRequest(`Rechnung hat Status "${invoice.status}" — nur Entwürfe können manuell als versendet markiert werden.`);
   }
 
@@ -2534,10 +2610,37 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
   schedulePdfPersistInBackground(id);
 
   const updated = await withAudit(async (tx, audit) => {
-    const u = await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
-    await tx.update(invoicesTable)
-      .set({ sentAt: new Date() })
-      .where(eq(invoicesTable.id, id));
+    let u: typeof invoicesTable.$inferSelect;
+    if (istStornoDokument) {
+      // KEIN Statuswechsel — das Dokument ist `abgeschlossen` und hat per
+      // Uebergangs-SSoT keine Ausgaenge. Nur die Marken.
+      //
+      // Die Zeile wird unter FOR UPDATE gelesen, nicht nackt: der Normal-Zweig
+      // bekommt diese Serialisierung von `updateInvoiceStatusTx` geschenkt, und
+      // dieser Zweig darf nicht schwaecher sein. Ohne sie war er zudem
+      // check-then-write — verschwand die Zeile zwischen Vorab-Guard und
+      // Transaktion, lief `{...undefined}` durch und der Endpunkt antwortete
+      // 200 samt Audit-Eintrag fuer ein Dokument, das es nicht mehr gab.
+      const [gesperrt] = await tx.select().from(invoicesTable)
+        .where(eq(invoicesTable.id, id)).for("update");
+      if (!gesperrt) throw notFound("Rechnung nicht gefunden");
+      u = gesperrt;
+
+      await tx.update(invoicesTable)
+        .set({
+          // `COALESCE`: ein zweites Markieren verschiebt das Versanddatum nicht.
+          sentAt: sql`COALESCE(${invoicesTable.sentAt}, now())` as unknown as Date,
+          // Auch die AUSGABE-Marke. Sie beantwortet „wurde dieser Beleg je
+          // ausgegeben?" — und ein verschicktes Storno-Dokument wurde das.
+          // Ohne sie bliebe es dauerhaft „nie ausgegeben", waehrend es beim
+          // Empfaenger liegt. (Der Normal-Zweig bekommt sie im Engpass.)
+          issuedAt: sql`COALESCE(${invoicesTable.issuedAt}, now())` as unknown as Date,
+        })
+        .where(eq(invoicesTable.id, id));
+    } else {
+      // Der Engpass setzt `sentAt` und `issuedAt` selbst, beide per `COALESCE`.
+      u = await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
+    }
     audit.record({
       userId: req.user!.id,
       action: "invoice_marked_sent_manually",
@@ -2548,12 +2651,22 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
         customerId: invoice.customerId,
         billingType: invoice.billingType,
         oldStatus: invoice.status,
-        newStatus: "versendet",
+        // Beim Storno-Dokument findet KEIN Uebergang statt — nur die
+        // Versand-Marke entsteht. Ein Audit-Eintrag, der `newStatus:
+        // "versendet"` behauptet, waere ein GoBD-Nachweis fuer einen Vorgang,
+        // den es nicht gab.
+        newStatus: istStornoDokument ? invoice.status : "versendet",
+        nurVersandMarke: istStornoDokument,
         reason: "manual_mark_sent_no_ti",
       },
       ipAddress: req.ip,
     });
-    return { ...u, sentAt: new Date() };
+    // Den tatsaechlich gespeicherten Wert zurueckgeben, nicht „jetzt": bei
+    // einem zweiten Markieren haelt `COALESCE` das Originaldatum, und die
+    // Antwort soll nicht etwas anderes melden als die Datenbank.
+    const [frisch] = await tx.select({ sentAt: invoicesTable.sentAt })
+      .from(invoicesTable).where(eq(invoicesTable.id, id));
+    return { ...u, sentAt: frisch.sentAt };
   }, { faults: readTestFaults(req) });
 
   res.json(updated);
@@ -2569,9 +2682,17 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
 // werden konnte — dieselbe Nummer fuer zwei Dokumente.
 //
 // Bewusst eng gehalten:
-//  - nur aus `versendet` (spaetere Status implizieren Folgewirkungen; ein
-//    Zahlungsbezug hebt ohnehin auf `teilweise_bezahlt`/`bezahlt` und faellt
-//    damit schon durch diese Bedingung),
+//  - nur aus `versendet` (spaetere Status implizieren Folgewirkungen),
+//  - und NICHT, wenn eine Zahlung gebunden ist. Diese Bedingung stand hier
+//    frueher NICHT, weil sie nicht noetig war: ein Zahlungsbezug hob die
+//    Rechnung auf `teilweise_bezahlt` oder `bezahlt` und fiel damit schon
+//    durch die Status-Bedingung. Seit die Teilzahlung KEINEN Status mehr
+//    schreibt, traegt dieses Argument nicht mehr — eine Rechnung mit
+//    gebundener Teilzahlung steht auf `versendet` und waere hier
+//    durchgelaufen. Sie waere damit zum Entwurf geworden, waehrend Geld auf
+//    sie gebucht ist: der Zahlungseingang haenge an einem Dokument, das es
+//    formal nicht gibt, und liesse sich auch keiner anderen Rechnung mehr
+//    zuordnen.
 //  - NIE auf einer Stornorechnung: das Gegendokument einer Storno-Kette darf
 //    nicht in den Entwurfsstatus zurueckfallen, waehrend das Original
 //    `storniert` bleibt,
@@ -2605,6 +2726,17 @@ router.post("/:id/revoke-sent-mark", asyncHandler("Markierung konnte nicht zurü
     throw badRequest(
       "Eine Stornorechnung kann nicht zurückgenommen werden — sie ist das Gegendokument "
       + "einer bereits stornierten Rechnung.",
+    );
+  }
+
+  // Siehe Kopfkommentar: die Status-Bedingung allein reicht seit dem
+  // Status-Umbau nicht mehr aus, um Rechnungen mit Geldeingang fernzuhalten.
+  const gebunden = await qontoStorage.getClaimedInvoiceIds(db, [id]);
+  if (gebunden.has(id)) {
+    throw badRequest(
+      "Auf diese Rechnung ist bereits eine Zahlung gebucht — die Ausgabe-Markierung "
+      + "kann nicht zurückgenommen werden. Zuerst die Zahlungszuordnung aufheben, "
+      + "sonst der Weg Storno + Neuausstellung.",
     );
   }
 
@@ -2731,10 +2863,10 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
       schedulePdfPersistInBackground(invoiceId);
 
       await withAudit(async (tx, audit) => {
+        // `updateInvoiceStatusTx` setzt `sent_at` selbst (per `COALESCE`).
+        // Das fruehere Direkt-Update daneben war nicht nur ueberfluessig — es
+        // haette den Ueberschreib-Schutz an dieser Stelle wieder ausgehebelt.
         await updateInvoiceStatusTx(tx, invoiceId, "versendet", req.user!.id);
-        await tx.update(invoicesTable)
-          .set({ sentAt: new Date() })
-          .where(eq(invoicesTable.id, invoiceId));
         audit.record({
           userId: req.user!.id,
           action: "invoice_marked_sent_manually",
@@ -2992,10 +3124,9 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
     try {
       schedulePdfPersistInBackground(inv.id);
       await withAudit(async (tx, audit) => {
+        // Siehe send-bulk: die Versand-Marke gehoert an den Engpass, nicht
+        // daneben.
         await updateInvoiceStatusTx(tx, inv.id, "versendet", req.user!.id);
-        await tx.update(invoicesTable)
-          .set({ sentAt: new Date() })
-          .where(eq(invoicesTable.id, inv.id));
         // Task #1403: Sammeldruck markiert ALLE enthaltenen Entwürfe einheitlich
         // manuell als versendet (Pflegekassen + Selbstzahler) — kein realer
         // E-Mail-Versand, kein Selbstzahler-Spezial-Pfad.

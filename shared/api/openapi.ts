@@ -221,7 +221,7 @@ export const CustomerListItemSchema = component(
     rechnungAnKunde: z.boolean(),
     budgetSetupMissing: z.boolean(),
     contractEnd: nullableString(),
-    contractTerminated: z.boolean(),
+    contractStatus: z.string().nullable(),
     createdAt: z.string(),
   }),
 );

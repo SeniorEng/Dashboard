@@ -10,7 +10,7 @@
  *    (`shared/domain/billing-pipeline.ts`) — offen / dokumentiert /
  *    „unterschrieben" (im Termine-Vertrag „nachgewiesen").
  *  - Stufe NACH Rechnung: `assignInvoiceStage` über den Rechnungsstatus
- *    (rechnung_erstellt / versendet / avis_erhalten / bezahlt).
+ *    (rechnung_erstellt / versendet / bezahlt).
  *  - „dokumentiert & unterschrieben": `documentedAndSignedSqlRaw`
  *    (= SQL-Spiegel von `isAppointmentDocumentedAndSigned`).
  *
@@ -34,6 +34,7 @@ import {
 } from "@shared/domain/billing-pipeline";
 import { attributeAppointmentToEmployees } from "@shared/domain/appointment-attribution";
 import type { AppointmentStatus } from "@shared/domain/appointments";
+import { parseInvoiceStatus } from "@shared/schema/billing";
 import type {
   BillingTermineResponse,
   BillingTermineAppointment,
@@ -49,7 +50,6 @@ const ALL_STAGES: BillingTermineStage[] = [
   "nachgewiesen",
   "rechnung_erstellt",
   "versendet",
-  "avis_erhalten",
   "bezahlt",
   "kunde_nicht_angetroffen",
 ];
@@ -175,10 +175,10 @@ export async function readBillingTermine(
       }
     } else if (apptAssignment.kind === "excluded" && apptAssignment.reason === "invoiced") {
       const invAssignment = assignInvoiceStage({
-        status: String(raw.invoice_status),
+        status: parseInvoiceStatus(String(raw.invoice_status)),
         invoiceType: String(raw.invoice_type),
       });
-      // Späte Stufen (rechnung_erstellt/versendet/avis_erhalten/bezahlt) sind
+      // Späte Stufen (rechnung_erstellt/versendet/bezahlt) sind
       // namensgleich mit den Termine-Stufen; Side („storniert") ist hier durch
       // den Join bereits ausgeschlossen.
       if (invAssignment.kind === "stage") {

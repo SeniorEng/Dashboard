@@ -9,6 +9,7 @@ import {
   isAgingCluster,
 } from "@shared/domain/billing-pipeline";
 import { PDF_PENDING_THRESHOLD_MS } from "./constants";
+import { parseInvoiceStatus } from "@shared/schema/billing";
 
 export function formatAmount(cents: number): string {
   return formatEuroDE(cents);
@@ -55,7 +56,7 @@ function todayIso(): string {
 // Typ). Delegiert an die SSoT `assignInvoiceActionCluster` (shared).
 export function invoiceActionCluster(inv: InvoiceItem): InvoiceActionCluster {
   return assignInvoiceActionCluster({
-    status: inv.status,
+    status: parseInvoiceStatus(inv.status),
     invoiceType: inv.invoiceType,
     billingType: inv.billingType,
     // #1897 — die Zahlungsbindung kommt vom Listen-Endpunkt (GET /api/billing/).

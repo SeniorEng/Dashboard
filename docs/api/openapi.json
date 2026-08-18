@@ -842,8 +842,9 @@
             "nullable": true,
             "type": "string"
           },
-          "contractTerminated": {
-            "type": "boolean"
+          "contractStatus": {
+            "nullable": true,
+            "type": "string"
           },
           "createdAt": {
             "type": "string"
@@ -950,7 +951,7 @@
           "rechnungAnKunde",
           "budgetSetupMissing",
           "contractEnd",
-          "contractTerminated",
+          "contractStatus",
           "createdAt"
         ],
         "type": "object"

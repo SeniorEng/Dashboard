@@ -4,7 +4,8 @@
  * Die Schreib-Seite (Status aus dem kumulierten Zahlungsstand, Task #1822) war
  * bereits korrekt; die Lese-Seite kannte die Zahlungsbindung nicht. Folge im
  * Betrieb: eine Rechnung mit gebundener, aber noch nicht freigegebener Zahlung
- * blieb auf `versendet`/`avis_erhalten`, alterte weiter und wurde als
+ * blieb auf `versendet` (vor dem Status-Umbau: auch `avis_erhalten`), alterte
+ * weiter und wurde als
  * „überfällig" gezählt — die Abrechnung mahnte Geld an, das auf dem Konto lag.
  *
  * Geprüft:
@@ -13,11 +14,12 @@
  *       Monats altert weiter — sonst würde der Test auch dann grün, wenn das
  *       Aging pauschal abgeschaltet wäre.
  *   (b) Listen-Endpunkt: liefert Bindung, gebundenen Betrag und Differenz für
- *       JEDE offene Rechnung — nicht nur für `teilweise_bezahlt`.
+ *       JEDE offene Rechnung — nicht nur für teilbezahlte.
  *   (c) Ungebundene offene Rechnung trägt `hasBoundPayment: false` (der Client
  *       soll nicht zwischen „nicht gebunden" und „Feld fehlt" raten müssen).
  *   (d) Der Bestandsvertrag aus Task #1822 (`paidCents`/`openAmountCents` bei
- *       `teilweise_bezahlt`) bleibt unverändert bedient.
+ *       Teilzahlung) bleibt bedient — jetzt an der ZAHLUNGSSUMME festgemacht
+ *       statt am entfallenen Status `teilweise_bezahlt`.
  *
  * Die Cluster-Zuordnung selbst (reine Funktion) ist im Architektur-Test
  * `tests/architecture/billing-pipeline-stage-identity.test.ts` verankert.
@@ -49,8 +51,11 @@ let overpaidInvoiceId = 0;
 let overpaidTxId = 0;
 let kasseInvoiceId = 0;
 let kasseTxId = 0;
+let partialTxId = 0;
 let paidInvoiceId = 0;
 const GROSS = 50_000;
+/** Teilzahlung: 300 von 500 EUR — deckt nicht, ist aber echtes Geld. */
+const PARTIAL = 30_000;
 
 async function insertInvoice(opts: { suffix: string; status: string; gross: number; billingType?: string }): Promise<number> {
   const [row] = await db.insert(invoices).values({
@@ -119,7 +124,7 @@ beforeAll(async () => {
 
   boundInvoiceId = await insertInvoice({ suffix: "BOUND", status: "versendet", gross: GROSS });
   unboundInvoiceId = await insertInvoice({ suffix: "FREI", status: "versendet", gross: GROSS });
-  partialInvoiceId = await insertInvoice({ suffix: "TEIL", status: "teilweise_bezahlt", gross: GROSS });
+  partialInvoiceId = await insertInvoice({ suffix: "TEIL", status: "versendet", gross: GROSS });
 
   const [tx] = await db.insert(qontoTransactions).values({
     qontoTransactionId: `p1897-${tag}`,
@@ -141,9 +146,21 @@ beforeAll(async () => {
   } as any).returning({ id: qontoTransactions.id }))[0].id;
   await bindPayment(overpaidInvoiceId, overpaidTxId, GROSS + 10_000);
 
-  // Pflegekassen-Pfad im Status `avis_erhalten` — der zweite Warte-Cluster.
+  // Teilzahlung: 300 von 500 EUR gebunden. Vor dem Status-Umbau trug diese
+  // Zeile den Status `teilweise_bezahlt` OHNE gebundene Zahlung — sie behauptete
+  // eine Teilzahlung, die es nicht gab. Genau diese Widersprüchlichkeit war der
+  // Grund, den Wert zum Badge zu machen: jetzt entscheidet die Summe.
+  partialTxId = (await db.insert(qontoTransactions).values({
+    qontoTransactionId: `p1897-teil-${tag}`, amountCents: PARTIAL, currency: "EUR",
+    side: "credit", status: "completed", emittedAt: new Date(),
+  } as any).returning({ id: qontoTransactions.id }))[0].id;
+  await bindPayment(partialInvoiceId, partialTxId, PARTIAL);
+
+  // Pflegekassen-Pfad: wartet auf Zahlung. Vor dem Umbau lag hier der eigene
+  // Status `avis_erhalten`; er ist als Zustand entfallen (der Avis ist eine
+  // Zuordnung), die Rechnung wartet weiter — auf `versendet`.
   kasseInvoiceId = await insertInvoice({
-    suffix: "KASSE", status: "avis_erhalten", gross: GROSS, billingType: "pflegekasse_gesetzlich",
+    suffix: "KASSE", status: "versendet", gross: GROSS, billingType: "pflegekasse_gesetzlich",
   });
   kasseTxId = (await db.insert(qontoTransactions).values({
     qontoTransactionId: `p1897-kasse-${tag}`, amountCents: GROSS, currency: "EUR",
@@ -156,7 +173,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  const txIds = [qontoTxId, overpaidTxId, kasseTxId].filter(Boolean);
+  const txIds = [qontoTxId, overpaidTxId, kasseTxId, partialTxId].filter(Boolean);
   if (txIds.length > 0) await db.delete(qontoTransactions).where(inArray(qontoTransactions.id, txIds));
   const ids = [boundInvoiceId, unboundInvoiceId, partialInvoiceId, overpaidInvoiceId, kasseInvoiceId, paidInvoiceId].filter(Boolean);
   if (ids.length > 0) {
@@ -237,10 +254,13 @@ describe("#1897 — gebundene Zahlung auf der Lese-Seite", () => {
     expect(cardIn(await board(), overpaidInvoiceId)!.card.aging).toBe("none");
   });
 
-  it("(f) Pflegekassen-Pfad: avis_erhalten mit Bindung altert ebenfalls nicht", async () => {
+  it("(f) Pflegekassen-Pfad: wartende Rechnung mit Bindung altert ebenfalls nicht", async () => {
     const kasse = cardIn(await board(), kasseInvoiceId);
     expect(kasse, "Kassen-Rechnung muss im Board auftauchen").not.toBeNull();
-    expect(kasse!.stage).toBe("avis_erhalten");
+    // Frueher `avis_erhalten` — die eigene Stufe fuer den Kassen-Zwischenstand.
+    // Sie ist entfallen; beide Empfaenger warten in derselben Stufe. Die
+    // Empfaenger-Unterscheidung lebt nur noch im Aging-Anker weiter.
+    expect(kasse!.stage).toBe("versendet");
     expect(kasse!.card.aging).toBe("none");
 
     const res = await apiGet<any[]>(`/api/billing?year=${YEAR}&month=${MONTH}`);
@@ -260,13 +280,30 @@ describe("#1897 — gebundene Zahlung auf der Lese-Seite", () => {
     expect(paid.boundPaidCents).toBeUndefined();
   });
 
-  it("(d) Bestandsvertrag #1822 bleibt: teilweise_bezahlt trägt paidCents/openAmountCents", async () => {
+  it("(d) Bestandsvertrag #1822 bleibt: Teilzahlung traegt paidCents/openAmountCents — jetzt als Badge", async () => {
     const res = await apiGet<any[]>(`/api/billing?year=${YEAR}&month=${MONTH}`);
     const partial = (res.data as any[]).find((r) => r.id === partialInvoiceId);
     expect(partial).toBeTruthy();
-    expect(partial.status).toBe("teilweise_bezahlt");
-    // Ohne gebundene Zahlung: 0 gezahlt, offener Rest = Brutto.
-    expect(partial.paidCents).toBe(0);
-    expect(partial.openAmountCents).toBe(GROSS);
+
+    // Der Zustand ist „wartet auf Zahlung" — daran aendert eine Teilzahlung
+    // nichts. Frueher stand hier `teilweise_bezahlt` als STATUS und beantwortete
+    // damit zwei Fragen auf einmal: wie weit der Vorgang ist UND wie viel Geld
+    // da ist. Getrennt gehoert die zweite ins Badge.
+    expect(partial.status).toBe("versendet");
+    expect(partial.badges).toContain("teilweise_bezahlt");
+
+    // Der Bestandsvertrag selbst, unveraendert.
+    expect(partial.paidCents).toBe(PARTIAL);
+    expect(partial.openAmountCents).toBe(GROSS - PARTIAL);
+  });
+
+  it("(d2) ohne Geldeingang gibt es kein Teilzahlungs-Badge — der alte Status konnte das behaupten", async () => {
+    // Die Gegenprobe zu (d), und der eigentliche Gewinn des Badge-Modells:
+    // ein STATUS liess sich auf `teilweise_bezahlt` setzen, ohne dass je Geld
+    // floss — die Spalte und die Zahlungen konnten auseinanderlaufen. Ein
+    // Badge kann das nicht, weil es bei jedem Lesen aus der Summe entsteht.
+    const res = await apiGet<any[]>(`/api/billing?year=${YEAR}&month=${MONTH}`);
+    const unbound = (res.data as any[]).find((r) => r.id === unboundInvoiceId);
+    expect(unbound.badges ?? []).not.toContain("teilweise_bezahlt");
   });
 });

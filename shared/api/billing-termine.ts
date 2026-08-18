@@ -25,7 +25,6 @@ export type BillingTermineStage =
   | "nachgewiesen"
   | "rechnung_erstellt"
   | "versendet"
-  | "avis_erhalten"
   | "bezahlt"
   // Terminaler Side-Zustand, in der Liste nur als Filter sichtbar (kein Geldbetrag).
   | "kunde_nicht_angetroffen";

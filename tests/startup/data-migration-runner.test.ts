@@ -8,7 +8,7 @@
  * Dieser Test verifiziert ausschließlich, dass die NICHT-Budget-Registry korrekt
  * gebaut wird:
  *  - vollständig (alle 17 Migrationen, korrekte Reihenfolge, eindeutige Namen),
- *  - GoBD-Bypass NUR für die drei GoBD-budget_transactions-Backfills aktiv,
+ *  - GoBD-Bypass NUR für die zwei GoBD-budget_transactions-Backfills aktiv,
  *  - Conservation-Check für ALLE deaktiviert (keine Budget-Topf-Mutation),
  *  - jede Migration liefert einen ausführbaren `migrate(tx)`-Callback.
  */
@@ -23,7 +23,10 @@ const PRE_BUDGET_ORDER = [
   "migrate-monthly-work-hours-to-numeric",
   "backfill-orphan-reversal-appointment-id",
   "backfill-storno-transaction-date",
-  "backfill-avis-received-status",
+  // `backfill-avis-received-status` stand hier, bis der Status-Umbau
+  // `avis_erhalten` abgeschafft hat: die Migration hob versendete Rechnungen
+  // auf einen Status, den es nicht mehr gibt. Sie ist mit ihm entfallen
+  // (`docs/rechnungsstatus-zielmodell.md`), nicht bloss abgeschaltet.
   "backfill-invoice-issued-at",
   "clear-45b-monthly-limits",
   "migrate-in-progress-appointments",
@@ -47,7 +50,6 @@ const POST_BUDGET_ORDER = [
 const GOBD_BYPASS_NAMES = new Set([
   "backfill-orphan-reversal-appointment-id",
   "backfill-storno-transaction-date",
-  "backfill-avis-received-status",
 ]);
 
 describe("Task #1428 — NICHT-Budget Daten-Migrations-Registry", () => {
@@ -63,17 +65,17 @@ describe("Task #1428 — NICHT-Budget Daten-Migrations-Registry", () => {
     expect(new Set(registry.map((m) => m.name)).size).toBe(registry.length);
   });
 
-  it("registriert genau 18 NICHT-Budget Migrationen mit eindeutigen Namen", async () => {
+  it("registriert genau 17 NICHT-Budget Migrationen mit eindeutigen Namen", async () => {
     const [pre, post] = await Promise.all([
       buildPreBudgetRegistry(),
       buildPostBudgetRegistry(),
     ]);
     const all = [...pre, ...post];
-    expect(all).toHaveLength(18);
-    expect(new Set(all.map((m) => m.name)).size).toBe(18);
+    expect(all).toHaveLength(17);
+    expect(new Set(all.map((m) => m.name)).size).toBe(17);
   });
 
-  it("aktiviert GoBD-Bypass NUR für die drei GoBD-Backfills", async () => {
+  it("aktiviert GoBD-Bypass NUR für die zwei GoBD-Backfills", async () => {
     const [pre, post] = await Promise.all([
       buildPreBudgetRegistry(),
       buildPostBudgetRegistry(),

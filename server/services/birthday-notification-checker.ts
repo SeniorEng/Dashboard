@@ -24,7 +24,10 @@ export async function checkUpcomingBirthdays(): Promise<number> {
 
   const [employees, customers] = await Promise.all([
     storage.getActiveEmployeesWithBirthday(),
-    storage.getActiveCustomersWithBirthday(),
+    // FINDING (PR-Body): dieser Dienst benachrichtigt weiterhin auch fuer
+    // gekuendigte/pausierte Kunden. Verhalten bewusst UNVERAENDERT gelassen —
+    // das Ticket deckt die beiden Ansichten ab, nicht den Versandpfad.
+    storage.getCustomersWithBirthday(),
   ]);
 
   const adminUsers = await storage.getAdminUserIds();

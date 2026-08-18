@@ -227,7 +227,11 @@ export function useBillingMutations({
       return unwrapResult(result);
     },
     onSuccess: () => {
-      toast({ title: "Als versendet markiert", description: "Die Rechnung wurde manuell auf versendet gesetzt." });
+      // Der Text muss beide Fälle tragen: bei einer Rechnung IST das
+      // Markieren der Statuswechsel, bei einem Storno-Dokument entsteht nur
+      // die Versand-Marke (es bleibt `abgeschlossen`). „auf versendet gesetzt"
+      // wäre dort schlicht falsch.
+      toast({ title: "Als versandt markiert", description: "Das Versanddatum wurde eingetragen." });
       invalidateRelated(queryClient, "billing");
     },
     onError: (error: Error) => {

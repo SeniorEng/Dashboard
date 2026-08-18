@@ -1,20 +1,33 @@
 /**
- * Task #1284 — Rechnungsstatus "avis_erhalten" zwischen "versendet" und "bezahlt".
+ * Der Zahlungsavis ist eine ZUORDNUNGS-Mechanik, kein Status.
  *
- * Lebenszyklus: Entwurf → Versendet → Avis erhalten → Bezahlt (+Storniert).
+ * ── Was diese Datei früher prüfte ───────────────────────────────────────
+ * Sie hieß „Task #1284 — Rechnungsstatus `avis_erhalten` zwischen `versendet`
+ * und `bezahlt`" und nagelte einen eigenen Lebenszyklus-Schritt fest: der
+ * Avis-Treffer hob die Rechnung auf `avis_erhalten`, das Löschen des Avis nahm
+ * das zurück, und ein Unmatch fiel „nicht unter den Avis-Stand".
  *
- * Verifiziert:
- *  1. Avis-Treffer (beim Anlegen eines Zahlungsavis mit CSV) hebt eine zugeordnete
- *     "versendet"-Rechnung auf "avis_erhalten" (Audit `invoice_avis_received`).
- *  2. "Als bezahlt markieren" setzt die offenen (versendet/avis_erhalten) Rechnungen
- *     eines Avis auf "bezahlt"; paidAt stammt aus dem Zahlungsdatum des Avis
- *     (Audit `invoice_payment_reconciled`, matchedBy="avis").
- *  3. Qonto-Match akzeptiert eine "avis_erhalten"-Rechnung und setzt sie auf "bezahlt";
- *     Unmatch setzt sie auf "avis_erhalten" zurück, solange das Avis noch aktiv ist
- *     (kein Herabstufen unter den Avis-Stand).
- *  4. Löschen eines Avis nimmt den "avis_erhalten"-Status zurück (→ versendet,
- *     Audit `invoice_avis_reverted`); bereits "bezahlt" bleibt unangetastet.
- *  5. GET /payment-advices reichert pro Avis matchedInvoiceCount + unpaidMatchedCount an.
+ * Mit dem Status-Umbau (`docs/rechnungsstatus-zielmodell.md`) ist dieser Schritt
+ * entfallen. Der Avis verbindet einen angekündigten Geldeingang mit einer
+ * Rechnung — genau wie eine Qonto-Banktransaktion. Bezahlt ist die Rechnung
+ * damit nicht, und ihr Zustand ändert sich nicht: sie wartet weiter auf Zahlung.
+ *
+ * ── Was sie jetzt prüft ─────────────────────────────────────────────────
+ * Dieselben Abläufe, aber gegen die neue Wahrheit. Die Datei ist damit kein
+ * Rest, sondern der Beleg für die Modelländerung an der Integrationsgrenze:
+ *
+ *  1. Avis-Treffer ändert den Status NICHT — die Zuordnung entsteht trotzdem,
+ *     und der Audit-Eintrag `invoice_avis_received` bleibt (ein Ereignis).
+ *  2. „Als bezahlt markieren" setzt die offenen Rechnungen eines Avis auf
+ *     `bezahlt`; paidAt aus dem Zahlungsdatum (Audit
+ *     `invoice_payment_reconciled`, matchedBy="avis"). Unverändert.
+ *  3. Qonto-Match hebt eine `versendet`-Rechnung mit Avis auf `bezahlt`;
+ *     Unmatch fällt auf `versendet` zurück — es gibt keinen Zwischenstand
+ *     mehr, unter den man nicht fallen dürfte.
+ *  4. Löschen eines Avis lässt den Status unberührt; der Audit-Eintrag
+ *     `invoice_avis_reverted` bleibt.
+ *  5. GET /payment-advices reichert matchedInvoiceCount + unpaidMatchedCount
+ *     an. Unverändert.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -198,8 +211,8 @@ afterAll(async () => {
   }
 });
 
-describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
-  it("Avis-Treffer hebt versendet → avis_erhalten (Audit invoice_avis_received)", async () => {
+describe("Zahlungsavis — Zuordnung ohne Statuswechsel", () => {
+  it("Avis-Treffer laesst den Status auf versendet (Audit invoice_avis_received bleibt)", async () => {
     const num = nextInvoiceNumber();
     const invoiceId = await insertInvoice({ amountCents: 12345, invoiceNumber: num });
 
@@ -211,12 +224,18 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
     expect(matched).toBe(1);
 
     const inv = await getInvoiceStatus(invoiceId);
-    expect(inv.status).toBe("avis_erhalten");
+    // DIE Kernaussage des Umbaus: die Zuordnung entsteht, der Zustand bleibt.
+    expect(inv.status).toBe("versendet");
     expect(inv.paidAt).toBeNull();
     expect(await countAudit("invoice_avis_received", invoiceId)).toBe(1);
   });
 
   it("Bereits bezahlte Rechnung wird vom Avis-Treffer NICHT herabgestuft", async () => {
+    // Diese Zusicherung war frueher aktiv erkaempft: der Avis-Treffer schrieb
+    // Status, und eine Bedingung musste die bezahlte Rechnung davor bewahren.
+    // Jetzt schreibt der Pfad ueberhaupt keinen Status mehr — die Zusicherung
+    // gilt bauartbedingt. Der Test bleibt trotzdem: er haelt fest, DASS sie
+    // gilt, unabhaengig davon, wodurch.
     const num = nextInvoiceNumber();
     const invoiceId = await insertInvoice({ amountCents: 22222, invoiceNumber: num });
     await withGobdMutation((tx) =>
@@ -232,10 +251,22 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
 
     const inv = await getInvoiceStatus(invoiceId);
     expect(inv.status).toBe("bezahlt"); // … aber Status bleibt bezahlt.
-    expect(await countAudit("invoice_avis_received", invoiceId)).toBe(0);
+    expect(inv.paidAt).not.toBeNull(); // und das Zahlungsdatum ueberlebt.
+
+    // Frueher stand hier `toBe(0)` — aber nicht, weil das Ereignis nicht
+    // stattgefunden haette, sondern weil der Audit-Eintrag INNERHALB des
+    // Status-Zweigs geschrieben wurde und der Zweig uebersprungen wurde. Die
+    // Null zaehlte also den ausgebliebenen Statuswechsel, nicht das Ereignis.
+    //
+    // Ohne Statuswechsel ist der Eintrag das, was er immer sein sollte: die
+    // Feststellung, dass ein Avis diese Rechnung deckt. Das ist auch dann
+    // wahr, wenn sie laengst bezahlt ist — und genau dann fuer die
+    // Nachvollziehbarkeit interessant (angekuendigtes Geld zu einer bereits
+    // beglichenen Forderung).
+    expect(await countAudit("invoice_avis_received", invoiceId)).toBe(1);
   });
 
-  it("'Als bezahlt markieren' setzt avis_erhalten → bezahlt mit paidAt aus Zahlungsdatum", async () => {
+  it("'Als bezahlt markieren' setzt versendet → bezahlt mit paidAt aus Zahlungsdatum", async () => {
     const num = nextInvoiceNumber();
     const invoiceId = await insertInvoice({ amountCents: 33333, invoiceNumber: num });
     const { adviceId } = await createAdviceWithCsv({
@@ -243,7 +274,7 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
       amountEuro: "333,33",
       zahlungsDatum: "10.04.2026",
     });
-    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("versendet");
 
     const res = await apiPost<{ paid: number }>(`/api/admin/qonto/payment-advices/${adviceId}/mark-paid`, {});
     expect(res.status).toBe(200);
@@ -263,7 +294,7 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
     expect(again.data.paid).toBe(0);
   });
 
-  it("Qonto-Match akzeptiert avis_erhalten → bezahlt; Unmatch fällt auf avis_erhalten zurück", async () => {
+  it("Qonto-Match akzeptiert eine Rechnung mit Avis → bezahlt; Unmatch faellt auf versendet zurueck", async () => {
     const num = nextInvoiceNumber();
     const invoiceId = await insertInvoice({ amountCents: 44444, invoiceNumber: num });
     await createAdviceWithCsv({
@@ -271,22 +302,26 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
       amountEuro: "444,44",
       zahlungsDatum: "12.04.2026",
     });
-    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("versendet");
 
     const txId = await insertQontoTx({ amountCents: 44444 });
     const matchRes = await apiPost(`/api/admin/qonto/transactions/${txId}/match`, { invoiceId });
     expect(matchRes.status).toBe(200);
     expect((await getInvoiceStatus(invoiceId)).status).toBe("bezahlt");
 
-    // Unmatch: Avis ist noch aktiv → zurück auf avis_erhalten, nicht versendet.
+    // Unmatch → `versendet`. Frueher fiel die Rechnung hier auf `avis_erhalten`
+    // zurueck, „nicht unter den Avis-Stand". Diesen Stand gibt es nicht mehr:
+    // faellt die Zahlung weg, wartet die Rechnung wieder auf Zahlung — ob ein
+    // Avis vorliegt oder nicht.
     const unmatchRes = await apiDelete(`/api/admin/qonto/transactions/${txId}/match`);
     expect(unmatchRes.status).toBe(200);
     const inv = await getInvoiceStatus(invoiceId);
-    expect(inv.status).toBe("avis_erhalten");
+    // DIE Kernaussage des Umbaus: die Zuordnung entsteht, der Zustand bleibt.
+    expect(inv.status).toBe("versendet");
     expect(inv.paidAt).toBeNull();
   });
 
-  it("Löschen des Avis nimmt avis_erhalten → versendet zurück (Audit invoice_avis_reverted)", async () => {
+  it("Loeschen des Avis laesst den Status unberuehrt (Audit invoice_avis_reverted bleibt)", async () => {
     const num = nextInvoiceNumber();
     const invoiceId = await insertInvoice({ amountCents: 55555, invoiceNumber: num });
     const { adviceId } = await createAdviceWithCsv({
@@ -294,7 +329,7 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
       amountEuro: "555,55",
       zahlungsDatum: "14.04.2026",
     });
-    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("versendet");
 
     const delRes = await apiDelete(`/api/admin/qonto/payment-advices/${adviceId}`);
     expect(delRes.status).toBe(200);
@@ -319,8 +354,16 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
     const delRes = await apiDelete(`/api/admin/qonto/payment-advices/${adviceId}`);
     expect(delRes.status).toBe(200);
 
-    expect((await getInvoiceStatus(invoiceId)).status).toBe("bezahlt");
-    expect(await countAudit("invoice_avis_reverted", invoiceId)).toBe(0);
+    // Der Kern: das Loeschen eines Avis nimmt KEINE Zahlung zurueck. Die
+    // Zahlung ist ein eigener Vorgang und ueberlebt das Entfernen der
+    // Ankuendigung.
+    const nachher = await getInvoiceStatus(invoiceId);
+    expect(nachher.status).toBe("bezahlt");
+    expect(nachher.paidAt).not.toBeNull();
+
+    // Analog zum Avis-Treffer oben: der Eintrag verzeichnet, dass die
+    // Avis-Deckung entfiel — ein Ereignis, kein Statuswechsel.
+    expect(await countAudit("invoice_avis_reverted", invoiceId)).toBe(1);
   });
 
   it("GET /payment-advices reichert matchedInvoiceCount + unpaidMatchedCount an", async () => {
@@ -355,7 +398,7 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
 });
 
 describe("Task #1687 — Avis-Import: strukturell + robustes Matching", () => {
-  it("AOK-CSV (Betrag an Feld 5) + O→0-Referenz hebt versendet → avis_erhalten", async () => {
+  it("AOK-CSV (Betrag an Feld 5) + O→0-Referenz ordnet zu, ohne den Status zu heben", async () => {
     // Rechnungsnummer mit Nullen; die CSV-Referenz verwendet O statt 0.
     const num = "RE-2026-700500";
     const invoiceId = await insertInvoice({ amountCents: 12399, invoiceNumber: num });
@@ -369,7 +412,7 @@ describe("Task #1687 — Avis-Import: strukturell + robustes Matching", () => {
     const { matched } = await createAdviceWithRawCsv(csv);
     expect(matched).toBe(1); // Betrag wurde strukturell an Feld 5 erkannt.
 
-    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("versendet");
     expect(await countAudit("invoice_avis_received", invoiceId)).toBe(1);
   });
 
@@ -387,7 +430,7 @@ describe("Task #1687 — Avis-Import: strukturell + robustes Matching", () => {
     const { matched } = await createAdviceWithRawCsv(csv);
     expect(matched).toBe(1); // über exakten Bruttobetrag zugeordnet.
 
-    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("versendet");
     expect(await countAudit("invoice_avis_received", invoiceId)).toBe(1);
   });
 
@@ -399,7 +442,7 @@ describe("Task #1687 — Avis-Import: strukturell + robustes Matching", () => {
     const csv = buildAokCsv({ ref: num, amountEuro: "90,00", zahlungsDatum: "19.04.2026" });
     const { adviceId, matched } = await createAdviceWithRawCsv(csv);
     expect(matched).toBe(1);
-    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("versendet");
 
     const res = await apiGet<Array<{
       id: number;
