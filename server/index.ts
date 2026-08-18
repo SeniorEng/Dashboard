@@ -233,6 +233,25 @@ function isNeonDriverBug(message: string): boolean {
     process.exit(1);
   }
 
+  // Task 6hHqw8c7 — Rechnungs-Status-Gate. Prueft VOR dem Serving, ob jeder in
+  // `invoices.status` vorkommende Wert von `parseInvoiceStatus` gelesen werden
+  // kann. Ein Altwert wuerde sonst im Betrieb die Rechnungsliste und das
+  // Cockpit-Board mit 500 beantworten — passiert am 18.08.2026, weil der
+  // Publish vor der Status-Migration lief.
+  //
+  // Wie das Gate darueber: bewusst NICHT fault-isoliert. Ein Fehlschlag MUSS
+  // den Prozess beenden (Exit != 0 => Deploy schlaegt fehl => alte Version
+  // bleibt online).
+  try {
+    const { runInvoiceStatusBootGate } = await import(
+      "./startup/assert-invoice-status-domain"
+    );
+    await runInvoiceStatusBootGate();
+  } catch (err) {
+    log(`[FATAL] Rechnungs-Status-Gate: ${err}`, "startup");
+    process.exit(1);
+  }
+
   await registerRoutes(httpServer, app);
 
   // Task #705 — API-Catch-All vor Vite/Static-Fallback. Vor diesem Handler
