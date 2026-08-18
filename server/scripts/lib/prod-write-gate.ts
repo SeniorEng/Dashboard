@@ -83,7 +83,11 @@ export function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: string | un
   if (/cc_test_/.test(url)) {
     throw new Error("ABBRUCH: DATABASE_URL zeigt auf eine Wegwerf-/Test-DB (cc_test_). --apply verweigert.");
   }
-  if (/^(localhost|127\.|::1|0\.0\.0\.0)/.test(host)) {
+  // Klammern abstreifen: `new URL("postgres://…@[::1]/db").hostname` liefert
+  // `"[::1]"` MIT eckigen Klammern. Ein Muster, das `::1` am Anfang erwartet,
+  // greift dann nicht — und ausgerechnet der Loopback rutschte durch.
+  const hostNackt = host.replace(/^\[|\]$/g, "");
+  if (/^(localhost|127\.|::1|::ffff:127\.|0\.0\.0\.0)/.test(hostNackt)) {
     throw new Error(`ABBRUCH: DB-Host '${host}' ist lokal. --apply verweigert.`);
   }
   if (/replica|readonly|read-only|([.-]ro[.-])/.test(host)) {

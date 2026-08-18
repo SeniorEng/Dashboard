@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { collectScanFiles, stripComments } from "./guard-helpers";
 import {
+  INVOICE_STATUS_REVERSAL_TRANSITIONS,
   INVOICE_STATUS_TRANSITIONS,
   isAllowedInvoiceStatusTransition,
+  statusesAllowedToReverseTo,
   statusesAllowedToTransitionTo,
 } from "@shared/domain/invoice-status";
 import { INVOICE_STATUSES, LEGACY_INVOICE_STATUSES } from "@shared/schema/billing";
@@ -131,8 +133,24 @@ const KONTEXT_FENSTER = 200;
  */
 const STATUS_ZUGRIFF = /\.status\b|\bstatus\s+in\s*\(/i;
 
-function istStatusKontext(inhalt: string, index: number): boolean {
-  return STATUS_ZUGRIFF.test(inhalt.slice(Math.max(0, index - KONTEXT_FENSTER), index));
+/**
+ * Sucht in BEIDE Richtungen.
+ *
+ * Die erste Fassung sah nur rueckwaerts — und uebersah damit die
+ * natuerlichste Form einer handgeschriebenen Statusliste ueberhaupt: die
+ * modul-globale Konstante, die ueber ihrer Verwendung steht.
+ *
+ *   const OFFENE = ["versendet", "bezahlt"];
+ *   …
+ *   if (OFFENE.includes(inv.status))   // <- der Zugriff kommt DANACH
+ *
+ * Stufen-Listen bleiben trotzdem draussen: sie werden ueber `.stage` gelesen,
+ * nicht ueber `.status`.
+ */
+function istStatusKontext(inhalt: string, index: number, laenge: number): boolean {
+  const davor = inhalt.slice(Math.max(0, index - KONTEXT_FENSTER), index);
+  const danach = inhalt.slice(index + laenge, index + laenge + KONTEXT_FENSTER);
+  return STATUS_ZUGRIFF.test(davor) || STATUS_ZUGRIFF.test(danach);
 }
 
 describe("Rechnungs-Status — ein Übergangs-Regime", () => {
@@ -188,6 +206,60 @@ describe("Rechnungs-Status — ein Übergangs-Regime", () => {
     expect(isAllowedInvoiceStatusTransition("storniert", "versendet")).toBe(false);
   });
 
+  it("7 — die Zahlungs-Ruecknahme ist eng und terminale Zustaende bleiben zu", () => {
+    // `bezahlt -> versendet` ist NUR ueber das ausdrueckliche Opt-in erlaubt.
+    expect(isAllowedInvoiceStatusTransition("bezahlt", "versendet")).toBe(false);
+    expect(isAllowedInvoiceStatusTransition("bezahlt", "versendet", { zahlungsRuecknahme: true })).toBe(true);
+
+    // Und WIRKLICH nur dieser eine Uebergang. Das Opt-in darf kein Generalschluessel
+    // sein: eine stornierte Rechnung liesse sich sonst ueber den Zahlungspfad
+    // wiederbeleben.
+    expect(isAllowedInvoiceStatusTransition("storniert", "versendet", { zahlungsRuecknahme: true })).toBe(false);
+    expect(isAllowedInvoiceStatusTransition("abgeschlossen", "versendet", { zahlungsRuecknahme: true })).toBe(false);
+    expect(isAllowedInvoiceStatusTransition("bezahlt", "entwurf", { zahlungsRuecknahme: true })).toBe(false);
+
+    expect(Object.keys(INVOICE_STATUS_REVERSAL_TRANSITIONS)).toEqual(["bezahlt"]);
+    expect(statusesAllowedToReverseTo("versendet")).toEqual(["bezahlt"]);
+  });
+
+  it("8 — `zahlungsRuecknahme` wird NUR an den Qonto-Ruecknahmestellen gesetzt", () => {
+    // ── Warum dieser Waechter noetig ist ─────────────────────────────────
+    // Die eigene Ruecknahme-Map wurde damit begruendet, die Regel NICHT fuer
+    // alle aufzuweichen: `bezahlt -> versendet` ist legitim, wenn eine
+    // gebundene Zahlung wegfaellt, aber nicht als Handgriff im Status-Menue,
+    // sonst verschleiert er einen Zahlungseingang.
+    //
+    // Diese Begruendung traegt nur, solange das Flag an genau den Stellen
+    // steht, die eine Zahlungsbindung loesen. Es ist aber ein Parameter am
+    // BREIT genutzten Engpass `updateInvoiceStatusTx` — jeder kuenftige
+    // Aufrufer koennte es mitgeben. Bis hierhin hielt das nichts fest ausser
+    // Prosa.
+    const ERLAUBTE_SETZER = new Set<string>([
+      // Die SSoT selbst (Definition + Signatur).
+      "shared/domain/invoice-status.ts",
+      // Der Engpass, der den Parameter durchreicht.
+      "server/storage/billing-storage.ts",
+      // Der Qonto-Unmatch: loest eine Zahlungsbindung.
+      "server/routes/admin/qonto.ts",
+    ]);
+
+    const treffer: string[] = [];
+    for (const { rel, content } of collectScanFiles(["server", "shared", "client/src"], { includeTsx: true })) {
+      if (ERLAUBTE_SETZER.has(rel)) continue;
+      if (/zahlungsRuecknahme/.test(stripComments(content))) treffer.push(rel);
+    }
+
+    if (treffer.length > 0) {
+      expect.fail(
+        "`zahlungsRuecknahme` ausserhalb der Ruecknahme-Pfade gefunden:\n" +
+        treffer.map(t => `  - ${t}`).join("\n") +
+        "\n\nDas Opt-in schaltet `bezahlt -> versendet` frei — den Uebergang, den die " +
+        "Uebergangs-SSoT dem manuellen Weg bewusst verwehrt. Wer es woanders braucht, " +
+        "beschreibt zuerst, warum das keine Verschleierung eines Zahlungseingangs ist.",
+      );
+    }
+  });
+
   it("6 — keine handgeschriebene Status-Liste ausserhalb der SSoT", () => {
     const treffer: string[] = [];
     for (const { rel, content } of collectScanFiles(["server", "shared", "client/src"], { includeTsx: true })) {
@@ -199,7 +271,7 @@ describe("Rechnungs-Status — ein Übergangs-Regime", () => {
       const inhalt = stripComments(content);
       LITERALLISTE.lastIndex = 0;
       for (let m = LITERALLISTE.exec(inhalt); m; m = LITERALLISTE.exec(inhalt)) {
-        if (istStatusKontext(inhalt, m.index)) { treffer.push(rel); break; }
+        if (istStatusKontext(inhalt, m.index, m[0].length)) { treffer.push(rel); break; }
       }
     }
 

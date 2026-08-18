@@ -9,7 +9,7 @@
  *
  *   avis_erhalten            → versendet
  *   teilweise_bezahlt        → versendet
- *   stornorechnung/entwurf   → abgeschlossen
+ *   stornorechnung/*         → abgeschlossen  (ausser `storniert`)
  *
  * Alles andere bleibt unverändert. Der Lauf fasst weder Beträge noch Belege
  * noch `sent_at`/`paid_at` an — nur die Spalte `status`.
@@ -99,9 +99,11 @@ const ABBILDUNGEN: Abbildung[] = [
   },
   {
     name: "stornorechnung/* -> abgeschlossen",
-    // Nicht nur `entwurf`: jedes Storno-Dokument, das noch nicht `abgeschlossen`
-    // ist, gehört dorthin. `storniert` bleibt ausgenommen — eine stornierte
-    // Storno-Rechnung ist ein eigener Vorgang, den dieser Lauf nicht anfasst.
+    // Nicht nur `entwurf`, sondern jeder Ausgangsstatus, in dem ein
+    // Storno-Dokument real vorkommt. AUSGENOMMEN bleibt `storniert`: eine
+    // stornierte Storno-Rechnung ist ein eigener Vorgang, den dieser Lauf
+    // nicht anfasst. Alles ausserhalb dieser Liste meldet die Vorpruefung —
+    // stillschweigend liegenbleiben soll nichts.
     where: and(
       eq(invoices.invoiceType, "stornorechnung"),
       inArray(invoices.status, ["entwurf", "avis_erhalten", "teilweise_bezahlt"]),
@@ -219,6 +221,36 @@ async function vorpruefung(log: (z: string) => void): Promise<void> {
     befunde.push(`${nichtStorniert[0].anzahl} Storno-Dokumente, deren Original NICHT storniert ist`);
   }
 
+  // Storno-Dokument in einem Status, den keine Abbildung trifft. Es stuerzt
+  // nach dem Deploy nichts ab (der Typ kurzschliesst in `assignInvoiceStage`),
+  // aber die Zeile bliebe liegen — und `mark-sent` lehnt sie danach ab, weil
+  // der Storno-Zweig `abgeschlossen` verlangt. Ein still zurueckgelassenes,
+  // unbedienbares Dokument.
+  const stornoFremd = await db
+    .select({ id: invoices.id, nummer: invoices.invoiceNumber, status: invoices.status })
+    .from(invoices)
+    .where(and(
+      eq(invoices.invoiceType, "stornorechnung"),
+      sql`${invoices.status} NOT IN ('entwurf','avis_erhalten','teilweise_bezahlt','abgeschlossen','storniert')`,
+    ));
+  for (const z of stornoFremd) {
+    befunde.push(`Storno-Dokument ${z.nummer} (id=${z.id}) steht auf "${z.status}" — keine Abbildung trifft es`);
+  }
+
+  // Migrationskandidat nach `versendet` OHNE Versanddatum: er bekaeme keinen
+  // Aging-Anker und altert nie. Laut Zaehlung tragen alle 54 ein `sent_at`.
+  const ohneSentAt = await db
+    .select({ id: invoices.id, nummer: invoices.invoiceNumber })
+    .from(invoices)
+    .where(and(
+      inArray(invoices.status, ["avis_erhalten", "teilweise_bezahlt"]),
+      ne(invoices.invoiceType, "stornorechnung"),
+      isNull(invoices.sentAt),
+    ));
+  for (const z of ohneSentAt) {
+    befunde.push(`${z.nummer} (id=${z.id}) wird nach 'versendet' gehoben, traegt aber kein sent_at`);
+  }
+
   if (befunde.length > 0) {
     abbruch(
       `Die Annahmen der Spezifikation halten nicht mehr:\n` +
@@ -226,7 +258,7 @@ async function vorpruefung(log: (z: string) => void): Promise<void> {
       `\n\nErst klaeren, dann migrieren.`,
     );
   }
-  log("  Vorpruefung: alle sieben Annahmen halten.\n");
+  log("  Vorpruefung: alle Annahmen halten.\n");
 }
 
 /** Nachprüfung — das Abnahmekriterium nach dem Deploy. */
@@ -275,7 +307,7 @@ export interface MigrationsOptionen {
  */
 export async function migriereStatusModell(opt: MigrationsOptionen): Promise<{ umgestellt: number }> {
   const args = { apply: opt.apply };
-  const log = (z: string) => { if (!opt.still) log(z); };
+  const log = (z: string) => { if (!opt.still) console.log(z); };
 
   if (args.apply && (opt.userId === undefined || !opt.reason)) {
     abbruch("Schreibender Lauf ohne Verantwortlichen/Begruendung.");
@@ -338,6 +370,10 @@ export async function migriereStatusModell(opt: MigrationsOptionen): Promise<{ u
   }
 
   // ── Schreiben. Ein Audit-Eintrag JE ZEILE, in derselben Transaktion.
+  // Was WIRKLICH geschrieben wurde — nicht, was geplant war. Das Abnahme-
+  // protokoll dieses Laufs ist ein GoBD-Nachweisstueck; es darf keine Zahl
+  // nennen, die nicht stattgefunden hat.
+  let tatsaechlich = 0;
   await db.transaction(async tx => {
     for (const { abb, ids } of plaene) {
       if (ids.length === 0) continue;
@@ -367,12 +403,22 @@ export async function migriereStatusModell(opt: MigrationsOptionen): Promise<{ u
       // sich die Datenlage zwischen Plan und Schreiben veraendert. Dann NICHT
       // weitermachen — die Transaktion rollt zurueck, der Lauf ist idempotent
       // und kann nach dem Klaeren wiederholt werden.
-      if (geschrieben.length !== vorher.length) {
+      // Alle DREI Mengen muessen sich decken.
+      //
+      // Der erste Entwurf verglich nur `geschrieben` gegen `vorher` — und
+      // uebersah damit genau das Fenster, fuer das der Abgleich gebaut ist:
+      // faellt eine Zeile zwischen PLAN (ausserhalb der Transaktion, ohne
+      // Lock) und SPERRE weg, sind `vorher` und `geschrieben` beide kleiner
+      // und trotzdem gleich. Der Lauf haette geschwiegen und anschliessend
+      // „168 umgestellt" gemeldet, obwohl er weniger geschrieben hat.
+      if (ids.length !== vorher.length || geschrieben.length !== vorher.length) {
         throw new Error(
           `${abb.name}: geplant ${ids.length}, gesperrt ${vorher.length}, geschrieben ${geschrieben.length}. ` +
-          `Die Datenlage hat sich waehrend des Laufs veraendert — Rollback.`,
+          `Die Datenlage hat sich waehrend des Laufs veraendert — Rollback. ` +
+          `Der Lauf ist idempotent: nach dem Klaeren erneut fahren.`,
         );
       }
+      tatsaechlich += geschrieben.length;
 
       for (const z of vorher) {
         await auditService.log(
@@ -401,9 +447,9 @@ export async function migriereStatusModell(opt: MigrationsOptionen): Promise<{ u
   for (const { abb, ids } of plaene) {
     if (ids.length > 0) log(`  ${abb.name}: ${ids.length} umgestellt`);
   }
-  log(`\n${gesamt} Zeilen umgestellt, ${gesamt} Audit-Eintraege geschrieben.`);
+  log(`\n${tatsaechlich} Zeilen umgestellt, ${tatsaechlich} Audit-Eintraege geschrieben.`);
   log("Naechster Schritt: Publish, danach diesen Lauf WIEDERHOLEN (Nachzuegler), dann --verify.");
-  return { umgestellt: gesamt };
+  return { umgestellt: tatsaechlich };
 }
 
 /**

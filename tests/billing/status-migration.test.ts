@@ -31,6 +31,7 @@ async function rechnung(opts: {
   suffix: string;
   paidAt?: Date | null;
   stornierteRechnungId?: number;
+  sentAt?: Date | null;
 }): Promise<number> {
   const [row] = await db.insert(invoices).values({
     invoiceNumber: `MIG-${opts.suffix}-${tag}`,
@@ -45,6 +46,13 @@ async function rechnung(opts: {
     status: opts.status as "versendet",
     paidAt: opts.paidAt ?? null,
     stornierteRechnungId: opts.stornierteRechnungId ?? null,
+    // Kandidaten nach `versendet` tragen in Produktion ausnahmslos ein
+    // Versanddatum (Zaehlung: alle 54). Eine Fixture ohne waere unrealistisch —
+    // und die Vorpruefung meldet sie zu Recht, weil die Zeile sonst nach der
+    // Migration ohne Aging-Anker dastuende.
+    sentAt: opts.sentAt !== undefined
+      ? opts.sentAt
+      : (opts.invoiceType === "stornorechnung" || opts.status === "entwurf" ? null : new Date("2026-04-01")),
   } as any).returning({ id: invoices.id });
   angelegt.push(row.id);
   return row.id;
@@ -109,6 +117,27 @@ describe("Status-Migration — auditierter Einmal-Lauf", () => {
     expect(await statusVon(entwurf)).toBe("entwurf");
   });
 
+  it("1b — ein Storno-Dokument mit Altwert geht nach `abgeschlossen`, NICHT nach `versendet`", async () => {
+    // ── Warum dieser Fall existiert ────────────────────────────────────────
+    // Die erste Abbildung (`avis_erhalten -> versendet`) trägt einen
+    // Typ-Filter, den das Skript ausdrücklich begründet: ohne ihn liefe ein
+    // Storno-Dokument mit Altwert nach `versendet` statt nach `abgeschlossen`
+    // und widerspräche dem Zielmodell.
+    //
+    // Ein Mutationslauf hat gezeigt, dass die Begründung unbelegt war: entfernt
+    // man den Filter, bleiben alle Fälle grün. Eine Regel, die man folgenlos
+    // löschen kann, ist keine.
+    const original = await rechnung({ status: "storniert", suffix: "T-ORIG" });
+    const storno = await rechnung({
+      status: "avis_erhalten", invoiceType: "stornorechnung", suffix: "T-STORNO",
+      stornierteRechnungId: original,
+    });
+
+    await migriereStatusModell({ apply: true, userId: 1, reason: "Testlauf Typ-Filter", still: true });
+
+    expect(await statusVon(storno)).toBe("abgeschlossen");
+  });
+
   it("2 — schreibt einen Audit-Eintrag je Zeile mit dem Vorher-Wert", async () => {
     const id = await rechnung({ status: "avis_erhalten", suffix: "AUDIT" });
 
@@ -155,6 +184,32 @@ describe("Status-Migration — auditierter Einmal-Lauf", () => {
     });
   });
 
+  it("4b — der Operator-Pfad (mit Konsolen-Ausgabe) läuft überhaupt durch", async () => {
+    // ── Warum dieser Fall existiert ────────────────────────────────────────
+    // Alle anderen Fälle rufen mit `still: true` — und damit ausgerechnet den
+    // Zweig NICHT, den ein Mensch fährt. Genau dort steckte ein Fehler, der
+    // das Skript vollständig funktionslos machte: der Ausgabe-Helfer rief sich
+    // selbst auf (`RangeError: Maximum call stack size exceeded`), sodass jeder
+    // Trockenlauf und jeder Schreiblauf abbrach, bevor irgendetwas geschah.
+    //
+    // Sechs grüne Fälle und ein grünes CI haben ihn nicht gesehen. Ein Test,
+    // der eine Option immer gleich setzt, prüft die andere Hälfte nie.
+    const zeilen: string[] = [];
+    const echt = console.log;
+    console.log = (...args: unknown[]) => { zeilen.push(args.join(" ")); };
+    try {
+      const ergebnis = await migriereStatusModell({ apply: false });
+      expect(ergebnis.umgestellt).toBe(0);
+    } finally {
+      console.log = echt;
+    }
+
+    // Und der Bericht muss auch etwas sagen — sonst wäre der Fall auch mit
+    // einem stummen `log` grün.
+    expect(zeilen.join("\n")).toMatch(/Vorpruefung/);
+    expect(zeilen.join("\n")).toMatch(/Trockenlauf beendet/);
+  });
+
   it("5 — die Vorprüfung bricht ab, wenn `abgeschlossen` auf einer normalen Rechnung steht", async () => {
     // Die einzige Status×Typ-Kombination, bei der `assignInvoiceStage` nach dem
     // Deploy wirft — und damit die ganze Rechnungsliste auf 500 legt. Vor der
@@ -169,6 +224,19 @@ describe("Status-Migration — auditierter Einmal-Lauf", () => {
     await withGobdMutation(async (tx) => {
       await tx.update(invoices).set({ status: "storniert" }).where(eq(invoices.id, kaputt));
     });
+  });
+
+  it("7 — die gemeldete Zahl ist die GESCHRIEBENE, nicht die geplante", async () => {
+    // Das Abnahmeprotokoll dieses Laufs ist ein GoBD-Nachweisstück. Der erste
+    // Entwurf gab `ids.length` zurück — also die Planmenge — und hätte damit
+    // Zeilen gemeldet, die nie geschrieben wurden.
+    const a = await rechnung({ status: "avis_erhalten", suffix: "ZAHL1" });
+    const b = await rechnung({ status: "avis_erhalten", suffix: "ZAHL2" });
+
+    const ergebnis = await migriereStatusModell({ apply: true, userId: 1, reason: "Testlauf Zaehlung", still: true });
+    expect(ergebnis.umgestellt).toBe(2);
+    expect(await statusVon(a)).toBe("versendet");
+    expect(await statusVon(b)).toBe("versendet");
   });
 
   it("6 — die Vorprüfung bricht ab, wenn ein Migrationskandidat ein Zahlungsdatum trägt", async () => {

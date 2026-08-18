@@ -59,6 +59,20 @@ describe("Badges — abgeleitete Sichten, keine Zustände", () => {
       expect(istTeilweiseBezahlt(mit({ paidCents: 60_000 }))).toBe(false);
     });
 
+    it("folgt der Deckungs-SSoT: Toleranz und Skonto zaehlen als gedeckt", () => {
+      // Die erste Fassung verglich `paidCents < grossAmountCents` und
+      // widersprach damit der Restbetrags-Zahl in derselben Zeile, die aus
+      // `classifyPaymentDifference` stammt — Badge ohne Zahl.
+      //
+      // 49.950 auf 50.000: innerhalb der 100-Cent-Toleranz ⇒ gedeckt.
+      expect(istTeilweiseBezahlt(mit({ paidCents: 49_950 }))).toBe(false);
+      // 45.000 gezahlt + 5.000 Skonto = exakt gedeckt.
+      expect(istTeilweiseBezahlt(mit({ paidCents: 45_000, skontoCents: 5_000 }))).toBe(false);
+      // Ohne das Skonto waere dieselbe Zahlung eine Teilzahlung — sonst
+      // prueft der Fall darueber nur, dass irgendetwas immer `false` ist.
+      expect(istTeilweiseBezahlt(mit({ paidCents: 45_000 }))).toBe(true);
+    });
+
     it("erscheint nie auf einer abgeschlossenen oder stornierten Rechnung", () => {
       for (const status of ["bezahlt", "storniert"] as const) {
         expect(
@@ -85,6 +99,50 @@ describe("Badges — abgeleitete Sichten, keine Zustände", () => {
       expect(istUeberfaellig(mitBindung)).toBe(false);
       // Aber die Teilzahlung bleibt sichtbar — sie wird nicht mit unterdrückt.
       expect(istTeilweiseBezahlt(mitBindung)).toBe(true);
+    });
+
+    it("die Ampel-SCHWELLEN selbst — hartkodiert, unabhaengig von der Implementierung", () => {
+      // ── Warum diese Tabelle ausgeschrieben ist ───────────────────────────
+      // Der Sweep darunter vergleicht `istUeberfaellig` gegen
+      // `resolveAgingBucket` — also gegen dieselbe Funktion, die
+      // `istUeberfaellig` intern aufruft. Er beweist damit die KOMPOSITION
+      // (richtiger Anker je Empfaenger, keine eigene Frist), aber NICHT die
+      // Zahlen: verschoebe jemand eine Schwelle, zoegen beide Seiten mit.
+      //
+      // Die Zahlen 14/30 (Selbstzahler ab Faelligkeit) und 21/45 (Kasse ab
+      // Versand) waren im gesamten Repo an keiner Stelle festgenagelt. Sie
+      // entscheiden, ab wann gemahnt wird — das gehoert ausgeschrieben, an den
+      // GRENZEN, nicht in der Mitte der Intervalle.
+      const faelle: Array<[string, number, boolean]> = [
+        // [billingType, Tage seit Anker, erwartet ueberfaellig?]
+        ["selbstzahler", -1, false],  // vor Faelligkeit
+        ["selbstzahler", 0, false],   // am Faelligkeitstag: noch gruen
+        ["selbstzahler", 1, true],    // ab dem Tag danach
+        ["selbstzahler", 14, true],
+        ["selbstzahler", 15, true],
+        ["selbstzahler", 30, true],
+        ["selbstzahler", 31, true],
+        ["pflegekasse_gesetzlich", 21, false], // Wartefrist laeuft noch
+        ["pflegekasse_gesetzlich", 22, true],  // erste Stufe
+        ["pflegekasse_gesetzlich", 45, true],
+        ["pflegekasse_gesetzlich", 46, true],
+      ];
+
+      const ASOF = "2027-01-15";
+      for (const [billingType, tage, erwartet] of faelle) {
+        const anker = new Date(Date.parse(`${ASOF}T00:00:00Z`) - tage * 86_400_000)
+          .toISOString().slice(0, 10);
+        const selbstzahler = billingType === "selbstzahler";
+        expect(
+          istUeberfaellig(mit({
+            billingType,
+            dueDate: selbstzahler ? anker : null,
+            sentAt: selbstzahler ? null : anker,
+            asOfIso: ASOF,
+          })),
+          `${billingType} @ ${tage} Tage`,
+        ).toBe(erwartet);
+      }
     });
 
     it("führt KEINE eigene Frist, sondern folgt der Aging-Ampel", () => {
@@ -149,7 +207,9 @@ describe("Badges — abgeleitete Sichten, keine Zustände", () => {
         grossAmountCents: -50_000,
         sentAt: "2026-03-01",
       }));
-      expect(badges).toContain("versandt");
+      // `toEqual`, nicht `toContain`: ein faelschlich feuerndes
+      // `teilweise_bezahlt` auf einer Gutschrift kaeme sonst durch.
+      expect(badges).toEqual(["versandt"]);
     });
   });
 

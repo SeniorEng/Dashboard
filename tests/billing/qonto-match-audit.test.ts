@@ -433,6 +433,38 @@ describe("Qonto Match: Audit-Coverage und Transaktionalität", () => {
     expect(await gebundeneSumme(invoiceId)).toBe(0);
   });
 
+  it("eine STORNIERTE Rechnung nimmt kein Geld mehr an — weder Teil- noch Ueberzahlung", async () => {
+    // ── Warum dieser Fall existiert ────────────────────────────────────────
+    // Bis zum Status-Umbau schuetzte den Bindungs-Pfad sein eigener
+    // Schreibvorgang: `UPDATE … WHERE status IN (…)` lief auf 0 Zeilen und der
+    // Handler warf 400. Der Statuswechsel entfiel mit dem Umbau — und der
+    // Guard ersatzlos mit ihm. Eine Zahlung liess sich danach per 200 an eine
+    // stornierte Rechnung binden.
+    //
+    // Kein Test wurde rot: es gab keinen. Genau deshalb gibt es ihn jetzt —
+    // sonst verschwindet der Guard beim naechsten Umbau wieder lautlos.
+    for (const [suffix, betrag] of [["SGT", 30000], ["SGU", 90000]] as const) {
+      const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix });
+      const txId = await insertQontoTx({ amountCents: betrag });
+      seeded.invoiceIds.push(invoiceId);
+      seeded.qontoTxIds.push(txId);
+
+      await withGobdMutation((tx) =>
+        tx.update(invoices).set({ status: "storniert" }).where(eq(invoices.id, invoiceId)),
+      );
+
+      const res = await apiPost(`/api/admin/qonto/transactions/${txId}/match`, { invoiceId });
+      expect(res.status, `Betrag ${betrag} muss abgelehnt werden`).toBe(400);
+
+      // Und die Bindung darf NICHT bestehen bleiben: der Wurf liegt innerhalb
+      // der Transaktion, also rollt sie das Binden mit zurueck. Ohne diese
+      // Zeile waere der Test auch dann gruen, wenn die Zahlung haengen bliebe.
+      const [tx] = await db.select({ matchedInvoiceId: qontoTransactions.matchedInvoiceId })
+        .from(qontoTransactions).where(eq(qontoTransactions.id, txId));
+      expect(tx.matchedInvoiceId, `Betrag ${betrag}: keine Bindung nach Ablehnung`).toBeNull();
+    }
+  });
+
   it("Task #1822: Über-Toleranz-Überzahlung bleibt Mismatch (nicht bezahlt, nicht teilweise)", async () => {
     const invoiceId = await insertInvoice(seeded.customerId, { amountCents: 50000, suffix: "OV1" });
     const txId = await insertQontoTx({ amountCents: 60000 });

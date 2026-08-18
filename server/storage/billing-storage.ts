@@ -147,12 +147,11 @@ export async function createInvoice(data: Record<string, unknown>, lineItems: Re
  * Ausnahme müsste jeder Aufrufer vorher selbst vergleichen — und genau dort
  * entstünde das nächste Zweitregime.
  *
- * Achtung bei den Zeitstempeln: `sentAt` und `issuedAt` sind per `COALESCE`
- * gegen Überschreiben geschützt, `paidAt`/`storniertAt` NICHT. Ein Gleichstand-
- * Aufruf mit `bezahlt` auf einer bereits bezahlten Rechnung ersetzt daher das
- * ursprüngliche Zahlungsdatum durch „jetzt". Heute gibt es keinen solchen
- * Aufrufer; wer einen baut, gibt `paidAt` ausdrücklich mit, statt sich auf
- * diesen Pfad zu verlassen.
+ * Alle vier Zeitstempel (`sentAt`, `issuedAt`, `paidAt`, `storniertAt`) sind
+ * per `COALESCE` gegen Überschreiben geschützt: sie halten den URSPRUNGS-
+ * zeitpunkt. Wer einen davon bewusst neu setzen will, leert ihn vorher (so
+ * macht es die Zahlungs-Rücknahme mit `paid_at`) — stillschweigend über einen
+ * Gleichstand-Aufruf passiert es nicht mehr.
  */
 /**
  * Ist die Rechnung noch in einem Zustand, in dem eine Zahlung auf sie gebucht
@@ -251,8 +250,18 @@ export async function updateInvoiceStatusTx(
   // Entwurfs-Loeschpfad gab ihre Belegnummer frei. Die Marke nimmt allein das
   // ausdrueckliche Fehlmarkierungs-Ventil zurueck.
   if (status === "entwurf") updateData.sentAt = null;
-  if (status === "bezahlt") updateData.paidAt = new Date();
-  if (status === "storniert") updateData.storniertAt = new Date();
+  // Wie `sentAt`: `COALESCE` schuetzt den URSPRUNGSZEITPUNKT.
+  //
+  // Ohne ihn ist der Gleichstand-Durchlass ein Datenverlust-Pfad, und zwar
+  // ueber ein echtes Rennen: `PATCH /billing/:id/status` prueft den Uebergang
+  // AUSSERHALB der Transaktion. Bestaetigt parallel jemand einen Qonto-Match,
+  // liest dieser Aufruf drinnen `bezahlt`, faellt in den Gleichstand — und
+  // ersetzte das echte Bankdatum (`qtx.emittedAt`) durch „jetzt".
+  //
+  // Die Zahlungs-Ruecknahme leert `paid_at` ausdruecklich; ein spaeterer,
+  // legitimer Weg nach `bezahlt` trifft also NULL und bekommt sein Datum.
+  if (status === "bezahlt") updateData.paidAt = sql`COALESCE(${invoices.paidAt}, now())` as unknown as Date;
+  if (status === "storniert") updateData.storniertAt = sql`COALESCE(${invoices.storniertAt}, now())` as unknown as Date;
   const [updated] = await exec.update(invoices).set(updateData).where(eq(invoices.id, id)).returning();
   return updated;
 }

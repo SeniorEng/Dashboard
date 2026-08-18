@@ -85,7 +85,7 @@ export async function runOneTimeDataMigrations(phase: DataMigrationPhase): Promi
  *
  * Reihenfolge = bisherige Boot-Reihenfolge. KM-/Geo- und monthly_work_hours-
  * Typ-Migrationen zuerst (laufen wie bisher VOR `reconcileDriftedColumnTypes`).
- * Die drei GoBD-Backfills laufen mit `gobdBypass: true`; alle übrigen ohne.
+ * Die zwei GoBD-Backfills laufen mit `gobdBypass: true`; alle übrigen ohne.
  * `conservationCheck` ist für alle deaktiviert (keine Budget-Topf-Mutation).
  */
 export async function buildPreBudgetRegistry(): Promise<GuardedBudgetMigration[]> {

@@ -549,6 +549,29 @@ export function InvoiceRow({
                       </DropdownMenuItem>
                     </>
                   )}
+                  {/* Storno-Dokument als versandt markieren.
+                      Es bleibt `abgeschlossen` — der Server setzt nur `sent_at`.
+                      Ohne diesen Eintrag wäre die Fähigkeit weg: beide anderen
+                      Einstiege gaten auf `entwurf`, und ein Storno-Dokument
+                      steht seit dem Status-Umbau nie mehr darauf. Der
+                      Server-Zweig allein reicht nicht — er wäre von der
+                      Oberfläche aus unerreichbar, und das Badge „Versandt"
+                      damit weiterhin totes Gewicht. */}
+                  {invoice.invoiceType === "stornorechnung"
+                    && invoice.status === "abgeschlossen"
+                    && !invoice.sentAt && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => markSentMutation.mutate(invoice.id)}
+                        disabled={markSentMutation.isPending}
+                        data-testid={`button-mark-storno-sent-${invoice.id}`}
+                      >
+                        <Check className={`${iconSize.sm} mr-2`} />
+                        Als versandt markieren
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   {/* Task #1785 P4: §45b-Kürzung (Superadmin) — storniert + kürzt
                       die ausgestellte §45b-Rechnung auf den gezahlten Betrag und
                       bucht den Überhang um. Eingabe/Bestätigung im Dialog. */}

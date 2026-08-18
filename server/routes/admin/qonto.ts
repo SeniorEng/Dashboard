@@ -362,6 +362,16 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
         ipAddress: req.ip,
       });
     } else {
+      // Auch hier: eine Ueberzahlung ist genauso wenig an eine stornierte
+      // Rechnung zu binden wie eine Teilzahlung. Der Guard stand zuerst nur im
+      // Unterzahlungs-Zweig, weil dort der Blocker gemeldet war — dieselbe
+      // Luecke bestand daneben weiter.
+      if (!(await istRechnungNochOffenTx(dbTx, invoiceId))) {
+        throw badRequest(
+          "Rechnung ist nicht in einem offenen Status und kann nicht abgeglichen werden.",
+        );
+      }
+
       // Über-Toleranz-Überzahlung (decision.status === null): Zahlung an die
       // Rechnung binden, aber NICHT still auf „bezahlt" setzen — sie bleibt zur
       // manuellen Prüfung offen (Differenz-Ansicht). Invariante „niemals still

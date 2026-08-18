@@ -40,7 +40,7 @@ import {
   deactivateTestEmployee,
 } from "../test-utils";
 import { db } from "../../server/lib/db";
-import { auditLog } from "@shared/schema";
+import { auditLog, qontoTransactions } from "@shared/schema";
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -1732,6 +1732,50 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
 
     const after = await apiGet<any>(`/api/billing/${inv.id}`);
     expect(after.data.status, "bezahlte Rechnung darf NICHT zurückgesetzt werden").toBe("bezahlt");
+  });
+
+  it("BF-10.10 — das Ventil greift NICHT, wenn Geld auf der Rechnung gebunden ist", async () => {
+    // ── Warum dieser Fall dazukam ──────────────────────────────────────────
+    // Das Ventil hielt Rechnungen mit Zahlungsbezug frueher ohne eigene Regel
+    // fern: ein Geldeingang hob den Status auf `teilweise_bezahlt` oder
+    // `bezahlt`, und die Bedingung „nur aus versendet" fing sie ab. Der
+    // Kommentar am Endpunkt sagte das ausdruecklich.
+    //
+    // Seit dem Status-Umbau schreibt die Teilzahlung KEINEN Status mehr — die
+    // Rechnung bleibt `versendet` und waere hier durchgelaufen. Sie waere zum
+    // Entwurf geworden, waehrend Geld auf sie gebucht ist: der Zahlungseingang
+    // haengt an einem Dokument, das es formal nicht gibt, und laesst sich auch
+    // keiner anderen Rechnung mehr zuordnen.
+    //
+    // Die Bedingung ist damit von einer Nebenwirkung zu einer eigenen Regel
+    // geworden — und braucht einen eigenen Test.
+    const inv = await createDraftSzInvoice("VENTIL-GEBUNDEN");
+    await finalizeInvoice(inv.id, "versendet");
+
+    const [tx] = await db.insert(qontoTransactions).values({
+      qontoTransactionId: `bf1010-${inv.invoiceNumber}`,
+      amountCents: 1000,
+      currency: "EUR",
+      side: "credit",
+      status: "completed",
+      emittedAt: new Date(),
+      matchedInvoiceId: inv.id,
+      matchConfidence: "test",
+    } as any).returning({ id: qontoTransactions.id });
+
+    try {
+      const res = await apiPost<any>(`/api/billing/${inv.id}/revoke-sent-mark`, {
+        reason: "Versehentlich markiert, es wurde nichts versandt.",
+      });
+      expect(res.status, `Ventil muss ablehnen: ${JSON.stringify(res.data)}`).toBe(400);
+
+      // Und wirklich nichts angefasst haben.
+      const after = await apiGet<any>(`/api/billing/${inv.id}`);
+      expect(after.data.status).toBe("versendet");
+      expect(after.data.sentAt, "Versanddatum muss stehenbleiben").toBeTruthy();
+    } finally {
+      await db.delete(qontoTransactions).where(eq(qontoTransactions.id, tx.id));
+    }
   });
 
   // BF-10.9 — Task #1434 / #66: Das Sammel-Rücksetzen auf „entwurf" ist mit

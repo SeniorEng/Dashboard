@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignInvoiceStage,
   assignInvoiceActionCluster,
-  traegtOffeneForderung,
+  istForderungsdokument,
   istAktionsfaehigeRechnung,
   PIPELINE_STAGES,
 } from "@shared/domain/billing-pipeline";
@@ -36,7 +36,7 @@ describe("Storno-Dokumente tragen keinen offenen Forderungsbetrag (Spec 4.4)", (
     // Status gerade zufällig in den Side-Zustand fällt.
     for (const status of INVOICE_STATUSES) {
       expect(
-        traegtOffeneForderung(rechnung(status, "stornorechnung")),
+        istForderungsdokument(rechnung(status, "stornorechnung")),
         `stornorechnung/${status}`,
       ).toBe(false);
     }
@@ -44,7 +44,7 @@ describe("Storno-Dokumente tragen keinen offenen Forderungsbetrag (Spec 4.4)", (
 
   it("2 — normale Rechnungen und historische Nachberechnungen tragen sie sehr wohl", () => {
     for (const typ of ["rechnung", "nachberechnung"]) {
-      expect(traegtOffeneForderung(rechnung("versendet", typ)), typ).toBe(true);
+      expect(istForderungsdokument(rechnung("versendet", typ)), typ).toBe(true);
     }
   });
 

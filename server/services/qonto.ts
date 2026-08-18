@@ -627,6 +627,13 @@ class QontoService {
             ipAddress,
           });
         } else {
+          // Wie im Unterzahlungs-Zweig: erst pruefen, ob die Rechnung ueberhaupt
+          // noch Geld annehmen darf. Der Guard stand zuerst nur dort, weil der
+          // Blocker dort gemeldet war — dieselbe Luecke bestand daneben weiter.
+          if (!(await istRechnungNochOffenTx(dbTx, match.invoiceId))) {
+            throw new Error("INVOICE_STATUS_CHANGED");
+          }
+
           // Über-Toleranz-ÜBERZAHLUNG: Transaktion
           // bleibt an die Rechnung gebunden, aber die Rechnung wird NICHT still
           // auf „bezahlt" gesetzt, sondern nur zur manuellen Prüfung markiert.

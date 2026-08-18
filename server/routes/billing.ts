@@ -319,6 +319,9 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
         invoiceType: inv.invoiceType,
         grossAmountCents: inv.grossAmountCents,
         paidCents: t.paidCents,
+        // Dieselben Eingaben wie `classifyPaymentDifference` oben — sonst
+        // beantworten Badge und Restbetrags-Zahl dieselbe Frage verschieden.
+        skontoCents: t.skontoCents,
         // #1897: eine gebundene Zahlung stoppt das Altern. Ohne diese Zahl
         // haette das Badge den Bug wiederholt, den #1897 behoben hat.
         hasBoundPayment,
@@ -2607,15 +2610,37 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
   schedulePdfPersistInBackground(id);
 
   const updated = await withAudit(async (tx, audit) => {
-    // Storno-Dokument: KEIN Statuswechsel — es ist bereits `abgeschlossen` und
-    // hat per Uebergangs-SSoT keine Ausgaenge. Nur die Versand-Marke.
-    const u = istStornoDokument
-      ? (await tx.select().from(invoicesTable).where(eq(invoicesTable.id, id)))[0]
-      : await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
-    await tx.update(invoicesTable)
-      // `COALESCE`: ein zweites Markieren verschiebt das Versanddatum nicht.
-      .set({ sentAt: sql`COALESCE(${invoicesTable.sentAt}, now())` as unknown as Date })
-      .where(eq(invoicesTable.id, id));
+    let u: typeof invoicesTable.$inferSelect;
+    if (istStornoDokument) {
+      // KEIN Statuswechsel — das Dokument ist `abgeschlossen` und hat per
+      // Uebergangs-SSoT keine Ausgaenge. Nur die Marken.
+      //
+      // Die Zeile wird unter FOR UPDATE gelesen, nicht nackt: der Normal-Zweig
+      // bekommt diese Serialisierung von `updateInvoiceStatusTx` geschenkt, und
+      // dieser Zweig darf nicht schwaecher sein. Ohne sie war er zudem
+      // check-then-write — verschwand die Zeile zwischen Vorab-Guard und
+      // Transaktion, lief `{...undefined}` durch und der Endpunkt antwortete
+      // 200 samt Audit-Eintrag fuer ein Dokument, das es nicht mehr gab.
+      const [gesperrt] = await tx.select().from(invoicesTable)
+        .where(eq(invoicesTable.id, id)).for("update");
+      if (!gesperrt) throw notFound("Rechnung nicht gefunden");
+      u = gesperrt;
+
+      await tx.update(invoicesTable)
+        .set({
+          // `COALESCE`: ein zweites Markieren verschiebt das Versanddatum nicht.
+          sentAt: sql`COALESCE(${invoicesTable.sentAt}, now())` as unknown as Date,
+          // Auch die AUSGABE-Marke. Sie beantwortet „wurde dieser Beleg je
+          // ausgegeben?" — und ein verschicktes Storno-Dokument wurde das.
+          // Ohne sie bliebe es dauerhaft „nie ausgegeben", waehrend es beim
+          // Empfaenger liegt. (Der Normal-Zweig bekommt sie im Engpass.)
+          issuedAt: sql`COALESCE(${invoicesTable.issuedAt}, now())` as unknown as Date,
+        })
+        .where(eq(invoicesTable.id, id));
+    } else {
+      // Der Engpass setzt `sentAt` und `issuedAt` selbst, beide per `COALESCE`.
+      u = await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
+    }
     audit.record({
       userId: req.user!.id,
       action: "invoice_marked_sent_manually",
@@ -2626,12 +2651,22 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
         customerId: invoice.customerId,
         billingType: invoice.billingType,
         oldStatus: invoice.status,
-        newStatus: "versendet",
+        // Beim Storno-Dokument findet KEIN Uebergang statt — nur die
+        // Versand-Marke entsteht. Ein Audit-Eintrag, der `newStatus:
+        // "versendet"` behauptet, waere ein GoBD-Nachweis fuer einen Vorgang,
+        // den es nicht gab.
+        newStatus: istStornoDokument ? invoice.status : "versendet",
+        nurVersandMarke: istStornoDokument,
         reason: "manual_mark_sent_no_ti",
       },
       ipAddress: req.ip,
     });
-    return { ...u, sentAt: new Date() };
+    // Den tatsaechlich gespeicherten Wert zurueckgeben, nicht „jetzt": bei
+    // einem zweiten Markieren haelt `COALESCE` das Originaldatum, und die
+    // Antwort soll nicht etwas anderes melden als die Datenbank.
+    const [frisch] = await tx.select({ sentAt: invoicesTable.sentAt })
+      .from(invoicesTable).where(eq(invoicesTable.id, id));
+    return { ...u, sentAt: frisch.sentAt };
   }, { faults: readTestFaults(req) });
 
   res.json(updated);
@@ -2647,9 +2682,17 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
 // werden konnte — dieselbe Nummer fuer zwei Dokumente.
 //
 // Bewusst eng gehalten:
-//  - nur aus `versendet` (spaetere Status implizieren Folgewirkungen; ein
-//    Zahlungsbezug hebt ohnehin auf `bezahlt` und faellt damit schon durch
-//    diese Bedingung),
+//  - nur aus `versendet` (spaetere Status implizieren Folgewirkungen),
+//  - und NICHT, wenn eine Zahlung gebunden ist. Diese Bedingung stand hier
+//    frueher NICHT, weil sie nicht noetig war: ein Zahlungsbezug hob die
+//    Rechnung auf `teilweise_bezahlt` oder `bezahlt` und fiel damit schon
+//    durch die Status-Bedingung. Seit die Teilzahlung KEINEN Status mehr
+//    schreibt, traegt dieses Argument nicht mehr — eine Rechnung mit
+//    gebundener Teilzahlung steht auf `versendet` und waere hier
+//    durchgelaufen. Sie waere damit zum Entwurf geworden, waehrend Geld auf
+//    sie gebucht ist: der Zahlungseingang haenge an einem Dokument, das es
+//    formal nicht gibt, und liesse sich auch keiner anderen Rechnung mehr
+//    zuordnen.
 //  - NIE auf einer Stornorechnung: das Gegendokument einer Storno-Kette darf
 //    nicht in den Entwurfsstatus zurueckfallen, waehrend das Original
 //    `storniert` bleibt,
@@ -2683,6 +2726,17 @@ router.post("/:id/revoke-sent-mark", asyncHandler("Markierung konnte nicht zurü
     throw badRequest(
       "Eine Stornorechnung kann nicht zurückgenommen werden — sie ist das Gegendokument "
       + "einer bereits stornierten Rechnung.",
+    );
+  }
+
+  // Siehe Kopfkommentar: die Status-Bedingung allein reicht seit dem
+  // Status-Umbau nicht mehr aus, um Rechnungen mit Geldeingang fernzuhalten.
+  const gebunden = await qontoStorage.getClaimedInvoiceIds(db, [id]);
+  if (gebunden.has(id)) {
+    throw badRequest(
+      "Auf diese Rechnung ist bereits eine Zahlung gebucht — die Ausgabe-Markierung "
+      + "kann nicht zurückgenommen werden. Zuerst die Zahlungszuordnung aufheben, "
+      + "sonst der Weg Storno + Neuausstellung.",
     );
   }
 
@@ -2809,10 +2863,10 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
       schedulePdfPersistInBackground(invoiceId);
 
       await withAudit(async (tx, audit) => {
+        // `updateInvoiceStatusTx` setzt `sent_at` selbst (per `COALESCE`).
+        // Das fruehere Direkt-Update daneben war nicht nur ueberfluessig — es
+        // haette den Ueberschreib-Schutz an dieser Stelle wieder ausgehebelt.
         await updateInvoiceStatusTx(tx, invoiceId, "versendet", req.user!.id);
-        await tx.update(invoicesTable)
-          .set({ sentAt: new Date() })
-          .where(eq(invoicesTable.id, invoiceId));
         audit.record({
           userId: req.user!.id,
           action: "invoice_marked_sent_manually",
@@ -3070,10 +3124,9 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
     try {
       schedulePdfPersistInBackground(inv.id);
       await withAudit(async (tx, audit) => {
+        // Siehe send-bulk: die Versand-Marke gehoert an den Engpass, nicht
+        // daneben.
         await updateInvoiceStatusTx(tx, inv.id, "versendet", req.user!.id);
-        await tx.update(invoicesTable)
-          .set({ sentAt: new Date() })
-          .where(eq(invoicesTable.id, inv.id));
         // Task #1403: Sammeldruck markiert ALLE enthaltenen Entwürfe einheitlich
         // manuell als versendet (Pflegekassen + Selbstzahler) — kein realer
         // E-Mail-Versand, kein Selbstzahler-Spezial-Pfad.

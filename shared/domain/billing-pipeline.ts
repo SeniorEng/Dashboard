@@ -247,10 +247,22 @@ export interface InvoicePipelineInput {
 }
 
 /**
- * SSoT: **Trägt dieses Dokument einen offenen Forderungsbetrag?**
+ * SSoT: **Ist dies ein Forderungs-DOKUMENT — also kein Storno-Beleg?**
  *
  * Nein für Storno-Dokumente — ausdrückliche Regel, kein Nebeneffekt einer
  * Enum-Zuordnung (Spec, Abschnitt 4.4).
+ *
+ * ── Zum Namen ───────────────────────────────────────────────────────────
+ * Sie hieß zuerst `traegtOffeneForderung`. Das war irreführend: die Funktion
+ * liest den Status GAR NICHT und liefert `true` auch für eine längst bezahlte
+ * Rechnung. Wer sich auf den Namen verließ und sie als „unbezahlt"-Filter
+ * benutzte, bekam ein falsches Ergebnis — und der ganze Gewinn der
+ * Umbenennung (die Regel trägt einen Namen statt einer Nebenwirkung) wäre
+ * dahin gewesen.
+ *
+ * Beantwortet wird die TYP-Frage: normale Rechnungen und historische
+ * Nachberechnungen tragen einen Forderungsbetrag; Storno-Dokumente sind das
+ * Gegenteil davon — sie geben Geld zurück und tragen negative Beträge.
  *
  * Der Betrag, den ein Storno-Dokument aufhebt, ist bereits am ORIGINAL
  * herausgerechnet: dort steht `storniert`, und stornierte Rechnungen zählen in
@@ -265,7 +277,7 @@ export interface InvoicePipelineInput {
  * dass ein Test rot würde. Verankert in
  * `tests/billing/storno-ohne-forderung.test.ts`.
  */
-export function traegtOffeneForderung(input: { invoiceType: string }): boolean {
+export function istForderungsdokument(input: { invoiceType: string }): boolean {
   return input.invoiceType !== "stornorechnung";
 }
 
@@ -300,7 +312,7 @@ export function traegtOffeneForderung(input: { invoiceType: string }): boolean {
  * hat den Bruch gefangen. Wer eine der drei Formen ändert, ändert alle drei.
  */
 export function istAktionsfaehigeRechnung(input: { status: string; invoiceType: string }): boolean {
-  return traegtOffeneForderung(input) && !isStorniertInvoice(input);
+  return istForderungsdokument(input) && !isStorniertInvoice(input);
 }
 
 /**
@@ -314,7 +326,7 @@ export function isStorniertInvoice(input: { status: string }): boolean {
   // NUR noch der Status. Der Typ sagt seit dem Umbau nichts mehr über den
   // Zustand aus: ein Storno-DOKUMENT ist `abgeschlossen`, nicht storniert.
   // Wer wissen will, ob ein Dokument eine offene Forderung trägt, fragt
-  // `traegtOffeneForderung`.
+  // `istForderungsdokument`.
   return input.status === "storniert";
 }
 
@@ -328,9 +340,9 @@ export function isStorniertInvoice(input: { status: string }): boolean {
  */
 export function assignInvoiceStage(input: InvoicePipelineInput): PipelineAssignment {
   // Storno-DOKUMENT zuerst: es trägt keine offene Forderung (siehe
-  // `traegtOffeneForderung`) und gehört deshalb in keine Stufe — unabhängig
+  // `istForderungsdokument`) und gehört deshalb in keine Stufe — unabhängig
   // davon, welchen Status es trägt.
-  if (!traegtOffeneForderung(input)) {
+  if (!istForderungsdokument(input)) {
     return { kind: "side", state: "storno_dokument" };
   }
   switch (input.status) {

@@ -27,6 +27,7 @@
 
 import type { InvoiceStatus } from "../schema/billing";
 import { agingModelForBillingType, resolveAgingBucket } from "./billing-pipeline";
+import { classifyPaymentDifference } from "./qonto/payment-difference";
 
 export const INVOICE_BADGES = ["teilweise_bezahlt", "ueberfaellig", "versandt"] as const;
 export type InvoiceBadge = (typeof INVOICE_BADGES)[number];
@@ -52,6 +53,8 @@ export interface InvoiceBadgeInput {
    * Genau diese Unterscheidung war der Kern von #1897.
    */
   hasBoundPayment: boolean;
+  /** Gewährtes Skonto in Cent. Zählt zur Deckung, ist aber kein Geldeingang. */
+  skontoCents?: number;
   /** Fälligkeitsdatum (ISO) — Anker für Selbstzahler/Privat. */
   dueDate: string | null;
   /** Versanddatum (ISO) — Anker für Pflegekassen, und Quelle des Versandt-Badges. */
@@ -77,7 +80,34 @@ export interface InvoiceBadgeInput {
  */
 export function istTeilweiseBezahlt(input: InvoiceBadgeInput): boolean {
   if (input.status === "bezahlt" || input.status === "storniert") return false;
-  return input.paidCents > 0 && input.paidCents < input.grossAmountCents;
+  if (input.paidCents <= 0) return false;
+
+  // Deckung über die BESTEHENDE SSoT, nicht über einen eigenen Vergleich.
+  //
+  // Die erste Fassung fragte `paidCents < grossAmountCents` — ohne Skonto und
+  // ohne die 100-Cent-Toleranz. Sie widersprach damit der Restbetrags-Zahl in
+  // derselben Zeile, die aus `classifyPaymentDifference` stammt. Zwei Fälle
+  // gingen konkret auseinander:
+  //
+  //   Brutto 1.000,00 €, gebunden 999,50 €  → `tolerated`, also gedeckt.
+  //     Alte Fassung: Badge „Teilweise bezahlt" neben „Zahlung · gedeckt".
+  //   Brutto 1.000,00 €, gezahlt 900,00 €, Skonto 100,00 € → `exact`.
+  //     Alte Fassung: Badge „Teilweise bezahlt" auf einer gedeckten Rechnung.
+  //
+  // Beide zeigten das Badge ohne die zugehörige Zahl, weil der Server sie nur
+  // bei `underpaid` mitgibt. Der Docstring begründete den Eigenbau damit, der
+  // Status entscheide („steht `bezahlt`, ist nichts mehr teilweise") — im
+  // Prüf-Fenster steht aber noch `versendet`, dort trug das Argument nicht.
+  // `underpaid`, nicht `!isPaymentFullyCovered`: die Verneinung der Deckung
+  // umfasst auch die ÜBERZAHLUNG, und eine überzahlte Rechnung ist nicht
+  // „teilweise bezahlt" — sie ist ein Prüffall. Das ist exakt die Bedingung,
+  // unter der der Server `paidCents`/`openAmountCents` mitgibt; Badge und Zahl
+  // erscheinen damit immer gemeinsam.
+  return classifyPaymentDifference({
+    invoiceGrossCents: input.grossAmountCents,
+    paidCents: input.paidCents,
+    skontoCents: input.skontoCents ?? 0,
+  }).result === "underpaid";
 }
 
 /**
@@ -94,8 +124,17 @@ export function istTeilweiseBezahlt(input: InvoiceBadgeInput): boolean {
  * Avis-Schritt. „Überfällig ab Fälligkeitsdatum" würde dort Rechnungen
  * anmahnen, die im normalen Lauf sind.
  *
- * Wer künftig eine ZWEITE Stelle mit `billingType` im Rechnungswesen findet,
- * hat einen Rückfall gefunden, keinen Rest.
+ * Die Aussage gilt eng: für STATUS, STUFE und CLUSTER — also für das
+ * Zustands- und Alterungs-Modell. NICHT für das Rechnungswesen insgesamt: der
+ * PDF-Aufbau, die Adress-Auffrischung und die Kostenerstattungs-Pfade
+ * verzweigen weiterhin völlig zu Recht auf `billingType`, weil dort wirklich
+ * verschiedene Dokumente entstehen.
+ *
+ * Eine frühere Fassung dieses Absatzes behauptete, JEDE weitere `billingType`-
+ * Stelle im Rechnungswesen sei ein Rückfall. Das ist falsch und hätte den
+ * nächsten Leser dazu gebracht, ein halbes Dutzend legitimer Stellen zu
+ * melden — eine unbelegte Eindeutigkeits-Behauptung ist genau die Sorte
+ * Zweitwahrheit, gegen die dieser Umbau angetreten ist.
  */
 export function istUeberfaellig(input: InvoiceBadgeInput): boolean {
   if (input.status !== "versendet") return false;
