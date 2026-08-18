@@ -91,22 +91,29 @@ describe("isGekuendigterAktiverKunde / isLaufenderAktiverKunde", () => {
     expect(isLaufenderAktiverKunde({ status: "inaktiv", contractEnd: null })).toBe(false);
   });
 
-  it("die beiden Prädikate sind innerhalb der aktiven Kohorte komplementär", () => {
-    const inputs = [
+  it("laufend und gekuendigt sind NICHT mehr komplementaer — dazwischen liegt pausiert", () => {
+    // ── Was dieser Fall vorher behauptete ────────────────────────────────
+    // „die beiden Praedikate sind innerhalb der aktiven Kohorte komplementaer"
+    // — `isLaufend === !isGekuendigt`. Das galt, solange es zwei Werte gab.
+    // Mit `pausiert` ist es falsch, und der Fall blieb nur deshalb gruen, weil
+    // seine `inputs`-Liste ausgerechnet `paused` nicht enthielt. Dieselbe
+    // Fehlerklasse wie der Fall, den 6hHW39Gx ersetzt hat: ein Test, der die
+    // alte Zweiwertigkeit mitglaubt.
+    const komplementaer = [
       { status: "aktiv", contractEnd: null, contractStatus: null },
       { status: "aktiv", contractEnd: "2026-01-31", contractStatus: null },
       { status: "aktiv", contractEnd: null, contractStatus: TERMINATED_CONTRACT_STATUS },
     ];
-    for (const input of inputs) {
+    for (const input of komplementaer) {
       expect(isLaufenderAktiverKunde(input)).toBe(!isGekuendigterAktiverKunde(input));
     }
-  });
-});
 
-describe("ACTIVE_CUSTOMER_LIFECYCLE_LABELS", () => {
-  it("liefert die deutschen UI-Labels", () => {
-    expect(ACTIVE_CUSTOMER_LIFECYCLE_LABELS.laufend).toBe("Laufend");
-    expect(ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt).toBe("Gekündigt");
+    // Und die Gegenprobe, die den Fall erst messend macht: pausiert ist WEDER
+    // laufend NOCH gekuendigt.
+    const pausiert = { status: "aktiv", contractEnd: null, contractStatus: PAUSED_CONTRACT_STATUS };
+    expect(isLaufenderAktiverKunde(pausiert)).toBe(false);
+    expect(isGekuendigterAktiverKunde(pausiert)).toBe(false);
+    expect(isPausierterAktiverKunde(pausiert)).toBe(true);
   });
 
   // ── Task 6hHW39Gx — „pausiert" als dritter Wert ───────────────────────
@@ -167,5 +174,13 @@ describe("ACTIVE_CUSTOMER_LIFECYCLE_LABELS", () => {
         classifyActiveCustomerLifecycle({ status: "aktiv", contractEnd: null, contractStatus: cs })),
     );
     expect([...erreicht].sort()).toEqual([...ACTIVE_CUSTOMER_LIFECYCLES].sort());
+  });
+});
+
+describe("ACTIVE_CUSTOMER_LIFECYCLE_LABELS", () => {
+  it("liefert die deutschen UI-Labels", () => {
+    expect(ACTIVE_CUSTOMER_LIFECYCLE_LABELS.laufend).toBe("Laufend");
+    expect(ACTIVE_CUSTOMER_LIFECYCLE_LABELS.pausiert).toBe("Pausiert");
+    expect(ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt).toBe("Gekündigt");
   });
 });

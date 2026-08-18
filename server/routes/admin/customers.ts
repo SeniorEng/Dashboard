@@ -164,12 +164,17 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
     // (aktiv, aber noch ohne aktiven Vertrag); `true` nur mit Vertrag.
     hasActiveContract:
       hasActiveContract === "true" ? true : hasActiveContract === "false" ? false : undefined,
-    // Task #1194 — Lebenszyklus-Filter aktiver Kunden: „laufend" vs.
-    // „gekuendigt". Andere Werte werden ignoriert.
-    lifecycle:
-      lifecycle === "laufend" ? "laufend" as const
-        : lifecycle === "gekuendigt" ? "gekuendigt" as const
-        : undefined,
+    // Lebenszyklus-Filter aktiver Kunden. Gegen die UNION geprueft, nicht
+    // aufgezaehlt: die frueheren zwei Ternaries waren der vierte Ort, an dem
+    // die Werte handgeschrieben standen — und der einzige, der beim Hinzufuegen
+    // von `pausiert` vergessen wurde. Folge: der neue Chip schickte
+    // `lifecycle=pausiert`, die Route machte daraus `undefined`, und die Liste
+    // zeigte ALLE aktiven Kunden, waehrend der Chip daneben „Pausiert (3)"
+    // behauptete. Der `never`-Guard in der Storage-Schicht konnte das nicht
+    // fangen — der Wert verliess die Route nie.
+    lifecycle: (ACTIVE_CUSTOMER_LIFECYCLES as readonly string[]).includes(lifecycle as string)
+      ? (lifecycle as ActiveCustomerLifecycle)
+      : undefined,
     sortBy: validSortBy,
     sortOrder: validSortOrder,
   };

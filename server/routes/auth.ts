@@ -146,8 +146,14 @@ router.get("/me", asyncHandler("Benutzerinformationen konnten nicht geladen werd
           if (req.user!.geburtsdatum && calculateDaysUntilBirthday(req.user!.geburtsdatum) <= 7) count++;
           const assignedIds = await storage.getAssignedCustomerIds(userId);
           if (assignedIds.length > 0) {
-            const customers = await storage.getCustomersByIds(assignedIds);
-            for (const cust of customers) {
+            // Derselbe Filter wie im Admin-Zweig darueber und wie in der Liste
+            // (`routes/birthdays.ts`). Die erste Fassung filterte NUR den
+            // Admin-Zweig — damit zeigte der Nav-Punkt einer Mitarbeiterin
+            // einen Geburtstag an, den ihr Geburtstags-Tab nicht mehr enthielt.
+            // Vor dem Umbau waren beide Zweige ungefiltert und dadurch
+            // konsistent; die Abweichung entstand erst durch den halben Fix.
+            const customers = await storage.getCustomersWithBirthdayByIds(assignedIds);
+            for (const cust of customers.filter(isLaufenderAktiverKunde)) {
               if (cust.geburtsdatum && calculateDaysUntilBirthday(cust.geburtsdatum) <= 7) count++;
             }
           }

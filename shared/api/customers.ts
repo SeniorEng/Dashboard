@@ -36,7 +36,6 @@ export interface CustomerListItem {
    */
   contractEnd: string | null;
   /**
-   * Task #1194 — true, wenn der jüngste Vertrag den Status `terminated` hat.
    * Status des jüngsten Vertrags (`active | paused | terminated`), `null` wenn
    * kein Vertrag existiert.
    *
@@ -58,9 +57,9 @@ export interface CustomerListParams extends PaginationParams {
   budgetSetupMissing?: string;
   hasActiveContract?: string;
   /**
-   * Task #1194 — Filtert aktive Kunden nach Lebenszyklus: `laufend`
-   * (aktiv ohne beendeten Vertrag) oder `gekuendigt` (aktiv mit beendetem/
-   * gekündigtem Vertrag). Greift nur innerhalb der aktiven Kohorte.
+   * Lebenszyklus-Filter innerhalb der aktiven Kohorte — ein Wert aus
+   * `ACTIVE_CUSTOMER_LIFECYCLES` (`laufend | pausiert | gekuendigt`). Andere
+   * Werte verwirft die Route.
    */
   lifecycle?: string;
   sortBy?: string;

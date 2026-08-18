@@ -336,9 +336,12 @@ class CustomerManagementStorage {
     // 'terminated'. Ein beendeter Vertrag schlägt den pausierten (siehe
     // Reihenfolge in `classifyActiveCustomerLifecycle`), deshalb steht der
     // Ausschluss von `gekuendigtExpr` in der Bedingung.
-    const pausiertExpr = sqlBuilder<boolean>`COALESCE(
+    // Aeussere Klammern sind PFLICHT: ohne sie rendert `NOT ${pausiertExpr}`
+    // als `NOT P AND NOT G` statt `NOT (P AND NOT G)`. Das Ergebnis stimmte im
+    // `laufend`-Zweig nur zufaellig, weil dort `NOT G` ohnehin davorsteht.
+    const pausiertExpr = sqlBuilder<boolean>`(COALESCE(
       ${latestContractSubquery.contractStatus} = 'paused', false
-    ) AND NOT ${gekuendigtExpr}`;
+    ) AND NOT ${gekuendigtExpr})`;
     // Erschöpfend über `ActiveCustomerLifecycle` — kein `else`-Zweig, der einen
     // künftigen vierten Wert stillschweigend als „laufend" mitfiltert.
     switch (filters?.lifecycle) {

@@ -131,8 +131,14 @@ interface ProjectedGrowthRange {
  * oder gekündigt). Summe entspricht `funnel.active`; die Funnel-Zahlen selbst
  * bleiben unverändert.
  */
+/**
+ * Aufteilung der aktiven Kohorte nach Lebenszyklus. Die Schluessel entsprechen
+ * `ActiveCustomerLifecycle` — ein Wert dort ohne Feld hier laesst die Summe
+ * nicht mehr aufgehen.
+ */
 interface ActiveCustomerBreakdown {
   laufend: number;
+  pausiert: number;
   gekuendigt: number;
 }
 

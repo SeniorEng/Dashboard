@@ -72,7 +72,13 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
     // „laufend" vs. „gekündigt" anhand des jüngsten Vertrags (Vertragsende
     // gesetzt ODER Vertragsstatus 'terminated'). Spiegelt die reine
     // Klassifikation in shared/domain/customers/lifecycle.ts. `laufend` wird als
-    // total − gekuendigt abgeleitet, damit die Summe exakt `funnel.active` trifft.
+    // total − gekuendigt − pausiert abgeleitet, damit die Summe exakt
+    // `funnel.active` trifft.
+    //
+    // `pausiert` kam mit 6hHW39Gx dazu. Ohne die Spalte zaehlte die Statistik
+    // pausierte Kunden weiter als „laufend" — derselbe Kunde stand dann auf
+    // /admin/statistics unter „laufend" und in der Kundenliste unter
+    // „Pausiert". Zwei Antworten auf dieselbe fachliche Frage.
     db.execute(sql`
       WITH latest_contract AS (
         SELECT DISTINCT ON (customer_id) customer_id, contract_end, status
@@ -81,7 +87,10 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
       )
       SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE lc.contract_end IS NOT NULL OR lc.status = 'terminated')::int AS gekuendigt
+        COUNT(*) FILTER (WHERE lc.contract_end IS NOT NULL OR lc.status = 'terminated')::int AS gekuendigt,
+        COUNT(*) FILTER (WHERE lc.status = 'paused'
+                           AND lc.contract_end IS NULL
+                           AND lc.status <> 'terminated')::int AS pausiert
       FROM customers c
       LEFT JOIN latest_contract lc ON lc.customer_id = c.id
       WHERE c.status = 'aktiv' AND c.deleted_at IS NULL
@@ -224,10 +233,11 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
   const terminated = num(f.terminated);
   const everActive = active + inactive + terminated;
 
-  // Task #1194 — `laufend` als total − gekuendigt, damit die Summe exakt
-  // `funnel.active` trifft (Funnel-Zahlen bleiben unverändert).
+  // `laufend` als Rest, damit die Summe exakt `funnel.active` trifft
+  // (Funnel-Zahlen bleiben unverändert).
   const ab = activeBreakdownRow.rows[0] as Record<string, unknown>;
   const abGekuendigt = num(ab?.gekuendigt);
+  const abPausiert = num(ab?.pausiert);
   const abTotal = num(ab?.total);
 
   return {
@@ -240,7 +250,11 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
         ? Math.round((active / (inConsultation + active)) * 100) : 0,
       retentionPct: everActive > 0 ? Math.round((active / everActive) * 100) : 0,
     },
-    activeBreakdown: { laufend: abTotal - abGekuendigt, gekuendigt: abGekuendigt },
+    activeBreakdown: {
+      laufend: abTotal - abGekuendigt - abPausiert,
+      pausiert: abPausiert,
+      gekuendigt: abGekuendigt,
+    },
     activeCustomers: buildKpi(curActive, prevActive, yoyActive),
     conversionRatePct: buildKpi(curConv.pct, prevConv.pct, yoyConv.pct),
     avgDaysConsultationToFirstAppointment: curConv.avgDays > 0 ? curConv.avgDays : null,

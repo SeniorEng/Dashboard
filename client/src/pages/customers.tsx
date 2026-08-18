@@ -28,6 +28,7 @@ import type { BirthdayEntry } from "@shared/types";
 import {
   classifyActiveCustomerLifecycle,
   ACTIVE_CUSTOMER_LIFECYCLE_LABELS,
+  ACTIVE_CUSTOMER_LIFECYCLES,
   type ActiveCustomerLifecycle,
 } from "@shared/domain/customers";
 
@@ -105,16 +106,20 @@ export default function CustomersPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Task #1194 — Aufteilung der aktiven Kunden in "laufend" vs. "gekuendigt".
+  // Aufteilung der aktiven Kunden nach Lebenszyklus — ueber die Union gezaehlt,
+  // nicht mit zwei Variablen. Die erste Fassung zaehlte nur `laufend` und
+  // `gekuendigt`; mit `pausiert` ging die Summe nicht mehr auf („7 laufend ·
+  // 2 gekuendigt" neben Chip „Alle (10)"), und der pausierte Kunde war ueber
+  // keinen Chip ausser „Alle" erreichbar.
   const lifecycleCounts = useMemo(() => {
-    let laufend = 0;
-    let gekuendigt = 0;
+    const zaehler = Object.fromEntries(
+      ACTIVE_CUSTOMER_LIFECYCLES.map((w) => [w, 0]),
+    ) as Record<ActiveCustomerLifecycle, number>;
     for (const c of customers) {
       const lc = customerLifecycle(c);
-      if (lc === "laufend") laufend++;
-      else if (lc === "gekuendigt") gekuendigt++;
+      if (lc) zaehler[lc]++;
     }
-    return { laufend, gekuendigt };
+    return zaehler;
   }, [customers]);
 
   const filteredCustomers = useMemo(() => {
@@ -230,12 +235,15 @@ export default function CustomersPage() {
             />
           </div>
 
-          {/* Task #1194 — Filter-Chips: Alle / Laufend / Gekündigt */}
+          {/* Filter-Chips: „Alle" plus ein Chip je Lebenszyklus-Wert. */}
           <div className="flex items-center gap-2 mb-4" data-testid="filter-customer-lifecycle">
             {([
               { key: "alle" as const, label: "Alle", count: customers.length },
-              { key: "laufend" as const, label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS.laufend, count: lifecycleCounts.laufend },
-              { key: "gekuendigt" as const, label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt, count: lifecycleCounts.gekuendigt },
+              ...ACTIVE_CUSTOMER_LIFECYCLES.map((w) => ({
+                key: w,
+                label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS[w],
+                count: lifecycleCounts[w],
+              })),
             ]).map((chip) => (
               <button
                 key={chip.key}
@@ -416,9 +424,21 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
                 {customer.name}
               </h3>
               <div className="flex items-center gap-1.5 shrink-0">
-                {customerLifecycle(customer) === "gekuendigt" && (
-                  <StatusBadge type="warning" value={ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt} size="sm" data-testid={`badge-customer-lifecycle-${customer.id}`} />
-                )}
+                {/* Jeder Lebenszyklus ausser „laufend" bekommt einen Badge.
+                    Vorher stand hier nur `gekuendigt` — ein pausierter Kunde
+                    sah damit aus wie ein laufender. */}
+                {(() => {
+                  const lc = customerLifecycle(customer);
+                  if (!lc || lc === "laufend") return null;
+                  return (
+                    <StatusBadge
+                      type="warning"
+                      value={ACTIVE_CUSTOMER_LIFECYCLE_LABELS[lc]}
+                      size="sm"
+                      data-testid={`badge-customer-lifecycle-${customer.id}`}
+                    />
+                  );
+                })()}
                 {isLegacy && (
                   <StatusBadge type="warning" value="Frühere Zuordnung" size="sm" data-testid={`badge-customer-legacy-${customer.id}`} />
                 )}
