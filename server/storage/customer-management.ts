@@ -31,6 +31,7 @@ import {
 import { eq, and, isNull, isNotNull, desc, asc, count, or, ilike, exists, sql as sqlBuilder } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { customerIdsCache } from "../services/cache";
+import type { ActiveCustomerLifecycle } from "@shared/domain/customers/lifecycle";
 import { todayISO } from "@shared/utils/datetime";
 import { db, type DbOrTx } from "../lib/db";
 import { AppError } from "../lib/errors";
@@ -85,7 +86,7 @@ export interface CustomerListFilters {
    * zusammen mit `status: "aktiv"` (die Unterscheidung gilt innerhalb der
    * aktiven Kohorte).
    */
-  lifecycle?: "laufend" | "gekuendigt";
+  lifecycle?: ActiveCustomerLifecycle;
   sortBy?: "name" | "contractStart" | "createdAt";
   sortOrder?: "asc" | "desc";
 }
@@ -122,7 +123,7 @@ interface CustomerListItem {
   rechnungAnKunde: boolean;
   // Task #1194 — Vertragsende + Kündigungs-Status des jüngsten Vertrags.
   contractEnd: string | null;
-  contractTerminated: boolean;
+  contractStatus: string | null;
   createdAt: Date;
 }
 
@@ -319,7 +320,7 @@ class CustomerManagementStorage {
       fullConditions.push(sqlBuilder`COALESCE(${customers.pflegegrad}, 0) >= 2`);
       fullConditions.push(isNull(activeBudgetSettingsSubquery.customerId));
     }
-    // Task #1194 — Lebenszyklus-Filter (laufend/gekündigt). „gekündigt" =
+    // Task #1194 — Lebenszyklus-Filter. „gekündigt" =
     // jüngster Vertrag mit Vertragsende ODER Vertragsstatus 'terminated';
     // „laufend" = alle übrigen aktiven Kunden (inkl. ohne Vertrag). Spiegelt
     // die reine Klassifikation in shared/domain/customers/lifecycle.ts.
@@ -331,10 +332,34 @@ class CustomerManagementStorage {
       ${latestContractSubquery.contractEnd} IS NOT NULL
       OR ${latestContractSubquery.contractStatus} = 'terminated'
     , false)`;
-    if (filters?.lifecycle === "gekuendigt") {
-      fullConditions.push(gekuendigtExpr);
-    } else if (filters?.lifecycle === "laufend") {
-      fullConditions.push(sqlBuilder`NOT ${gekuendigtExpr}`);
+    // „pausiert" = jüngster Vertrag auf 'paused', ohne Vertragsende und nicht
+    // 'terminated'. Ein beendeter Vertrag schlägt den pausierten (siehe
+    // Reihenfolge in `classifyActiveCustomerLifecycle`), deshalb steht der
+    // Ausschluss von `gekuendigtExpr` in der Bedingung.
+    // Aeussere Klammern sind PFLICHT: ohne sie rendert `NOT ${pausiertExpr}`
+    // als `NOT P AND NOT G` statt `NOT (P AND NOT G)`. Das Ergebnis stimmte im
+    // `laufend`-Zweig nur zufaellig, weil dort `NOT G` ohnehin davorsteht.
+    const pausiertExpr = sqlBuilder<boolean>`(COALESCE(
+      ${latestContractSubquery.contractStatus} = 'paused', false
+    ) AND NOT ${gekuendigtExpr})`;
+    // Erschöpfend über `ActiveCustomerLifecycle` — kein `else`-Zweig, der einen
+    // künftigen vierten Wert stillschweigend als „laufend" mitfiltert.
+    switch (filters?.lifecycle) {
+      case "gekuendigt":
+        fullConditions.push(gekuendigtExpr);
+        break;
+      case "pausiert":
+        fullConditions.push(pausiertExpr);
+        break;
+      case "laufend":
+        fullConditions.push(sqlBuilder`NOT ${gekuendigtExpr} AND NOT ${pausiertExpr}`);
+        break;
+      case undefined:
+        break;
+      default: {
+        const nieErreicht: never = filters!.lifecycle;
+        throw new Error(`Unbekannter Lebenszyklus-Filter: ${String(nieErreicht)}`);
+      }
     }
     const fullWhereClause = fullConditions.length > 0 ? and(...fullConditions) : undefined;
 
@@ -464,7 +489,7 @@ class CustomerManagementStorage {
         hasBetreuer: r.hasBetreuer === true,
         budgetSetupMissing: r.budgetSetupMissing === true,
         contractEnd: r.contractEnd ? String(r.contractEnd) : null,
-        contractTerminated: r.contractStatus === "terminated",
+        contractStatus: r.contractStatus ?? null,
         createdAt: r.createdAt,
       };
     });

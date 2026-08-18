@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { requireAuth } from "../middleware/auth";
+import { isLaufenderAktiverKunde } from "@shared/domain/customers/lifecycle";
 import { asyncHandler } from "../lib/errors";
 import { storage } from "../storage";
 import { birthdaysCache } from "../services/cache";
@@ -132,6 +133,23 @@ function calculateUpcomingAge(birthDate: string, daysUntil: number): number {
   return daysUntil <= 0 ? baseAge : baseAge + 1;
 }
 
+/**
+ * Wird dieser Kunde gerade betreut?
+ *
+ * Beide Ansichten — Admin und Mitarbeiter — fragen dieselbe SSoT. Vorher gab es
+ * gar keinen Filter: die Admin-Sicht rief `getActiveCustomersWithBirthday`, das
+ * trotz seines Namens nur `deleted_at IS NULL` prueft, und die Mitarbeiter-Sicht
+ * filterte ueberhaupt nicht. Gekuendigte, pausierte und auf `inaktiv` gesetzte
+ * Kunden bekamen Geburtstagsgruesse.
+ */
+function nurBetreute(kunde: {
+  status: string | null;
+  contractEnd: string | null;
+  contractStatus: string | null;
+}): boolean {
+  return isLaufenderAktiverKunde(kunde);
+}
+
 router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (req: Request, res: Response) => {
   const user = req.user!;
   const rawDays = parseInt(req.query.days as string);
@@ -162,10 +180,13 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
   };
 
   if (user.isAdmin) {
-    const [activeEmployees, activeCustomers] = await Promise.all([
+    const [activeEmployees, alleKunden] = await Promise.all([
       storage.getActiveEmployeesWithBirthday(),
-      storage.getActiveCustomersWithBirthday(),
+      storage.getCustomersWithBirthday(),
     ]);
+    // Nur betreute Kunden. Gekuendigte (durch Kunde wie durch Firma) und
+    // pausierte fallen heraus — beides beantwortet die Lebenszyklus-SSoT.
+    const activeCustomers = alleKunden.filter(nurBetreute);
 
     for (const emp of activeEmployees) {
       if (!emp.geburtsdatum) continue;
@@ -208,10 +229,17 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
       }));
     }
 
+    // ── Scoping und Aktiv-Filter sind ZWEI Schritte ─────────────────────
+    // `getAssignedCustomerIds` bestimmt WELCHE Kunden dieser Mitarbeiter sehen
+    // darf — unveraendert, inklusive Vertretungs-Zuweisungen. Der Aktiv-Filter
+    // kommt DANACH und verkleinert diese Menge nur. Er ersetzt das Scoping
+    // nicht und kann es nicht erweitern: was `getAssignedCustomerIds` nicht
+    // liefert, taucht auch hier nicht auf.
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
 
     if (assignedCustomerIds.length > 0) {
-      const assignedCustomers = await storage.getCustomersByIds(assignedCustomerIds);
+      const zugewiesene = await storage.getCustomersWithBirthdayByIds(assignedCustomerIds);
+      const assignedCustomers = zugewiesene.filter(nurBetreute);
 
       for (const cust of assignedCustomers) {
         if (!cust.geburtsdatum) continue;
@@ -223,7 +251,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
           geburtsdatum: cust.geburtsdatum!,
           daysUntil: daysUntil!,
           age: calculateUpcomingAge(cust.geburtsdatum!, daysUntil!),
-          address: buildAddress(cust.strasse, cust.nr, cust.plz, cust.stadt),
+          address: buildAddress(cust.strasse, cust.hausnummer, cust.plz, cust.stadt),
         }));
       }
     }

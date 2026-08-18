@@ -2,11 +2,14 @@ import { CONTACT_TYPES as CONTACT_TYPE_VALUES, LEGACY_CONTACT_TYPES } from "../s
 
 export { LEGACY_CONTACT_TYPES };
 
-// Lebenszyklus aktiver Kunden (Task #1194): laufend vs. gekündigt.
+// Lebenszyklus aktiver Kunden (Task #1194 / 6hHW39Gx): laufend · pausiert · gekündigt.
 export {
   classifyActiveCustomerLifecycle,
   isGekuendigterAktiverKunde,
   isLaufenderAktiverKunde,
+  isPausierterAktiverKunde,
+  ACTIVE_CUSTOMER_LIFECYCLES,
+  PAUSED_CONTRACT_STATUS,
   ACTIVE_CUSTOMER_LIFECYCLE_LABELS,
   TERMINATED_CONTRACT_STATUS,
   type ActiveCustomerLifecycle,

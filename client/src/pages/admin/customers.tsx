@@ -40,6 +40,7 @@ import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/
 import {
   classifyActiveCustomerLifecycle,
   ACTIVE_CUSTOMER_LIFECYCLE_LABELS,
+  ACTIVE_CUSTOMER_LIFECYCLES,
   type ActiveCustomerLifecycle,
 } from "@shared/domain/customers";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
@@ -52,15 +53,19 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 // Task #1194 — Lebenszyklus aktiver Kunden über die zentrale, reine
-// Klassifikation ableiten. `contractTerminated` wird auf den Vertragsstatus
-// abgebildet, den der Classifier erwartet.
+// Klassifikation ableiten. Der Vertragsstatus kommt unverändert aus der
+// Antwort — er ist die Eingabe, die der Classifier erwartet.
 type LifecycleFilter = "alle" | ActiveCustomerLifecycle;
 
 function customerLifecycle(c: CustomerListItem): ActiveCustomerLifecycle | null {
   return classifyActiveCustomerLifecycle({
     status: c.status,
     contractEnd: c.contractEnd,
-    contractStatus: c.contractTerminated ? "terminated" : null,
+    // Direkt durchgereicht. Vorher wurde hier aus einem Boolean ein
+    // Vertragsstatus REKONSTRUIERT (`contractTerminated ? "terminated" : null`)
+    // — und dabei konnte „paused" nicht entstehen, egal was in der Datenbank
+    // stand. Die Liste wies pausierte Kunden deshalb als „Laufend" aus.
+    contractStatus: c.contractStatus ?? null,
   });
 }
 
@@ -105,10 +110,11 @@ export default function AdminCustomers() {
   const { data: budgetSetupMissingData } = useBudgetSetupMissingCount();
   const budgetSetupMissingCount = budgetSetupMissingData?.count ?? 0;
   const { data: lifecycleCountsData } = useCustomerLifecycleCounts();
-  const lifecycleCounts = {
-    laufend: lifecycleCountsData?.laufend ?? 0,
-    gekuendigt: lifecycleCountsData?.gekuendigt ?? 0,
-  };
+  // Aus der Union gebaut, nicht aufgezaehlt: ein vierter Lebenszyklus-Wert
+  // erscheint damit automatisch in Split-Badge und Chips.
+  const lifecycleCounts = Object.fromEntries(
+    ACTIVE_CUSTOMER_LIFECYCLES.map((w) => [w, lifecycleCountsData?.[w] ?? 0]),
+  ) as Record<ActiveCustomerLifecycle, number>;
 
   const employeeFilterOptions = useMemo(() => [
     { value: "all", label: "Alle Mitarbeiter" },
@@ -372,14 +378,19 @@ export default function AdminCustomers() {
             <div className="mb-4">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-xs text-muted-foreground" data-testid="text-customers-lifecycle-split">
-                  {lifecycleCounts.laufend} laufend · {lifecycleCounts.gekuendigt} gekündigt
+                  {ACTIVE_CUSTOMER_LIFECYCLES
+                    .map((w) => `${lifecycleCounts[w]} ${ACTIVE_CUSTOMER_LIFECYCLE_LABELS[w].toLowerCase()}`)
+                    .join(" · ")}
                 </span>
               </div>
               <div className="flex gap-1 bg-white rounded-lg p-1 border" data-testid="lifecycle-filter">
                 {[
-                  { key: "alle" as const, label: "Alle" },
-                  { key: "laufend" as const, label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS.laufend, count: lifecycleCounts.laufend },
-                  { key: "gekuendigt" as const, label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt, count: lifecycleCounts.gekuendigt },
+                  { key: "alle" as const, label: "Alle", count: undefined as number | undefined },
+                  ...ACTIVE_CUSTOMER_LIFECYCLES.map((w) => ({
+                    key: w,
+                    label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS[w],
+                    count: lifecycleCounts[w],
+                  })),
                 ].map((chip) => (
                   <button
                     key={chip.key}

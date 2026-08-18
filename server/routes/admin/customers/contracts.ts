@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { birthdaysCache } from "../../../services/cache";
 import { storage } from "../../../storage";
 import { customerManagementStorage } from "../../../storage/customer-management";
 import { asyncHandler } from "../../../lib/errors";
@@ -183,6 +184,14 @@ router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktua
     res.status(404).json({ error: "NOT_FOUND", message: "Vertrag nicht gefunden" });
     return;
   }
+
+  // Der Vertragsstatus entscheidet seit 6hHW39Gx ueber den Lebenszyklus und
+  // damit darueber, wer in den Geburtstags-Ansichten steht. Ohne diese Zeile
+  // zeigte die Liste einen soeben pausierten oder gekuendigten Kunden bis zu
+  // einer Stunde weiter (TTL des Caches). Der Kunden-PATCH und die
+  // Zuweisungs-Routen invalidieren laengst; dieser Pfad war vorher schlicht
+  // nicht beteiligt.
+  birthdaysCache.invalidateAll();
 
   res.json(result);
 }));

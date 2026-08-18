@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { ACTIVE_CUSTOMER_LIFECYCLES } from "@shared/domain/customers/lifecycle";
 import {
   apiGet,
   apiPost,
@@ -7,6 +8,33 @@ import {
   getAuthCookie,
   uniqueId,
 } from "./test-utils";
+
+/**
+ * Aktiver Kunde mit genau einem Vertrag im gewuenschten Status. Gibt die Id
+ * zurueck und meldet sie fuer das Aufraeumen an.
+ */
+async function erzeugeKundeMitVertrag(vertragsStatus: string): Promise<number> {
+  // Derselbe Payload-Helfer wie der Rest der Datei — kein zweiter Aufbau.
+  const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+    nachname: `LZ-Filter-${vertragsStatus}-${uniqueId()}`,
+  }));
+  expect(res.status, `Kunde (${vertragsStatus}) anlegen`).toBe(201);
+  const id = res.data.id as number;
+  createdCustomerIds.push(id);
+
+  // Ein Vertrag entsteht immer `active` (`createContractSchema` kennt kein
+  // `status`); der Zielzustand wird per PATCH gesetzt.
+  const vertrag = await apiPost<any>(`/api/admin/customers/${id}/contract`, {
+    contractStart: "2025-01-01",
+  });
+  expect([200, 201], `Vertrag anlegen: ${JSON.stringify(vertrag.data)}`).toContain(vertrag.status);
+
+  if (vertragsStatus !== "active") {
+    const patch = await apiPatch<any>(`/api/admin/customers/${id}/contract`, { status: vertragsStatus });
+    expect(patch.status, `Vertrag auf '${vertragsStatus}': ${JSON.stringify(patch.data)}`).toBe(200);
+  }
+  return id;
+}
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let insuranceProviderId: number;
@@ -80,13 +108,31 @@ describe("KV-0: CRUD-Grundfunktionen", () => {
   });
 
   it("KV-0.2 – GET /api/customers/:id liefert einzelne Kundendetails", async () => {
+    // ── Warum der Fall seinen Kunden selbst anlegt ───────────────────────
+    // Er verlangte `length > 0`, legte aber nichts an — er hing an Kunden, die
+    // ANDERE Testdateien in der geteilten Leg-DB hinterlassen hatten. Damit war
+    // er von der Shard-Verteilung abhaengig: kommt eine Testdatei dazu,
+    // verschiebt sich, welche Dateien sich eine Datenbank teilen, und der Fall
+    // kippt ohne jeden Bezug zur Aenderung. Genau das ist hier passiert.
+    //
+    // CLAUDE.md fuehrt ihn als bekannten Flake („isoliert rot, im Vollauf meist
+    // gruen"). „Meist" ist fuer ein Gate keine Eigenschaft — der Fall braucht
+    // seine eigene Voraussetzung.
+    const angelegt = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      nachname: "KV02-" + uniqueId(),
+    }));
+    expect(angelegt.status).toBe(201);
+    createdCustomerIds.push(angelegt.data.id);
+
     const listRes = await apiGet<any[]>("/api/customers");
     expect(listRes.status).toBe(200);
     expect(listRes.data.length).toBeGreaterThan(0);
-    const firstCustomer = listRes.data[0];
-    const res = await apiGet<any>(`/api/customers/${firstCustomer.id}`);
+
+    // Gezielt DEN angelegten Kunden lesen, nicht `data[0]`: sonst prueft der
+    // Fall je nach Sortierung und Fremddaten ein anderes Objekt.
+    const res = await apiGet<any>(`/api/customers/${angelegt.data.id}`);
     expect(res.status).toBe(200);
-    expect(res.data.id).toBe(firstCustomer.id);
+    expect(res.data.id).toBe(angelegt.data.id);
     expect(res.data).toHaveProperty("vorname");
     expect(res.data).toHaveProperty("nachname");
   });
@@ -1008,14 +1054,56 @@ describe("KV-LC: Lebenszyklus-Filter aktiver Kunden (laufend/gekündigt) — Tas
     expect(laufend.data.total + gekuendigt.data.total).toBe(alle.data.total);
   });
 
-  it("KV-LC.2 – /lifecycle-counts ist additiv: laufend + gekündigt == gesamt aktiv", async () => {
+  it("KV-LC.2 – /lifecycle-counts ist additiv: Summe ueber ALLE Lebenszyklen == gesamt aktiv", async () => {
+    // Die Invariante summierte `laufend + gekuendigt` und war damit an eine
+    // zweiwertige Klassifikation gebunden. Seit `pausiert` (6hHW39Gx) ging sie
+    // nur noch auf, solange zufaellig kein pausierter aktiver Kunde in der DB
+    // lag — ausgerechnet `birthdays-active-customers-only.test.ts` legt einen an.
+    // Jetzt ueber die Union summiert: ein vierter Wert bricht sie nicht, er
+    // wird mitgezaehlt.
     const counts = await apiGet<any>("/api/admin/customers/lifecycle-counts");
     expect(counts.status).toBe(200);
-    expect(typeof counts.data.laufend).toBe("number");
-    expect(typeof counts.data.gekuendigt).toBe("number");
+    for (const wert of ACTIVE_CUSTOMER_LIFECYCLES) {
+      expect(typeof counts.data[wert], `Zaehler fuer ${wert}`).toBe("number");
+    }
 
     const aktivGesamt = await apiGet<any>("/api/admin/customers?status=aktiv&limit=1");
     expect(aktivGesamt.status).toBe(200);
-    expect(counts.data.laufend + counts.data.gekuendigt).toBe(aktivGesamt.data.total);
+    const summe = ACTIVE_CUSTOMER_LIFECYCLES.reduce((s, w) => s + counts.data[w], 0);
+    expect(summe).toBe(aktivGesamt.data.total);
+  });
+
+  it("KV-LC.3 – der Lebenszyklus-Filter liefert je Wert genau die passende Teilmenge", async () => {
+    // Deckt den Fall ab, der beim Hinzufuegen von `pausiert` durchgerutscht war:
+    // die Route hatte eine eigene Whitelist (`laufend`/`gekuendigt`) und machte
+    // aus `lifecycle=pausiert` ein `undefined` — der Filter fiel weg und die
+    // Liste zeigte ALLE aktiven Kunden, waehrend der Chip eine Teilmenge
+    // versprach. Ein `never`-Guard tiefer im Stack konnte das nicht fangen.
+    //
+    // Eigenes Fixture je Lebenszyklus: ohne einen PAUSIERTEN Kunden in der DB
+    // misst der Fall nichts. Ein erster Entwurf verglich nur Zaehler gegen
+    // gefilterte Summen — in der frischen Wegwerf-DB waren beide 0, und der
+    // Fall blieb selbst mit der kaputten Whitelist gruen.
+    await erzeugeKundeMitVertrag("active");
+    await erzeugeKundeMitVertrag("paused");
+    await erzeugeKundeMitVertrag("terminated");
+
+    const counts = await apiGet<any>("/api/admin/customers/lifecycle-counts");
+    // Jeder Wert MUSS jetzt mindestens einen Kunden haben — sonst ist die
+    // Gleichheit unten wieder 0 === 0.
+    for (const wert of ACTIVE_CUSTOMER_LIFECYCLES) {
+      expect(counts.data[wert], `mindestens ein Kunde mit '${wert}'`).toBeGreaterThan(0);
+    }
+
+    for (const wert of ACTIVE_CUSTOMER_LIFECYCLES) {
+      const res = await apiGet<any>(`/api/admin/customers?status=aktiv&lifecycle=${wert}&limit=1`);
+      expect(res.status, wert).toBe(200);
+      expect(res.data.total, `Filter '${wert}' muss die Teilmenge liefern, nicht alles`)
+        .toBe(counts.data[wert]);
+    }
+
+    // Und die drei Teilmengen zusammen sind die aktive Kohorte.
+    const aktiv = await apiGet<any>("/api/admin/customers?status=aktiv&limit=1");
+    expect(ACTIVE_CUSTOMER_LIFECYCLES.reduce((n, w) => n + counts.data[w], 0)).toBe(aktiv.data.total);
   });
 });
