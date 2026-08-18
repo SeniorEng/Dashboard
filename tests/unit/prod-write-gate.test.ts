@@ -5,9 +5,14 @@ import {
   assertApplyTargetIsProdPrimaryOrThrow,
 } from "../../server/scripts/lib/prod-write-gate";
 
-// Der Datenbankname wird an der offenen Verbindung erfragt. Für die reinen
-// Ziel-Prüfungen wird er gestubbt; der echte Weg ist in `status-migration`
-// abgedeckt.
+// Der Datenbankname wird an der offenen Verbindung erfragt; fuer die reinen
+// Ziel-Pruefungen wird er gestubbt.
+//
+// Die erste Fassung dieses Kommentars behauptete, der echte Weg sei „in
+// `status-migration` abgedeckt". Das stimmte nicht — jene Datei importiert
+// `migriereStatusModell` direkt und beruehrt das Gate nie. Der Mock pruefte
+// damit exakt die Annahme, die er belegen sollte. Der echte Treiber-Pfad liegt
+// jetzt in `tests/startup/prod-write-gate-db-name.test.ts`.
 vi.mock("../../server/lib/db", () => ({
   db: { execute: async () => ({ rows: [{ db: DB_NAME.wert }] }) },
 }));

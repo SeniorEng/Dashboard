@@ -81,6 +81,7 @@ export async function currentDatabaseName(): Promise<string> {
  * Fail-closed: wirft, wenn `--apply` gegen irgendetwas anderes als die
  * bestätigte Prod-Primary liefe.
  *
+ *
  * ── Warum `--confirm-target` jetzt ZWEI Teile hat ───────────────────────
  * Die erste Fassung verglich nur den HOST aus der `DATABASE_URL`. Das hat in
  * der Praxis versagt: auf Replit heißt der interne Postgres-Host `helium` —
@@ -92,6 +93,13 @@ export async function currentDatabaseName(): Promise<string> {
  * es — und er wird an der offenen Verbindung erfragt, nicht aus der URL
  * geparst. Die alte einteilige Form wird ABGELEHNT statt still weiter
  * akzeptiert: sie ist genau der Weg, auf dem der Fehler passiert ist.
+ *
+ * ACHTUNG beim Umstellen bestehender Skripte: diese Funktion ist `async`. Die
+ * handgeschriebenen Kopien in `cleanup-duplicate-monthly-proofs.ts` und
+ * anderswo sind SYNCHRON. Wer nur den Import tauscht, bekommt eine Zeile, die
+ * ohne `await` durchkompiliert — das Gate ist dann wirkungslos, und `eslint`
+ * meldet es nicht (kein `no-floating-promises` in diesem Repo). Immer ueber
+ * `assertProdWriteAllowedOrThrow` gehen, das den Aufruf mit `await` kapselt.
  */
 export async function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: string | undefined): Promise<void> {
   if (process.env.NODE_ENV !== "production") {
