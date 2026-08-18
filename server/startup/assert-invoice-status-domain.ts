@@ -53,8 +53,8 @@ export class InvoiceStatusDomainError extends Error {
       `beantworten — nicht nur die betroffene Zeile, sondern die ganze Antwort.\n\n` +
       `Fast immer ist die Ursache die Reihenfolge: die Status-Migration muss VOR\n` +
       `dem Deploy laufen, nicht danach. Trockenlauf zuerst, dann --apply, dann\n` +
-      `--verify (siehe server/scripts/migrate-invoice-status-model.ts, falls\n` +
-      `vorhanden — sonst docs/rechnungsstatus-zielmodell.md, Abschnitt 5).\n\n` +
+      `--verify. Der Weg steht im Kopfkommentar von\n` +
+      `server/scripts/migrate-invoice-status-model.ts.\n\n` +
       `Der Boot bricht bewusst ab: so bleibt die alte Version online, statt dass\n` +
       `eine neue startet, die die Abrechnung nicht bedienen kann.`,
     );
@@ -75,6 +75,45 @@ export class InvoiceStatusDomainError extends Error {
  * Leerer Bestand besteht: keine Zeilen ⇒ keine Befunde ⇒ Boot läuft weiter.
  * Fehlende Tabelle ebenfalls (frische DB vor dem Schema-Push).
  */
+export interface StatusZeile {
+  status: string;
+  anzahl: number;
+}
+
+export interface StatusBefund {
+  befunde: string[];
+  betroffen: number;
+}
+
+/**
+ * Der Entscheidungskern — rein, ohne Datenbank.
+ *
+ * Herausgezogen, weil sonst JEDER Testfall gegen die geteilte Leg-DB laufen
+ * muesste. Genau daran ist die erste Fassung gescheitert: der Fall „leerer
+ * Bestand" zaehlte die GANZE `invoices`-Tabelle, und in CI teilen sich die
+ * Dateien eines Shard-Legs eine Datenbank ohne Truncate — 106 Rechnungen aus
+ * `tests/billing/` liefen davor. Der Test war damit nicht isoliert, sondern
+ * eine Wette auf die Shard-Verteilung.
+ *
+ * Mit reinem Kern sind die Faelle Tabellen-Ein-/Ausgabe: keine DB, keine
+ * Reihenfolge-Annahme, keine Fremddaten.
+ */
+export function bewerteStatuszeilen(zeilen: readonly StatusZeile[]): StatusBefund {
+  const befunde: string[] = [];
+  let betroffen = 0;
+  for (const zeile of zeilen) {
+    try {
+      // Der Kontext landet in der Meldung von `parseInvoiceStatus` und macht
+      // aus „Wert unbekannt" ein „Wert unbekannt, N Zeilen betroffen".
+      parseInvoiceStatus(zeile.status, `${zeile.anzahl} Zeile(n) in invoices.status`);
+    } catch (err) {
+      betroffen += zeile.anzahl;
+      befunde.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return { befunde, betroffen };
+}
+
 export async function runInvoiceStatusBootGate(): Promise<void> {
   const vorhanden = await db.execute(
     sql`SELECT to_regclass('public.invoices') IS NOT NULL AS da`,
@@ -94,19 +133,7 @@ export async function runInvoiceStatusBootGate(): Promise<void> {
     ? ergebnis
     : ((ergebnis as { rows?: unknown[] }).rows ?? [])) as Array<{ status: string; anzahl: number }>;
 
-  const befunde: string[] = [];
-  let betroffen = 0;
-  for (const zeile of zeilen) {
-    try {
-      // Der Kontext landet in der Meldung von `parseInvoiceStatus` und macht
-      // aus „Wert unbekannt" ein „Wert unbekannt, N Zeilen betroffen".
-      parseInvoiceStatus(zeile.status, `${zeile.anzahl} Zeile(n) in invoices.status`);
-    } catch (err) {
-      betroffen += zeile.anzahl;
-      befunde.push(err instanceof Error ? err.message : String(err));
-    }
-  }
-
+  const { befunde, betroffen } = bewerteStatuszeilen(zeilen);
   if (befunde.length > 0) {
     throw new InvoiceStatusDomainError(befunde, betroffen);
   }
