@@ -287,7 +287,17 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
       // … und das reine TS-Prädikat auf bereits geladenen Objekten. Alle drei
       // MÜSSEN im Gleichschritt bleiben; festgehalten in
       // `tests/unit/active-invoice-ssot.test.ts`.
-      { symbol: "isStorniertInvoice", module: "shared/domain/billing-pipeline.ts" },
+      //
+      // Hier stand bis zum Status-Umbau `isStorniertInvoice`. Der Umbau hat
+      // dieses Symbol auf `status === "storniert"` VERENGT — der Typ sagt seither
+      // nichts mehr über den Zustand. Damit war es die Negation der SQL-Form
+      // nicht mehr: eine Gutschrift wäre wieder als „zählt noch" durchgelaufen,
+      // also genau der Bug, den dieser Eintrag verhindern soll.
+      //
+      // Der Meta-Wächter konnte das nicht fangen: er prüft rein textuell, ob das
+      // Symbol existiert und exportiert wird — und das tat es weiterhin. Ein
+      // Katalog, der still falsch wird, ist schlimmer als keiner.
+      { symbol: "istAktionsfaehigeRechnung", module: "shared/domain/billing-pipeline.ts" },
     ],
     ownedLiterals: [],
     guards: [

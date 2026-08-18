@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { collectScanFiles } from "./guard-helpers";
+import { collectScanFiles, stripComments } from "./guard-helpers";
 import {
   INVOICE_STATUS_TRANSITIONS,
   isAllowedInvoiceStatusTransition,
   statusesAllowedToTransitionTo,
 } from "@shared/domain/invoice-status";
-import { INVOICE_STATUSES } from "@shared/schema/billing";
+import { INVOICE_STATUSES, LEGACY_INVOICE_STATUSES } from "@shared/schema/billing";
 
 /**
  * EIN Übergangs-Regime für alle Schreibpfade (Ziel-Spec, Abschnitt 4).
@@ -54,10 +54,86 @@ const ERLAUBT = new Set<string>([
  * Rechnungsliste — ist keine Status-Liste, und der Wächter hat sie in der
  * ersten Fassung fälschlich gemeldet.
  */
-const EINDEUTIGE_STATUS = "entwurf|versendet|bezahlt|avis_erhalten|teilweise_bezahlt";
+/**
+ * Status, die AUSSCHLIESSLICH Status sind.
+ *
+ * `storniert` und `abgeschlossen` fehlen bewusst: sie sind zugleich
+ * Cluster-Werte (der Status sagt WARUM etwas fertig ist, der Cluster DASS).
+ * Eine Liste aus nur diesen beiden — etwa die eingeklappten Cluster der
+ * Rechnungsliste — ist keine Status-Liste, und die erste Fassung des Wächters
+ * hat sie fälschlich gemeldet.
+ *
+ * Aus den KONSTANTEN gebaut, nicht abgeschrieben. Die frühere Fassung führte
+ * die Namen als Literal-String; sie wäre einer Änderung an `INVOICE_STATUSES`
+ * oder `LEGACY_INVOICE_STATUSES` nicht gefolgt — derselbe Zweitbegriff, gegen
+ * den der Wächter selbst gerichtet ist.
+ */
+const MEHRDEUTIG = new Set(["storniert", "abgeschlossen"]);
+const EINDEUTIGE_STATUS = [...INVOICE_STATUSES, ...LEGACY_INVOICE_STATUSES]
+  .filter(s => !MEHRDEUTIG.has(s))
+  .join("|");
+const ALLE_STATUS = [...INVOICE_STATUSES, ...LEGACY_INVOICE_STATUSES].join("|");
+
+/**
+ * Eine Aufzählung von zwei oder mehr Status-Literalen — das Muster der
+ * handgeschriebenen Liste.
+ *
+ * ── Was die erste Fassung nicht sah (gemessen) ──────────────────────────
+ *  - `["storniert", "versendet"]` — sie verlangte, dass das ERSTE Literal
+ *    eindeutig ist; steht ein mehrdeutiger Wert vorn, lief die Liste durch.
+ *  - `['versendet', 'bezahlt']` — nur doppelte Anführungszeichen.
+ *  - `` sql`status IN ('versendet','bezahlt')` `` — Roh-SQL ohne Array-Klammer.
+ *    Der relevanteste Fall: genau diese Form ist im Repo lebendig, und eine
+ *    handgeschriebene Statusliste in einem `sql`-Template ist derselbe
+ *    Zweitbegriff wie eine im Array.
+ *
+ * Jetzt: zwei benachbarte Status-Literale in beliebiger Quote-Form, getrennt
+ * nur durch ein Komma — Array wie SQL-`IN` —, wobei MINDESTENS eines der
+ * beiden eindeutig sein muss.
+ */
+const Q = `["']`;
 const LITERALLISTE = new RegExp(
-  `\\[\\s*"(${EINDEUTIGE_STATUS})"\\s*,\\s*"(${EINDEUTIGE_STATUS}|storniert|abgeschlossen)"`,
+  `${Q}(?:${EINDEUTIGE_STATUS})${Q}\\s*,\\s*${Q}(?:${ALLE_STATUS})${Q}` +
+  `|${Q}(?:${ALLE_STATUS})${Q}\\s*,\\s*${Q}(?:${EINDEUTIGE_STATUS})${Q}`,
+  "g",
 );
+
+/**
+ * Wie weit vor der Liste nach einem Status-Zugriff gesucht wird.
+ *
+ * ── Warum es diesen Kontext-Anker überhaupt braucht ─────────────────────
+ * Rechnungs-STATUS und Pipeline-STUFEN teilen sich Namen: `versendet` und
+ * `bezahlt` sind beides. `PIPELINE_STAGES` listet die Stufen mehrzeilig auf und
+ * enthält damit wörtlich `"versendet",\n  "bezahlt",` — für ein reines
+ * Literal-Muster nicht von einer Status-Liste zu unterscheiden.
+ *
+ * Die erste Fassung des Wächters umging das, indem sie die Liste an die
+ * ARRAY-KLAMMER band: nur ein Array, dessen ERSTES Element ein Status ist,
+ * zählte. Das funktionierte (`PIPELINE_STAGES` beginnt mit `"offen"`), war aber
+ * ein Zufallstreffer — und es kostete drei echte Fälle: eine Liste, die mit
+ * `storniert` beginnt, einfache Anführungszeichen, und Roh-SQL ohne Klammer.
+ *
+ * Statt der Klammer wird deshalb am Status-ZUGRIFF verankert. Das trifft genau
+ * die Frage, um die es geht („wird hier über Status gefiltert?"), und lässt
+ * Stufen-Listen in Ruhe, weil dort kein `status` steht.
+ */
+const KONTEXT_FENSTER = 200;
+
+/**
+ * Die zwei Formen, in denen im Repo tatsächlich über Status GEFILTERT wird:
+ * der Spaltenzugriff (`invoices.status`, `inArray(invoices.status, […])`) und
+ * das Roh-SQL-`IN` (`sql\`status IN (…)\``).
+ *
+ * Bewusst NICHT das blosse Wort `status`: das stand in der ersten Fassung hier
+ * und meldete `STAGE_ORDER` in `termine-tab.tsx`, nur weil zwanzig Zeilen
+ * darüber ein `statusFilter`-Prop deklariert ist. Ein Wächter, der Fehlalarme
+ * produziert, wird abgeschaltet — dann schützt er gar nichts mehr.
+ */
+const STATUS_ZUGRIFF = /\.status\b|\bstatus\s+in\s*\(/i;
+
+function istStatusKontext(inhalt: string, index: number): boolean {
+  return STATUS_ZUGRIFF.test(inhalt.slice(Math.max(0, index - KONTEXT_FENSTER), index));
+}
 
 describe("Rechnungs-Status — ein Übergangs-Regime", () => {
   it("1 — die Übergangs-Map deckt jeden Status ab", () => {
@@ -117,10 +193,14 @@ describe("Rechnungs-Status — ein Übergangs-Regime", () => {
     for (const { rel, content } of collectScanFiles(["server", "shared", "client/src"], { includeTsx: true })) {
       if (ERLAUBT.has(rel)) continue;
       // Kommentare zaehlen nicht — dort duerfen Status genannt werden.
-      const inhalt = content
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/^\s*\/\/.*$/gm, "");
-      if (LITERALLISTE.test(inhalt)) treffer.push(rel);
+      // `stripComments` aus den guard-helpers statt Eigenbau: die frühere
+      // Eigenbau-Variante strippte nur GANZE Kommentarzeilen (`^\s*//`), ein
+      // NACHGESTELLTER Kommentar blieb stehen und löste Fehlalarm aus.
+      const inhalt = stripComments(content);
+      LITERALLISTE.lastIndex = 0;
+      for (let m = LITERALLISTE.exec(inhalt); m; m = LITERALLISTE.exec(inhalt)) {
+        if (istStatusKontext(inhalt, m.index)) { treffer.push(rel); break; }
+      }
     }
 
     if (treffer.length > 0) {

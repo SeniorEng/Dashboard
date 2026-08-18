@@ -34,7 +34,7 @@ import {
   computeProposals,
   applyProposals,
 } from "../../../scripts/verify-advice-backfill";
-import { updateInvoiceStatusTx } from "../../storage/billing-storage";
+import { updateInvoiceStatusTx, istRechnungNochOffenTx } from "../../storage/billing-storage";
 import { statusesAllowedToTransitionTo, statusesAllowedToReverseTo } from "@shared/domain/invoice-status";
 
 const router = Router();
@@ -315,6 +315,19 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
       });
     } else if (decision.classification.result === "underpaid") {
       // Teilzahlung: Zahlung binden, Status NICHT anfassen.
+      //
+      // ZUERST aber pruefen, ob die Rechnung ueberhaupt noch Geld annehmen darf.
+      // Bis zum Status-Umbau erledigte das der Schreibvorgang selbst: das
+      // `UPDATE … WHERE status IN (…)` lief auf 0 Zeilen und der Handler warf
+      // 400. Mit dem Wegfall des Statuswechsels fiel dieser Schutz hier
+      // ersatzlos weg — eine Zahlung liess sich per 200 an eine STORNIERTE
+      // Rechnung binden. Derselbe Fehler wie im Auto-Pfad, nur zehn Zeilen
+      // daneben und einen Commit spaeter gefunden.
+      if (!(await istRechnungNochOffenTx(dbTx, invoiceId))) {
+        throw badRequest(
+          "Rechnung ist nicht in einem offenen Status und kann nicht abgeglichen werden.",
+        );
+      }
       //
       // Bis zum Status-Umbau wurde hier `teilweise_bezahlt` geschrieben. Der
       // Status ist entfallen — eine Teilzahlung aendert den Zustand der

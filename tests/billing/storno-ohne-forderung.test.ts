@@ -85,21 +85,42 @@ describe("Storno-Dokumente tragen keinen offenen Forderungsbetrag (Spec 4.4)", (
     }
   });
 
-  it("6 — im Cluster erscheint es als „abgeschlossen“, nicht als „storniert“", () => {
-    // Fachlich: ein Storno-Dokument ist FERTIG, nicht storniert. Dieselbe
-    // Aussage wie bei einer bezahlten Rechnung — deshalb derselbe Cluster.
-    const cluster = assignInvoiceActionCluster({
-      status: "abgeschlossen",
-      invoiceType: "stornorechnung",
-      billingType: "pflegekasse_gesetzlich",
-    });
-    expect(cluster).toBe("abgeschlossen");
+  it("6 — im Cluster steht es bei den Gutschriften, NICHT bei „abgeschlossen“", () => {
+    // ── Was diese Prüfung vorher behauptete ──────────────────────────────
+    // „Ein Storno-Dokument ist FERTIG, nicht storniert — deshalb derselbe
+    // Cluster wie eine bezahlte Rechnung." Das verwechselte zwei Ebenen: der
+    // STATUS `abgeschlossen` beschreibt das Dokument, der CLUSTER gruppiert die
+    // Rechnungsliste und trägt je Gruppe eine €-Summe.
+    //
+    // Storno-Dokumente tragen negative Beträge. Im Cluster „Bezahlt —
+    // abgeschlossen" hätten sie die Summe um −15.884,35 € (Prod) gedrückt,
+    // während „Stornierte Rechnungen und Gutschriften" die Gegenbuchung
+    // verloren hätte, die sich dort gegen die stornierten Originale aufhebt.
+    for (const status of INVOICE_STATUSES) {
+      expect(
+        assignInvoiceActionCluster({
+          status,
+          invoiceType: "stornorechnung",
+          billingType: "pflegekasse_gesetzlich",
+        }),
+        `stornorechnung/${status}`,
+      ).toBe("storniert");
+    }
 
-    // Eine wirklich stornierte RECHNUNG dagegen bleibt „storniert“.
+    // Eine stornierte RECHNUNG liegt im selben Cluster — dort heben sich
+    // Original und Gutschrift gegeneinander auf. Genau das ist der Zweck.
     expect(assignInvoiceActionCluster({
       status: "storniert",
       invoiceType: "rechnung",
       billingType: "pflegekasse_gesetzlich",
     })).toBe("storniert");
+
+    // Gegenprobe: eine BEZAHLTE Rechnung ist „abgeschlossen“ — sonst prüfte
+    // der Fall oben nur, dass irgendetwas nie diesen Cluster erreicht.
+    expect(assignInvoiceActionCluster({
+      status: "bezahlt",
+      invoiceType: "rechnung",
+      billingType: "pflegekasse_gesetzlich",
+    })).toBe("abgeschlossen");
   });
 });

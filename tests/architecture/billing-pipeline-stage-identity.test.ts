@@ -270,10 +270,18 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
     // Eine stornierte RECHNUNG → Storniert-Cluster.
     expect(assignInvoiceActionCluster({ status: "storniert", invoiceType: "rechnung", billingType: "selbstzahler" }))
       .toBe("storniert");
-    // Ein STORNO-DOKUMENT → „abgeschlossen“. Es ist fertig, nicht storniert —
-    // dieselbe Aussage wie bei einer bezahlten Rechnung.
+    // Ein STORNO-DOKUMENT → Storniert-Cluster, zu den Gutschriften.
+    //
+    // Ein früherer Entwurf schickte es nach „abgeschlossen" („es ist fertig,
+    // dieselbe Aussage wie bei einer bezahlten Rechnung"). Das verwechselte
+    // STATUS und CLUSTER: der Status beschreibt das Dokument, der Cluster
+    // gruppiert die Liste und trägt je Gruppe eine €-Summe — und
+    // Storno-Dokumente tragen NEGATIVE Beträge. Im Cluster „Bezahlt —
+    // abgeschlossen" hätten sie die Summe um −15.884,35 € (Prod) verfälscht,
+    // während „Stornierte Rechnungen und Gutschriften" die Gegenbuchung
+    // verloren hätte, die sich dort gegen die Originale aufhebt.
     expect(assignInvoiceActionCluster({ status: "abgeschlossen", invoiceType: "stornorechnung", billingType: "pflegekasse_gesetzlich" }))
-      .toBe("abgeschlossen");
+      .toBe("storniert");
   });
 
   // ---------------------------------------------------------------- #1897 ---
@@ -328,9 +336,9 @@ describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
   it("Storno schlaegt die Zahlungsbindung (eine stornierte Rechnung ist kein Pruef-Fall)", () => {
     expect(assignInvoiceActionCluster({ status: "storniert", invoiceType: "rechnung", billingType: "selbstzahler", hasBoundPayment: true }))
       .toBe("storniert");
-    // Ein Storno-Dokument ebenfalls nicht — es ist fertig.
+    // Ein Storno-Dokument ebenfalls nicht — es liegt bei den Gutschriften.
     expect(assignInvoiceActionCluster({ status: "abgeschlossen", invoiceType: "stornorechnung", billingType: "selbstzahler", hasBoundPayment: true }))
-      .toBe("abgeschlossen");
+      .toBe("storniert");
   });
 
   it("nur der Warte-Cluster altert (geteilte Regel fuer Cockpit UND Liste)", () => {

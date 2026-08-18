@@ -20,7 +20,6 @@ import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } 
 import {
   INVOICE_ACTION_CLUSTERS,
   INVOICE_ACTION_CLUSTER_LABELS,
-  isStorniertInvoice,
   istAktionsfaehigeRechnung,
   type InvoiceActionCluster,
 } from "@shared/domain/billing-pipeline";
@@ -58,9 +57,12 @@ const CLUSTER_HINTS: Record<InvoiceActionCluster, string> = {
 // einzeln und mit Begründung über „Markierung zurücknehmen" korrigiert — eine
 // Sammelaktion wäre dafür der falsche Ort, weil jede Rücknahme eine eigene
 // Begründung ins Audit-Log schreibt.
-const BULK_STATUS_OPTIONS: { value: "versendet" | "avis_erhalten" | "bezahlt"; label: string }[] = [
+// `avis_erhalten` stand hier bis zum Status-Umbau. Der Wert ist entfallen — der
+// Avis ist eine Zuordnungs-Mechanik, kein Zustand —, und das Zod-Schema des
+// Endpunkts kennt ihn nicht mehr. Der Menuepunkt haette also einen 400
+// ausgeloest; er wird nicht ersetzt, weil es nichts zu ersetzen gibt.
+const BULK_STATUS_OPTIONS: { value: "versendet" | "bezahlt"; label: string }[] = [
   { value: "versendet", label: "Versendet" },
-  { value: "avis_erhalten", label: "Avis erhalten" },
   { value: "bezahlt", label: "Bezahlt" },
 ];
 

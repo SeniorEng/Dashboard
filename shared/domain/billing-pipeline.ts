@@ -475,10 +475,23 @@ export function assignInvoiceActionCluster(input: InvoiceClusterInput): InvoiceA
   // entstünde, ebenfalls dem Storniert-Cluster zugeordnet, damit die Zuordnung
   // total bleibt.
   if (assignment.kind === "side") {
-    // Ein Storno-DOKUMENT ist fertig — dieselbe Aussage wie bei einer bezahlten
-    // Rechnung, deshalb derselbe Cluster. Der Status sagt WARUM etwas fertig
-    // ist, der Cluster sagt DASS.
-    return assignment.state === "storno_dokument" ? "abgeschlossen" : "storniert";
+    // ALLE Side-Zustände — auch das Storno-DOKUMENT — landen im Cluster
+    // `storniert`.
+    //
+    // Ein früherer Entwurf schickte `storno_dokument` nach `abgeschlossen`, mit
+    // dem Argument „ein Storno-Dokument ist fertig, dieselbe Aussage wie bei
+    // einer bezahlten Rechnung". Das war eine Verwechslung von STATUS und
+    // CLUSTER. Der Status `abgeschlossen` beschreibt das einzelne Dokument; der
+    // Cluster ist eine GRUPPIERUNG der Rechnungsliste mit einer €-Summe je
+    // Gruppe — und Storno-Dokumente tragen negative Beträge.
+    //
+    // Die Folge war in Zahlen greifbar: „Bezahlt — abgeschlossen" wäre um die
+    // Storno-Summe (in Produktion −15.884,35 €) zu klein geworden, und
+    // „Stornierte Rechnungen und Gutschriften" hätte die Gegenbuchung verloren,
+    // die sich dort gegen die stornierten Originale aufhebt. Beide Zahlen
+    // hätten nichts Reales beschrieben. Die Cluster-Überschrift sagt
+    // „und Gutschriften" — sie gehören dorthin.
+    return "storniert";
   }
   if (assignment.kind !== "stage") return "storniert";
 

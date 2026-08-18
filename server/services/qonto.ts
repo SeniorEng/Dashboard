@@ -1,4 +1,5 @@
 import { storage } from "../storage";
+import { istRechnungNochOffenTx } from "../storage/billing-storage";
 import { qontoStorage } from "../storage/qonto";
 import { invoices, qontoTransactions } from "@shared/schema";
 import { eq, and, inArray, isNull, sql } from "drizzle-orm";
@@ -599,14 +600,12 @@ class QontoService {
           // liess den Match auflaufen, wenn die Rechnung zwischenzeitlich
           // storniert wurde. Ohne Schreibvorgang gibt es diese Bedingung nicht
           // mehr, also wird derselbe Zustand ausdruecklich nachgelesen — sonst
-          // haenge man eine Zahlung an eine stornierte Rechnung.
-          const [nochOffen] = await dbTx.select({ status: invoices.status })
-            .from(invoices)
-            .where(and(
-              eq(invoices.id, match.invoiceId),
-              inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
-            ));
-          if (!nochOffen) throw new Error("INVOICE_STATUS_CHANGED");
+          // haenge man eine Zahlung an eine stornierte Rechnung. Der Helfer
+          // liest unter FOR UPDATE — ein nacktes SELECT liesse einen parallel
+          // laufenden Storno durchrutschen.
+          if (!(await istRechnungNochOffenTx(dbTx, match.invoiceId))) {
+            throw new Error("INVOICE_STATUS_CHANGED");
+          }
 
           audit.record({
             userId,

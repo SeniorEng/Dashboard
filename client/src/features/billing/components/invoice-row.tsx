@@ -25,7 +25,6 @@ import {
   Eye,
   Printer,
   MoreHorizontal,
-  MailCheck,
   Banknote,
   Undo2,
   Scissors,
@@ -33,8 +32,7 @@ import {
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
-import { isStorniertInvoice,
-  istAktionsfaehigeRechnung, type AgingBucket } from "@shared/domain/billing-pipeline";
+import { istAktionsfaehigeRechnung, type AgingBucket } from "@shared/domain/billing-pipeline";
 import {
   STATUS_LABELS,
   STATUS_COLORS,
@@ -280,8 +278,15 @@ export function InvoiceRow({
               {/* Task #1822: Offener Rest bei Teilzahlung — die Summe der bereits
                   eingegangenen Zahlungen deckt die Rechnung noch nicht. Der Betrag
                   stammt aus derselben SSoT wie der Statuswechsel
-                  (openAmountCents = Brutto − Skonto − gezahlt). */}
-              {invoice.status === "teilweise_bezahlt" && invoice.openAmountCents != null && (
+                  (openAmountCents = Brutto − Skonto − gezahlt).
+
+                  Gatet auf das BADGE, nicht mehr auf den Status `teilweise_bezahlt`:
+                  den gibt es nicht mehr. Waere die Bedingung stehengeblieben,
+                  haette sie nie wieder zugetroffen — und die konkrete Zahl waere
+                  aus der Liste verschwunden, ohne dass es auffaellt. Das Badge
+                  daneben sagt nur DASS teilweise bezahlt wurde, nicht WIE VIEL
+                  offen ist. */}
+              {(invoice.badges ?? []).includes("teilweise_bezahlt") && invoice.openAmountCents != null && (
                 <Badge
                   variant="outline"
                   className="bg-cyan-50 text-cyan-700 border-cyan-200"
@@ -496,19 +501,9 @@ export function InvoiceRow({
                       Zwischenschritt ohne Bestätigung; „Als bezahlt markieren"
                       ist endgültig und läuft über den Bestätigungsdialog. So
                       kann „versendet" nie still zu „bezahlt" werden. */}
-                  {(invoice.status === "versendet" || invoice.status === "avis_erhalten") && (
+                  {invoice.status === "versendet" && (
                     <>
                       <DropdownMenuSeparator />
-                      {invoice.status === "versendet" && (
-                        <DropdownMenuItem
-                          onSelect={() => statusMutation.mutate({ id: invoice.id, status: "avis_erhalten" })}
-                          disabled={statusMutation.isPending}
-                          data-testid={`button-status-avis-${invoice.id}`}
-                        >
-                          <MailCheck className={`${iconSize.sm} mr-2`} />
-                          Avis erhalten
-                        </DropdownMenuItem>
-                      )}
                       <DropdownMenuItem
                         onSelect={() => onMarkPaid(invoice)}
                         disabled={statusMutation.isPending}

@@ -142,11 +142,55 @@ export async function createInvoice(data: Record<string, unknown>, lineItems: Re
  *
  * Jetzt prüft dieser Engpass, und alle Pfade gehen hindurch.
  *
- * `erlaubeGleichstand`: ein Schreibvorgang, der den Status NICHT ändert
- * (z.B. Zahlung nachtragen bei bereits `bezahlt`), ist kein Übergang und
- * wird durchgelassen. Ohne diese Ausnahme müsste jeder Aufrufer vorher selbst
- * vergleichen — und genau dort entstünde das nächste Zweitregime.
+ * GLEICHSTAND: ein Aufruf, der den Status NICHT ändert, ist kein Übergang und
+ * wird durchgelassen (`ist.status !== status` in der Prüfung unten). Ohne diese
+ * Ausnahme müsste jeder Aufrufer vorher selbst vergleichen — und genau dort
+ * entstünde das nächste Zweitregime.
+ *
+ * Achtung bei den Zeitstempeln: `sentAt` und `issuedAt` sind per `COALESCE`
+ * gegen Überschreiben geschützt, `paidAt`/`storniertAt` NICHT. Ein Gleichstand-
+ * Aufruf mit `bezahlt` auf einer bereits bezahlten Rechnung ersetzt daher das
+ * ursprüngliche Zahlungsdatum durch „jetzt". Heute gibt es keinen solchen
+ * Aufrufer; wer einen baut, gibt `paidAt` ausdrücklich mit, statt sich auf
+ * diesen Pfad zu verlassen.
  */
+/**
+ * Ist die Rechnung noch in einem Zustand, in dem eine Zahlung auf sie gebucht
+ * werden darf? Liest unter `FOR UPDATE` **innerhalb** der laufenden Transaktion.
+ *
+ * ── Was das ERSETZT ─────────────────────────────────────────────────────
+ * Die Schutzwirkung, die vorher als Nebenprodukt am Schreibvorgang hing:
+ * `UPDATE … WHERE id = ? AND status IN (…) RETURNING` lief auf 0 Zeilen, wenn
+ * die Rechnung zwischenzeitlich storniert wurde, und der Aufrufer brach ab.
+ *
+ * Seit die Teilzahlung KEINEN Status mehr schreibt, gibt es dieses `WHERE`
+ * nicht mehr — und damit fiel der Schutz an zwei Stellen ersatzlos weg
+ * (Auto-Match und manueller Match). Er steht jetzt hier, einmal, ausdrücklich.
+ *
+ * `FOR UPDATE` ist nicht optional: ein nacktes `SELECT` sieht unter READ
+ * COMMITTED die letzte committete Version und nimmt keine Sperre. Ein parallel
+ * laufender Storno würde durchrutschen — genau das Rennen, das das frühere
+ * `UPDATE … WHERE` per Konstruktion nicht zuließ.
+ *
+ * Die zulässigen Zustände kommen aus der Übergangs-SSoT (was nach `bezahlt`
+ * darf, ist offen), nicht aus einer eigenen Liste.
+ */
+export async function istRechnungNochOffenTx(exec: DbOrTx, id: number): Promise<boolean> {
+  const { invoices } = await import("@shared/schema");
+  const { and, eq, inArray } = await import("drizzle-orm");
+  const { statusesAllowedToTransitionTo } = await import("@shared/domain/invoice-status");
+
+  const [zeile] = await exec
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(and(
+      eq(invoices.id, id),
+      inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
+    ))
+    .for("update");
+  return Boolean(zeile);
+}
+
 export async function updateInvoiceStatusTx(
   exec: DbOrTx,
   id: number,
@@ -176,7 +220,23 @@ export async function updateInvoiceStatusTx(
   }
   const updateData: Partial<Invoice> = { status: status as Invoice["status"] };
   if (status === "versendet") {
-    updateData.sentAt = new Date();
+    // `COALESCE` wie bei `issuedAt` — und aus demselben Grund.
+    //
+    // Bis zur Zahlungs-Ruecknahme (`INVOICE_STATUS_REVERSAL_TRANSITIONS`) fuehrte
+    // JEDER Weg nach `versendet` von einem frueheren Zustand her, in dem noch
+    // nie versandt wurde: `entwurf -> versendet` ist eine Ausgabe, und ein
+    // zweiter Aufruf auf einer bereits versendeten Rechnung war ein Gleichstand
+    // ohne Bedeutung. „Jetzt" war deshalb immer richtig.
+    //
+    // Die Ruecknahme bricht das: `bezahlt -> versendet` faellt auf einen
+    // Zustand ZURUECK, den die Rechnung schon einmal hatte. Sie wurde vor
+    // Monaten versandt; dass eine Zahlung wieder geloest wurde, aendert daran
+    // nichts. Ein frisches `sent_at` waere gleich dreifach falsch: es
+    // verschiebt den Aging-Anker der Kassen-Rechnungen (die Forderung sieht neu
+    // aus und faellt aus dem Mahnwesen), es verschiebt das Ueberfaellig-Badge,
+    // und es aendert das Rechnungsdatum auf einem bereits ausgegebenen Beleg,
+    // der ohne Snapshot neu gerendert wird.
+    updateData.sentAt = sql`COALESCE(${invoices.sentAt}, now())` as unknown as Date;
     // #66 — Die Ausgabe-Marke gehoert an DIESEN Engpass, nicht an die einzelnen
     // Aufrufer: jeder Weg nach `versendet` ist eine Ausgabe, ob ueber
     // `mark-sent`, den Sammelversand oder den generischen Statuswechsel.

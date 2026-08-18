@@ -44,6 +44,14 @@ export interface InvoiceBadgeInput {
   grossAmountCents: number;
   /** Summe ALLER gebundenen Zahlungen in Cent (kumuliert, nicht die letzte). */
   paidCents: number;
+  /**
+   * Hängt an dieser Rechnung eine gebundene Qonto-Zahlung (Task #1897)?
+   *
+   * Nicht dasselbe wie `paidCents > 0`: gebunden heißt „das Geld ist auf dem
+   * Konto und dieser Rechnung zugeordnet", freigegeben ist es damit noch nicht.
+   * Genau diese Unterscheidung war der Kern von #1897.
+   */
+  hasBoundPayment: boolean;
   /** Fälligkeitsdatum (ISO) — Anker für Selbstzahler/Privat. */
   dueDate: string | null;
   /** Versanddatum (ISO) — Anker für Pflegekassen, und Quelle des Versandt-Badges. */
@@ -73,7 +81,8 @@ export function istTeilweiseBezahlt(input: InvoiceBadgeInput): boolean {
 }
 
 /**
- * Ist die Rechnung unbezahlt und die Frist überschritten?
+ * Ist die Rechnung unbezahlt, ohne gebundene Zahlung, und die Frist
+ * überschritten?
  *
  * ── Die einzige legitime Empfänger-Unterscheidung ───────────────────────
  * Selbstzahler/Privat altern ab dem **Fälligkeitsdatum**, Pflegekassen ab dem
@@ -91,6 +100,20 @@ export function istTeilweiseBezahlt(input: InvoiceBadgeInput): boolean {
 export function istUeberfaellig(input: InvoiceBadgeInput): boolean {
   if (input.status !== "versendet") return false;
   if (input.paidCents >= input.grossAmountCents) return false;
+
+  // Gebundene Zahlung stoppt das Altern — die #1897-Regel, und der Grund, warum
+  // dieses Badge sie kennen MUSS.
+  //
+  // Die erste Fassung fragte nur `paidCents >= grossAmountCents` und hätte
+  // damit genau den Fehler wiederholt, den #1897 behoben hat: eine Rechnung mit
+  // eingegangener, aber noch nicht freigegebener Zahlung galt weiter als
+  // überfällig — „die Abrechnung mahnte Geld an, das auf dem Konto lag".
+  //
+  // Sichtbar geworden wäre es als Widerspruch in derselben Zeile: das Cockpit
+  // führt sie über `isAgingCluster` als `aging: "none"`, die Liste hätte
+  // daneben „Überfällig" gezeigt. Das Board ist hier die ältere und geprüfte
+  // Wahrheit; das Badge folgt ihr.
+  if (input.hasBoundPayment) return false;
 
   // KEINE eigene Frist-Zahl. Der erste Entwurf dieser Funktion trug einen
   // `fristTage`-Parameter — und hätte damit eine ZWEITE Definition von

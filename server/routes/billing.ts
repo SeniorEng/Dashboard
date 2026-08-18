@@ -58,7 +58,7 @@ import {
 } from "../storage/billing-storage";
 import { stornoInvoiceCascade } from "../services/invoice-storno";
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
-import { isStorniertInvoice, istAktionsfaehigeRechnung } from "@shared/domain/billing-pipeline";
+import { istAktionsfaehigeRechnung } from "@shared/domain/billing-pipeline";
 import { readBillingEconomics } from "../storage/billing/economics-reader";
 import { readBillingTermine } from "../storage/billing/termine-reader";
 import { auditService } from "../services/audit";
@@ -237,10 +237,8 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   const openInvoices = invoices.filter(inv =>
     inv.status !== "bezahlt" && istAktionsfaehigeRechnung({ status: inv.status, invoiceType: inv.invoiceType }),
   );
-  if (openInvoices.length === 0) {
-    res.json(invoices);
-    return;
-  }
+  // Kein frueher Ausstieg mehr: auch ohne offene Rechnung tragen die Zeilen
+  // Badges (z.B. `versandt` auf einem Storno-Dokument).
 
   const openIds = openInvoices.map(inv => inv.id);
   const [claimed, totals] = await Promise.all([
@@ -250,7 +248,35 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
 
   const openIdSet = new Set(openIds);
   const enriched = invoices.map(inv => {
-    if (!openIdSet.has(inv.id)) return inv;
+    if (!openIdSet.has(inv.id)) {
+      // Nicht offen — also keine Zahlungs-Anreicherung. BADGES bekommt die
+      // Zeile trotzdem, denn sie sind nicht an „offen" gebunden.
+      //
+      // Das war der Fehler der ersten Fassung: Badges entstanden nur im
+      // Zweig darunter, und `istVersandt` feuert ausschliesslich fuer
+      // `stornorechnung` — eine Kombination, die es hier per Definition nicht
+      // gibt (`istAktionsfaehigeRechnung` schliesst Gutschriften aus). Das
+      // Badge war damit unerreichbar, und die Begruendung „ob ein
+      // Storno-Dokument verschickt wurde, sagt das Badge" trug nicht.
+      return {
+        ...inv,
+        badges: invoiceBadges({
+          status: parseInvoiceStatus(inv.status),
+          invoiceType: inv.invoiceType,
+          grossAmountCents: inv.grossAmountCents,
+          // Ohne Anreicherung ist ueber gebundene Zahlungen nichts bekannt.
+          // `bezahlt`/`storniert` schliessen das Teilzahlungs-Badge ohnehin aus,
+          // und `ueberfaellig` verlangt `versendet` — beide Badges koennen hier
+          // also nicht falsch-positiv werden. Erreichbar ist `versandt`.
+          paidCents: 0,
+          hasBoundPayment: false,
+          dueDate: inv.dueDate ?? null,
+          sentAt: inv.sentAt ? new Date(inv.sentAt).toISOString().slice(0, 10) : null,
+          billingType: inv.billingType,
+          asOfIso: todayISO(),
+        }),
+      };
+    }
 
     const hasBoundPayment = claimed.has(inv.id);
     const t = totals.get(inv.id) ?? { paidCents: 0, skontoCents: 0 };
@@ -293,6 +319,9 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
         invoiceType: inv.invoiceType,
         grossAmountCents: inv.grossAmountCents,
         paidCents: t.paidCents,
+        // #1897: eine gebundene Zahlung stoppt das Altern. Ohne diese Zahl
+        // haette das Badge den Bug wiederholt, den #1897 behoben hat.
+        hasBoundPayment,
         dueDate: inv.dueDate ?? null,
         sentAt: inv.sentAt ? new Date(inv.sentAt).toISOString().slice(0, 10) : null,
         billingType: inv.billingType,
@@ -2534,7 +2563,25 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
 
-  if (invoice.status !== "entwurf") {
+  // Zwei zulaessige Ausgangslagen, und sie meinen Verschiedenes:
+  //
+  //  - `entwurf` (normale Rechnung): das Markieren IST der Uebergang. Der
+  //    Status wandert nach `versendet`, die Ausgabe-Marke entsteht.
+  //  - `abgeschlossen` (Storno-DOKUMENT): das Dokument ist fertig und bleibt
+  //    es. Hier wird NUR `sent_at` gesetzt — dass eine Gutschrift verschickt
+  //    wurde, ist ein Kennzeichen am Beleg, kein Zustandswechsel. Sichtbar
+  //    ueber das Badge `versandt`.
+  //
+  // Der zweite Fall ersetzt den Weg, den der Status-Umbau zugeschuettet hatte:
+  // vorher standen Storno-Dokumente auf `entwurf` und liefen deshalb durch den
+  // ersten Zweig. Mit `abgeschlossen` (und `[]` als Ausgaengen) waere die
+  // Faehigkeit ersatzlos entfallen.
+  const istStornoDokument = invoice.invoiceType === "stornorechnung";
+  if (istStornoDokument) {
+    if (invoice.status !== "abgeschlossen") {
+      throw badRequest(`Storno-Dokument hat Status "${invoice.status}" — erwartet wird "abgeschlossen".`);
+    }
+  } else if (invoice.status !== "entwurf") {
     throw badRequest(`Rechnung hat Status "${invoice.status}" — nur Entwürfe können manuell als versendet markiert werden.`);
   }
 
@@ -2560,9 +2607,14 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
   schedulePdfPersistInBackground(id);
 
   const updated = await withAudit(async (tx, audit) => {
-    const u = await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
+    // Storno-Dokument: KEIN Statuswechsel — es ist bereits `abgeschlossen` und
+    // hat per Uebergangs-SSoT keine Ausgaenge. Nur die Versand-Marke.
+    const u = istStornoDokument
+      ? (await tx.select().from(invoicesTable).where(eq(invoicesTable.id, id)))[0]
+      : await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
     await tx.update(invoicesTable)
-      .set({ sentAt: new Date() })
+      // `COALESCE`: ein zweites Markieren verschiebt das Versanddatum nicht.
+      .set({ sentAt: sql`COALESCE(${invoicesTable.sentAt}, now())` as unknown as Date })
       .where(eq(invoicesTable.id, id));
     audit.record({
       userId: req.user!.id,

@@ -26,7 +26,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { ArrowLeft, CalendarDays, FileText, Printer, Loader2, Ban } from "lucide-react";
 import type { InvoiceItem } from "@shared/api";
 import { isBulkActionableDraft, isPflegekasseBatchDraft } from "@shared/domain/billing-drafts";
-import { isStorniertInvoice, istAktionsfaehigeRechnung } from "@shared/domain/billing-pipeline";
+import { istAktionsfaehigeRechnung } from "@shared/domain/billing-pipeline";
 import {
   useBillingInvoices,
   useEligibleCustomers,
