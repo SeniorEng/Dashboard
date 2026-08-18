@@ -47,6 +47,7 @@ describe("computeVisiblePendingRecords — customer-scoped pages must not show f
         undocumentedCount: 0,
         uncoveredDocumentedCount: 0,
         monthlyRecords: [{ id: 42, status: "pending" }],
+        singleRecords: [],
       },
     ];
     expect(computeVisiblePendingRecords([foreignPending], 2026, 3, null, overview)).toEqual([]);
@@ -71,26 +72,74 @@ describe("computeVisiblePendingRecords — customer-scoped pages must not show f
         undocumentedCount: 2,
         uncoveredDocumentedCount: 3,
         monthlyRecords: [{ id: 42, status: "pending" }],
+        singleRecords: [],
       },
     ];
     expect(computeVisiblePendingRecords([foreignPending], 2026, 3, null, mitOffenerArbeit)).toEqual([]);
   });
 
-  it("ein FERTIGER Nachweis desselben Kunden blendet das Banner NICHT aus", () => {
-    // Gegenprobe: die Menge ist nachweis-, nicht kundenbezogen. Ein Kunde kann
-    // einen fertigen und einen wartenden Nachweis haben; nur der wartende steht
-    // im Abschnitt, also darf auch nur er aus dem Banner fallen.
-    const andererNachweis = [
+  it("gefiltert wird der NACHWEIS, nicht der Kunde", () => {
+    // Derselbe Kunde hat einen wartenden (42) und einen fertigen (77) Nachweis.
+    // Nur der wartende steht im Abschnitt, also faellt auch nur er aus dem
+    // Banner — 42 verschwindet, und ein anderer wartender Nachweis desselben
+    // Kunden waere weiterhin sichtbar.
+    //
+    // Die erste Fassung dieses Falls hiess „ein FERTIGER Nachweis desselben
+    // Kunden blendet das Banner NICHT aus", modellierte aber etwas anderes:
+    // Nachweis 42 stand gar nicht in der Uebersicht. Der beschriebene Fall war
+    // ungetestet.
+    const beides = [
       {
         customerId: 999,
-        undocumentedCount: 0,
-        uncoveredDocumentedCount: 0,
-        monthlyRecords: [{ id: 77, status: "completed" }],
+        monthlyRecords: [
+          { id: 42, status: "pending" },
+          { id: 77, status: "completed" },
+        ],
+        singleRecords: [],
       },
     ];
-    const result = computeVisiblePendingRecords([foreignPending], 2026, 3, null, andererNachweis);
+    expect(computeVisiblePendingRecords([foreignPending], 2026, 3, null, beides)).toEqual([]);
+
+    // Und ein Nachweis, den die Uebersicht gar nicht kennt, bleibt sichtbar.
+    const nurFremder = [
+      { customerId: 999, monthlyRecords: [{ id: 77, status: "completed" }], singleRecords: [] },
+    ];
+    expect(computeVisiblePendingRecords([foreignPending], 2026, 3, null, nurFremder)).toHaveLength(1);
+  });
+
+  it("EINZEL-Nachweise zaehlen genauso — sie bekommen im Abschnitt eine eigene Karte", () => {
+    // ── Das Loch, das die erste Fassung hatte ────────────────────────────
+    // Die Banner-Eingabe (`getPendingServiceRecords`) filtert NICHT nach
+    // `recordType` — Einzel- und Sammel-LN liegen in derselben Tabelle, und ein
+    // Einzel-LN startet auf `pending`. Der Abschnitt rendert seine Karten ueber
+    // `pendingProofsOf`, das beide Arten umfasst.
+    //
+    // Die erste Fassung des Lockstep sammelte nur `monthlyRecords`. Ein
+    // wartender Einzel-LN stand damit DOPPELT auf dem Bildschirm: als Karte im
+    // Abschnitt und als Zeile im Banner, beide mit demselben Ziel. Auf `main`
+    // konnte das nicht passieren — dort deckte die Kunden-Menge beide Arten ab.
+    const alsEinzelNachweis = [
+      {
+        customerId: 999,
+        monthlyRecords: [],
+        singleRecords: [{ id: 42, status: "pending" }],
+      },
+    ];
+    expect(computeVisiblePendingRecords([foreignPending], 2026, 3, null, alsEinzelNachweis)).toEqual([]);
+  });
+
+  it("ein FERTIGER Einzel-Nachweis blendet nichts aus", () => {
+    // Gegenprobe zum Fall darueber: gefiltert wird nach `wartetAufUnterschrift`,
+    // nicht nach der Nachweis-Art.
+    const fertigerEinzel = [
+      {
+        customerId: 999,
+        monthlyRecords: [],
+        singleRecords: [{ id: 42, status: "completed" }],
+      },
+    ];
+    const result = computeVisiblePendingRecords([foreignPending], 2026, 3, null, fertigerEinzel);
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe(42);
   });
 
   it("tolerates undefined input", () => {

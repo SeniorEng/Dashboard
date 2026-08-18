@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bucketize,
   completedCardSummary,
+  fertigeNachweiseVon,
   type CustomerOverviewItem,
 } from "../../client/src/features/service-records/components/overview-sections";
 
@@ -91,8 +92,13 @@ describe("bucketize — Mischzustand in ALLEN Abschnitten (Task #1914)", () => {
     // Der zweite Teil des Fundes. Die Karte trug `totalAppointments` — für
     // Sonja „5 Termine", obwohl nur 3 in einem Nachweis liegen. Neben einer
     // Aktions-Karte desselben Kunden ist das schlicht falsch.
-    expect(completedCardSummary(sonja)).toBe("3 von 5 Terminen · 3 Sammel-LN");
+    expect(completedCardSummary(sonja)).toBe("3 von 5 Terminen abgedeckt · 3 Sammel-LN");
 
+    // „abgedeckt" statt „Termine": die Zahl misst, wie viele Termine in einem
+    // Nachweis LIEGEN — nicht, wie viele fertig unterschrieben sind. Die
+    // Abdeckungs-Semantik zaehlt auch unsignierte Nachweise mit (out of scope),
+    // also sagt die Karte, was die Zahl bedeutet, statt Erledigung zu behaupten.
+    //
     // Gegenprobe: ist wirklich alles abgedeckt, entfällt die Relativierung —
     // sonst prüfte der Fall oben nur, dass irgendwo „von" steht.
     const komplett = makeItem({
@@ -102,14 +108,14 @@ describe("bucketize — Mischzustand in ALLEN Abschnitten (Task #1914)", () => {
       totalAppointments: 3,
       coveredByMonthlyCount: 3,
     });
-    expect(completedCardSummary(komplett)).toBe("3 Termine · 1 Sammel-LN");
+    expect(completedCardSummary(komplett)).toBe("3 Termine abgedeckt · 1 Sammel-LN");
   });
 
   it("unsignierter Nachweis NEBEN offenen Terminen — beides sichtbar", () => {
     // Der zweite geforderte Fall. Vorher gewann die Aktions-Seite und der
     // wartende Nachweis war im Abschnitt unsichtbar; er tauchte nur im
     // Hinweis-Banner auf. Jetzt steht er dort, wo er hingehört — und das Banner
-    // zieht sich zurück (siehe `pending-banner-lockstep.test.ts`).
+    // zieht sich zurück (`pending-banner-customer-scope.test.ts`).
     const gemischtWartend = makeItem({
       customerId: 99,
       customerName: "Mira Mischzustand",
@@ -142,6 +148,30 @@ describe("bucketize — Mischzustand in ALLEN Abschnitten (Task #1914)", () => {
       coveredByMonthlyCount: 2,
     });
     expect(abschnitteVon(bucketize([rosali]), 2)).toEqual(["awaitingSignature", "completed"]);
+
+    // Und die gruene Karte darf den WARTENDEN Nachweis nicht als erstellten
+    // ausgeben. Die erste Fassung zaehlte ungefiltert und sagte
+    // „3 Termine · 1 Sammel-LN · 1 Einzel-LN" — der Sammel-LN 82 steht zwei
+    // Zeilen tiefer unter „Unterschrift offen".
+    expect(completedCardSummary(rosali)).toBe("3 Termine abgedeckt · 1 Einzel-LN");
+  });
+
+  it("die „erstellt“-Karte verlinkt auf einen FERTIGEN Nachweis, nie auf einen wartenden", () => {
+    // Vorher nahm die Karte `monthlyRecords[0]` ungefiltert. Seit ein Kunde
+    // gleichzeitig hier und unter „Wartet auf Unterschrift" stehen kann, zeigte
+    // die gruene Karte damit auf den UNSIGNIERTEN Nachweis — und der fertige war
+    // von dort aus gar nicht erreichbar.
+    const rosali = makeItem({
+      customerId: 2,
+      monthlyRecords: [{ id: 82, status: "pending" }],
+      singleRecords: [{ id: 83, status: "completed", recordType: "single" }],
+      totalAppointments: 3,
+      coveredBySingleCount: 1,
+      coveredByMonthlyCount: 2,
+    });
+    const fertig = fertigeNachweiseVon(rosali);
+    expect(fertig.monthly).toEqual([]);
+    expect(fertig.single.map((r) => r.id)).toEqual([83]);
   });
 
   it("Sonderfall „Nachweis ganz ohne Termine“ bleibt der Prüfauftrag", () => {
@@ -207,11 +237,45 @@ describe("bucketize — Mischzustand in ALLEN Abschnitten (Task #1914)", () => {
     }
   });
 
-  it("sortiert jeden Abschnitt nach Nachname", () => {
-    const buckets = bucketize([
-      makeItem({ customerId: 1, customerName: "Wolfgang Seidel", undocumentedCount: 1, totalAppointments: 1 }),
-      makeItem({ customerId: 2, customerName: "Rosali Demirev", undocumentedCount: 1, totalAppointments: 1 }),
-    ]);
-    expect(buckets.needsDoc.map((i) => i.customerName)).toEqual(["Rosali Demirev", "Wolfgang Seidel"]);
+  it("sortiert JEDEN Abschnitt nach Nachname — nicht nur den ersten", () => {
+    // Der Name versprach vorher mehr als der Koerper: geprueft wurde nur
+    // `needsDoc`. Die Sortierung von `awaitingSignature` war im alten Testsatz
+    // ausdruecklich abgedeckt und ging beim Umschreiben verloren.
+    const seidel = makeItem({
+      customerId: 1, customerName: "Wolfgang Seidel",
+      undocumentedCount: 1, uncoveredDocumentedCount: 1, totalAppointments: 2,
+      monthlyRecords: [{ id: 11, status: "pending" }],
+      singleRecords: [{ id: 12, status: "completed", recordType: "single" }],
+      coveredBySingleCount: 1,
+    });
+    const demirev = makeItem({
+      customerId: 2, customerName: "Rosali Demirev",
+      undocumentedCount: 1, uncoveredDocumentedCount: 1, totalAppointments: 2,
+      monthlyRecords: [{ id: 21, status: "pending" }],
+      singleRecords: [{ id: 22, status: "completed", recordType: "single" }],
+      coveredBySingleCount: 1,
+    });
+    const buckets = bucketize([seidel, demirev]);
+    const erwartet = ["Rosali Demirev", "Wolfgang Seidel"];
+    for (const [name, liste] of Object.entries(buckets)) {
+      if (liste.length === 0) continue;
+      expect(liste.map((i) => i.customerName), `${name} unsortiert`).toEqual(erwartet);
+    }
+    // Gegenprobe: die Schleife oben prueft nur nicht-leere Abschnitte — es
+    // muessen also welche dabei sein, sonst misst sie nichts.
+    expect(buckets.needsDoc.length + buckets.ready.length
+      + buckets.awaitingSignature.length + buckets.completed.length).toBe(8);
+  });
+
+  it("nur ein wartender EINZEL-Nachweis reicht fuer „Wartet auf Unterschrift“", () => {
+    // Stand im alten Testsatz als eigener Fall und ging beim Umschreiben
+    // verloren — ausgerechnet Einzel-LN waren danach der blinde Fleck des
+    // Banner-Lockstep.
+    const petra = makeItem({
+      customerId: 7, customerName: "Petra Pending-Single",
+      singleRecords: [{ id: 700, status: "pending", recordType: "single" }],
+      documentedCount: 1, totalAppointments: 1, coveredBySingleCount: 1,
+    });
+    expect(abschnitteVon(bucketize([petra]), 7)).toEqual(["awaitingSignature"]);
   });
 });

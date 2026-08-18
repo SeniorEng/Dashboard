@@ -260,27 +260,50 @@ interface CompletedCardProps {
  * Als reine Funktion herausgezogen, damit genau das pruefbar ist und nicht nur
  * gerendert wird.
  */
+export function fertigeNachweiseVon(item: CustomerOverviewItem) {
+  return {
+    monthly: item.monthlyRecords.filter((r) => !wartetAufUnterschrift(r.status)),
+    single: item.singleRecords.filter((r) => !wartetAufUnterschrift(r.status)),
+  };
+}
+
 export function completedCardSummary(item: CustomerOverviewItem): string {
   const abgedeckt = item.coveredBySingleCount + item.coveredByMonthlyCount;
+  // „abgedeckt", nicht „Termine": die Zahl misst, wie viele Termine in einem
+  // Nachweis LIEGEN — nicht, wie viele davon fertig unterschrieben sind. Die
+  // Abdeckungs-Semantik (`coverageConditions`, serverseitig) filtert nicht nach
+  // Nachweis-Status; sie zu aendern ist ausdruecklich out of scope. Also sagt
+  // die Karte, was die Zahl wirklich bedeutet, statt Erledigung zu suggerieren.
   const teile: string[] = [
     abgedeckt < item.totalAppointments
-      ? `${abgedeckt} von ${item.totalAppointments} Terminen`
-      : `${abgedeckt} ${abgedeckt === 1 ? "Termin" : "Termine"}`,
+      ? `${abgedeckt} von ${item.totalAppointments} Terminen abgedeckt`
+      : `${abgedeckt} ${abgedeckt === 1 ? "Termin" : "Termine"} abgedeckt`,
   ];
-  if (item.monthlyRecords.length > 0) teile.push(`${item.monthlyRecords.length} Sammel-LN`);
-  if (item.singleRecords.length > 0) teile.push(`${item.singleRecords.length} Einzel-LN`);
+  // NUR die fertigen Nachweise zaehlen. Die erste Fassung nahm
+  // `monthlyRecords.length` ungefiltert — im Abschnitt „Leistungsnachweise
+  // ERSTELLT" haette damit ein wartender Nachweis als erstellter gezaehlt.
+  // Sichtbar am Rosali-Fall: „1 Sammel-LN" fuer einen LN, der zwei Zeilen
+  // tiefer unter „Unterschrift offen" steht.
+  const fertig = fertigeNachweiseVon(item);
+  if (fertig.monthly.length > 0) teile.push(`${fertig.monthly.length} Sammel-LN`);
+  if (fertig.single.length > 0) teile.push(`${fertig.single.length} Einzel-LN`);
   return teile.join(" · ");
 }
 
 function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedCardProps) {
-  const singleCount = item.singleRecords.length;
-  const monthlyCount = item.monthlyRecords.length;
   const periodHref = `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
-  // A single monthly proof links straight to it; multiple proofs link to the
-  // period view so every one stays reachable.
-  const href = monthlyCount === 1
-    ? `/service-records/${item.monthlyRecords[0].id}`
-    : periodHref;
+  // Ziel ist ein FERTIGER Nachweis. Vorher nahm die Karte `monthlyRecords[0]`
+  // ungefiltert — seit ein Kunde gleichzeitig hier und unter „Wartet auf
+  // Unterschrift" stehen kann, zeigte die gruene Karte damit auf den
+  // UNSIGNIERTEN Nachweis, waehrend der fertige von hier aus gar nicht
+  // erreichbar war. Genau das „anklickbar machen" war die Begruendung fuer
+  // Variante B.
+  const fertig = fertigeNachweiseVon(item);
+  const href = fertig.monthly.length === 1 && fertig.single.length === 0
+    ? `/service-records/${fertig.monthly[0].id}`
+    : fertig.single.length === 1 && fertig.monthly.length === 0
+      ? `/service-records/${fertig.single[0].id}`
+      : periodHref;
 
   const summary = completedCardSummary(item);
 
@@ -323,12 +346,17 @@ interface PendingProof {
 // Each not-yet-completed proof becomes its own card so two pending monthly LNs
 // for the same customer (Task #1526) never collapse into one invisible entry.
 function pendingProofsOf(item: CustomerOverviewItem): PendingProof[] {
+  // `wartetAufUnterschrift` statt eines eigenen `!== "completed"`: das ist die
+  // DRITTE Leserin derselben Frage (neben `bucketize` und dem Banner). Sie
+  // stand hier handgeschrieben, waehrend der Docstring der SSoT bereits
+  // behauptete, sie lese sie — „strukturell ausgeschlossen" war fuer sie also
+  // weiterhin Disziplin.
   return [
     ...item.monthlyRecords
-      .filter((r) => r.status !== "completed")
+      .filter((r) => wartetAufUnterschrift(r.status))
       .map((r) => ({ id: r.id, status: r.status, kind: "monthly" as const })),
     ...item.singleRecords
-      .filter((r) => r.status !== "completed")
+      .filter((r) => wartetAufUnterschrift(r.status))
       .map((r) => ({ id: r.id, status: r.status, kind: "single" as const })),
   ];
 }

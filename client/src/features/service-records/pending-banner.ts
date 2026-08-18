@@ -3,18 +3,28 @@ import { wartetAufUnterschrift } from "./proof-status";
 
 export interface PendingBannerOverviewItem {
   customerId: number;
-  undocumentedCount: number;
-  uncoveredDocumentedCount: number;
   /**
-   * Die Sammel-Nachweise des Kunden im gewählten Monat. Gebraucht wird nur die
-   * `id` und der `status` — daran hängt, ob der Übersichts-Abschnitt den
-   * Nachweis bereits als eigene Karte zeigt.
+   * BEIDE Nachweis-Arten des Kunden im gewählten Monat. Gebraucht werden nur
+   * `id` und `status` — daran hängt, ob der Übersichts-Abschnitt den Nachweis
+   * bereits als eigene Karte zeigt.
+   *
+   * Die erste Fassung sammelte nur `monthlyRecords`. Das war ein Loch: der
+   * Abschnitt rendert seine Karten über `pendingProofsOf`, das Sammel- UND
+   * Einzel-Nachweise umfasst, und `getPendingServiceRecords` filtert seinerseits
+   * nicht nach `recordType` (beide liegen in derselben Tabelle). Ein wartender
+   * Einzel-LN stand damit doppelt auf dem Bildschirm — als Karte im Abschnitt
+   * und als Zeile im Banner, beide mit demselben Ziel.
+   *
+   * `undocumentedCount`/`uncoveredDocumentedCount` standen hier, solange das
+   * Banner die Unterdrückungs-Regel von `bucketize` nachbaute. Sie werden nicht
+   * mehr gelesen und sind deshalb weg — nicht bloß ungenutzt liegengeblieben.
    */
   monthlyRecords: { id: number; status: string }[];
+  singleRecords: { id: number; status: string }[];
 }
 
 /**
- * Welche wartenden Sammel-Nachweise gehören ins Hinweis-Banner?
+ * Welche wartenden Nachweise gehören ins Hinweis-Banner?
  *
  * ── Die Regel, und warum sie sich geändert hat ──────────────────────────
  * Das Banner ist die Auffanglinie für Nachweise, die die Übersicht NICHT
@@ -55,7 +65,9 @@ export function computeVisiblePendingRecords(
   // ist die Frage „zeigt der Abschnitt DIESEN Nachweis?" die einzig richtige.
   const imAbschnittGezeigt = new Set<number>();
   for (const item of overview ?? []) {
-    for (const record of item.monthlyRecords) {
+    // Beide Arten, denn beide bekommen im Abschnitt eine Karte. `?? []` weil ein
+    // gecachter Response aus einer aelteren Fassung die Felder nicht traegt.
+    for (const record of [...(item.monthlyRecords ?? []), ...(item.singleRecords ?? [])]) {
       if (wartetAufUnterschrift(record.status)) imAbschnittGezeigt.add(record.id);
     }
   }
