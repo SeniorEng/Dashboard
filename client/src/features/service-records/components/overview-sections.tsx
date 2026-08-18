@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { computeDeadlineInfo, DeadlineHint } from "./deadline-hint";
+import { wartetAufUnterschrift } from "../proof-status";
 
 export interface CustomerOverviewItem {
   customerId: number;
@@ -56,50 +57,51 @@ export function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
   const completed: CustomerOverviewItem[] = [];
   const orphans: CustomerOverviewItem[] = [];
   for (const it of items) {
-    // Die beiden Aktions-Kategorien schliessen sich NICHT aus.
-    //
-    // Vorher war das eine `continue`-Kette: ein einziger offener Termin liess
-    // die Einordnung bei `needsDoc` abbrechen, und `uncoveredDocumentedCount`
-    // wurde zwar berechnet, aber nie angezeigt. Ein dokumentierter, noch nicht
-    // gebuendelter Termin fiel damit in gar keine sichtbare Kategorie — er war
-    // weder als „zu dokumentieren" noch als „bereit" zu sehen. Genau in dem
-    // Mischzustand, der im laufenden Monat der Normalfall ist.
-    //
-    // Jetzt darf derselbe Kunde in BEIDEN Listen stehen: „noch 2 Termine
-    // dokumentieren" UND „3 dokumentierte buendeln". Zwei verschiedene
-    // Handlungen, beide moeglich, beide sichtbar.
+    // ── AKTIONS-Abschnitte: was kann ich tun? ─────────────────────────────
+    // Schliessen sich nicht aus (#106): ein Kunde kann gleichzeitig offene
+    // Termine haben UND dokumentierte, die noch gebuendelt werden koennen.
     const hatOffene = it.undocumentedCount > 0;
     const hatBuendelbare = it.uncoveredDocumentedCount > 0;
     if (hatOffene) needsDoc.push(it);
     if (hatBuendelbare) ready.push(it);
-    // Die Zustands-Kategorien unten gelten weiterhin nur, wenn NICHTS zu tun
-    // ist — sonst stuende ein Kunde mit offener Arbeit zusaetzlich unter
-    // „wartet auf Unterschrift" und die Uebersicht verloere ihre Ordnung.
-    if (hatOffene || hatBuendelbare) continue;
-    // No open work. Records still awaiting signatures (pending/employee_signed)
-    // get their own bucket so the customer never disappears completely — even
-    // if there is also a finished single-record alongside the pending monthly
-    // one (Rosali-Demirev case). Customers with ONLY completed records stay in
-    // the completed bucket.
-    const hasPendingRecord =
-      it.monthlyRecords.some((r) => r.status !== "completed") ||
-      it.singleRecords.some((r) => r.status !== "completed");
-    if (hasPendingRecord) {
-      awaitingSignature.push(it);
-      continue;
-    }
 
-    const hasCompletedRecord =
-      it.monthlyRecords.some((r) => r.status === "completed") ||
-      it.singleRecords.some((r) => r.status === "completed");
-    // Without a completed record there is nothing to show in the completed
-    // bucket — the customer simply has no relevant activity this month.
-    if (!hasCompletedRecord) continue;
+    // ── ZUSTANDS-Abschnitte: was ist schon passiert? ──────────────────────
+    //
+    // Diese liefen bis #1914 hinter einem `continue`: sobald ein Kunde
+    // irgendetwas zu tun hatte, wurden sie uebersprungen. Die Begruendung war,
+    // die Uebersicht verloere sonst ihre Ordnung.
+    //
+    // Sie hat dadurch etwas Schlimmeres verloren — die Wahrheit. Im laufenden
+    // Monat ist der Mischzustand der NORMALFALL: drei Termine sind im Nachweis,
+    // einer ist dokumentiert und wartet aufs Buendeln, einer steht noch aus.
+    // Unter der alten Regel verschwanden die drei fertigen Nachweise komplett
+    // aus dem Monats-Ueberblick, nur weil ein einziger Termin offen war. Der
+    // belegte Fall (Sonja Krause, Aug 2026) zeigte 2 statt 3 fertige Kunden.
+    //
+    // Aktion und Zustand sind VERSCHIEDENE Fragen ueber denselben Kunden, keine
+    // konkurrierenden Antworten auf dieselbe. „Hier sind noch 2 Termine offen"
+    // und „hier liegen 3 fertige Nachweise" sind beide wahr und beide
+    // handlungsrelevant. Ein Kunde erscheint deshalb in JEDEM zutreffenden
+    // Abschnitt (Variante B, entschieden von Alrik).
+    //
+    // Verworfen wurde: die fertigen Nachweise nur als Zusatzzeile auf der
+    // Aktions-Karte zu zeigen. Das haette die Zaehler der Abschnitte weiter
+    // falsch gelassen und die fertigen Nachweise nicht anklickbar gemacht.
+    const hatWartenden =
+      it.monthlyRecords.some((r) => wartetAufUnterschrift(r.status)) ||
+      it.singleRecords.some((r) => wartetAufUnterschrift(r.status));
+    if (hatWartenden) awaitingSignature.push(it);
 
-    if (it.totalAppointments === 0) {
-      orphans.push(it);
-    } else {
-      completed.push(it);
+    const hatFertigen =
+      it.monthlyRecords.some((r) => !wartetAufUnterschrift(r.status)) ||
+      it.singleRecords.some((r) => !wartetAufUnterschrift(r.status));
+    if (hatFertigen) {
+      // Sonderfall bleibt erhalten: ein Nachweis ohne einen einzigen aktiven
+      // Termin ist kein Erfolg, sondern ein Pruefauftrag — etwa wenn die
+      // Termine nachtraeglich geloescht wurden. Er gehoert in den
+      // Auffaelligkeits-Abschnitt, nicht unter „erstellt".
+      if (it.totalAppointments === 0) orphans.push(it);
+      else completed.push(it);
     }
   }
   needsDoc.sort(byNachname);
@@ -174,6 +176,12 @@ interface ActionCardProps {
 }
 
 function ActionCustomerCard({ item, selectedYear, selectedMonth, variant }: ActionCardProps) {
+  // Abschnitts-bezogene Kennung. Sie war `card-overview-<kundeId>` und damit
+  // fuer beide Aktions-Karten UND die „erstellt"-Karte identisch. Solange ein
+  // Kunde in genau einem Abschnitt stand, war das eindeutig; seit er in
+  // mehreren steht, waere dieselbe Kennung mehrfach im DOM — Tests und
+  // Bedienhilfen greifen dann die erstbeste Karte und pruefen die falsche.
+  const abschnitt = variant === "needsDoc" ? "needs-doc" : "ready";
   const deadline = computeDeadlineInfo(selectedYear, selectedMonth);
   const href = `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
   const isNeedsDoc = variant === "needsDoc";
@@ -199,7 +207,7 @@ function ActionCustomerCard({ item, selectedYear, selectedMonth, variant }: Acti
 
   return (
     <Link href={href}>
-      <Card data-testid={`card-overview-${item.customerId}`}>
+      <Card data-testid={`card-${abschnitt}-${item.customerId}`}>
         <CardContent className="p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-1 min-w-0 flex-1">
@@ -207,7 +215,7 @@ function ActionCustomerCard({ item, selectedYear, selectedMonth, variant }: Acti
                 <User className={`${iconSize.sm} text-muted-foreground`} />
                 <span
                   className="font-medium"
-                  data-testid={`text-customer-${item.customerId}`}
+                  data-testid={`text-customer-${abschnitt}-${item.customerId}`}
                 >
                   {item.customerName}
                 </span>
@@ -238,25 +246,70 @@ interface CompletedCardProps {
   selectedMonth: number;
 }
 
-function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedCardProps) {
-  const singleCount = item.singleRecords.length;
-  const monthlyCount = item.monthlyRecords.length;
-  const periodHref = `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
-  // A single monthly proof links straight to it; multiple proofs link to the
-  // period view so every one stays reachable.
-  const href = monthlyCount === 1
-    ? `/service-records/${item.monthlyRecords[0].id}`
-    : periodHref;
+/**
+ * Der Beschreibungstext der „erstellt"-Karte.
+ *
+ * Beschreibt den FERTIGEN Teil, nicht den ganzen Monat. Vorher stand hier
+ * `totalAppointments` — die Gesamtzahl der Termine des Kunden. Solange die Karte
+ * nur erschien, wenn nichts mehr zu tun war, fielen beide Zahlen zusammen und
+ * niemand merkte den Unterschied. Seit ein Kunde gleichzeitig hier UND in einem
+ * Aktions-Abschnitt steht, tun sie es nicht mehr: im belegten Fall haette die
+ * Karte „5 Termine" behauptet, waehrend nur 3 in einem Nachweis liegen und 2
+ * noch Arbeit sind — eine Zahl, die Erledigung behauptet, wo keine ist.
+ *
+ * Als reine Funktion herausgezogen, damit genau das pruefbar ist und nicht nur
+ * gerendert wird.
+ */
+export function fertigeNachweiseVon(item: CustomerOverviewItem) {
+  return {
+    monthly: item.monthlyRecords.filter((r) => !wartetAufUnterschrift(r.status)),
+    single: item.singleRecords.filter((r) => !wartetAufUnterschrift(r.status)),
+  };
+}
 
-  const parts: string[] = [
-    `${item.totalAppointments} ${item.totalAppointments === 1 ? "Termin" : "Termine"}`,
+export function completedCardSummary(item: CustomerOverviewItem): string {
+  const abgedeckt = item.coveredBySingleCount + item.coveredByMonthlyCount;
+  // „abgedeckt", nicht „Termine": die Zahl misst, wie viele Termine in einem
+  // Nachweis LIEGEN — nicht, wie viele davon fertig unterschrieben sind. Die
+  // Abdeckungs-Semantik (`coverageConditions`, serverseitig) filtert nicht nach
+  // Nachweis-Status; sie zu aendern ist ausdruecklich out of scope. Also sagt
+  // die Karte, was die Zahl wirklich bedeutet, statt Erledigung zu suggerieren.
+  const teile: string[] = [
+    abgedeckt < item.totalAppointments
+      ? `${abgedeckt} von ${item.totalAppointments} Terminen abgedeckt`
+      : `${abgedeckt} ${abgedeckt === 1 ? "Termin" : "Termine"} abgedeckt`,
   ];
-  if (monthlyCount > 0) parts.push(`${monthlyCount} Sammel-LN`);
-  if (singleCount > 0) parts.push(`${singleCount} Einzel-LN`);
+  // NUR die fertigen Nachweise zaehlen. Die erste Fassung nahm
+  // `monthlyRecords.length` ungefiltert — im Abschnitt „Leistungsnachweise
+  // ERSTELLT" haette damit ein wartender Nachweis als erstellter gezaehlt.
+  // Sichtbar am Rosali-Fall: „1 Sammel-LN" fuer einen LN, der zwei Zeilen
+  // tiefer unter „Unterschrift offen" steht.
+  const fertig = fertigeNachweiseVon(item);
+  if (fertig.monthly.length > 0) teile.push(`${fertig.monthly.length} Sammel-LN`);
+  if (fertig.single.length > 0) teile.push(`${fertig.single.length} Einzel-LN`);
+  return teile.join(" · ");
+}
+
+function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedCardProps) {
+  const periodHref = `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
+  // Ziel ist ein FERTIGER Nachweis. Vorher nahm die Karte `monthlyRecords[0]`
+  // ungefiltert — seit ein Kunde gleichzeitig hier und unter „Wartet auf
+  // Unterschrift" stehen kann, zeigte die gruene Karte damit auf den
+  // UNSIGNIERTEN Nachweis, waehrend der fertige von hier aus gar nicht
+  // erreichbar war. Genau das „anklickbar machen" war die Begruendung fuer
+  // Variante B.
+  const fertig = fertigeNachweiseVon(item);
+  const href = fertig.monthly.length === 1 && fertig.single.length === 0
+    ? `/service-records/${fertig.monthly[0].id}`
+    : fertig.single.length === 1 && fertig.monthly.length === 0
+      ? `/service-records/${fertig.single[0].id}`
+      : periodHref;
+
+  const summary = completedCardSummary(item);
 
   return (
     <Link href={href}>
-      <Card data-testid={`card-overview-${item.customerId}`}>
+      <Card data-testid={`card-completed-${item.customerId}`}>
         <CardContent className="p-3">
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-0.5 min-w-0 flex-1">
@@ -264,7 +317,7 @@ function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedC
                 <User className={`${iconSize.sm} text-muted-foreground`} />
                 <span
                   className="font-medium truncate"
-                  data-testid={`text-customer-${item.customerId}`}
+                  data-testid={`text-customer-completed-${item.customerId}`}
                 >
                   {item.customerName}
                 </span>
@@ -273,7 +326,7 @@ function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedC
                 className="text-xs text-muted-foreground"
                 data-testid={`text-completed-${item.customerId}`}
               >
-                {parts.join(" · ")}
+                {summary}
               </p>
             </div>
             <ChevronRight className={`${iconSize.sm} text-muted-foreground shrink-0`} />
@@ -293,12 +346,17 @@ interface PendingProof {
 // Each not-yet-completed proof becomes its own card so two pending monthly LNs
 // for the same customer (Task #1526) never collapse into one invisible entry.
 function pendingProofsOf(item: CustomerOverviewItem): PendingProof[] {
+  // `wartetAufUnterschrift` statt eines eigenen `!== "completed"`: das ist die
+  // DRITTE Leserin derselben Frage (neben `bucketize` und dem Banner). Sie
+  // stand hier handgeschrieben, waehrend der Docstring der SSoT bereits
+  // behauptete, sie lese sie — „strukturell ausgeschlossen" war fuer sie also
+  // weiterhin Disziplin.
   return [
     ...item.monthlyRecords
-      .filter((r) => r.status !== "completed")
+      .filter((r) => wartetAufUnterschrift(r.status))
       .map((r) => ({ id: r.id, status: r.status, kind: "monthly" as const })),
     ...item.singleRecords
-      .filter((r) => r.status !== "completed")
+      .filter((r) => wartetAufUnterschrift(r.status))
       .map((r) => ({ id: r.id, status: r.status, kind: "single" as const })),
   ];
 }
@@ -324,7 +382,7 @@ function AwaitingSignatureCard({ item, proof }: { item: CustomerOverviewItem; pr
                 <User className={`${iconSize.sm} text-muted-foreground`} />
                 <span
                   className="font-medium truncate"
-                  data-testid={`text-customer-${item.customerId}`}
+                  data-testid={`text-customer-awaiting-${item.customerId}`}
                 >
                   {item.customerName}
                 </span>
@@ -358,7 +416,7 @@ function OrphanRecordCard({ item, selectedYear, selectedMonth }: CompletedCardPr
               <div className="space-y-0.5 min-w-0">
                 <span
                   className="font-medium text-sm block"
-                  data-testid={`text-customer-${item.customerId}`}
+                  data-testid={`text-customer-orphan-${item.customerId}`}
                 >
                   {item.customerName}
                 </span>
