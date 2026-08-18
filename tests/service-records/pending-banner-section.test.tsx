@@ -65,7 +65,14 @@ describe("PendingBannerSection — customer-scoped pages must not show foreign p
         selectedMonth={3}
         customerId={null}
         overview={[
-          { customerId: 999, undocumentedCount: 0, uncoveredDocumentedCount: 0 },
+          {
+            customerId: 999,
+            undocumentedCount: 0,
+            uncoveredDocumentedCount: 0,
+            // Seit #1914 entscheidet der NACHWEIS, nicht der Kunde: das Banner
+            // blendet genau die Nachweise aus, die der Abschnitt als Karte zeigt.
+            monthlyRecords: [{ id: 42, status: "pending" }],
+          },
         ]}
         onSingleClick={() => {}}
         onMultiClick={() => {}}

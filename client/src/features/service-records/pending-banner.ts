@@ -1,11 +1,43 @@
 import type { MonthlyServiceRecord } from "@shared/schema";
+import { wartetAufUnterschrift } from "./proof-status";
 
 export interface PendingBannerOverviewItem {
   customerId: number;
   undocumentedCount: number;
   uncoveredDocumentedCount: number;
+  /**
+   * Die Sammel-Nachweise des Kunden im gewählten Monat. Gebraucht wird nur die
+   * `id` und der `status` — daran hängt, ob der Übersichts-Abschnitt den
+   * Nachweis bereits als eigene Karte zeigt.
+   */
+  monthlyRecords: { id: number; status: string }[];
 }
 
+/**
+ * Welche wartenden Sammel-Nachweise gehören ins Hinweis-Banner?
+ *
+ * ── Die Regel, und warum sie sich geändert hat ──────────────────────────
+ * Das Banner ist die Auffanglinie für Nachweise, die die Übersicht NICHT
+ * sichtbar macht. Es darf deshalb genau das zeigen, was der Abschnitt „Wartet
+ * auf Unterschrift" nicht zeigt — sonst steht derselbe Nachweis zweimal auf
+ * dem Bildschirm.
+ *
+ * Vorher wurde das über eine NACHGEBAUTE Regel entschieden: „Kunde hat keine
+ * offene Arbeit" — dieselbe Bedingung, mit der `bucketize` die Zustands-
+ * Abschnitte unterdrückte. Das funktionierte nur, solange beide Kopien gleich
+ * blieben. Mit #1914 fällt die Unterdrückung weg: der Abschnitt zeigt jetzt
+ * JEDEN wartenden Nachweis, auch neben offener Arbeit. Die nachgebaute Regel
+ * hätte den Nachweis weiterhin zusätzlich ins Banner gehoben — doppelt.
+ *
+ * Jetzt wird nicht mehr nachgebaut, sondern dieselbe Frage gestellt: welche
+ * Nachweis-IDs zeigt der Abschnitt? Beide Seiten lesen dafür
+ * `wartetAufUnterschrift`. Ein Auseinanderlaufen ist damit nicht mehr eine
+ * Frage der Disziplin, sondern strukturell ausgeschlossen.
+ *
+ * Unverändert: auf einer kunden-gefilterten Seite zeigt das Banner nichts
+ * (dort ist der Nachweis ohnehin im Blick), und Nachweise aus anderen Monaten
+ * bleiben immer sichtbar — die Übersicht zeigt nur den gewählten Monat.
+ */
 export function computeVisiblePendingRecords(
   pendingRecords: MonthlyServiceRecord[] | undefined,
   selectedYear: number,
@@ -15,19 +47,21 @@ export function computeVisiblePendingRecords(
 ): MonthlyServiceRecord[] {
   if (customerId) return [];
   const records = pendingRecords ?? [];
-  // Customers handled by the overview's display buckets (awaiting-signature,
-  // completed, orphan) — those that have NO open action work for the selected
-  // month. For customers in the action buckets (needsDoc / ready) the overview
-  // card links to a create flow, not to the existing pending record, so the
-  // banner must still surface them.
-  const customersShownInOverview = new Set<number>();
+
+  // Genau die Nachweise, für die der Abschnitt eine eigene Karte rendert
+  // (`pendingProofsOf` in `overview-sections.tsx` filtert nach derselben
+  // Bedingung). Keine Kunden-Menge mehr, sondern eine Nachweis-Menge: ein Kunde
+  // kann einen fertigen und einen wartenden Nachweis zugleich haben, und dann
+  // ist die Frage „zeigt der Abschnitt DIESEN Nachweis?" die einzig richtige.
+  const imAbschnittGezeigt = new Set<number>();
   for (const item of overview ?? []) {
-    if (item.undocumentedCount > 0) continue;
-    if (item.uncoveredDocumentedCount > 0) continue;
-    customersShownInOverview.add(item.customerId);
+    for (const record of item.monthlyRecords) {
+      if (wartetAufUnterschrift(record.status)) imAbschnittGezeigt.add(record.id);
+    }
   }
+
   return records.filter((r) => {
     if (r.year !== selectedYear || r.month !== selectedMonth) return true;
-    return !customersShownInOverview.has(r.customerId);
+    return !imAbschnittGezeigt.has(r.id);
   });
 }
