@@ -92,25 +92,88 @@ describe("scripts/migrate.sh — Prod-Migrationspfad", () => {
   );
 
   it.skipIf(!pinnedDrizzleKit)(
-    "lädt die Config und kommt bis zum Verbindungsversuch",
+    "lädt die Module und kommt bis zum Verbindungsversuch",
     () => {
       const res = runMigrate({});
       const out = `${res.stdout}${res.stderr}`;
 
       // Der Guard darf hier NICHT greifen …
       expect(out).not.toMatch(/NICHT-Wegwerf-Datenbank/);
-      // … und der Config-Load muss durchlaufen. Genau hier wäre der fehlende
-      // `scripts/lib`-COPY im Image sichtbar geworden.
+      // … und der Modul-Load muss durchlaufen. Genau hier wäre ein fehlender
+      // COPY im Image sichtbar geworden — jetzt für die ganze Kette, die der
+      // Release-Step braucht (Schema-Riegel, Datenstand-Prüfung, drizzle-kit).
       expect(out).not.toMatch(/Cannot find module/);
       expect(out).not.toMatch(/SyntaxError/);
-      // Beleg, dass drizzle-kit die Config wirklich gelesen hat und erst danach
-      // an der (nicht auflösbaren) DB scheitert.
-      expect(out).toMatch(/drizzle-kit@\d+\.\d+\.\d+ push/);
+      // Beleg, dass der Release-Step wirklich bis zur DB kommt und erst an der
+      // (nicht auflösbaren) Adresse scheitert. Schritt 0d verbindet über
+      // `server/lib/db`, nicht über die drizzle-kit-CLI — die Evidenz ist
+      // deshalb der Pool-Aufbau plus die gescheiterte Ziel-Abfrage.
+      expect(out).toMatch(
+        /driver=\w+ pool configured|SELECT current_database|ENOTFOUND|EAI_AGAIN|getaddrinfo/,
+      );
+      // Und dass er beim ERSTEN Schritt scheitert, nicht stillschweigend
+      // weiterläuft: der Riegel steht vor dem Push.
+      expect(out).toMatch(/Schritt 0d/);
+      expect(res.status).not.toBe(0);
+    },
+  );
+
+  // Schritt 1 wird seit dem Riegel (0d) im Black-Box-Lauf nicht mehr erreicht —
+  // 0d bricht vorher an der nicht auflösbaren DB ab. Die Aussage des früheren
+  // Tests („drizzle-kit liest die Config und scheitert erst danach an der DB")
+  // ist damit NICHT weg, sie wird hier direkt geübt. Ohne diesen Test wäre der
+  // Beleg ersatzlos entfallen, dass der Prod-Migrationspfad die Config lädt.
+  it.skipIf(!pinnedDrizzleKit)(
+    "Schritt 1 — drizzle-kit liest die Config und scheitert erst an der DB",
+    () => {
+      const version = JSON.parse(
+        readFileSync(path.resolve(process.cwd(), "package-lock.json"), "utf8"),
+      ).packages["node_modules/drizzle-kit"].version;
+
+      const res = spawnSync("npx", ["--yes", `drizzle-kit@${version}`, "push", "--force"], {
+        encoding: "utf8",
+        timeout: 120_000,
+        env: {
+          ...process.env,
+          CI: "",
+          TEST_DATABASE_URLS: "",
+          PGCONNECT_TIMEOUT: "3",
+          DATABASE_URL: FAKE_DB,
+          // Denselben Marker setzt `migrate.sh` — das ist der legitime
+          // Prod-Migrationspfad, deshalb greift der Wegwerf-DB-Guard hier nicht.
+          ALLOW_NON_EPHEMERAL_DB_WRITE: "1",
+        },
+      });
+      const out = `${res.stdout}${res.stderr}`;
+
+      expect(out).not.toMatch(/NICHT-Wegwerf-Datenbank/);
+      expect(out).not.toMatch(/Cannot find module/);
+      expect(out).not.toMatch(/SyntaxError/);
       expect(out).toMatch(
         /driver for database querying|Pulling schema|ENOTFOUND|EAI_AGAIN|getaddrinfo/,
       );
     },
   );
+
+  it("migrate.sh ruft Schritt 1 mit der aus dem Lockfile gepinnten Version", () => {
+    // Die Verbindung zwischen dem oben direkt geübten Schritt 1 und dem Skript.
+    const skript = readFileSync(MIGRATE, "utf8");
+    expect(skript).toMatch(/npx --yes "drizzle-kit@\$\{VERSION\}" push "\$@"/);
+    expect(skript).toMatch(/package-lock\.json/);
+  });
+
+  it("die Nachbedingung steht NACH dem Push — sonst misst sie nichts", () => {
+    // `drizzle-kit push` meldet DDL-Fehlschläge mit exit 0 (gemessen, 0.31.10).
+    // Der Erfolg wird deshalb an der Wirkung gemessen. Stünde 1b vor dem Push,
+    // wäre die Messung wertlos — dieser Wächter hält die Reihenfolge fest.
+    const skript = readFileSync(MIGRATE, "utf8");
+    const push = skript.indexOf('npx --yes "drizzle-kit@${VERSION}" push');
+    const nachbedingung = skript.indexOf("release-schema-gate.ts --nachbedingung");
+    const dropGate = skript.indexOf("release-schema-gate.ts --drop-gate");
+    expect(dropGate).toBeGreaterThan(-1);
+    expect(push).toBeGreaterThan(dropGate);
+    expect(nachbedingung).toBeGreaterThan(push);
+  });
 });
 
 describe("Dockerfile — Runner-Stage trägt den Pre-Deploy-Pfad", () => {

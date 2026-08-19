@@ -30,7 +30,7 @@
     "test:verify-concurrent-cache": "tsx scripts/verify-concurrent-cache-build.ts",
     "test:verify-concurrent-clone": "tsx scripts/verify-concurrent-template-clone.ts",
     "budget:correct-km-drift": "tsx server/scripts/reconcile-km-drift.ts",
-    "lint": "eslint client/src server shared tests --max-warnings 0",
+    "lint": "eslint client/src server shared tests scripts script --max-warnings 0",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test --grep @smoke",
     "chromium:smoke": "tsx scripts/smoke-chromium.ts",

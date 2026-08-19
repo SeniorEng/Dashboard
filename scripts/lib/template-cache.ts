@@ -24,7 +24,7 @@
 // Orchestrator `scripts/with-ephemeral-db.ts`.
 // ---------------------------------------------------------------------------
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, type Dirent } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import { DB_PREFIX } from "./ephemeral-db-sweep.ts";
@@ -51,7 +51,9 @@ export const HASH_SOURCE_FILES = [
 ] as const;
 
 function collectDirFiles(absDir: string): string[] {
-  let entries: ReturnType<typeof readdirSync>;
+  // NICHT `ReturnType<typeof readdirSync>`: das trifft die Buffer-Ueberladung,
+  // `withFileTypes: true` liefert aber `Dirent` mit string-`name`.
+  let entries: Dirent[];
   try {
     entries = readdirSync(absDir, { withFileTypes: true });
   } catch {

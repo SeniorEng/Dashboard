@@ -1,10 +1,27 @@
 {
-  "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "include": ["client/src/**/*", "shared/**/*", "server/**/*", "scripts/**/*", "script/**/*"],
+  // Die beiden `audit-*`-Skripte sind liegengebliebene Einmal-Werkzeuge und
+  // typ-verrottet (nicht existierende Spalte `budgetStartDate`, Audit-Aktion
+  // `budget_allocation_storno` ausserhalb des Enums). Nach CLAUDE.md gehoeren
+  // sie geloescht und durch ein Protokoll unter `docs/corrections/` ersetzt —
+  // das ist eine Entscheidung, keine Reparatur nebenbei. Bis dahin ausgeschlossen,
+  // damit `tsc` als Gate wieder gruen ist statt dauerhaft rot.
+  "exclude": [
+    "node_modules",
+    "build",
+    "dist",
+    "**/*.test.ts",
+    "scripts/audit-45b-deleted-ib-gaps.ts",
+    "scripts/audit-duplicate-wizard-carryovers.ts"
+  ],
   "compilerOptions": {
     "incremental": true,
     "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
     "noEmit": true,
+    // Ohne `target` nimmt tsc ES5 an — falsch fuer ein Projekt, das per esbuild/vite
+    // fuer modernes Node baut. Sichtbar wurde es erst, als `scripts/**` in den
+    // Scope kam: benannte Regex-Gruppen und BigInt-Literale galten als Syntaxfehler.
+    "target": "ES2022",
     "module": "ESNext",
     "strict": true,
     "downlevelIteration": true,
