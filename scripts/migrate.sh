@@ -18,7 +18,8 @@
 #       Werkzeug? (Host + current_database() über BEIDE Verbindungswege,
 #       drizzle-kit-Version über api UND cli.)
 #   0d. Schema-Riegel — Trockenlauf VOR dem Push: stünde ein DROP COLUMN/TABLE
-#       an, das nicht per PUBLISH_ACK_DROPS einzeln freigegeben ist?
+#       an — oder ein NOT NULL/UNIQUE/CHECK/eine verengende Typaenderung —,
+#       ohne gueltige Freigabe in docs/schema-change-manifest.json?
 #   0e. Datenstand VOR dem Push. Die Prüfung braucht das neue Schema nicht (sie
 #       liest nur `invoices.status`), und vorgezogen ist der Teil-Fehlschlag-Rest
 #       für diese Fehlerklasse NULL statt „Schema schon angewendet, kein Rollback".
@@ -107,8 +108,11 @@ export ALLOW_NON_EPHEMERAL_DB_WRITE=1
 # `script/preflight-publish.mjs` ist ein Operator-Schritt, den im automatischen
 # Deploy niemand aufruft. Dieser Schritt macht daraus ein Gate.
 #
-# Läuft VOR dem Push und im Trockenlauf. Freigabe einzeln über
-# `PUBLISH_ACK_DROPS` — dieselbe Variable wie im Operator-Preflight.
+# Laeuft VOR dem Push und im Trockenlauf. Freigabe einzeln ueber
+# `docs/schema-change-manifest.json`, gebunden an den aktuellen schemaHash —
+# sie entwertet sich selbst, sobald die Aenderung angewendet ist. Bewusst
+# KEIN Dauer-Env: eine Plattform-Variable bliebe gesetzt und genehmigte still
+# jeden weiteren Deploy.
 # Schritt 0a — Identitaets-Kette eroeffnen (S7/S8).
 #
 # Der Release-Step hat ZWEI Verbindungswege, und das ist Konstruktion:
@@ -136,8 +140,25 @@ npx tsx scripts/release-schema-gate.ts --drop-gate
 echo "[migrate] Schritt 0e — Datenstand VOR dem Push pruefen"
 npx tsx scripts/release-verify.ts --vor-dem-push
 
-echo "[migrate] Schritt 1 — Schema: drizzle-kit@${VERSION} push (Version gepinnt aus package-lock.json)"
-npx --yes "drizzle-kit@${VERSION}" push "$@"
+# Bevorzugt die INSTALLIERTE Kopie, wenn sie exakt der Lockfile-Version
+# entspricht. Grund ist der aeltere Defekt aus PR #21 (FINDING P1): im
+# Prod-Image holt `npx --yes drizzle-kit@<version>` eine Kopie in den
+# npx-Cache, und von dort ist `drizzle-orm` nicht aufloesbar — der Pre-Deploy
+# scheiterte mit "please install required packages: 'drizzle-orm'". Seit
+# drizzle-kit eine Laufzeit-Dependency ist (nicht mehr weggeprunt), liegt die
+# richtige Version im Baum und wird direkt benutzt.
+#
+# Der `npx --yes`-Weg bleibt als Fallback fuer Umgebungen ohne installierte
+# Kopie. Welche der beiden gilt, meldet Schritt 0a mit — dieselbe Aufloesung
+# steckt in `scripts/lib/release-identity-core.ts`.
+LOKAL="$(node -e "try{process.stdout.write(require('./node_modules/drizzle-kit/package.json').version)}catch{}" 2>/dev/null || true)"
+if [ "$LOKAL" = "$VERSION" ]; then
+  echo "[migrate] Schritt 1 — Schema: drizzle-kit@${VERSION} push (lokal installiert, Version aus package-lock.json)"
+  npx --no-install drizzle-kit push "$@"
+else
+  echo "[migrate] Schritt 1 — Schema: drizzle-kit@${VERSION} push (via npx, lokal ist \"${LOKAL:-nichts}\")"
+  npx --yes "drizzle-kit@${VERSION}" push "$@"
+fi
 
 echo "[migrate] Schritt 1a — Identitaet nach dem Push gegen die Kette pruefen"
 npx tsx scripts/release-identity.ts --pruefen "$IDENTITAET"

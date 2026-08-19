@@ -57,19 +57,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
-# Für den Migrations-Pre-Deploy (`bash scripts/migrate.sh`):
-#   - package-lock.json: migrate.sh liest die gepinnte drizzle-kit-Version daraus
-#   - drizzle.config.ts + shared/ + migrations/: Schema-Quelle für drizzle-kit
-#   - scripts/lib/: drizzle.config.ts importiert von dort den Wegwerf-DB-Guard.
-#     Die Config wird NICHT gebündelt, sondern von drizzle-kit zur Laufzeit
-#     gelesen — fehlt der Ordner, bricht schon der Config-Load ("Cannot find
-#     module") und der Pre-Deploy scheitert. Beide Dateien importieren nur
-#     Node-Builtins, kosten also nichts an Laufzeit-Deps.
-COPY package.json package-lock.json drizzle.config.ts ./
+# Für den Release-Step (`bash scripts/migrate.sh`, Coolify-Pre-Deployment).
+# Er läuft NICHT aus dem Bundle, sondern als Quelltext über `tsx` — deshalb
+# muss sein vollständiger Import-Abschluss hier liegen. Fehlt eine Datei,
+# scheitert er mit "Cannot find module", und zwar erst im Deploy.
+#   - package-lock.json : gepinnte drizzle-kit-Version
+#   - tsconfig.json     : Pfad-Alias `@shared/*`, den tsx zur Laufzeit auflöst
+#   - drizzle.config.ts + shared/ + migrations/ : Schema-Quelle für drizzle-kit
+#   - scripts/          : migrate.sh + release-identity/-schema-gate/-verify + lib/
+#   - script/           : schema-replica-diff.mjs (Ack-SSoT des Schema-Riegels)
+# Bewacht von tests/architecture/migrate-script-guard.test.ts, damit ein neuer
+# Import nicht still am Image vorbeiläuft.
+COPY package.json package-lock.json drizzle.config.ts tsconfig.json ./
 COPY shared ./shared
 COPY migrations ./migrations
-COPY scripts/migrate.sh ./scripts/migrate.sh
-COPY scripts/lib ./scripts/lib
+COPY scripts ./scripts
+COPY script ./script
+# Der Import-Abschluss der Release-Skripte auf der Server-Seite ist genau
+# diese zwei Dateien (gemessen, nicht geschaetzt): `release-verify.ts` und
+# `release-schema-gate.ts` holen sich `db` und `dbHostOf`/`currentDatabaseName`
+# von hier. Bewusst NICHT `COPY server ./server` — der Runner soll nicht den
+# ganzen Serverquelltext mitschleppen, `dist/index.cjs` ist die Laufzeit.
+COPY server/lib/db.ts ./server/lib/db.ts
+COPY server/scripts/lib/prod-write-gate.ts ./server/scripts/lib/prod-write-gate.ts
+# Das Freigabe-Manifest wird zur LAUFZEIT gelesen (new URL(...)), nicht
+# importiert — der Import-Abschluss-Waechter sieht es deshalb nicht. Fehlt es
+# im Image, bricht Schritt 0d bei der ersten freigabepflichtigen Aenderung ab.
+COPY docs/schema-change-manifest.json ./docs/schema-change-manifest.json
 
 # non-root Laufzeit; /data als Mountpoint für den lokalen Storage-Treiber.
 RUN groupadd --system app \

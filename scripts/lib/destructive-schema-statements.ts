@@ -84,3 +84,79 @@ export function findeDestruktiveAnweisungen(anweisungen: readonly string[]): Dro
   }
   return drops;
 }
+
+/**
+ * ── Freigabepflichtige Änderungen (S6) ──────────────────────────────────
+ *
+ * `findeDestruktiveAnweisungen` fängt nur `DROP COLUMN`/`DROP TABLE`. Es gibt
+ * aber weitere Formen, die den ALTEN Code brechen, der im Deploy-Fenster noch
+ * bedient — ein neues `NOT NULL` auf einer Spalte, die er leer lässt, ein
+ * `UNIQUE`/`CHECK`, das Altzeilen ablehnt, eine verengende Typänderung.
+ * Datenverlust ist nicht die einzige Art, eine Abrechnung anzuhalten.
+ *
+ * Diese Formen brauchen deshalb dieselbe ausdrückliche Freigabe wie ein Drop.
+ * Additives (`CREATE TABLE`, `ADD COLUMN` ohne NOT NULL, Indizes) nicht — sonst
+ * wäre jede normale Migration freigabepflichtig und die Freigabe würde zur
+ * Formalie.
+ */
+export type Aenderungsart = "drop" | "not-null" | "unique" | "check" | "typ";
+
+export interface Freigabepflichtig {
+  art: Aenderungsart;
+  /** Stabiler Schlüssel für die Manifest-Freigabe. */
+  key: string;
+  sql: string;
+}
+
+const SPALTEN_ZIEL =
+  /\bALTER\s+TABLE\s+(?<tabelle>(?:"[^"]+"|[\w$]+)(?:\s*\.\s*(?:"[^"]+"|[\w$]+))?)[\s\S]*?\bALTER\s+COLUMN\s+(?<spalte>"[^"]+"|[\w$]+)/i;
+const CONSTRAINT_ZIEL =
+  /\bALTER\s+TABLE\s+(?<tabelle>(?:"[^"]+"|[\w$]+)(?:\s*\.\s*(?:"[^"]+"|[\w$]+))?)[\s\S]*?\bADD\s+CONSTRAINT\s+(?<name>"[^"]+"|[\w$]+)/i;
+
+function zielSpalte(sql: string): string {
+  const m = SPALTEN_ZIEL.exec(sql);
+  if (!m?.groups) return "(unbekannt)";
+  return `${bezeichner(m.groups.tabelle)}.${bezeichner(m.groups.spalte)}`;
+}
+
+function zielConstraint(sql: string): string {
+  const m = CONSTRAINT_ZIEL.exec(sql);
+  if (!m?.groups) return "(unbekannt)";
+  return `${bezeichner(m.groups.tabelle)}.${bezeichner(m.groups.name)}`;
+}
+
+export function findeFreigabepflichtige(
+  anweisungen: readonly string[],
+): Freigabepflichtig[] {
+  const pflichtige: Freigabepflichtig[] = [];
+  for (const sql of anweisungen) {
+    // Drops zuerst — sie haben bereits eine etablierte Schlüsselform.
+    const drops = findeDestruktiveAnweisungen([sql]);
+    if (drops.length > 0) {
+      for (const drop of drops) {
+        pflichtige.push({
+          art: "drop",
+          key: drop.column ? `column:${drop.table}.${drop.column}` : `table:${drop.table}`,
+          sql,
+        });
+      }
+      continue;
+    }
+    if (/\bALTER\s+COLUMN\b[\s\S]*\bSET\s+NOT\s+NULL\b/i.test(sql)) {
+      pflichtige.push({ art: "not-null", key: `not-null:${zielSpalte(sql)}`, sql });
+      continue;
+    }
+    if (/\bADD\s+CONSTRAINT\b[\s\S]*\bUNIQUE\b/i.test(sql)) {
+      pflichtige.push({ art: "unique", key: `unique:${zielConstraint(sql)}`, sql });
+      continue;
+    }
+    if (/\bADD\s+CONSTRAINT\b[\s\S]*\bCHECK\b/i.test(sql)) {
+      pflichtige.push({ art: "check", key: `check:${zielConstraint(sql)}`, sql });
+      continue;
+    }
+    if (/\bALTER\s+COLUMN\b[\s\S]*\b(?:SET\s+DATA\s+)?TYPE\b/i.test(sql)) {
+      pflichtige.push({ art: "typ", key: `typ:${zielSpalte(sql)}`, sql });
+    }
+  }
+  return pflichtige;
+}

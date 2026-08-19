@@ -49,8 +49,14 @@ Code (`scripts/release-verify.ts`, 6hHqw8c7).
   blockierende `script/preflight-publish.mjs` ist ein Operator-Schritt, den kein
   Deploy aufruft. `scripts/release-schema-gate.ts` fährt jetzt VOR dem Push
   einen Trockenlauf (`pushSchema` aus `drizzle-kit/api`) und bricht bei einem
-  nicht freigegebenen `DROP COLUMN`/`DROP TABLE` ab. Freigabe einzeln über
-  `PUBLISH_ACK_DROPS` — dieselbe Variable wie im Operator-Preflight.
+  nicht freigegebenen `DROP COLUMN`/`DROP TABLE` ab — ebenso bei `SET NOT NULL`,
+  `UNIQUE`, `CHECK` und verengenden Typänderungen, die den im Deploy-Fenster noch
+  bedienenden alten Code genauso brechen.
+- **Freigabe über `docs/schema-change-manifest.json`, an den `schemaHash` gebunden.**
+  ERSETZT `PUBLISH_ACK_DROPS` auf dem Deploy-Pfad: eine Plattform-Env bliebe
+  gesetzt und genehmigte still jeden weiteren Deploy. Der Manifest-Eintrag trägt
+  den Schema-Stand, für den er gilt, und entwertet sich selbst, sobald die
+  Änderung angewendet ist (Muster: `docs/pre-publish-backup-runbook.md` §8.6).
   - **Nicht auf `hasDataLoss` verlassen**: gemessen an drizzle-kit 0.31.10 bleibt
     das Flag bei einem anstehenden `DROP COLUMN` **false**. Gelesen werden die
     Anweisungen selbst.
@@ -62,8 +68,9 @@ Code (`scripts/release-verify.ts`, 6hHqw8c7).
   angewendet und wird NICHT zurückgerollt. Der Deploy bricht ab, der alte Code
   bedient weiter — auf dem neuen Schema. Das trägt, weil Schritt 0d genau die
   Anweisungen abfängt, die den alten Code brechen würden, und der Rest additiv
-  ist. Ein per `PUBLISH_ACK_DROPS` bewusst freigegebener Drop hebt diese Zusage
-  auf — dann gilt wieder Backup nach `docs/pre-publish-backup-runbook.md`.
+  ist. Eine per Manifest bewusst freigegebene Änderung hebt diese Zusage auf —
+  deshalb verlangt der Eintrag eine `backupId` nach
+  `docs/pre-publish-backup-runbook.md`.
 - **Versions-Pinning (drift-sicher)**: `migrate.sh` liest die drizzle-kit-Version
   EXAKT aus `package-lock.json` — nie `@latest`. Migrationstool-Drift auf echten
   Abrechnungs-/Patientendaten ist ein reales Risiko.

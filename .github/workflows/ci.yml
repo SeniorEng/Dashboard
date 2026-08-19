@@ -1075,18 +1075,39 @@ jobs:
       - name: Build image
         run: docker build -t careconnect:ci .
 
-      # HIER FEHLT ein Schritt, der den Coolify-Pre-Deploy IM IMAGE fährt
-      # (`docker run --entrypoint bash careconnect:ci scripts/migrate.sh --force`).
-      # Er ist absichtlich noch nicht drin: er wäre heute ROT, weil der
-      # Pre-Deploy im Image gar nicht laufen kann — `migrate.sh` ruft
-      # `npx --yes drizzle-kit@<version>`, und da drizzle-kit devDependency ist
-      # und `npm prune --omit=dev` es entfernt, lädt npx in den eigenen Cache
-      # und findet von dort aus `drizzle-orm` nicht ("Error please install
-      # required packages: 'drizzle-orm'"). Reproduziert im echten Image und im
-      # Repo-Baum mit verstecktem drizzle-kit. Der Defekt ist ÄLTER als der
-      # Guard (Task #1840) und wird getrennt entschieden — siehe PR #21,
-      # FINDING [P1]. Sobald er behoben ist, gehört dieser Schritt hierher:
-      # er ist die einzige Stelle, die den Prod-Migrationspfad wirklich ausübt.
+      # Der Coolify-Pre-Deployment-Command IM IMAGE — die einzige Stelle, die
+      # den Prod-Migrationspfad wirklich ausübt. Vorher stand hier nur ein
+      # Kommentar, warum der Schritt fehlt: `migrate.sh` rief
+      # `npx --yes drizzle-kit@<version>`, drizzle-kit war devDependency und
+      # wurde von `npm prune --omit=dev` entfernt, npx lud in den eigenen Cache
+      # und fand von dort `drizzle-orm` nicht ("please install required
+      # packages: 'drizzle-orm'"). Behoben: drizzle-kit und tsx sind jetzt
+      # Laufzeit-Dependencies, das Image trägt den vollen Import-Abschluss des
+      # Release-Steps, und Schritt 1 nimmt die lokal installierte Kopie.
+      #
+      # Das ist der Beleg für "ein Skript, zwei Hooks": derselbe Aufruf, den
+      # Coolify als Pre-Deployment-Command fährt. Läuft die ganze Kette 0a–2
+      # durch, ist die Zusage eingelöst — nicht schon dann, wenn die Dateien
+      # im Image liegen.
+      - name: Release-Step im Image fahren (Coolify-Pre-Deploy)
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e DB_DRIVER=pg \
+            -e CI=true \
+            --entrypoint bash \
+            careconnect:ci scripts/migrate.sh --force 2>&1 | tee migrate-im-image.log
+          # Nicht nur der Exit-Code: alle sieben Schritte müssen belegt sein.
+          for schritt in "Schritt 0a" "Schritt 0d" "Schritt 0e" "Schritt 1 " \
+                         "Schritt 1a" "Schritt 1b" "Schritt 2 " \
+                         "Release-Step abgeschlossen"; do
+            grep -q "$schritt" migrate-im-image.log \
+              || { echo "FEHLT im Image-Lauf: $schritt"; exit 1; }
+          done
+          # Und die DATABASE_URL darf nirgends im Deploy-Log auftauchen.
+          if grep -q "postgres://" migrate-im-image.log; then
+            echo "LEAK: Connection-String im Log des Release-Steps"; exit 1
+          fi
       - name: Boot container and gate on /health == 200
         run: |
           docker run -d --name cc-app --network host \

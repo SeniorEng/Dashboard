@@ -1,6 +1,6 @@
 /**
  * Release-Step, Schritt 0d: **technischer Riegel gegen einen destruktiven
- * Schema-Push.**
+ * Schema-Push (Schritt 0d).**
  *
  * `scripts/migrate.sh` läuft im Hook mit `--force`, und `--force` genehmigt
  * Datenverlust-Anweisungen automatisch. Dieser Schritt läuft VOR dem Push, im
@@ -21,37 +21,74 @@
  * Die CLI kann das nicht — `push` hat kein `--dry-run`, und `--strict` würde im
  * Hook auf eine Rückfrage warten.
  *
- * ── Freigabe ────────────────────────────────────────────────────────────
- * Über `PUBLISH_ACK_DROPS` — dieselbe Variable und dasselbe Schlüsselformat
- * (`column:<tabelle>.<spalte>`, `table:<tabelle>`) wie der Operator-Preflight.
- * Bewusst kein zweiter Begriff für dieselbe Frage. Ein Sammel-OK gibt es nicht:
- * jeder Drop muss einzeln dastehen.
+ * ── Freigabe: `docs/schema-change-manifest.json`, an den schemaHash gebunden ──
+ * ERSETZT `PUBLISH_ACK_DROPS` auf diesem Pfad. Eine Env-Variable müsste auf der
+ * Plattform gesetzt werden und bliebe dann gesetzt — derselbe Schlüssel
+ * genehmigte still jeden künftigen Deploy. Eine Freigabe, die nicht abläuft,
+ * ist keine. Der Manifest-Eintrag trägt den Schema-Stand, für den er gilt, und
+ * entwertet sich selbst, sobald die Änderung angewendet ist (Muster aus
+ * docs/pre-publish-backup-runbook.md §8.6).
+ *
+ * Freigabepflichtig ist nicht nur `DROP COLUMN`/`DROP TABLE`, sondern auch
+ * `SET NOT NULL`, `UNIQUE`, `CHECK` und verengende Typänderungen: sie brechen
+ * den alten Code, der im Deploy-Fenster noch bedient, genauso.
  *
  * ── Die DATABASE_URL wird NIE ausgegeben ────────────────────────────────
  * Gemeldet werden Host und `current_database()` aus der offenen Verbindung.
  */
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { pushSchema } from "drizzle-kit/api";
 import * as schema from "@shared/schema";
 import { db } from "../server/lib/db";
 import { dbHostOf, currentDatabaseName } from "../server/scripts/lib/prod-write-gate";
-import { findeDestruktiveAnweisungen } from "./lib/destructive-schema-statements";
+import { findeFreigabepflichtige } from "./lib/destructive-schema-statements";
+import {
+  berechneSchemaHash,
+  freigabeMeldung,
+  pruefeFreigaben,
+  type Manifest,
+} from "./lib/schema-change-manifest";
 import {
   bewerteNachbedingung,
   klassifiziereAnweisung,
 } from "./lib/push-statement-classifier";
 import BENIGNER_CHURN from "./lib/benign-push-churn.json" with { type: "json" };
-// Die Ack-/Beschreibungs-Helfer sind bereits die SSoT des Operator-Preflights.
-import {
-  describeDrop,
-  dropKey,
-  parseAckList,
-  partitionAcknowledgedDrops,
-} from "../script/schema-replica-diff.mjs";
+import { sql } from "drizzle-orm";
 
 function abbruch(nachricht: string): never {
   console.error(`\n${nachricht}\n`);
   process.exit(1);
+}
+
+/**
+ * Schema-Schnappschuss in der Form von `script/schema-replica-diff.mjs`
+ * (Tabelle → Spalten), aber über `server/lib/db` gelesen.
+ *
+ * Bewusst NICHT über dessen `fetchSchemaSnapshot`: das oeffnet eine eigene
+ * `pg`-Verbindung und leitet SSL aus dem Connection-String ab — gegen einen
+ * Postgres ohne TLS (Coolify-intern, lokale Wegwerf-DBs) scheitert es mit
+ * "The server does not support SSL connections". Gemessen, nicht vermutet.
+ * Ausserdem waere es eine DRITTE Verbindung neben den zwei, deren Identitaet
+ * Schritt 0a gerade beweist. Die Form bleibt dieselbe, damit Freigabe und
+ * Operator-Preflight denselben Begriff benutzen.
+ */
+async function schemaSchnappschuss(): Promise<Record<string, string[]>> {
+  const ergebnis = (await db.execute(sql`
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+  `)) as unknown;
+  const rows = (Array.isArray(ergebnis)
+    ? ergebnis
+    : ((ergebnis as { rows?: unknown[] }).rows ?? [])) as {
+    table_name: string;
+    column_name: string;
+  }[];
+  const schnappschuss: Record<string, string[]> = {};
+  for (const zeile of rows) {
+    (schnappschuss[zeile.table_name] ??= []).push(zeile.column_name);
+  }
+  return schnappschuss;
 }
 
 async function anstehendeAnweisungen(): Promise<string[]> {
@@ -106,40 +143,40 @@ async function nachbedingung(): Promise<void> {
 
 async function drop_gate(): Promise<void> {
   const statements = await anstehendeAnweisungen();
-  const drops = findeDestruktiveAnweisungen(statements);
-  if (drops.length === 0) {
+  const pflichtige = findeFreigabepflichtige(statements);
+  if (pflichtige.length === 0) {
     console.log(
       `[schema-gate] ${statements.length} Anweisung(en) anstehend, ` +
-        `keine davon droppt Spalten oder Tabellen.`,
+        `keine davon ist freigabepflichtig.`,
     );
     return;
   }
 
-  const { acknowledged, unacknowledged } = partitionAcknowledgedDrops(
-    drops,
-    parseAckList(process.env.PUBLISH_ACK_DROPS),
+  // Der Hash laeuft ueber den LIVE-Stand der Zieldatenbank. Sobald eine
+  // freigegebene Aenderung angewendet ist, passt der Eintrag nicht mehr —
+  // die Freigabe entwertet sich von selbst, ohne dass jemand aufraeumt.
+  const schemaHash = berechneSchemaHash(await schemaSchnappschuss());
+  const manifest = JSON.parse(
+    await readFile(new URL("../docs/schema-change-manifest.json", import.meta.url), "utf8"),
+  ) as Manifest;
+
+  const urteil = pruefeFreigaben(
+    pflichtige.map((p) => p.key),
+    manifest,
+    schemaHash,
   );
 
-  for (const drop of acknowledged) {
-    console.log(`[schema-gate] freigegeben: ${describeDrop(drop)}`);
-  }
-  if (unacknowledged.length === 0) {
+  for (const f of urteil.angenommen) {
     console.log(
-      `[schema-gate] Alle ${acknowledged.length} destruktiven Änderungen sind einzeln freigegeben.`,
+      `[schema-gate] freigegeben: ${f.aenderung} (Backup ${f.backupId}, ${f.begruendung})`,
     );
-    return;
   }
-
-  abbruch(
-    `RELEASE ABGEBROCHEN — der Schema-Push würde ${unacknowledged.length} nicht\n` +
-      `freigegebene, datenvernichtende Änderung(en) anwenden.\n\n` +
-      unacknowledged.map((d) => `  ${describeDrop(d)}   →   ${dropKey(d)}`).join("\n") +
-      `\n\n\`migrate.sh\` läuft im Release-Hook mit --force; --force genehmigt genau\n` +
-      `solche Anweisungen automatisch. Deshalb dieser Riegel davor.\n\n` +
-      `Wenn der Drop gewollt ist: Backup nach docs/pre-publish-backup-runbook.md\n` +
-      `ziehen und jeden Schlüssel einzeln freigeben —\n\n` +
-      `  PUBLISH_ACK_DROPS="${unacknowledged.map(dropKey).join(",")}"\n\n` +
-      `Ein Sammel-OK gibt es bewusst nicht: so kann kein Drop mitrutschen.`,
+  if (urteil.abgelehnt.length > 0) {
+    abbruch(freigabeMeldung(urteil, schemaHash));
+  }
+  console.log(
+    `[schema-gate] Alle ${urteil.angenommen.length} freigabepflichtigen Aenderungen ` +
+      `sind fuer Schema ${schemaHash} einzeln freigegeben.`,
   );
 }
 

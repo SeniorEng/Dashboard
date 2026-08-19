@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const MIGRATE = path.resolve(process.cwd(), "scripts/migrate.sh");
@@ -268,6 +268,66 @@ describe("Dockerfile — Runner-Stage trägt den Pre-Deploy-Pfad", () => {
   });
 
   it("kopiert migrate.sh selbst", () => {
-    expect(dockerfile).toMatch(/COPY scripts\/migrate\.sh/);
+    expect(dockerfile).toMatch(/COPY scripts(\/migrate\.sh)? /);
+  });
+
+  // Der eigentliche Wächter: nicht eine Liste von Dateinamen abhaken, sondern
+  // den TATSÄCHLICHEN Import-Abschluss der Release-Skripte auflösen und gegen
+  // die COPY-Zeilen halten. Ein neuer Import in einem der Skripte läuft sonst
+  // still am Image vorbei und scheitert erst im Coolify-Pre-Deploy mit
+  // "Cannot find module" — also im Deploy, nicht im Test.
+  it("deckt den vollstaendigen Import-Abschluss der Release-Skripte ab", () => {
+    const wurzel = process.cwd();
+    const einstiege = [
+      "scripts/release-identity.ts",
+      "scripts/release-schema-gate.ts",
+      "scripts/release-verify.ts",
+    ];
+
+    const gesehen = new Set<string>();
+    const offen = [...einstiege];
+    while (offen.length > 0) {
+      const rel = offen.pop()!;
+      if (gesehen.has(rel)) continue;
+      gesehen.add(rel);
+
+      let quelle: string;
+      try {
+        quelle = readFileSync(path.join(wurzel, rel), "utf8");
+      } catch {
+        continue; // .json/.mjs ohne lesbare Importe — als Datei trotzdem gezählt
+      }
+      for (const treffer of quelle.matchAll(/from\s+"(\.[^"]+)"/g)) {
+        const ziel = path.posix.normalize(
+          path.posix.join(path.posix.dirname(rel), treffer[1]),
+        );
+        // Endung ergänzen, wenn der Import sie weglässt.
+        const kandidaten = [ziel, `${ziel}.ts`, `${ziel}.mjs`, `${ziel}.json`];
+        const echt = kandidaten.find((k) => existsSync(path.join(wurzel, k)));
+        if (echt) offen.push(echt);
+      }
+    }
+
+    // Welche COPY-Quellen bringt die Runner-Stage mit?
+    const kopiert = [...dockerfile.matchAll(/^COPY\s+(?!--from)(.+)$/gm)]
+      .flatMap((m) => m[1].trim().split(/\s+/).slice(0, -1))
+      .map((q) => path.posix.normalize(q));
+
+    const fehlend = [...gesehen].filter(
+      (datei) => !kopiert.some((q) => datei === q || datei.startsWith(`${q}/`)),
+    );
+
+    expect(
+      fehlend,
+      `Diese Dateien braucht der Release-Step, liegen aber nicht im Image:\n  ${fehlend.join("\n  ")}`,
+    ).toEqual([]);
+    // Das Freigabe-Manifest wird zur LAUFZEIT gelesen, taucht also in keinem
+    // Import auf — es braucht eine eigene Zusicherung, sonst faellt es beim
+    // naechsten Dockerfile-Umbau lautlos raus.
+    expect(dockerfile).toMatch(/COPY docs\/schema-change-manifest\.json/);
+    // Sanity: der Abschluss muss die gemessenen server-Dateien enthalten,
+    // sonst hat die Aufloesung nichts gefunden und der Test ist eine Attrappe.
+    expect(gesehen).toContain("server/lib/db.ts");
+    expect(gesehen).toContain("server/scripts/lib/prod-write-gate.ts");
   });
 });
