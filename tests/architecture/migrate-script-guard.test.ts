@@ -111,9 +111,12 @@ describe("scripts/migrate.sh — Prod-Migrationspfad", () => {
       expect(out).toMatch(
         /driver=\w+ pool configured|SELECT current_database|ENOTFOUND|EAI_AGAIN|getaddrinfo/,
       );
-      // Und dass er beim ERSTEN Schritt scheitert, nicht stillschweigend
-      // weiterläuft: der Riegel steht vor dem Push.
-      expect(out).toMatch(/Schritt 0d/);
+      // Und dass er beim ERSTEN gatenden Schritt scheitert, nicht
+      // stillschweigend weiterläuft. Erster Schritt ist die Identitäts-Kette;
+      // ohne erreichbare DB kommt der Lauf nicht über sie hinaus — und darf es
+      // auch nicht, denn ohne bekanntes Ziel ist jede spätere Prüfung wertlos.
+      expect(out).toMatch(/Schritt 0a/);
+      expect(out).not.toMatch(/Schritt 1 — Schema/);
       expect(res.status).not.toBe(0);
     },
   );
@@ -160,6 +163,22 @@ describe("scripts/migrate.sh — Prod-Migrationspfad", () => {
     const skript = readFileSync(MIGRATE, "utf8");
     expect(skript).toMatch(/npx --yes "drizzle-kit@\$\{VERSION\}" push "\$@"/);
     expect(skript).toMatch(/package-lock\.json/);
+  });
+
+  it("die Identitaets-Kette umschliesst den Push (S7/S8)", () => {
+    // Ein Gate, das eine andere Verbindung prueft als der Push benutzt, ist
+    // wertlos — das ist die heliumdb-Klasse. Die Kette muss deshalb VOR dem
+    // Riegel eroeffnet und NACH dem Push geschlossen werden. Steht die Pruefung
+    // vor dem Push, kann sie einen Zielwechsel per Konstruktion nicht sehen.
+    const skript = readFileSync(MIGRATE, "utf8");
+    const eroeffnen = skript.indexOf("release-identity.ts --schreiben");
+    const dropGate = skript.indexOf("release-schema-gate.ts --drop-gate");
+    const push = skript.indexOf('npx --yes "drizzle-kit@${VERSION}" push');
+    const schliessen = skript.indexOf("release-identity.ts --pruefen");
+    expect(eroeffnen).toBeGreaterThan(-1);
+    expect(schliessen).toBeGreaterThan(-1);
+    expect(dropGate).toBeGreaterThan(eroeffnen);
+    expect(schliessen).toBeGreaterThan(push);
   });
 
   it("die Nachbedingung steht NACH dem Push — sonst misst sie nichts", () => {

@@ -14,12 +14,16 @@
 # war rund eine Stunde nicht bedienbar.
 #
 # ── Fünf Schritte, alle gatend ─────────────────────────────────────────────
+#   0a. Identitäts-Kette — sehen Riegel und Push dieselbe DB und dasselbe
+#       Werkzeug? (Host + current_database() über BEIDE Verbindungswege,
+#       drizzle-kit-Version über api UND cli.)
 #   0d. Schema-Riegel — Trockenlauf VOR dem Push: stünde ein DROP COLUMN/TABLE
 #       an, das nicht per PUBLISH_ACK_DROPS einzeln freigegeben ist?
 #   0e. Datenstand VOR dem Push. Die Prüfung braucht das neue Schema nicht (sie
 #       liest nur `invoices.status`), und vorgezogen ist der Teil-Fehlschlag-Rest
 #       für diese Fehlerklasse NULL statt „Schema schon angewendet, kein Rollback".
 #   1.  Schema-Push  (drizzle-kit, Version aus package-lock.json gepinnt)
+#   1a. Identitäts-Kette schliessen — hat sich das Ziel mittendrin geändert?
 #   1b. NACHBEDINGUNG des Pushs — siehe unten, der Rückgabewert taugt nicht.
 #   2.  Datenstand NACH dem Push (und nach etwaigen Datenmigrationen)
 #   3.  — weitere Datenmigrationen kommen zwischen 1b und 2, wenn es sie gibt
@@ -105,6 +109,24 @@ export ALLOW_NON_EPHEMERAL_DB_WRITE=1
 #
 # Läuft VOR dem Push und im Trockenlauf. Freigabe einzeln über
 # `PUBLISH_ACK_DROPS` — dieselbe Variable wie im Operator-Preflight.
+# Schritt 0a — Identitaets-Kette eroeffnen (S7/S8).
+#
+# Der Release-Step hat ZWEI Verbindungswege, und das ist Konstruktion:
+# 0d/1b/2 gehen ueber `server/lib/db` (wertet DB_DRIVER aus), Schritt 1 ueber
+# `drizzle.config.ts` (dbCredentials.url, direkt-TCP). Mit DB_DRIVER=neon und
+# gesetztem NEON_LOCAL_WS_PROXY ist der erste Weg eine Fixed-Target-Bruecke:
+# der Proxy ignoriert den DB-Namen aus der URL. Dann prueft der Riegel DB A,
+# waehrend der Push DB B veraendert — lautlos. Das ist die heliumdb-Klasse.
+#
+# 0a erhebt Host + current_database() ueber BEIDE Wege plus beide aufgeloesten
+# drizzle-kit-Versionen und bricht bei Abweichung ab. 1a erhebt nach dem Push
+# erneut und vergleicht.
+IDENTITAET="$(mktemp -t release-identity.XXXXXX.json)"
+trap 'rm -f "$IDENTITAET"' EXIT
+
+echo "[migrate] Schritt 0a — Identitaet erheben (welche DB, welches Werkzeug?)"
+npx tsx scripts/release-identity.ts --schreiben "$IDENTITAET"
+
 echo "[migrate] Schritt 0d — Trockenlauf: wuerde der Push Spalten/Tabellen droppen?"
 npx tsx scripts/release-schema-gate.ts --drop-gate
 
@@ -116,6 +138,9 @@ npx tsx scripts/release-verify.ts --vor-dem-push
 
 echo "[migrate] Schritt 1 — Schema: drizzle-kit@${VERSION} push (Version gepinnt aus package-lock.json)"
 npx --yes "drizzle-kit@${VERSION}" push "$@"
+
+echo "[migrate] Schritt 1a — Identitaet nach dem Push gegen die Kette pruefen"
+npx tsx scripts/release-identity.ts --pruefen "$IDENTITAET"
 
 echo "[migrate] Schritt 1b — Nachbedingung: hat der Push wirklich gewirkt?"
 npx tsx scripts/release-schema-gate.ts --nachbedingung
