@@ -41,12 +41,29 @@ Code (`scripts/release-verify.ts`, 6hHqw8c7).
   das Prod-Schreib-Gate vergleicht.
 - **Plattform-agnostisch**: braucht nur `DATABASE_URL` + node/npx, keine
   Replit-/Coolify-Variable; `DB_DRIVER=neon` und `=pg` funktionieren beide.
+- **Schritt 0d ist der technische Riegel gegen `--force`.** `--force` genehmigt
+  Datenverlust-Anweisungen automatisch, und auf dem automatischen Deploy-Pfad
+  gab es davor NICHTS außer dieser Datei: `script/check-pre-publish-backup.mjs`
+  liest Dateien in `migrations/` und ist bei `push` per Konstruktion blind
+  (der Build ruft ihn zudem nur in einem `try`/`catch` als Warnung auf), und der
+  blockierende `script/preflight-publish.mjs` ist ein Operator-Schritt, den kein
+  Deploy aufruft. `scripts/release-schema-gate.ts` fährt jetzt VOR dem Push
+  einen Trockenlauf (`pushSchema` aus `drizzle-kit/api`) und bricht bei einem
+  nicht freigegebenen `DROP COLUMN`/`DROP TABLE` ab. Freigabe einzeln über
+  `PUBLISH_ACK_DROPS` — dieselbe Variable wie im Operator-Preflight.
+  - **Nicht auf `hasDataLoss` verlassen**: gemessen an drizzle-kit 0.31.10 bleibt
+    das Flag bei einem anstehenden `DROP COLUMN` **false**. Gelesen werden die
+    Anweisungen selbst.
+  - **Nur `DROP COLUMN`/`DROP TABLE`, nicht `DROP`**: ein Push gegen ein
+    deckungsgleiches Schema erzeugt regelmäßig ~8 `DROP CONSTRAINT` (drizzle legt
+    Fremdschlüssel mit abgeschnittenen Namen neu an). Ein Riegel auf „DROP" würde
+    jeden Deploy blockieren.
 - **Teil-Fehlschlag**: Schritt 1 (Schema) ist zu diesem Zeitpunkt bereits
   angewendet und wird NICHT zurückgerollt. Der Deploy bricht ab, der alte Code
-  bedient weiter — auf dem neuen Schema. Das trägt nur, weil `push` ohne
-  reviewten destruktiven Diff additiv ist; ein `--force` mit Spalten-Drop macht
-  aus dem Abbruch einen Ausfall. Deshalb bleibt der Schema-Diff-Review vor
-  `--force` Pflicht.
+  bedient weiter — auf dem neuen Schema. Das trägt, weil Schritt 0d genau die
+  Anweisungen abfängt, die den alten Code brechen würden, und der Rest additiv
+  ist. Ein per `PUBLISH_ACK_DROPS` bewusst freigegebener Drop hebt diese Zusage
+  auf — dann gilt wieder Backup nach `docs/pre-publish-backup-runbook.md`.
 - **Versions-Pinning (drift-sicher)**: `migrate.sh` liest die drizzle-kit-Version
   EXAKT aus `package-lock.json` — nie `@latest`. Migrationstool-Drift auf echten
   Abrechnungs-/Patientendaten ist ein reales Risiko.

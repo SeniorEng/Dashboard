@@ -14,9 +14,12 @@
 # war rund eine Stunde nicht bedienbar.
 #
 # ── Drei Schritte, alle gatend ─────────────────────────────────────────────
-#   1. Schema-Push  (drizzle-kit, Version aus package-lock.json gepinnt)
-#   2. Datenstand-Prüfung  (scripts/release-verify.ts)
-#   3. — weitere Datenmigrationen kommen hier dazwischen, wenn es sie gibt
+#   0d. Schema-Riegel  (scripts/release-schema-gate.ts) — Trockenlauf VOR dem
+#       Push: stünde ein DROP COLUMN/TABLE an, das nicht per PUBLISH_ACK_DROPS
+#       einzeln freigegeben ist? Dann Abbruch, bevor die DB angefasst wird.
+#   1.  Schema-Push  (drizzle-kit, Version aus package-lock.json gepinnt)
+#   2.  Datenstand-Prüfung  (scripts/release-verify.ts)
+#   3.  — weitere Datenmigrationen kommen hier dazwischen, wenn es sie gibt
 #
 # `set -euo pipefail`: jeder Fehlschlag beendet das Skript mit exit≠0. Auf
 # beiden Plattformen bricht das den Deploy ab; die laufende Version bleibt
@@ -76,14 +79,28 @@ fi
 # einer Shell, die eine fremde DATABASE_URL geerbt hat.
 export ALLOW_NON_EPHEMERAL_DB_WRITE=1
 
-echo "[migrate] Schritt 1/2 — Schema: drizzle-kit@${VERSION} push (Version gepinnt aus package-lock.json)"
+# Schritt 0d — der technische Riegel vor `--force`.
+#
+# `--force` genehmigt Datenverlust-Anweisungen automatisch. Bis hierhin war der
+# einzige Schutz dagegen die Review-Regel in CLAUDE.md: der Build-Check
+# `script/check-pre-publish-backup.mjs` liest DATEIEN in `migrations/` und ist
+# bei `push` per Konstruktion blind, und der blockierende
+# `script/preflight-publish.mjs` ist ein Operator-Schritt, den im automatischen
+# Deploy niemand aufruft. Dieser Schritt macht daraus ein Gate.
+#
+# Läuft VOR dem Push und im Trockenlauf. Freigabe einzeln über
+# `PUBLISH_ACK_DROPS` — dieselbe Variable wie im Operator-Preflight.
+echo "[migrate] Schritt 0d/3 — Trockenlauf: wuerde der Push Spalten/Tabellen droppen?"
+npx tsx scripts/release-schema-gate.ts
+
+echo "[migrate] Schritt 1/3 — Schema: drizzle-kit@${VERSION} push (Version gepinnt aus package-lock.json)"
 npx --yes "drizzle-kit@${VERSION}" push "$@"
 
 # Kein `exec` mehr. Die frühere Fassung endete mit `exec npx drizzle-kit push` —
 # `exec` ersetzt die Shell, danach konnte nichts mehr laufen. Genau deshalb gab
 # es keinen Ort für eine Datenstand-Prüfung, und die Reihenfolge blieb eine
 # Anweisung in Dokumenten.
-echo "[migrate] Schritt 2/2 — Datenstand gegen den auszuliefernden Code pruefen"
+echo "[migrate] Schritt 2/3 — Datenstand gegen den auszuliefernden Code pruefen"
 npx tsx scripts/release-verify.ts
 
 echo "[migrate] Release-Step abgeschlossen. Serving darf starten."
