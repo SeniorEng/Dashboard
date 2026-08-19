@@ -8,7 +8,13 @@ packages = ["chromium"]
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["npm", "run", "build"]
+# Release-Step. Reihenfolge ist Absicht: erst bauen, dann migrieren — ein
+# fehlgeschlagener Build fasst die Datenbank dann gar nicht erst an.
+# `scripts/migrate.sh` macht Schema-Push UND Datenstand-Pruefung; ein Fehlschlag
+# beendet den Build mit exit!=0, Replit bricht den Deploy ab, die laufende
+# Version bleibt oben. Derselbe Aufruf steht als Pre-Deployment-Command in
+# Coolify — ein Skript, zwei Hooks.
+build = ["sh", "-c", "npm run build && bash scripts/migrate.sh --force"]
 run = [
   "sh",
   "-c",

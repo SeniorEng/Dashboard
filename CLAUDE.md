@@ -16,10 +16,37 @@ Cutover parallel gültig (Replit-Betrieb).
 - **Healthcheck**: `GET /health` (schlank: DB-Ping + Build-Version, ohne Auth/PII).
   Das reichhaltige `GET /api/health` (Startup/Chromium/Migrationen) bleibt separat.
 
-## Migrationen (Coolify Pre-Deploy-Command)
+## Release-Step (`scripts/migrate.sh`) — EIN Skript, plattform-eigener Hook
 
-- **Pre-Deploy-Command**: `bash scripts/migrate.sh` — führt `drizzle-kit push`
-  gegen `DATABASE_URL` (direkt-pg/TCP, kein Neon-Proxy nötig).
+**ERSETZT** „Pre-Deploy-Command fährt `drizzle-kit push`" als Beschreibung des
+Deploys: `migrate.sh` ist jetzt der **Release-Step** und macht zwei gatende
+Schritte — Schema-Push **und** Datenstand-Prüfung gegen den auszuliefernden
+Code (`scripts/release-verify.ts`, 6hHqw8c7).
+
+- **Eingebunden über den Hook der jeweiligen Plattform**, nicht über das
+  App-Boot:
+  - Coolify: Pre-Deployment-Command → `bash scripts/migrate.sh --force`
+  - Replit: `[deployment].build` → `npm run build && bash scripts/migrate.sh --force`
+- **Warum Release-Step und nicht Boot-Gate**: ein Boot-Gate fände denselben
+  Fehler, aber bei JEDEM Start — auch beim Restart einer laufenden Version
+  (OOM, Healthcheck, Host-Reboot). Aus „Abrechnung antwortet 500" würde „nichts
+  läuft mehr". Hier bricht ein Fehlschlag den *Deploy* ab; die laufende Version
+  bedient unberührt weiter.
+- **Reihenfolge steckt IM Skript**, nicht in einer Anweisung, die jemand
+  einhalten muss. Genau daran ist der 18.08.2026 gescheitert: der Publish lief
+  28 Minuten vor der Datenmigration, 54 Zeilen trugen einen Status, den der neue
+  Code nicht lesen kann, Abrechnung rund eine Stunde nicht bedienbar.
+- **Die `DATABASE_URL` wird NIE ausgegeben** (Passwort). Gemeldet werden Host +
+  `current_database()` aus der OFFENEN Verbindung — dieselbe Quelle, gegen die
+  das Prod-Schreib-Gate vergleicht.
+- **Plattform-agnostisch**: braucht nur `DATABASE_URL` + node/npx, keine
+  Replit-/Coolify-Variable; `DB_DRIVER=neon` und `=pg` funktionieren beide.
+- **Teil-Fehlschlag**: Schritt 1 (Schema) ist zu diesem Zeitpunkt bereits
+  angewendet und wird NICHT zurückgerollt. Der Deploy bricht ab, der alte Code
+  bedient weiter — auf dem neuen Schema. Das trägt nur, weil `push` ohne
+  reviewten destruktiven Diff additiv ist; ein `--force` mit Spalten-Drop macht
+  aus dem Abbruch einen Ausfall. Deshalb bleibt der Schema-Diff-Review vor
+  `--force` Pflicht.
 - **Versions-Pinning (drift-sicher)**: `migrate.sh` liest die drizzle-kit-Version
   EXAKT aus `package-lock.json` — nie `@latest`. Migrationstool-Drift auf echten
   Abrechnungs-/Patientendaten ist ein reales Risiko.
