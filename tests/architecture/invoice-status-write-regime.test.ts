@@ -35,8 +35,6 @@ const ERLAUBT = new Set<string>([
   "shared/domain/invoice-status.ts",
   // Das Enum und die Grenze.
   "shared/schema/billing.ts",
-  // Der Einmal-Lauf bildet ausdrücklich Altwerte ab.
-  "server/scripts/migrate-invoice-status-model.ts",
   // Der manuelle Status-Endpoint: sein Zod-Schema zählt auf, welche Ziele ein
   // MENSCH überhaupt anfragen darf — eine engere Frage als „welche Übergänge
   // sind zulässig". `storniert` läuft über den Storno-Flow, `abgeschlossen`
