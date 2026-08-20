@@ -627,9 +627,6 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
         // Fristverschiebung ohnehin von Hand nachgezogen werden.
         allowlist: [
           "server/scripts/lib/__fixtures__/45b-halfyear-cases.ts",
-          // Einmal-Korrekturskript mit einem Monatsende, das zufällig der
-          // 30.06. ist — keine §45b-Frist.
-          "server/scripts/fix-ursula-99-june-rebill.ts",
         ],
       },
     ],
