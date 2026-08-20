@@ -34,9 +34,18 @@
 # Datenbankname aus einer Connection-URL (Pfad-Segment, lowercased).
 # Spiegelbild zu `dbNameOf` in shared/ephemeral-db-target.ts.
 db_name_of() {
-  local url="${1:-}"
-  [[ -z "$url" ]] && return 0
-  printf '%s' "$url" | sed -E 's#^[a-z+]+://[^/]*/##; s#\?.*$##' | tr '[:upper:]' '[:lower:]'
+  local url="${1:-}" n
+  # `sed -n … p`: gibt NUR bei Treffer aus. Die erste Fassung benutzte
+  # `sed 's#...##'` — trifft das Muster nicht, gibt sed die EINGABE unveraendert
+  # zurueck. Der Rueckgabewert war dann die ganze URL, also nicht-leer, also
+  # griff der `[[ -z ... ]]`-Zweig der Aufrufer nicht: fail-OPEN, wo der
+  # TS-Zwilling `dbNameOf` fail-closed ist. Bei `reseed-dev-db.sh` haengt daran
+  # ein `DROP SCHEMA public CASCADE`.
+  #
+  # Schema-Zeichensatz identisch zu `db_host_of` (inkl. Grossschreibung), und
+  # Query/Fragment werden abgeschnitten wie in `new URL().pathname`.
+  n="$(printf '%s' "$url" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^@/?#]*@)?[^/?#]+/([^?#]+).*$#\2#p')"
+  printf '%s' "${n,,}"
 }
 
 db_host_of() {
@@ -52,7 +61,7 @@ db_host_of() {
 #   1. NODE_ENV=production.
 #   2. Host aus DATABASE_URL nicht extrahierbar → fail-closed.
 #   3. Prod-aussehender DB-Host.
-#   4. DATABASE_URL-Host == PROD_DATABASE_URL-Host.
+#   4. DATABASE_URL == PROD_DATABASE_URL (Host UND Datenbank).
 #
 # Setzt bei Erfolg die globale Variable DEV_HOST.
 assert_dev_db() {
@@ -101,7 +110,7 @@ assert_dev_db() {
 # die Paritaet haelt `tests/architecture/dev-db-guard-parity.test.ts` fest.
 #
 # `assert_dev_db` oben ist ein NEGATIVES Praedikat ("Host sieht nicht nach
-# Produktion aus"). Gemessen bestehen `helium` (der echte Prod-Host), die
+# Produktion aus"). Gemessen bestehen `helium` (die Replit-Wegwerf-Default-DB, NICHT Prod), die
 # Neon-Prod-Form `ep-....aws.neon.tech` und `localhost` diesen Test glatt —
 # "nicht Prod" ist auch fuer eine unbekannte DB wahr. Deshalb hier die
 # Umkehrung: das Ziel muss BENANNT werden, und der Datenbankname kommt aus der
@@ -135,6 +144,29 @@ assert_dev_write_target() {
     echo "ABBRUCH: DEV_WRITE_CONFIRM_TARGET=\"${DEV_WRITE_CONFIRM_TARGET}\", die offene" >&2
     echo "  Verbindung zeigt aber auf \"${tatsaechlich}\". Verweigert." >&2
     exit 1
+  fi
+
+  # Prod-Reject — Spiegelbild zu `assertDevWriteTargetOrThrow`. Ohne ihn haette
+  # die Bash-Seite Baustein 1, aber nicht Baustein 2, und der Paritaets-Anspruch
+  # waere nur halb eingeloest. An dieser Funktion haengen die destruktiven
+  # psql-Skripte, die den TS-Chokepoint nie sehen.
+  if [[ -n "${PROD_DATABASE_URL:-}" ]]; then
+    local prod_host prod_db
+    prod_host="$(db_host_of "$PROD_DATABASE_URL")"
+    prod_db="$(db_name_of "$PROD_DATABASE_URL")"
+    if [[ -z "$prod_host" || -z "$prod_db" ]]; then
+      echo "ABBRUCH: PROD_DATABASE_URL ist gesetzt, aber nicht auswertbar. Fail-closed." >&2
+      exit 1
+    fi
+    if [[ "$prod_host" == "$host" && "$prod_db" == "$db_name" ]]; then
+      echo "ABBRUCH: \"${tatsaechlich}\" IST die Produktionsdatenbank (PROD_DATABASE_URL)." >&2
+      echo "  Ein schreibender Dev-Lauf geht dorthin nie — auch nicht mit passendem" >&2
+      echo "  DEV_WRITE_CONFIRM_TARGET." >&2
+      exit 1
+    fi
+    echo "Prod-Reject aktiv, verglichen gegen ${prod_host}/${prod_db}"
+  else
+    echo "Hinweis: PROD_DATABASE_URL nicht gesetzt — kein Prod-Reject moeglich."
   fi
 
   echo "Dev-Ziel bestaetigt: ${tatsaechlich}"

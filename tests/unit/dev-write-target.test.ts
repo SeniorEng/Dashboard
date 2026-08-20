@@ -5,7 +5,7 @@
  * `assertDevDatabase()` ist ein NEGATIVES Prädikat: „der Host sieht nicht nach
  * Produktion aus". Im Gate-2-Review von PR #117 gemessen — damit bestehen
  *
- *   helium                     ← der ECHTE Prod-Host
+ *   helium/heliumdb            ← die Replit-Wegwerf-Default-DB, NICHT Prod
  *   ep-….eu-central-1.aws.neon.tech   ← die Neon-Prod-Form
  *   localhost
  *

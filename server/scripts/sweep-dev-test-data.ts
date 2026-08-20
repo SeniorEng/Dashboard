@@ -20,7 +20,7 @@
  *     bereits ein No-op).
  *   - Abbruch, wenn der DB-Host nach Produktion aussieht (Regex auf Hostname).
  *   - Fail-closed: Abbruch, wenn der Host nicht ermittelbar ist.
- *   - Abbruch, wenn DATABASE_URL-Host == PROD_DATABASE_URL-Host.
+ *   - Abbruch, wenn DATABASE_URL == PROD_DATABASE_URL (Host UND Datenbank).
  *   - Default ist DRY-RUN (zählt nur). Erst `--apply` löscht.
  *   - Der ZZ-Test-Whitelist-Schutz (CUSTOMER_PRESERVE_VORNAME_PREFIX) steckt im
  *     CUSTOMER_TEST_FILTER und bleibt damit automatisch erhalten.

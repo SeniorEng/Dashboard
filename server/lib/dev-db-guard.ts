@@ -66,7 +66,7 @@ export function dbHostOf(url: string): string {
  *   1. NODE_ENV=production.
  *   2. DB-Host sieht nach Produktion aus (Regex).
  *   3. Fail-closed: Host nicht aus DATABASE_URL extrahierbar.
- *   4. DATABASE_URL-Host == PROD_DATABASE_URL-Host.
+ *   4. DATABASE_URL == PROD_DATABASE_URL (Host UND Datenbank).
  */
 export function assertDevDatabase(): void {
 
@@ -167,6 +167,17 @@ export async function assertDevWriteTargetOrThrow(): Promise<string> {
   if (prodUrl) {
     const prodHost = (dbHostOf(prodUrl) || "").toLowerCase();
     const prodDb = (dbNameOf(prodUrl) || "").toLowerCase();
+    // Fail-closed wie auf der Prod-Seite: eine gesetzte, aber unauswertbare
+    // PROD_DATABASE_URL darf nicht dazu fuehren, dass der Reject stumm bleibt
+    // UND das Log ihn als aktiv meldet. Genau diese Fehlerklasse soll der
+    // Drift-Waechter sichtbar machen — er darf sie nicht selbst erzeugen.
+    if (!prodHost || !prodDb) {
+      throw new Error(
+        `ABBRUCH: PROD_DATABASE_URL ist gesetzt, aber nicht auswertbar ` +
+          `(Host: "${prodHost || "?"}", Datenbank: "${prodDb || "?"}"). ` +
+          `Ohne sie laesst sich der Prod-Reject nicht durchfuehren. Fail-closed.`,
+      );
+    }
     if (prodHost === host.toLowerCase() && prodDb === datenbank.toLowerCase()) {
       throw new Error(
         `ABBRUCH: "${tatsaechlich}" IST die Produktionsdatenbank (PROD_DATABASE_URL).\n` +
