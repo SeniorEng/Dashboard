@@ -1,9 +1,22 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   dbHostOf,
   parseProdWriteArgs,
   assertApplyTargetIsProdPrimaryOrThrow,
 } from "../../server/scripts/lib/prod-write-gate";
+
+// Der Datenbankname wird an der offenen Verbindung erfragt; fuer die reinen
+// Ziel-Pruefungen wird er gestubbt.
+//
+// Die erste Fassung dieses Kommentars behauptete, der echte Weg sei „in
+// `status-migration` abgedeckt". Das stimmte nicht — jene Datei importiert
+// `migriereStatusModell` direkt und beruehrt das Gate nie. Der Mock pruefte
+// damit exakt die Annahme, die er belegen sollte. Der echte Treiber-Pfad liegt
+// jetzt in `tests/startup/prod-write-gate-db-name.test.ts`.
+vi.mock("../../server/lib/db", () => ({
+  db: { execute: async () => ({ rows: [{ db: DB_NAME.wert }] }) },
+}));
+const DB_NAME = { wert: "neondb" };
 
 /**
  * Der Ziel-Zaun für schreibende Einmal-Skripte auf Produktion.
@@ -33,43 +46,63 @@ function umgebung(url: string, extra: Record<string, string> = {}) {
 
 describe("Prod-Schreib-Gate", () => {
   describe("Ziel-Prüfung — fail-closed", () => {
-    it("lässt die bestätigte Prod-Primary durch", () => {
-      umgebung("postgres://u:p@db.prod.example.com:5432/careconnect");
-      expect(() => assertApplyTargetIsProdPrimaryOrThrow("db.prod.example.com")).not.toThrow();
+    it("lässt die bestätigte Prod-Primary durch", async () => {
+      umgebung("postgres://u:p@db.prod.example.com:5432/neondb");
+      DB_NAME.wert = "neondb";
+      await expect(assertApplyTargetIsProdPrimaryOrThrow("db.prod.example.com/neondb")).resolves.toBeUndefined();
       // Groß-/Kleinschreibung ist beidseitig normalisiert.
-      expect(() => assertApplyTargetIsProdPrimaryOrThrow("DB.PROD.EXAMPLE.COM")).not.toThrow();
+      await expect(assertApplyTargetIsProdPrimaryOrThrow("DB.PROD.EXAMPLE.COM/NEONDB")).resolves.toBeUndefined();
     });
 
-    it("verweigert alles, was nicht die bestätigte Prod-Primary ist", () => {
+    it("blockt den Fall, der real passiert ist: gleicher Host, falsche Datenbank", async () => {
+      // Auf Replit heisst der interne Postgres-Host in Dev und Prod gleich
+      // (`helium`). Die erste Fassung des Gates verglich nur ihn — und liess
+      // einen Lauf gegen `heliumdb` durch, waehrend Prod `neondb` ist.
+      umgebung("postgres://u:p@helium:5432/heliumdb");
+      DB_NAME.wert = "heliumdb";
+      await expect(assertApplyTargetIsProdPrimaryOrThrow("helium/neondb"))
+        .rejects.toThrow(/Verbunden mit Datenbank 'heliumdb'.*bestätigt wurde 'neondb'/s);
+    });
+
+    it("lehnt die alte einteilige Form ab, statt sie still zu akzeptieren", async () => {
+      umgebung("postgres://u:p@helium:5432/neondb");
+      DB_NAME.wert = "neondb";
+      // Genau diese Form hat den Fehlgriff durchgelassen. Sie muss laut werden.
+      await expect(assertApplyTargetIsProdPrimaryOrThrow("helium"))
+        .rejects.toThrow(/<host>\/<datenbank>/);
+    });
+
+    it("verweigert alles, was nicht die bestätigte Prod-Primary ist", async () => {
+      DB_NAME.wert = "neondb";
       const faelle: Array<[string, string, string | undefined, RegExp]> = [
-        ["Wegwerf-DB", "postgres://u:p@db.prod.example.com/cc_test_careconnect", "db.prod.example.com", /Wegwerf/],
-        ["lokal", "postgres://u:p@localhost:5432/careconnect", "localhost", /lokal/],
-        ["IPv4-Loopback", "postgres://u:p@127.0.0.1:5432/careconnect", "127.0.0.1", /lokal/],
-        ["Read-Replica", "postgres://u:p@db-replica.prod.example.com/careconnect", "db-replica.prod.example.com", /Replica/],
-        ["Ziel unbestätigt", "postgres://u:p@db.prod.example.com/careconnect", undefined, /confirm-target/],
-        ["falsches Ziel", "postgres://u:p@db.prod.example.com/careconnect", "db.anders.example.com", /confirm-target/],
-        ["leere URL", "", "irgendwas", /nicht ermittelbar/],
-        ["unparsebare URL", "kein-url-format", "irgendwas", /nicht ermittelbar/],
+        ["Wegwerf-DB", "postgres://u:p@db.prod.example.com/cc_test_careconnect", "db.prod.example.com/cc_test_careconnect", /Wegwerf/],
+        ["lokal", "postgres://u:p@localhost:5432/neondb", "localhost/neondb", /lokal/],
+        ["IPv4-Loopback", "postgres://u:p@127.0.0.1:5432/neondb", "127.0.0.1/neondb", /lokal/],
+        ["Read-Replica", "postgres://u:p@db-replica.prod.example.com/neondb", "db-replica.prod.example.com/neondb", /Replica/],
+        ["Ziel unbestätigt", "postgres://u:p@db.prod.example.com/neondb", undefined, /confirm-target/],
+        ["falscher Host", "postgres://u:p@db.prod.example.com/neondb", "db.anders.example.com/neondb", /Host stimmt nicht/],
+        ["leere URL", "", "irgendwas/neondb", /nicht ermittelbar/],
+        ["unparsebare URL", "kein-url-format", "irgendwas/neondb", /nicht ermittelbar/],
       ];
       for (const [name, url, ziel, muster] of faelle) {
         umgebung(url);
-        expect(() => assertApplyTargetIsProdPrimaryOrThrow(ziel), name).toThrow(muster);
+        await expect(assertApplyTargetIsProdPrimaryOrThrow(ziel), name).rejects.toThrow(muster);
       }
     });
 
-    it("verweigert IPv6-Loopback — die Klammern des URL-Parsers zaehlen nicht als Ausnahme", () => {
+    it("verweigert IPv6-Loopback — die Klammern des URL-Parsers zaehlen nicht als Ausnahme", async () => {
       // `new URL(…).hostname` liefert fuer IPv6 `"[::1]"` MIT Klammern. Ein
       // Muster, das auf `::1` am Zeilenanfang prueft, greift dann nicht.
-      umgebung("postgres://u:p@[::1]:5432/careconnect");
-      expect(() => assertApplyTargetIsProdPrimaryOrThrow("[::1]")).toThrow(/lokal/);
+      umgebung("postgres://u:p@[::1]:5432/neondb");
+      await expect(assertApplyTargetIsProdPrimaryOrThrow("[::1]/neondb")).rejects.toThrow(/lokal/);
     });
 
-    it("verweigert ausserhalb von NODE_ENV=production und in Ephemeral-Umgebungen", () => {
-      umgebung("postgres://u:p@db.prod.example.com/careconnect", { NODE_ENV: "development" });
-      expect(() => assertApplyTargetIsProdPrimaryOrThrow("db.prod.example.com")).toThrow(/NODE_ENV/);
+    it("verweigert ausserhalb von NODE_ENV=production und in Ephemeral-Umgebungen", async () => {
+      umgebung("postgres://u:p@db.prod.example.com/neondb", { NODE_ENV: "development" });
+      await expect(assertApplyTargetIsProdPrimaryOrThrow("db.prod.example.com/neondb")).rejects.toThrow(/NODE_ENV/);
 
-      umgebung("postgres://u:p@db.prod.example.com/careconnect", { TEST_DATABASE_URLS: "postgres://x/y" });
-      expect(() => assertApplyTargetIsProdPrimaryOrThrow("db.prod.example.com")).toThrow(/Ephemeral/);
+      umgebung("postgres://u:p@db.prod.example.com/neondb", { TEST_DATABASE_URLS: "postgres://x/y" });
+      await expect(assertApplyTargetIsProdPrimaryOrThrow("db.prod.example.com/neondb")).rejects.toThrow(/Ephemeral/);
     });
   });
 

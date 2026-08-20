@@ -23,7 +23,7 @@
  * eine Replica laufen, um den Blast-Radius zu bestimmen.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { users } from "@shared/schema";
 
@@ -63,10 +63,45 @@ export function dbHostOf(url: string): string | null {
 }
 
 /**
+ * Liest den Datenbanknamen aus der TATSÄCHLICHEN Verbindung.
+ *
+ * Bewusst nicht aus dem URL-Pfad: die URL sagt, wohin verbunden werden SOLLTE,
+ * `current_database()` sagt, wo man GELANDET ist. Bei Poolern und Aliassen ist
+ * das nicht dasselbe — und genau diese Differenz ist der Fall, für den dieser
+ * Zaun existiert.
+ */
+export async function currentDatabaseName(): Promise<string> {
+  const res = await db.execute(sql`SELECT current_database() AS db`) as unknown;
+  const rows = Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? []);
+  const erste = rows[0] as { db?: unknown } | undefined;
+  return String(erste?.db ?? "");
+}
+
+/**
  * Fail-closed: wirft, wenn `--apply` gegen irgendetwas anderes als die
  * bestätigte Prod-Primary liefe.
+ *
+ *
+ * ── Warum `--confirm-target` jetzt ZWEI Teile hat ───────────────────────
+ * Die erste Fassung verglich nur den HOST aus der `DATABASE_URL`. Das hat in
+ * der Praxis versagt: auf Replit heißt der interne Postgres-Host `helium` —
+ * in der Dev-Umgebung genauso wie in Prod. Ein `--confirm-target=helium` ging
+ * damit gegen BEIDE Datenbanken durch, und der Trockenlauf lief unbemerkt
+ * gegen die falsche (`heliumdb` statt `neondb`): 0/0/633 statt 54/0/114.
+ *
+ * Der Host allein kann Prod also nicht identifizieren. Der DATENBANKNAME kann
+ * es — und er wird an der offenen Verbindung erfragt, nicht aus der URL
+ * geparst. Die alte einteilige Form wird ABGELEHNT statt still weiter
+ * akzeptiert: sie ist genau der Weg, auf dem der Fehler passiert ist.
+ *
+ * ACHTUNG beim Umstellen bestehender Skripte: diese Funktion ist `async`. Die
+ * handgeschriebenen Kopien in `cleanup-duplicate-monthly-proofs.ts` und
+ * anderswo sind SYNCHRON. Wer nur den Import tauscht, bekommt eine Zeile, die
+ * ohne `await` durchkompiliert — das Gate ist dann wirkungslos, und `eslint`
+ * meldet es nicht (kein `no-floating-promises` in diesem Repo). Immer ueber
+ * `assertProdWriteAllowedOrThrow` gehen, das den Aufruf mit `await` kapselt.
  */
-export function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: string | undefined): void {
+export async function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: string | undefined): Promise<void> {
   if (process.env.NODE_ENV !== "production") {
     throw new Error(
       `ABBRUCH: --apply erfordert NODE_ENV=production (aktuell: ${process.env.NODE_ENV ?? "(unset)"}).`,
@@ -96,10 +131,32 @@ export function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: string | un
       `--apply braucht die Prod-Primary (Replica nur für den Trockenlauf).`,
     );
   }
-  if (!confirmTarget || confirmTarget.toLowerCase() !== host) {
+  const teile = (confirmTarget ?? "").toLowerCase().split("/");
+  if (teile.length !== 2 || !teile[0] || !teile[1]) {
     throw new Error(
-      `ABBRUCH: --apply erfordert --confirm-target=<host>, exakt passend zum ` +
-      `DATABASE_URL-Host. Erwartet: '${host}'. Übergeben: '${confirmTarget ?? "(fehlt)"}'.`,
+      `ABBRUCH: --apply erfordert --confirm-target=<host>/<datenbank>. ` +
+      `Übergeben: '${confirmTarget ?? "(fehlt)"}'. ` +
+      `Die einteilige Form (nur Host) wird nicht mehr akzeptiert — auf Replit heißt ` +
+      `der Host in Dev und Prod gleich ('helium'), sie hat einen Lauf gegen die ` +
+      `falsche Datenbank durchgelassen.`,
+    );
+  }
+  const [zielHost, zielDb] = teile;
+
+  if (zielHost !== host) {
+    throw new Error(
+      `ABBRUCH: Host stimmt nicht. DATABASE_URL zeigt auf '${host}', ` +
+      `--confirm-target nennt '${zielHost}'.`,
+    );
+  }
+
+  // Der eigentliche Diskriminator, an der offenen Verbindung erfragt.
+  const istDb = (await currentDatabaseName()).toLowerCase();
+  if (istDb !== zielDb) {
+    throw new Error(
+      `ABBRUCH: Verbunden mit Datenbank '${istDb}', bestätigt wurde '${zielDb}'. ` +
+      `Der Lauf hätte die falsche Datenbank getroffen. ` +
+      `(Prüfen: läuft die Shell mit der Deployment-DATABASE_URL oder mit einer eigenen?)`,
     );
   }
 }
@@ -143,7 +200,7 @@ export async function assertProdWriteAllowedOrThrow(
       `ABBRUCH: --apply erfordert --reason="…" (mindestens ${REASON_MIN_LAENGE} Zeichen, landet im Audit-Log).`,
     );
   }
-  assertApplyTargetIsProdPrimaryOrThrow(args.confirmTarget);
+  await assertApplyTargetIsProdPrimaryOrThrow(args.confirmTarget);
   const displayName = await assertSuperadminOrThrow(args.userId, zweck);
   return { userId: args.userId, displayName, reason: args.reason.trim() };
 }

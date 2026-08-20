@@ -53,11 +53,24 @@
  * zeigen bis zum Publish ein leeres Status-Badge.
  *
  * ── Ausführung ──────────────────────────────────────────────────────────
- *   tsx server/scripts/migrate-invoice-status-model.ts
- *   tsx server/scripts/migrate-invoice-status-model.ts --verify
- *   NODE_ENV=production tsx server/scripts/migrate-invoice-status-model.ts \
+ * Das Skript nimmt seine Verbindung AUSSCHLIESSLICH aus `DATABASE_URL`
+ * (`server/lib/db.ts`) — es gibt keinen eigenen Ziel-Flag. Auf Replit ist die
+ * Shell-`DATABASE_URL` NICHT zwingend die der Deployment-Umgebung; sie muss
+ * deshalb ausdrücklich gesetzt werden:
+ *
+ *   DATABASE_URL="$PROD_DATABASE_URL" tsx server/scripts/migrate-invoice-status-model.ts
+ *   DATABASE_URL="$PROD_DATABASE_URL" tsx server/scripts/migrate-invoice-status-model.ts --verify
+ *   DATABASE_URL="$PROD_DATABASE_URL" NODE_ENV=production \
+ *     tsx server/scripts/migrate-invoice-status-model.ts \
  *     --apply --user=<superadmin-id> --reason="Status-Modell-Umstellung #108" \
- *     --confirm-target=<prod-host>
+ *     --confirm-target=<host>/<datenbank>
+ *
+ * `--confirm-target` hat ZWEI Teile, und der zweite ist der eigentliche
+ * Diskriminator: der Datenbankname wird an der offenen Verbindung erfragt
+ * (`current_database()`), nicht aus der URL geparst. Grund: auf Replit heißt
+ * der interne Host in Dev und Prod gleich (`helium`). Ein einteiliges
+ * `--confirm-target=helium` hat einen Trockenlauf unbemerkt gegen `heliumdb`
+ * laufen lassen, während Prod `neondb` ist — 0/0/633 statt 54/0/114.
  *
  * Nach „angewendet + verifiziert" wird diese Datei GELÖSCHT und durch ein
  * Protokoll unter `docs/corrections/` ersetzt (CLAUDE.md). Erst NACH Schritt 7
@@ -68,7 +81,12 @@ import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { invoices } from "@shared/schema";
 import { auditService } from "../services/audit";
-import { parseProdWriteArgs, assertProdWriteAllowedOrThrow } from "./lib/prod-write-gate";
+import {
+  parseProdWriteArgs,
+  assertProdWriteAllowedOrThrow,
+  currentDatabaseName,
+  dbHostOf,
+} from "./lib/prod-write-gate";
 
 /** Ab welcher Abweichung vom Erwartungswert der Trockenlauf laut wird. */
 const ABWEICHUNG_LAUT_FAKTOR = 3;
@@ -456,16 +474,44 @@ export async function migriereStatusModell(opt: MigrationsOptionen): Promise<{ u
  * CLI-Huelle: Flags lesen, Ziel-/Berechtigungs-Gate setzen, dann die Migration
  * aufrufen. Das Gate liegt AUSSCHLIESSLICH hier — siehe `MigrationsAbbruch`.
  */
+/**
+ * Nennt in JEDEM Modus, wogegen der Lauf tatsaechlich arbeitet.
+ *
+ * ── Warum das keine Kosmetik ist ────────────────────────────────────────
+ * Das Ziel-Gate greift nur bei `--apply`. Der Vorfall vom 18.08. war aber ein
+ * TROCKENLAUF: er lief gegen `heliumdb` statt `neondb` und meldete 0/0/633
+ * statt 54/0/114, ohne dass irgendwo stand, welche Datenbank gemeint war.
+ * Aufgefallen ist es erst daran, dass die Zahlen fachlich nicht zusammenpassten.
+ *
+ * Schaerfer noch bei `--verify`: das ist das Abnahmekriterium. Gegen die falsche
+ * Datenbank druckt es „Bestanden. Das Status-Modell ist durchgaengig", waehrend
+ * auf Prod die Altwerte liegen. Aus der Ausgabe eines solchen Laufs liess sich
+ * hinterher nicht rekonstruieren, welches Ziel er hatte.
+ *
+ * Der Host kommt aus der URL, der Datenbankname aus der offenen VERBINDUNG —
+ * dieselbe Quelle, die auch das Gate prueft.
+ */
+async function zielZeile(): Promise<string> {
+  const host = dbHostOf(process.env.DATABASE_URL ?? "") ?? "(Host unbekannt)";
+  try {
+    return `  Ziel: ${host}/${await currentDatabaseName()}`;
+  } catch (err) {
+    return `  Ziel: ${host}/(Datenbankname nicht lesbar: ${err instanceof Error ? err.message : String(err)})`;
+  }
+}
+
 async function main(): Promise<void> {
   const args = parseProdWriteArgs();
 
   if (process.argv.includes("--verify")) {
+    console.log(await zielZeile());
     await nachpruefung();
     return;
   }
 
   console.log("Status-Modell-Umstellung");
   console.log(args.apply ? "MODUS: SCHREIBEND (--apply)\n" : "MODUS: Trockenlauf (kein --apply)\n");
+  console.log(await zielZeile());
 
   let userId: number | undefined;
   let reason: string | undefined;
