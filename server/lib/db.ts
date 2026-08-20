@@ -3,6 +3,7 @@ import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import ws from "ws";
+import { mitSchreibsperre } from "./prod-write-lock";
 
 // Replit-Exit — schaltbarer DB-Treiber (additiv, Strangler-Prinzip):
 //   DB_DRIVER=neon (Default) → @neondatabase/serverless via WebSocket
@@ -103,10 +104,23 @@ console.log(
 // (SSoT unten) und alle Konsumenten eine einzige statische Sicht behalten.
 const neonDb = () => drizzleNeon(pool);
 type AppDb = ReturnType<typeof neonDb>;
-export const db: AppDb =
+
+const roheDb: AppDb =
   DB_DRIVER === "pg"
     ? (drizzlePg(pool as unknown as pg.Pool) as unknown as AppDb)
     : neonDb();
+
+/**
+ * Der EINE Schreibpfad der Anwendung — und damit die einzige Stelle, an der
+ * sich „Skript schreibt ohne Ziel-Freigabe" ortsunabhaengig abfangen laesst.
+ *
+ * `mitSchreibsperre` ist im App- und Test-Kontext ein reiner Durchreicher
+ * (siehe `ermittleKontext`); nur im Skript-Kontext verlangt es die Freigabe
+ * aus `assertProdWriteAllowedOrThrow`. Die Huelle umfasst ausdruecklich das
+ * `tx` aus `transaction(...)`: genau darueber schreiben die Storage-Helfer,
+ * und ohne sie fielen die Indirektions-Faelle durch.
+ */
+export const db: AppDb = mitSchreibsperre(roheDb);
 
 export type DbOrTx = Pick<typeof db, "select" | "insert" | "update" | "delete" | "execute">;
 

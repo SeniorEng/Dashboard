@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { findeDestruktiveAnweisungen } from "../../scripts/lib/destructive-schema-statements.ts";
+import { quelltextSchreibt } from "@shared/db-write-statements";
 
 /** Wörtlich aus dem Trockenlauf gegen ein deckungsgleiches Schema. */
 const HARMLOS_ECHT = [
@@ -71,5 +72,33 @@ describe("findeDestruktiveAnweisungen", () => {
 
   it("leere Eingabe ist leer, nicht fehlerhaft", () => {
     expect(findeDestruktiveAnweisungen([])).toEqual([]);
+  });
+});
+
+describe("quelltextSchreibt — Skripte mit eigenem Treiber", () => {
+  it("eigener pg-Client + DML zaehlt als schreibend", () => {
+    // Solche Skripte laufen am gemeinsamen `server/lib/db` vorbei und damit
+    // auch an der Laufzeit-Schreibsperre. Der statische Waechter ist fuer sie
+    // die EINZIGE Instanz.
+    const quelle = `
+      import pg from "pg";
+      const client = new pg.Client({ connectionString: url });
+      await client.query("ALTER DATABASE x SET statement_timeout = 0");
+    `;
+    expect(quelltextSchreibt(quelle)).toBe(true);
+  });
+
+  it("eigener Treiber OHNE SQL im Quelltext bleibt unsichtbar — bekannte Grenze", () => {
+    // `scripts/apply-test-db-timeouts.ts` sieht genau so aus: das SQL steckt
+    // in einem importierten Helfer (`testDbTimeoutStatements(dbName)`), die
+    // Datei selbst traegt kein Literal. Statische Textsuche kann das ohne
+    // Verfolgung des Importgraphen nicht aufloesen — und die Laufzeit-Sperre
+    // sieht es nicht, weil der Treiber ein eigener ist.
+    const quelle = `
+      import pg from "pg";
+      const client = new pg.Client({ connectionString: url });
+      for (const stmt of baueAnweisungen(name)) await client.query(stmt);
+    `;
+    expect(quelltextSchreibt(quelle)).toBe(false);
   });
 });

@@ -69,34 +69,40 @@ import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { quelltextSchreibt } from "@shared/db-write-statements";
 
-const SKRIPT_DIR = path.resolve(process.cwd(), "server/scripts");
+// BEIDE Skript-Verzeichnisse. `scripts/` fehlte in der ersten Fassung —
+// `audit-duplicate-wizard-carryovers.ts` (erzeugt Storno-Allokationen) und
+// `verify-advice-backfill.ts` (schreibt laut Kopfkommentar gegen Prod) lagen
+// damit ganz ausserhalb der Reichweite des Waechters.
+const SKRIPT_DIRS = ["server/scripts", "scripts"] as const;
 const GATE = "assertProdWriteAllowedOrThrow";
 
 /**
- * Zwei Formen, die statisch sicher erkennbar sind:
- *   1. Query-Builder: `.update(`, `.insert(`, `.delete(`
- *   2. rohes SQL ueber `db.execute` / `tx.execute` mit UPDATE/INSERT/DELETE
+ * Die Erkennung teilt sich die SSoT mit der Laufzeit-Sperre
+ * (`@shared/db-write-statements`). Zwei Pruefer, EINE Antwort auf „schreibt
+ * das?" — liefen sie auseinander, meldete der eine ein Skript als harmlos,
+ * waehrend der andere es sperrt (oder schlimmer: umgekehrt).
  *
- * Form 2 kam erst im Review dazu — `fix-customer-182-budget-cap.ts` schrieb
- * per `tx.execute(sql\`UPDATE …\`)` und war fuer den Waechter unsichtbar,
- * OHNE jeden Guard.
+ * Dass das kein theoretisches Risiko ist, hat der Umbau selbst gezeigt: das
+ * Muster hatte ein abschliessendes `\b` hinter `UPDATE\s+\w`, wodurch
+ * `UPDATE invoices …` NICHT traf (nur `UPDATE i`). Beide Pruefer waren fuer
+ * rohes UPDATE blind, bis Mutationstest 4 es aufdeckte.
  */
-const SCHREIBT_BUILDER = /\.\s*(?:update|insert|delete)\s*\(/;
-const SCHREIBT_ROH_EXEC = /\b(?:db|tx|trx)\s*\.\s*execute\s*\(/;
-const SCHREIBT_ROH_SQL = /\b(?:UPDATE\s+\w|INSERT\s+INTO|DELETE\s+FROM|TRUNCATE\s+)/i;
-
-function schreibtDirekt(text: string): boolean {
-  if (SCHREIBT_BUILDER.test(text)) return true;
-  return SCHREIBT_ROH_EXEC.test(text) && SCHREIBT_ROH_SQL.test(text);
-}
-
 /**
  * Gepinnter Schnappschuss der bekannten Löcher. **Diese Liste schrumpft nur.**
  * Wellenplan: W1 = die zwei kaputt-gegateten (nur Host), W2 = hoher
  * Blast-Radius, W3+ = Rest.
+ *
+ * Jeder Eintrag traegt den SHA-256 seines Inhalts: wird die Datei geaendert,
+ * passt der Hash nicht mehr und Test 3 wird rot. Die Liste duldet BESTEHENDEN
+ * ungegateten Code, nicht WACHSENDEN.
  */
 const ALTLAST: readonly { datei: string; sha256: string }[] = [
+  { datei: "scripts/audit-duplicate-wizard-carryovers.ts", sha256: "e68b65e32f201702" },
+  { datei: "scripts/ci-seed-superadmin.ts", sha256: "8393502e6c045110" },
+  { datei: "scripts/migrate-schema.ts", sha256: "cc2ada92e0ac3ec6" },
+  { datei: "scripts/verify-advice-backfill.ts", sha256: "1584bebf75ad95a3" },
   { datei: "server/scripts/apply-vacation-policy-2026.ts", sha256: "37dcf9af44d0ae6d" },
   { datei: "server/scripts/b3-quantify-exposure.ts", sha256: "ad122b582faf1605" },
   { datei: "server/scripts/backfill-missing-import-consumption.ts", sha256: "ab6fb319b8f00d4d" },
@@ -105,7 +111,6 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
   { datei: "server/scripts/cleanup-orphan-appointments.ts", sha256: "9865c82d2fd47bc2" },
   { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "edced74152e2c84b" },
   { datei: "server/scripts/cleanup-test-data.ts", sha256: "d46beef9193c2384" },
-  { datei: "server/scripts/fix-customer-182-budget-cap.ts", sha256: "ede4c11f2ab3837e" },
   { datei: "server/scripts/reconcile-billed-appointment-import-drift.ts", sha256: "68ea413d0cdcacd2" },
   { datei: "server/scripts/reconcile-import-from-excel.ts", sha256: "e5fa5d19206aeb1c" },
   { datei: "server/scripts/reconcile-km-drift.ts", sha256: "0c1b45563cac5e45" },
@@ -117,19 +122,25 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
 ];
 
 /** Muss zur Listenlänge passen — macht jede Ergänzung im Diff sichtbar. */
-const BEKANNTE_LOECHER = 17;
+const BEKANNTE_LOECHER = 20;
 
-/**
- * REKURSIV und inklusive `.mts`/`.cts`. Die erste Fassung las nur die oberste
- * Ebene und nur `.ts` — ein neues `server/scripts/tools/foo.ts` mit
- * `db.delete(...)` waere still grün geblieben, die Hauptregel also durch einen
- * Unterordner umgehbar gewesen.
- */
 function schreibendeSkripte(): string[] {
-  return readdirSync(SKRIPT_DIR, { recursive: true, encoding: "utf8" })
-    .filter((f) => /\.(?:ts|mts|cts)$/.test(f) && !f.includes("__fixtures__"))
-    .map((f) => `server/scripts/${f}`)
-    .filter((rel) => schreibtDirekt(readFileSync(path.resolve(process.cwd(), rel), "utf8")))
+  return SKRIPT_DIRS.flatMap((dir) =>
+    readdirSync(path.resolve(process.cwd(), dir), { recursive: true, encoding: "utf8" })
+      .filter(
+        (f) =>
+          /\.(?:ts|mts|cts)$/.test(f) &&
+          !f.includes("__fixtures__") &&
+          // `lib/` sind importierte Helfer, keine aufrufbaren Entrypoints. Der
+          // statische Waechter fragt „welches SKRIPT braucht ein Ziel-Gate?" —
+          // ein Helfer beantwortet das nicht, er hat keinen eigenen Aufruf.
+          // Schreibt er, faengt ihn die Laufzeit-Sperre am Treiber, und zwar
+          // ortsunabhaengig.
+          !/(^|\/)lib\//.test(f),
+      )
+      .map((f) => `${dir}/${f}`),
+  )
+    .filter((rel) => quelltextSchreibt(readFileSync(path.resolve(process.cwd(), rel), "utf8")))
     .sort();
 }
 

@@ -26,6 +26,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { users } from "@shared/schema";
+import { freigabeErteilen } from "../../lib/prod-write-lock";
 
 export interface ProdWriteArgs {
   apply: boolean;
@@ -202,5 +203,10 @@ export async function assertProdWriteAllowedOrThrow(
   }
   await assertApplyTargetIsProdPrimaryOrThrow(args.confirmTarget);
   const displayName = await assertSuperadminOrThrow(args.userId, zweck);
+  // Erst JETZT — nach Ziel, Superadmin und Begruendung — faellt die
+  // Laufzeit-Sperre. Sie sitzt am Treiber und deckt damit auch Schreibzugriffe
+  // ueber Storage-Helfer und innerhalb von Transaktionen ab, die kein
+  // statischer Waechter sehen kann.
+  freigabeErteilen(args.confirmTarget ?? "(ohne Zielangabe)");
   return { userId: args.userId, displayName, reason: args.reason.trim() };
 }

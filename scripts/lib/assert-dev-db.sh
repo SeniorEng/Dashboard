@@ -79,3 +79,49 @@ assert_dev_db() {
     fi
   fi
 }
+
+# ---------------------------------------------------------------------------
+# assert_dev_write_target — POSITIVE Ziel-Pruefung fuer schreibende Dev-Laeufe.
+#
+# Spiegelbild zu `assertDevWriteTargetOrThrow` in server/lib/dev-db-guard.ts;
+# die Paritaet haelt `tests/architecture/dev-db-guard-parity.test.ts` fest.
+#
+# `assert_dev_db` oben ist ein NEGATIVES Praedikat ("Host sieht nicht nach
+# Produktion aus"). Gemessen bestehen `helium` (der echte Prod-Host), die
+# Neon-Prod-Form `ep-....aws.neon.tech` und `localhost` diesen Test glatt —
+# "nicht Prod" ist auch fuer eine unbekannte DB wahr. Deshalb hier die
+# Umkehrung: das Ziel muss BENANNT werden, und der Datenbankname kommt aus der
+# OFFENEN Verbindung, nicht aus der URL.
+#
+# Aufruf:  assert_dev_write_target "<skriptname>"
+# Erwartet: DEV_WRITE_CONFIRM_TARGET="<host>/<datenbank>"
+assert_dev_write_target() {
+  local script_name="${1:-unbekannt}"
+
+  # Erst der billige Screen (identisch zur TS-Seite).
+  assert_dev_db "$script_name"
+
+  if [[ -z "${DEV_WRITE_CONFIRM_TARGET:-}" ]]; then
+    echo "ABBRUCH: ${script_name} erfordert DEV_WRITE_CONFIRM_TARGET=\"<host>/<datenbank>\"." >&2
+    echo "  Der Datenbankname wird an der OFFENEN Verbindung geprueft, nicht aus der URL" >&2
+    echo "  gelesen — 'nicht nach Prod aussehend' ist KEIN Nachweis." >&2
+    exit 1
+  fi
+
+  local host db_name tatsaechlich
+  host="$(db_host_of "$DATABASE_URL")"
+  db_name="$(psql "$DATABASE_URL" -tAc 'SELECT current_database()' 2>/dev/null | tr -d '[:space:]')"
+  if [[ -z "$db_name" ]]; then
+    echo "ABBRUCH: current_database() konnte nicht ermittelt werden (fail-closed)." >&2
+    exit 1
+  fi
+  tatsaechlich="${host}/${db_name}"
+
+  if [[ "$DEV_WRITE_CONFIRM_TARGET" != "$tatsaechlich" ]]; then
+    echo "ABBRUCH: DEV_WRITE_CONFIRM_TARGET=\"${DEV_WRITE_CONFIRM_TARGET}\", die offene" >&2
+    echo "  Verbindung zeigt aber auf \"${tatsaechlich}\". Verweigert." >&2
+    exit 1
+  fi
+
+  echo "Dev-Ziel bestaetigt: ${tatsaechlich}"
+}
