@@ -1,4 +1,5 @@
 import { devZielGeprueft } from "./prod-write-lock";
+import { dbNameOf } from "@shared/ephemeral-db-target";
 /**
  * Dev-DB-CLI-Prod-Schutz-Guards (DB-frei)
  *
@@ -87,8 +88,15 @@ export function assertDevDatabase(): void {
   const prodUrl = process.env.PROD_DATABASE_URL || "";
   if (prodUrl) {
     const prodHost = dbHostOf(prodUrl);
-    if (prodHost && devHost === prodHost) {
-      throw new Error(`ABBRUCH: DATABASE_URL-Host == PROD_DATABASE_URL-Host ('${devHost}'). Verweigert.`);
+    // Host UND Datenbankname. Nur-Host liess den Fall „gleicher Host, andere
+    // Datenbank" durch — und genau das war der Vorfall: Host stimmte, die
+    // Datenbank nicht.
+    const prodDb = (dbNameOf(prodUrl) || "").toLowerCase();
+    const devDb = (dbNameOf(url) || "").toLowerCase();
+    if (prodHost && devHost === prodHost && (!prodDb || !devDb || prodDb === devDb)) {
+      throw new Error(
+        `ABBRUCH: DATABASE_URL == PROD_DATABASE_URL ('${devHost}/${devDb || "?"}'). Verweigert.`,
+      );
     }
   }
   console.log(`Sicherheits-Checks ok. Dev-DB-Host: ${devHost}`);
@@ -104,7 +112,8 @@ export const DEV_WRITE_CONFIRM_ENV = "DEV_WRITE_CONFIRM_TARGET";
  *
  * ── Warum `assertDevDatabase()` allein nicht genuegt ────────────────────
  * Sie ist ein NEGATIVES Praedikat: „der Host sieht nicht nach Produktion aus".
- * Gemessen laufen damit `helium` (der echte Prod-Host), die Neon-Prod-Form
+ * Gemessen laufen damit `helium` (die Replit-Wegwerf-Default-DB, das
+ * Near-Miss-Ziel des Vorfalls), die Neon-Prod-Form
  * `ep-….aws.neon.tech` und `localhost` glatt durch — „nicht Prod" ist eben
  * auch fuer eine unbekannte oder fehlkonfigurierte Datenbank wahr. Genau
  * dieses NULL-Loch hat schon einmal zugeschlagen.
@@ -147,6 +156,35 @@ export async function assertDevWriteTargetOrThrow(): Promise<string> {
     throw new Error(
       `ABBRUCH: ${DEV_WRITE_CONFIRM_ENV}="${erwartet}", die offene Verbindung zeigt aber auf ` +
         `"${tatsaechlich}". Verweigert.`,
+    );
+  }
+
+  // Prod-Reject: das Ziel darf NIE die Produktionsdatenbank sein, auch nicht
+  // mit passend gesetztem DEV_WRITE_CONFIRM_TARGET. Prod-Identitaet kommt aus
+  // PROD_DATABASE_URL (Host) und dem Namen der OFFENEN Verbindung — dieselbe
+  // Quelle wie im Prod-Gate, nur negativ verwendet.
+  const prodUrl = (process.env.PROD_DATABASE_URL || "").trim();
+  if (prodUrl) {
+    const prodHost = (dbHostOf(prodUrl) || "").toLowerCase();
+    const prodDb = (dbNameOf(prodUrl) || "").toLowerCase();
+    if (prodHost === host.toLowerCase() && prodDb === datenbank.toLowerCase()) {
+      throw new Error(
+        `ABBRUCH: "${tatsaechlich}" IST die Produktionsdatenbank (PROD_DATABASE_URL).\n` +
+          `Ein schreibender Dev-Lauf geht dorthin nie — auch nicht mit passendem ` +
+          `${DEV_WRITE_CONFIRM_ENV}.`,
+      );
+    }
+    // Drift-Waechter: die Zusage haengt daran, dass PROD_DATABASE_URL das
+    // WIRKLICHE Prod-Ziel nennt. Faellt sie weg, faellt der Reject lautlos mit —
+    // deshalb steht im Log, worauf verglichen wurde.
+    console.log(`[dev-write] Prod-Reject aktiv, verglichen gegen ${prodHost}/${prodDb}`);
+  } else {
+    // Bewusster Rest-Rand (Stolperdraht, nicht Sandbox): ohne
+    // PROD_DATABASE_URL laesst sich Prod nicht identifizieren. Der
+    // VERSEHENTLICHE Fall ist trotzdem gefangen — dafuer muesste jemand das
+    // Ziel exakt richtig benennen. Der absichtliche bleibt offen.
+    console.log(
+      `[dev-write] Hinweis: PROD_DATABASE_URL nicht gesetzt — kein Prod-Reject moeglich.`,
     );
   }
 

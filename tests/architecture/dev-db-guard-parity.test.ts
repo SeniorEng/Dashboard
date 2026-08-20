@@ -171,10 +171,12 @@ const GUARD_FIXTURES: GuardFixture[] = [
     expectAbort: true,
   },
   {
-    name: "DATABASE_URL-Host == PROD_DATABASE_URL-Host bricht ab",
+    // Verschaerft: Host-Gleichheit allein genuegt nicht mehr, beide
+    // Fixtures nennen deshalb dieselbe Datenbank.
+    name: "DATABASE_URL == PROD_DATABASE_URL bricht ab (Host UND Datenbank)",
     NODE_ENV: "development",
-    DATABASE_URL: "postgresql://user:pass@shared-host.example:5432/dev",
-    PROD_DATABASE_URL: "postgresql://other:secret@shared-host.example:5432/prod",
+    DATABASE_URL: "postgresql://user:pass@shared-host.example:5432/neondb",
+    PROD_DATABASE_URL: "postgresql://other:secret@shared-host.example:5432/neondb",
     expectAbort: true,
   },
   {
@@ -251,7 +253,7 @@ describe("Task #1438: Guard-Verdikt TS ⇔ Shell (Parität)", () => {
  * Paritaet der POSITIVEN Ziel-Pruefung (PR #117).
  *
  * `assert_dev_db` / `assertDevDatabase` sind negative Praedikate — im Gate-2
- * gemessen bestehen `helium` (der echte Prod-Host), die Neon-Prod-Form und
+ * gemessen bestehen `helium` (die Replit-Default-DB, NICHT Prod), die Neon-Prod-Form und
  * `localhost` sie glatt. Deshalb erteilen sie kein Schreibrecht mehr; das tut
  * die positive Pruefung, und die muss es auf BEIDEN Seiten geben — an der
  * Bash-Seite haengen die vier `psql`-Skripte (`reseed-dev-db.sh`,

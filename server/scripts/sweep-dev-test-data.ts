@@ -68,7 +68,7 @@ export async function runSweep(apply: boolean): Promise<void> {
   if (apply) {
     // Schreibender Lauf: POSITIVE Ziel-Pruefung. `assertDevDatabase()` allein
     // genuegt nicht — sie ist ein negatives Praedikat und laesst `helium`
-    // (den echten Prod-Host), die Neon-Prod-Form und `localhost` durch.
+    // (die Replit-Default-DB), die Neon-Prod-Form und `localhost` durch.
     // Sie laeuft weiterhin, aber als Vorschirm innerhalb der positiven Pruefung.
     await assertDevWriteTargetOrThrow();
   } else {

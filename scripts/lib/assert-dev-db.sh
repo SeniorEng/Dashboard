@@ -31,6 +31,14 @@
 # aus server/scripts/cleanup-test-data.ts. Credentials (user:pass@) sind optional,
 # damit auch Connection-Strings OHNE Anmeldedaten korrekt geparst werden (sonst
 # Host leer → Guards greifen nicht).
+# Datenbankname aus einer Connection-URL (Pfad-Segment, lowercased).
+# Spiegelbild zu `dbNameOf` in shared/ephemeral-db-target.ts.
+db_name_of() {
+  local url="${1:-}"
+  [[ -z "$url" ]] && return 0
+  printf '%s' "$url" | sed -E 's#^[a-z+]+://[^/]*/##; s#\?.*$##' | tr '[:upper:]' '[:lower:]'
+}
+
 db_host_of() {
   local url="$1" h
   h="$(printf '%s' "$url" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^@/?#]*@)?([^:/?#]+).*$#\2#p')"
@@ -73,8 +81,14 @@ assert_dev_db() {
   if [[ -n "${PROD_DATABASE_URL:-}" ]]; then
     local prod_host
     prod_host="$(db_host_of "$PROD_DATABASE_URL")"
-    if [[ -n "$prod_host" && "$DEV_HOST" == "$prod_host" ]]; then
-      echo "ABBRUCH: DATABASE_URL-Host == PROD_DATABASE_URL-Host ('$DEV_HOST'). Verweigert." >&2
+    # Host UND Datenbankname. Nur-Host liess den Fall "gleicher Host, andere
+    # Datenbank" durch — und genau das war der Vorfall.
+    local prod_db dev_db
+    prod_db="$(db_name_of "$PROD_DATABASE_URL")"
+    dev_db="$(db_name_of "$DATABASE_URL")"
+    if [[ -n "$prod_host" && "$DEV_HOST" == "$prod_host" ]] \
+       && { [[ -z "$prod_db" || -z "$dev_db" ]] || [[ "$prod_db" == "$dev_db" ]]; }; then
+      echo "ABBRUCH: DATABASE_URL == PROD_DATABASE_URL ('$DEV_HOST'). Verweigert." >&2
       exit 1
     fi
   fi
