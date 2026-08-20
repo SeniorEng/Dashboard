@@ -16,10 +16,61 @@ Cutover parallel gültig (Replit-Betrieb).
 - **Healthcheck**: `GET /health` (schlank: DB-Ping + Build-Version, ohne Auth/PII).
   Das reichhaltige `GET /api/health` (Startup/Chromium/Migrationen) bleibt separat.
 
-## Migrationen (Coolify Pre-Deploy-Command)
+## Release-Step (`scripts/migrate.sh`) — EIN Skript, plattform-eigener Hook
 
-- **Pre-Deploy-Command**: `bash scripts/migrate.sh` — führt `drizzle-kit push`
-  gegen `DATABASE_URL` (direkt-pg/TCP, kein Neon-Proxy nötig).
+**ERSETZT** „Pre-Deploy-Command fährt `drizzle-kit push`" als Beschreibung des
+Deploys: `migrate.sh` ist jetzt der **Release-Step** und macht zwei gatende
+Schritte — Schema-Push **und** Datenstand-Prüfung gegen den auszuliefernden
+Code (`scripts/release-verify.ts`, 6hHqw8c7).
+
+- **Eingebunden über den Hook der jeweiligen Plattform**, nicht über das
+  App-Boot:
+  - Coolify: Pre-Deployment-Command → `bash scripts/migrate.sh --force`
+  - Replit: `[deployment].build` → `npm run build && bash scripts/migrate.sh --force`
+- **Warum Release-Step und nicht Boot-Gate**: ein Boot-Gate fände denselben
+  Fehler, aber bei JEDEM Start — auch beim Restart einer laufenden Version
+  (OOM, Healthcheck, Host-Reboot). Aus „Abrechnung antwortet 500" würde „nichts
+  läuft mehr". Hier bricht ein Fehlschlag den *Deploy* ab; die laufende Version
+  bedient unberührt weiter.
+- **Reihenfolge steckt IM Skript**, nicht in einer Anweisung, die jemand
+  einhalten muss. Genau daran ist der 18.08.2026 gescheitert: der Publish lief
+  28 Minuten vor der Datenmigration, 54 Zeilen trugen einen Status, den der neue
+  Code nicht lesen kann, Abrechnung rund eine Stunde nicht bedienbar.
+- **Die `DATABASE_URL` wird NIE ausgegeben** (Passwort). Gemeldet werden Host +
+  `current_database()` aus der OFFENEN Verbindung — dieselbe Quelle, gegen die
+  das Prod-Schreib-Gate vergleicht.
+- **Plattform-agnostisch**: braucht nur `DATABASE_URL` + node/npx, keine
+  Replit-/Coolify-Variable; `DB_DRIVER=neon` und `=pg` funktionieren beide.
+- **Schritt 0d ist der technische Riegel gegen `--force`.** `--force` genehmigt
+  Datenverlust-Anweisungen automatisch, und auf dem automatischen Deploy-Pfad
+  gab es davor NICHTS außer dieser Datei: `script/check-pre-publish-backup.mjs`
+  liest Dateien in `migrations/` und ist bei `push` per Konstruktion blind
+  (der Build ruft ihn zudem nur in einem `try`/`catch` als Warnung auf), und der
+  blockierende `script/preflight-publish.mjs` ist ein Operator-Schritt, den kein
+  Deploy aufruft. `scripts/release-schema-gate.ts` fährt jetzt VOR dem Push
+  einen Trockenlauf (`pushSchema` aus `drizzle-kit/api`) und bricht bei einem
+  nicht freigegebenen `DROP COLUMN`/`DROP TABLE` ab — ebenso bei `SET NOT NULL`,
+  `UNIQUE`, `CHECK` und verengenden Typänderungen, die den im Deploy-Fenster noch
+  bedienenden alten Code genauso brechen.
+- **Freigabe über `docs/schema-change-manifest.json`, an den `schemaHash` gebunden.**
+  ERSETZT `PUBLISH_ACK_DROPS` auf dem Deploy-Pfad: eine Plattform-Env bliebe
+  gesetzt und genehmigte still jeden weiteren Deploy. Der Manifest-Eintrag trägt
+  den Schema-Stand, für den er gilt, und entwertet sich selbst, sobald die
+  Änderung angewendet ist (Muster: `docs/pre-publish-backup-runbook.md` §8.6).
+  - **Nicht auf `hasDataLoss` verlassen**: gemessen an drizzle-kit 0.31.10 bleibt
+    das Flag bei einem anstehenden `DROP COLUMN` **false**. Gelesen werden die
+    Anweisungen selbst.
+  - **Nur `DROP COLUMN`/`DROP TABLE`, nicht `DROP`**: ein Push gegen ein
+    deckungsgleiches Schema erzeugt regelmäßig ~8 `DROP CONSTRAINT` (drizzle legt
+    Fremdschlüssel mit abgeschnittenen Namen neu an). Ein Riegel auf „DROP" würde
+    jeden Deploy blockieren.
+- **Teil-Fehlschlag**: Schritt 1 (Schema) ist zu diesem Zeitpunkt bereits
+  angewendet und wird NICHT zurückgerollt. Der Deploy bricht ab, der alte Code
+  bedient weiter — auf dem neuen Schema. Das trägt, weil Schritt 0d genau die
+  Anweisungen abfängt, die den alten Code brechen würden, und der Rest additiv
+  ist. Eine per Manifest bewusst freigegebene Änderung hebt diese Zusage auf —
+  deshalb verlangt der Eintrag eine `backupId` nach
+  `docs/pre-publish-backup-runbook.md`.
 - **Versions-Pinning (drift-sicher)**: `migrate.sh` liest die drizzle-kit-Version
   EXAKT aus `package-lock.json` — nie `@latest`. Migrationstool-Drift auf echten
   Abrechnungs-/Patientendaten ist ein reales Risiko.

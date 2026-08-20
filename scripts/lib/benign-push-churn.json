@@ -1,0 +1,19 @@
+[
+  "ALTER TABLE \"appointments\" DROP CONSTRAINT \"appointments_prospect_or_customer_check\";",
+  "ALTER TABLE \"service_record_appointments\" DROP CONSTRAINT \"service_record_appointments_service_record_id_monthly_service_r\";\n",
+  "ALTER TABLE \"customer_insurance_history\" DROP CONSTRAINT \"customer_insurance_history_insurance_provider_id_insurance_prov\";\n",
+  "ALTER TABLE \"budget_reservations\" DROP CONSTRAINT \"budget_reservations_captured_transaction_id_budget_transactions\";\n",
+  "ALTER TABLE \"document_deliveries\" DROP CONSTRAINT \"document_deliveries_generated_document_id_generated_documents_i\";\n",
+  "ALTER TABLE \"customer_creation_idempotency_keys\" DROP CONSTRAINT \"customer_creation_idempotency_keys_created_by_user_id_users_id_\";\n",
+  "ALTER TABLE \"document_template_billing_types\" DROP CONSTRAINT \"document_template_billing_types_template_id_document_templates_\";\n",
+  "ALTER TABLE \"qonto_transactions\" DROP CONSTRAINT \"qonto_transactions_matched_payment_advice_id_payment_advices_id\";\n",
+  "ALTER TABLE \"employee_time_entries\" ALTER COLUMN \"kilometers\" SET DEFAULT 0;",
+  "ALTER TABLE \"company_settings\" ALTER COLUMN \"qonto_additional_ibans\" SET DEFAULT ARRAY[]::text[];",
+  "ALTER TABLE \"service_record_appointments\" ADD CONSTRAINT \"service_record_appointments_service_record_id_monthly_service_records_id_fk\" FOREIGN KEY (\"service_record_id\") REFERENCES \"public\".\"monthly_service_records\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "ALTER TABLE \"customer_insurance_history\" ADD CONSTRAINT \"customer_insurance_history_insurance_provider_id_insurance_providers_id_fk\" FOREIGN KEY (\"insurance_provider_id\") REFERENCES \"public\".\"insurance_providers\"(\"id\") ON DELETE no action ON UPDATE no action;",
+  "ALTER TABLE \"budget_reservations\" ADD CONSTRAINT \"budget_reservations_captured_transaction_id_budget_transactions_id_fk\" FOREIGN KEY (\"captured_transaction_id\") REFERENCES \"public\".\"budget_transactions\"(\"id\") ON DELETE no action ON UPDATE no action;",
+  "ALTER TABLE \"document_deliveries\" ADD CONSTRAINT \"document_deliveries_generated_document_id_generated_documents_id_fk\" FOREIGN KEY (\"generated_document_id\") REFERENCES \"public\".\"generated_documents\"(\"id\") ON DELETE no action ON UPDATE no action;",
+  "ALTER TABLE \"customer_creation_idempotency_keys\" ADD CONSTRAINT \"customer_creation_idempotency_keys_created_by_user_id_users_id_fk\" FOREIGN KEY (\"created_by_user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE no action ON UPDATE no action;",
+  "ALTER TABLE \"document_template_billing_types\" ADD CONSTRAINT \"document_template_billing_types_template_id_document_templates_id_fk\" FOREIGN KEY (\"template_id\") REFERENCES \"public\".\"document_templates\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "ALTER TABLE \"qonto_transactions\" ADD CONSTRAINT \"qonto_transactions_matched_payment_advice_id_payment_advices_id_fk\" FOREIGN KEY (\"matched_payment_advice_id\") REFERENCES \"public\".\"payment_advices\"(\"id\") ON DELETE no action ON UPDATE no action;"
+]
