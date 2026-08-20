@@ -3,10 +3,11 @@ import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// In Replit liegt Chromium im Nix-Store; in CI (GitHub Actions) wird es per
-// `npx playwright install --with-deps chromium` an Playwrights Standardpfad
-// installiert. Wir setzen `executablePath` nur, wenn ein konkreter Pfad
-// per Env vorgegeben ist ODER der Nix-Store-Pfad tatsächlich existiert.
+// In Replit liegt Chromium im Nix-Store; in CI (GitHub Actions) installiert
+// `.github/actions/playwright-chromium` es an Playwrights Standardpfad —
+// ohne `--with-deps` (das war der Haenger, der CI reihenweise rot machte).
+// Wir setzen `executablePath` nur, wenn ein konkreter Pfad per Env vorgegeben
+// ist ODER der Nix-Store-Pfad tatsächlich existiert.
 // Andernfalls (CI) bleibt `executablePath` undefined und Playwright nutzt
 // den selbst installierten Browser.
 const NIX_CHROMIUM =

@@ -343,9 +343,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
+      # ERSETZT `npx playwright install --with-deps chromium` (ungecacht, apt bei
+      # jedem Lauf). Dieses Leg lud Chromium bisher dreimal parallel aus dem Netz
+      # und hatte keinen Cache — es war die groesste Flaeche fuer den Haenger,
+      # der am 19.08. main/#111/#113 rot gemacht hat. Begruendung in der Action.
+      - name: Playwright-Chromium bereitstellen
         if: ${{ env.TEST_USER_PASSWORD != '' }}
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 13
+        uses: ./.github/actions/playwright-chromium
       - name: Resolve CHROMIUM_PATH for the PDF engine
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: |
@@ -599,18 +604,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Playwright-Browser-Cache: keyed auf package-lock, damit Folge-Runs
-      # den Chromium-Download überspringen.
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-
-      - name: Install Playwright Chromium
+      # ERSETZT den eigenen Cache-Block + `--with-deps`-Install. Der Key hing an
+      # `hashFiles('package-lock.json')`: jede beliebige Dependency-Aenderung
+      # entwertete den Browser-Cache — deshalb traf der Haenger ausgerechnet
+      # #113, das package-lock.json anfasste. Jetzt haengt er an der
+      # playwright-core-Version, also an dem, was den Browser bestimmt.
+      - name: Playwright-Chromium bereitstellen
         if: ${{ env.TEST_USER_PASSWORD != '' }}
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 13
+        uses: ./.github/actions/playwright-chromium
 
       - name: Push DB schema (drizzle-kit push)
         if: ${{ env.TEST_USER_PASSWORD != '' }}

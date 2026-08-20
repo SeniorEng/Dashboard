@@ -1,0 +1,146 @@
+name: Playwright-Chromium bereitstellen
+description: >-
+  Stellt Chromium fuer Playwright bereit — gecacht, ohne apt, mit Wiederholung
+  und lautem Fehlschlag. EINE Formulierung fuer beide Aufrufstellen
+  (tests-shard und e2e-smoke).
+
+# ── Warum es diese Action gibt ───────────────────────────────────────────────
+# `npx playwright install --with-deps chromium` war der Flake, der am 19.08.2026
+# `main` (Lauf 32230089329), #111 und #113 rot gemacht hat. In JEDEM
+# abgebrochenen Job stand derselbe Waisenprozess im Cleanup:
+#
+#   Terminate orphan process: pid (3267) (npm exec playwright install --with-deps chromium)
+#
+# `tests-shard (1)` bei #111 hatte 777 Log-Zeilen und hat mit dem Testen NIE
+# angefangen — der Schritt hing 25 Minuten und frass das komplette Job-Budget
+# (`timeout-minutes: 25`). Der `tests`-Job meldete danach nur die Folge
+# ("Leg nicht erfolgreich (cancelled)"), was wie ein Testfehler aussieht und
+# keiner war.
+#
+# ── Was WIRKLICH gehangen hat ────────────────────────────────────────────────
+# Gemessen im ersten gruenen Lauf dieses PRs (32339426979): die Kaltinstallation
+# der Browser dauert 8–11 s. Der Download war also NIE das Problem — `--with-deps`
+# war es, weil es bei jedem Lauf `apt-get` nachzog. Der Cache ist deshalb
+# Beiwerk, nicht der Fix; der Fix ist "kein apt, dafuer ein lauter Startcheck".
+#
+# ── Bewusst OHNE Browser-Cache ───────────────────────────────────────────────
+# Der erste Entwurf cachte `~/.cache/ms-playwright`. Die Messung oben hat das
+# widerlegt: bei 8–11 s Kaltinstallation spart ein Restore von ~180 MB nichts
+# Nennenswertes, kostet aber Quota (10 GB pro Repo, je Playwright-Version eine
+# Kopie) und erzeugt Log-Rauschen — vier Jobs starten gleichzeitig und drei
+# melden zuverlaessig "Unable to reserve cache with key …, another job may be
+# creating this cache" ausgerechnet in den Logs, die man liest, wenn CI rot ist.
+#
+# Dazu kam eine Falle, die der Cache selbst mitbrachte: `actions/cache@v4`
+# speichert unter `post-if: success()`. Auf einem roten Job — dem Zustand, der
+# diesen PR ausgeloest hat — wurde er nie geschrieben, der naechste Lauf war
+# wieder kalt. Reparierbar (`cache/restore` + `cache/save` mit `if: always()`),
+# aber Aufwand fuer einen Nutzen, den es nicht gibt.
+#
+# Wer ihn wieder einfuehren will, braucht einen Grund aus einer Messung, nicht
+# aus dem Gefuehl "Downloads soll man cachen".
+#
+# ── Zwei Startchecks, weil es zwei Fragen sind ───────────────────────────────
+#  1. "Kann die PDF-Engine starten?" — `npm run chromium:smoke` ist die
+#     BESTEHENDE SSoT dafuer (`scripts/smoke-chromium.ts`): puppeteer-core,
+#     `resolveChromiumPath()`, `runChromiumPreflight()`, die produktiven
+#     `getLaunchArgs()` und ein Chromium-stderr-Dump im Fehlerfall. Die
+#     PDF-Engine des Repos IST puppeteer-core, nicht Playwright. Ein eigener
+#     `chromium.launch()` hier waere ein Zweitbegriff derselben Frage gewesen.
+#     `tests-shard` setzt sein `CHROMIUM_PATH` auf genau diese volle Binary.
+#  2. "Kann Playwright starten?" — das ist eine ANDERE Binary:
+#     `playwright.config.ts` laesst `executablePath` in CI undefined und
+#     `headless` ist Default true, also faehrt `e2e-smoke` real die
+#     `chromium_headless_shell`. Ein Check nur auf die volle Binary haette fuer
+#     `e2e-smoke` die falsche Datei validiert.
+#
+# Erst wenn EINE der beiden Fragen mit Nein beantwortet wird, ziehen wir
+# `playwright install-deps` gezielt nach — mit `::warning::`. Laut statt still:
+# verliert das Runner-Image seine Bibliotheken, wollen wir es SEHEN und nicht
+# spaeter einen kryptischen PDF-Fehler suchen.
+#
+# ── Schranken ────────────────────────────────────────────────────────────────
+# `timeout-minutes` gibt es auf Composite-*Steps* nicht (nur auf Job-Steps), die
+# aeussere Schranke setzen deshalb die Aufrufer. Innen steht ein `timeout` je
+# Einzelschritt, damit ein Haenger abbricht und der naechste Versuch zum Zug
+# kommt. `-k 10`, weil `timeout` sonst nur SIGTERM schickt und ein
+# SIGTERM-tauber Node stehen bliebe.
+#
+# Worst case, nachgerechnet (nicht geschaetzt):
+#   Install-Schleife  3x90 s + 5 s + 10 s Backoff        = 285 s
+#   Startchecks       2x60 s                             = 120 s
+#   Fallback apt      180 s                              = 180 s
+#   Startchecks erneut 2x60 s                            = 120 s
+#   ------------------------------------------------------------
+#                                                        = 705 s ≈ 11,8 min
+# Die Aufrufer stehen deshalb auf `timeout-minutes: 13`. Der Normalfall liegt
+# bei ~15 s; die Schranke ist fuer den pathologischen Fall da — und vor allem
+# dafuer, dass die lauten `::error::`-Meldungen unten ERREICHBAR bleiben. Ein
+# knapperes Budget haette sie abgeschnitten und wieder ein nacktes
+# "has timed out" hinterlassen, also genau die Meldung, die hier abgeschafft
+# werden soll.
+
+runs:
+  using: composite
+  steps:
+    # `shell: bash` laesst GitHub als `bash --noprofile --norc -e -o pipefail`
+    # laufen — `-e` ist also AN. Alle Fehlerpruefungen unten sind deshalb
+    # `if`-Bedingungen bzw. `|| …`, damit sie ueberhaupt erreicht werden.
+    - name: Chromium installieren (ohne apt, mit Wiederholung)
+      shell: bash
+      run: |
+        for versuch in 1 2 3; do
+          if timeout -k 10 90 npx playwright install chromium; then
+            echo "Chromium bereit (Versuch $versuch)."
+            exit 0
+          fi
+          echo "::warning::playwright install chromium fehlgeschlagen oder haengt (Versuch $versuch/3)"
+          # Backoff NUR zwischen den Versuchen. Stand er hinter dem letzten
+          # Durchlauf, verschob er die Fehlermeldung unten hinter die Schranke
+          # des Aufrufers — der laute Abbruch waere nie ausgegeben worden.
+          if [ "$versuch" -lt 3 ]; then sleep $((versuch * 5)); fi
+        done
+        echo "::error::playwright install chromium nach 3 Versuchen nicht erfolgreich."
+        exit 1
+
+    - name: Startfaehigkeit pruefen, Systempakete nur bei Bedarf
+      shell: bash
+      run: |
+        VOLL="$(node -p "require('playwright-core').chromium.executablePath()")"
+
+        pruefe() {
+          local fehler=0
+          echo "--- PDF-Engine (puppeteer-core, Produktions-Launcher): $VOLL"
+          CHROMIUM_PATH="$VOLL" timeout -k 10 60 npm run --silent chromium:smoke || fehler=1
+          echo "--- Playwright (headless-shell, das e2e-smoke real benutzt)"
+          timeout -k 10 60 node -e "
+            const { chromium } = require('playwright-core');
+            chromium.launch()
+              .then((b) => b.close())
+              .then(() => process.exit(0), (e) => {
+                console.error(String((e && e.message) || e));
+                process.exit(1);
+              });
+          " || fehler=1
+          return $fehler
+        }
+
+        if pruefe; then
+          echo "Chromium startet auf beiden Pfaden."
+          exit 0
+        fi
+
+        # Genau hier waere `--with-deps` frueher blind gelaufen — bei jedem Lauf,
+        # auch wenn nichts fehlte. Jetzt nur bei Bedarf, und sichtbar.
+        echo "::warning::Ein Startpfad scheitert — ziehe Systempakete gezielt nach (playwright install-deps)."
+        if ! timeout -k 10 180 npx playwright install-deps chromium; then
+          echo "::error::playwright install-deps chromium fehlgeschlagen."
+          exit 1
+        fi
+        if pruefe; then
+          echo "::warning::Chromium startet erst nach install-deps. Das Runner-Image bringt die Bibliotheken nicht mehr mit — diese Action pruefen."
+          exit 0
+        fi
+        echo "::error::Chromium startet auch nach install-deps nicht."
+        exit 1
+
