@@ -87,6 +87,16 @@ export function istSchreibendesSql(sql: string): boolean {
  * billiger als Auslassungen — ein zu Unrecht gelistetes Skript kostet einen
  * Blick, ein übersehenes kostet eine Datenbank.
  */
+/**
+ * Eigener Treiber: `new pg.Client(...)`, `new Pool(...)`, `postgres(...)`,
+ * `drizzle(...)`. Solche Skripte laufen am gemeinsamen `server/lib/db` vorbei
+ * und damit auch an der Laufzeit-Schreibsperre — der statische Waechter ist
+ * fuer sie die EINZIGE Instanz. `scripts/apply-test-db-timeouts.ts` schrieb so
+ * (`ALTER DATABASE …`) und war weder gelistet noch gesperrt.
+ */
+const EIGENER_TREIBER_MUSTER =
+  /\bnew\s+(?:pg\.)?(?:Client|Pool)\s*\(|\bpostgres\s*\(|\bdrizzle(?:Neon|Pg)?\s*\(/;
+
 export function quelltextSchreibt(text: string): boolean {
   // Kommentare raus: ein `// … DELETE FROM …` in einer Erklaerung ist kein
   // Schreibzugriff. Strings bleiben drin — ein Skript, das seinen SQL-Befehl
@@ -95,5 +105,8 @@ export function quelltextSchreibt(text: string): boolean {
     .replace(/\/\/[^\n]*/g, " ")
     .replace(/\/\*[\s\S]*?\*\//g, " ");
   if (SCHREIB_BUILDER_MUSTER.test(ohneKommentare)) return true;
-  return ROH_EXEC_MUSTER.test(ohneKommentare) && ROH_SQL_MUSTER.test(ohneKommentare);
+  if (ROH_EXEC_MUSTER.test(ohneKommentare) && ROH_SQL_MUSTER.test(ohneKommentare)) return true;
+  // Eigener Treiber + DML irgendwo in der Datei: der Laufzeit-Riegel sieht das
+  // nie, also muss es der statische tun.
+  return EIGENER_TREIBER_MUSTER.test(ohneKommentare) && ROH_SQL_MUSTER.test(ohneKommentare);
 }

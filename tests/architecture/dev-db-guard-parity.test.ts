@@ -28,10 +28,12 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   dbHostOf,
   assertDevDatabase,
+  DEV_WRITE_CONFIRM_ENV,
 } from "../../server/lib/dev-db-guard";
 
 const SHELL_LIB = path.resolve(process.cwd(), "scripts/lib/assert-dev-db.sh");
@@ -242,5 +244,71 @@ describe("Task #1438: Guard-Verdikt TS ⇔ Shell (Parität)", () => {
     expect(tsAborts).toBe(shellAborts);
     // 2. ...und das gemeinsame Verdikt entspricht der Erwartung.
     expect(tsAborts).toBe(fx.expectAbort);
+  });
+});
+
+/**
+ * Paritaet der POSITIVEN Ziel-Pruefung (PR #117).
+ *
+ * `assert_dev_db` / `assertDevDatabase` sind negative Praedikate — im Gate-2
+ * gemessen bestehen `helium` (der echte Prod-Host), die Neon-Prod-Form und
+ * `localhost` sie glatt. Deshalb erteilen sie kein Schreibrecht mehr; das tut
+ * die positive Pruefung, und die muss es auf BEIDEN Seiten geben — an der
+ * Bash-Seite haengen die vier `psql`-Skripte (`reseed-dev-db.sh`,
+ * `post-merge.sh`, die zwei Backup-Skripte), die den TS-Chokepoint nie sehen.
+ */
+describe("positive Dev-Ziel-Pruefung — TS ⇔ Bash", () => {
+  const shell = readFileSync(SHELL_LIB, "utf8");
+
+  it("beide Seiten kennen die Funktion und dieselbe Env", () => {
+    expect(shell).toMatch(/assert_dev_write_target\(\)/);
+    expect(shell).toContain("DEV_WRITE_CONFIRM_TARGET");
+    expect(DEV_WRITE_CONFIRM_ENV).toBe("DEV_WRITE_CONFIRM_TARGET");
+  });
+
+  it("beide holen den DB-Namen aus der OFFENEN Verbindung, nicht aus der URL", () => {
+    // Der Kern des 18.08.-Vorfalls: `helium` stimmte, `heliumdb` statt
+    // `neondb` nicht. Wer den Namen aus der URL liest, sieht das nicht.
+    expect(shell).toMatch(/current_database\(\)/);
+    const ts = readFileSync(
+      path.resolve(process.cwd(), "server/lib/dev-db-guard.ts"),
+      "utf8",
+    );
+    expect(ts).toContain("currentDatabaseName()");
+  });
+
+  it("Bash bricht ohne benanntes Ziel ab", () => {
+    const res = spawnSync(
+      "bash",
+      ["-c", `source "$0"; assert_dev_write_target "parity-test"`, SHELL_LIB],
+      {
+        env: {
+          ...process.env,
+          NODE_ENV: "development",
+          DATABASE_URL: "postgres://u:p@dev-host/careconnect_dev",
+          DEV_WRITE_CONFIRM_TARGET: "",
+        },
+        encoding: "utf8",
+      },
+    );
+    expect(res.status).not.toBe(0);
+    expect(`${res.stdout}${res.stderr}`).toMatch(/DEV_WRITE_CONFIRM_TARGET/);
+  });
+
+  it("Bash bricht auch bei helium ohne Ziel ab — der negative Screen laesst es durch", () => {
+    const res = spawnSync(
+      "bash",
+      ["-c", `source "$0"; assert_dev_write_target "parity-test"`, SHELL_LIB],
+      {
+        env: {
+          ...process.env,
+          NODE_ENV: "development",
+          DATABASE_URL: "postgres://u:p@helium/neondb",
+          DEV_WRITE_CONFIRM_TARGET: "",
+        },
+        encoding: "utf8",
+      },
+    );
+    expect(res.status).not.toBe(0);
   });
 });

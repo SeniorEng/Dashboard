@@ -57,7 +57,7 @@ export {
   dbHostOf,
   assertDevDatabase,
 } from "../lib/dev-db-guard";
-import { assertDevDatabase } from "../lib/dev-db-guard";
+import { assertDevDatabase, assertDevWriteTargetOrThrow } from "../lib/dev-db-guard";
 
 async function countProspects(): Promise<number> {
   const rows = await db.select({ id: prospects.id }).from(prospects).where(PROSPECT_TEST_FILTER);
@@ -65,7 +65,15 @@ async function countProspects(): Promise<number> {
 }
 
 export async function runSweep(apply: boolean): Promise<void> {
-  assertDevDatabase();
+  if (apply) {
+    // Schreibender Lauf: POSITIVE Ziel-Pruefung. `assertDevDatabase()` allein
+    // genuegt nicht — sie ist ein negatives Praedikat und laesst `helium`
+    // (den echten Prod-Host), die Neon-Prod-Form und `localhost` durch.
+    // Sie laeuft weiterhin, aber als Vorschirm innerhalb der positiven Pruefung.
+    await assertDevWriteTargetOrThrow();
+  } else {
+    assertDevDatabase();
+  }
   console.log(`Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN (zählt nur)"}`);
 
   if (!apply) {
