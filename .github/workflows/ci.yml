@@ -604,11 +604,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # ERSETZT den eigenen Cache-Block + `--with-deps`-Install. Der Key hing an
-      # `hashFiles('package-lock.json')`: jede beliebige Dependency-Aenderung
-      # entwertete den Browser-Cache — deshalb traf der Haenger ausgerechnet
-      # #113, das package-lock.json anfasste. Jetzt haengt er an der
-      # playwright-core-Version, also an dem, was den Browser bestimmt.
+      # ERSETZT den eigenen Cache-Block + `--with-deps`-Install. Der Cache ist
+      # ersatzlos entfallen: gemessen dauert die Kaltinstallation 8–11 s, ein
+      # Restore spart davon nichts, kostet aber Quota und Log-Rauschen. Der
+      # Haenger kam von `--with-deps`/apt, nicht vom Download. Details in der
+      # Action.
       - name: Playwright-Chromium bereitstellen
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         timeout-minutes: 13
