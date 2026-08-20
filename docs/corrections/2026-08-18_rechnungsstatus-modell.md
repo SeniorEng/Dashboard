@@ -8,7 +8,8 @@
 
 ## Problem
 
-Das Statusmodell wurde auf sechs Werte verengt. Zwei Altwerte (`avis_erhalten`,
+Das Statusmodell wurde auf fünf Werte verengt (vier für Rechnungen, ein
+eigener für Storno-Dokumente). Zwei Altwerte (`avis_erhalten`,
 `teilweise_bezahlt`) und die Storno-Dokument-Zustände kannte der neue Code nicht
 mehr — `parseInvoiceStatus` wirft bei ihnen, und der Wurf reißt nicht die
 einzelne Zeile mit, sondern den ganzen Lesepfad: `GET /api/billing` und das
@@ -31,9 +32,29 @@ Schreiber nicht überfahren wird.
 
 ## Vorher / Nachher
 
-54 Zeilen trugen einen Altwert. Nach dem Lauf: Verify meldete **0/0/0** —
-keine Altwerte, keine unbekannten Werte, keine Zeile ohne Zuordnung. Die
-Abrechnung war anschließend live und bedienbar.
+**168 Zeilen** der Tabelle `invoices` wurden umgestellt:
+
+| Abbildung | Zeilen |
+|---|---|
+| `avis_erhalten` → `versendet` | 54 |
+| `teilweise_bezahlt` → `versendet` | 0 |
+| `stornorechnung/*` → `abgeschlossen` | **114** |
+| **Summe** | **168** |
+
+Die 114 Storno-Dokumente sind der größere Teil und gehören ausdrücklich in
+diesen Nachweis — eine frühere Fassung dieses Protokolls nannte nur die 54
+Altwert-Zeilen und wies damit zwei Drittel der GoBD-relevanten
+Statusänderungen nicht aus.
+
+Nach dem Lauf: Verify meldete **0/0/0** — keine Altwerte, keine unbekannten
+Werte, keine Zeile ohne Zuordnung. Die Abrechnung war anschließend live und
+bedienbar.
+
+## Audit-Referenz
+
+Jede Umstellung schrieb einen Audit-Eintrag; suchbar über `invoices.status`
+in Verbindung mit dem Lauf-Zeitpunkt (18.08.2026). Der vollständige Nachweis
+ist git-Historie (`10db8bf8`, PR #108) + DB-Audit-Log + dieses Protokoll.
 
 ## Was daraus gebaut wurde
 
@@ -48,6 +69,9 @@ dieselbe SSoT `parseInvoiceStatus` gebunden.
 
 git-Historie (`10db8bf8`, PR #108) · DB-Audit-Log · dieses Protokoll.
 Die begleitende Testdatei `tests/billing/status-migration.test.ts` ist mit dem
-Skript entfallen: sie prüfte die Idempotenz eines Laufs, den es nicht mehr gibt.
-Die dauerhaft gültige Aussage — der Code muss jeden Wert in `invoices.status`
-lesen können — lebt in `tests/unit/release-verify-status-domain.test.ts` weiter.
+Skript entfallen: sechs ihrer sieben Fälle prüften die Migrationsfunktion
+selbst und sind mit ihr gegenstandslos. Die eine dauerhaft gültige Aussage —
+`abgeschlossen` auf einer normalen Rechnung muss werfen — ist in
+`tests/architecture/billing-pipeline-stage-identity.test.ts` abgedeckt.
+Die davon getrennte Frage „kann der Code jeden Wert in `invoices.status`
+lesen?" beantwortet `tests/unit/release-verify-status-domain.test.ts`.

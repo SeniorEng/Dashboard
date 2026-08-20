@@ -23,9 +23,15 @@ die zwei fehlenden `signed_at` nachgetragen. Termin #1387 (27.05.2026) wurde
 
 ## Vorher / Nachher
 
-Zielzustand laut Skript-Verifikation: §45b-Verbrauch 2026 für Kunde 39 =
-**475,55 €**.
+| | Vorher | Nachher |
+|---|---|---|
+| Termine #177, #710 | `scheduled` (vom Re-Import als „Duplikat → skip" behandelt) | `completed` |
+| Termine #303, #304 (18.03.2026) | `signed_at` leer trotz unterschriebenem Leistungsnachweis | `signed_at` nachgetragen |
+| §45b-Verbrauch 2026, Kunde 39 | um die vier Termine zu niedrig | **475,55 €** (`TARGET_45B_CENTS_2026 = 47555`, vom Skript verifiziert) |
 
-## Nachweis
+Termin #1387 (27.05.2026) blieb bewusst unangetastet.
 
-git-Historie (`19a43a2f`) · DB-Audit-Log · dieses Protokoll.
+## Audit-Referenz
+
+git-Historie (`19a43a2f`) · DB-Audit-Log zum 28.05.2026 auf `appointments`
+für Kunde 39 · dieses Protokoll.

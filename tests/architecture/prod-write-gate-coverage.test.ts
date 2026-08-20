@@ -31,11 +31,39 @@
 //   * Wird es GELÖSCHT, greift Test 1 → Eintrag muss raus.
 // Damit schrumpft die Liste von selbst und kann nicht stillstehen.
 //
+// ── DIE GRENZE: Indirektion sieht er NICHT ─────────────────────────────────
+// Gemessen am 20.08.2026 in `server/scripts/`: 15 Skripte schreiben so, dass
+// dieser Waechter es sieht — 12 weitere schreiben ueber importierte
+// Storage-/Service-Helfer (`rebookAppointmentConsumption`,
+// `stornoInvoiceDocumentOnly`, PDF-Orchestrator …). Die Datei selbst enthaelt
+// dann kein einziges `.update(`, und statische Textsuche kann das nicht
+// aufloesen, ohne den Importgraphen zu verfolgen.
+//
+// Zwei davon sind GoBD-nah: `reconcile-forbidden-private-invoices.ts` und
+// `reconcile-phantom-pot-invoices.ts` erzeugen ueber einen Helfer
+// STORNORECHNUNGEN. Fuer sie ist dieser Waechter blind.
+//
+// Rohes SQL (`db.execute(sql\`UPDATE …\`)`) ist seit dem Review mit drin —
+// `fix-customer-182-budget-cap.ts` schrieb so, ohne jeden Guard.
+//
+// Der belastbare Riegel gegen JEDE Indirektion ist eine Laufzeit-Sperre im
+// gemeinsamen db-Write-Layer (Kontext-Flag, gesetzt von
+// `assertProdWriteAllowedOrThrow`). Die gehoert in einen eigenen PR — sie
+// fasst den Schreibpfad der ganzen App an. Bis dahin gilt: dieser Waechter
+// deckt den direkten Weg ab, nicht den indirekten. Wer ein Wellen-Skript
+// anfasst, prueft von Hand, ob es ueber einen Helfer schreibt.
+//
 // ── Was er NICHT kann (ehrlich, wie beim bash-gate) ────────────────────────
 // Ein Mensch kann einen Eintrag hinzufügen. Verhindern lässt sich das nicht —
 // sichtbar machen schon: `BEKANNTE_LOECHER` muss zur Listenlänge passen, jede
-// Ergänzung ändert also die Zahl im Diff. Ein wachsendes „15 → 16" ist im
-// Review nicht zu übersehen. Das ist ein Stolperdraht, keine Sandbox.
+// Ergänzung ändert also die Zahl im Diff.
+//
+// Eine Einschraenkung dazu, die im Review aufkam und stimmt: wer im SELBEN PR
+// ein Skript gatet (Eintrag faellt raus) und ein neues eintraegt, haelt die
+// Laenge konstant — die ZAHL verraet den Tausch dann nicht. Die Liste selbst
+// steht natuerlich im Diff, ein neuer Dateiname darin ist sichtbar. Aber die
+// Zahl allein traegt die Aussage nicht, und genau dieser Fall ist der
+// Normalfall der Wellen-PRs. Stolperdraht, keine Sandbox.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
@@ -45,8 +73,23 @@ import path from "node:path";
 const SKRIPT_DIR = path.resolve(process.cwd(), "server/scripts");
 const GATE = "assertProdWriteAllowedOrThrow";
 
-/** `.update(`, `.insert(`, `.delete(` — dieselbe Erkennung wie bei der Erhebung. */
-const SCHREIBT = /\.\s*(?:update|insert|delete)\s*\(/;
+/**
+ * Zwei Formen, die statisch sicher erkennbar sind:
+ *   1. Query-Builder: `.update(`, `.insert(`, `.delete(`
+ *   2. rohes SQL ueber `db.execute` / `tx.execute` mit UPDATE/INSERT/DELETE
+ *
+ * Form 2 kam erst im Review dazu — `fix-customer-182-budget-cap.ts` schrieb
+ * per `tx.execute(sql\`UPDATE …\`)` und war fuer den Waechter unsichtbar,
+ * OHNE jeden Guard.
+ */
+const SCHREIBT_BUILDER = /\.\s*(?:update|insert|delete)\s*\(/;
+const SCHREIBT_ROH_EXEC = /\b(?:db|tx|trx)\s*\.\s*execute\s*\(/;
+const SCHREIBT_ROH_SQL = /\b(?:UPDATE\s+\w|INSERT\s+INTO|DELETE\s+FROM|TRUNCATE\s+)/i;
+
+function schreibtDirekt(text: string): boolean {
+  if (SCHREIBT_BUILDER.test(text)) return true;
+  return SCHREIBT_ROH_EXEC.test(text) && SCHREIBT_ROH_SQL.test(text);
+}
 
 /**
  * Gepinnter Schnappschuss der bekannten Löcher. **Diese Liste schrumpft nur.**
@@ -61,6 +104,8 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
   { datei: "server/scripts/cleanup-duplicate-monthly-proofs.ts", sha256: "f4718563d7a688e0" },
   { datei: "server/scripts/cleanup-orphan-appointments.ts", sha256: "9865c82d2fd47bc2" },
   { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "edced74152e2c84b" },
+  { datei: "server/scripts/cleanup-test-data.ts", sha256: "d46beef9193c2384" },
+  { datei: "server/scripts/fix-customer-182-budget-cap.ts", sha256: "ede4c11f2ab3837e" },
   { datei: "server/scripts/reconcile-billed-appointment-import-drift.ts", sha256: "68ea413d0cdcacd2" },
   { datei: "server/scripts/reconcile-import-from-excel.ts", sha256: "e5fa5d19206aeb1c" },
   { datei: "server/scripts/reconcile-km-drift.ts", sha256: "0c1b45563cac5e45" },
@@ -72,13 +117,19 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
 ];
 
 /** Muss zur Listenlänge passen — macht jede Ergänzung im Diff sichtbar. */
-const BEKANNTE_LOECHER = 15;
+const BEKANNTE_LOECHER = 17;
 
+/**
+ * REKURSIV und inklusive `.mts`/`.cts`. Die erste Fassung las nur die oberste
+ * Ebene und nur `.ts` — ein neues `server/scripts/tools/foo.ts` mit
+ * `db.delete(...)` waere still grün geblieben, die Hauptregel also durch einen
+ * Unterordner umgehbar gewesen.
+ */
 function schreibendeSkripte(): string[] {
-  return readdirSync(SKRIPT_DIR)
-    .filter((f) => f.endsWith(".ts"))
+  return readdirSync(SKRIPT_DIR, { recursive: true, encoding: "utf8" })
+    .filter((f) => /\.(?:ts|mts|cts)$/.test(f) && !f.includes("__fixtures__"))
     .map((f) => `server/scripts/${f}`)
-    .filter((rel) => SCHREIBT.test(readFileSync(path.resolve(process.cwd(), rel), "utf8")))
+    .filter((rel) => schreibtDirekt(readFileSync(path.resolve(process.cwd(), rel), "utf8")))
     .sort();
 }
 

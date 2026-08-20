@@ -21,13 +21,17 @@ historischen Zustände.
 
 ## Maßnahme
 
-Zielzustand hergestellt, **Beträge unverändert**, verfügbares Budget identisch:
+Die drei Unfall-Zeilen entfernt, Zielzustand hergestellt — **Beträge
+unverändert**, verfügbares Budget identisch.
 
-- **§45b** (`entlastungsbetrag_45b`): genau **eine** offene Version — id 73,
-  `enabled`, Priorität 2, `valid_from` = Epoch-Sentinel (undatiert),
-  `valid_to = NULL`.
-- **§39/§42a**: analog auf eine offene Version zurückgeführt.
+## Vorher / Nachher
 
-## Nachweis
+| Topf | Vorher | Nachher |
+|---|---|---|
+| §45b (`entlastungsbetrag_45b`) | zusätzlich die Unfall-Zeilen **480** und **481** (zukunfts-datiert 17.07.) | genau **eine** offene Version: **id 73**, `enabled`, Priorität 2, `valid_from` = Epoch-Sentinel (undatiert), `valid_to = NULL`, keine Limits |
+| §39/§42a (`ersatzpflege_39_42a`) | zusätzlich die Unfall-Zeile **479** | genau **eine** offene wertbelegte Version: **id 447**, `enabled`, Priorität 1, `valid_from = 2026-06-03`, `valid_to = NULL`, **3.539 €/Jahr** (`yearly_limit 353900`) |
 
-git-Historie (`0d80cb9d`) · DB-Audit-Log · dieses Protokoll.
+## Audit-Referenz
+
+git-Historie (`0d80cb9d`) · DB-Audit-Log zum 16.07.2026 auf
+`customer_budget_type_settings` für Kunde 96 · dieses Protokoll.

@@ -3,6 +3,8 @@ import {
   dbHostOf,
   parseProdWriteArgs,
   assertApplyTargetIsProdPrimaryOrThrow,
+  assertProdWriteAllowedOrThrow,
+  REASON_MIN_LAENGE,
 } from "../../server/scripts/lib/prod-write-gate";
 
 // Der Datenbankname wird an der offenen Verbindung erfragt; fuer die reinen
@@ -139,5 +141,61 @@ describe("Prod-Schreib-Gate", () => {
       expect(a.userId).toBeUndefined();
       expect(a.reason).toBeUndefined();
     });
+  });
+});
+
+/**
+ * Die ZUSAMMENSETZENDE Funktion — bis hierhin ungetestet.
+ *
+ * Der Architektur-Waechter `prod-write-gate-coverage` erzwingt genau diesen
+ * Symbolnamen. Nachdem das letzte Einmal-Skript, das ihn aufrief, abgelegt
+ * wurde, hat sie im Repo NULL Aufrufer. Ein Gate ohne Aufrufer und ohne Test
+ * ist eine Behauptung: waere das `await` vor
+ * `assertApplyTargetIsProdPrimaryOrThrow` verlorengegangen — wovor der
+ * Dateikopf selbst warnt, und `no-floating-promises` greift hier nicht —,
+ * bliebe alles gruen und der Ziel-Zaun waere still weg.
+ */
+describe("assertProdWriteAllowedOrThrow — das komponierte Gate", () => {
+  it("verlangt --user, bevor irgendetwas anderes geprueft wird", async () => {
+    umgebung("postgres://u:p@helium/neondb");
+    await expect(
+      assertProdWriteAllowedOrThrow({ apply: true, reason: "lang genug fuer den Audit-Log" }, "Zweck"),
+    ).rejects.toThrow(/--user=<superadmin-id>/);
+  });
+
+  it("verlangt eine Begruendung von Mindestlaenge", async () => {
+    umgebung("postgres://u:p@helium/neondb");
+    await expect(
+      assertProdWriteAllowedOrThrow({ apply: true, userId: 1, reason: "zu kurz" }, "Zweck"),
+    ).rejects.toThrow(new RegExp(`mindestens ${REASON_MIN_LAENGE} Zeichen`));
+  });
+
+  it("prueft das ZIEL — ohne --confirm-target kein Scharflauf", async () => {
+    // Der eigentliche Punkt: das `await` vor der Ziel-Pruefung. Faellt es weg,
+    // laeuft die Funktion durch und der Fehl-Dry-Run vom 18.08. waere wieder
+    // moeglich.
+    umgebung("postgres://u:p@helium/neondb");
+    await expect(
+      assertProdWriteAllowedOrThrow(
+        { apply: true, userId: 1, reason: "lang genug fuer den Audit-Log" },
+        "Zweck",
+      ),
+    ).rejects.toThrow(/--confirm-target/);
+  });
+
+  it("ein FALSCHER Datenbankname im --confirm-target bricht ab", async () => {
+    // Genau der Vorfall: `helium` stimmt, `heliumdb` statt `neondb` nicht.
+    umgebung("postgres://u:p@helium/neondb");
+    await expect(
+      assertProdWriteAllowedOrThrow(
+        {
+          apply: true,
+          userId: 1,
+          reason: "lang genug fuer den Audit-Log",
+          confirmTarget: "helium/heliumdb",
+        },
+        "Zweck",
+      ),
+    ).rejects.toThrow();
   });
 });
