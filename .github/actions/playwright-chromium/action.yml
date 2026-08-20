@@ -23,20 +23,22 @@ description: >-
 # war es, weil es bei jedem Lauf `apt-get` nachzog. Der Cache ist deshalb
 # Beiwerk, nicht der Fix; der Fix ist "kein apt, dafuer ein lauter Startcheck".
 #
-# ── Der Cache trotzdem, aber richtig ─────────────────────────────────────────
-#  * `tests-shard` hatte gar keinen und lud dreimal parallel.
-#  * `e2e-smoke` hatte einen mit Key auf `hashFiles('package-lock.json')` —
-#    jede beliebige Dependency-Aenderung entwertete ihn. Der Key haengt jetzt an
-#    der `playwright-core`-Version (bestimmt die Browser-Revision 1:1) plus
-#    `runner.arch` (chromium-linux-x64 und -arm64 sind verschiedene Archive;
-#    `runner.os` ist fuer beide "Linux").
-#  * Bewusst KEIN `restore-keys`: ein Teiltreffer spielte eine fremde Revision
-#    ein. Und der Install laeuft UNBEDINGT, auch bei Cache-Hit — ein
-#    unvollstaendiger Cache heilt sich damit zur Laufzeit selbst.
-#  * `restore` und `save` sind getrennt, weil `actions/cache@v4` sein Save
-#    unter `post-if: success()` faehrt: auf einem roten Job wuerde der Cache NIE
-#    geschrieben — also ausgerechnet in dem Zustand, der diesen PR ausgeloest
-#    hat. `save` laeuft deshalb mit `if: always()`.
+# ── Bewusst OHNE Browser-Cache ───────────────────────────────────────────────
+# Der erste Entwurf cachte `~/.cache/ms-playwright`. Die Messung oben hat das
+# widerlegt: bei 8–11 s Kaltinstallation spart ein Restore von ~180 MB nichts
+# Nennenswertes, kostet aber Quota (10 GB pro Repo, je Playwright-Version eine
+# Kopie) und erzeugt Log-Rauschen — vier Jobs starten gleichzeitig und drei
+# melden zuverlaessig "Unable to reserve cache with key …, another job may be
+# creating this cache" ausgerechnet in den Logs, die man liest, wenn CI rot ist.
+#
+# Dazu kam eine Falle, die der Cache selbst mitbrachte: `actions/cache@v4`
+# speichert unter `post-if: success()`. Auf einem roten Job — dem Zustand, der
+# diesen PR ausgeloest hat — wurde er nie geschrieben, der naechste Lauf war
+# wieder kalt. Reparierbar (`cache/restore` + `cache/save` mit `if: always()`),
+# aber Aufwand fuer einen Nutzen, den es nicht gibt.
+#
+# Wer ihn wieder einfuehren will, braucht einen Grund aus einer Messung, nicht
+# aus dem Gefuehl "Downloads soll man cachen".
 #
 # ── Zwei Startchecks, weil es zwei Fragen sind ───────────────────────────────
 #  1. "Kann die PDF-Engine starten?" — `npm run chromium:smoke` ist die
@@ -84,31 +86,12 @@ runs:
     # `shell: bash` laesst GitHub als `bash --noprofile --norc -e -o pipefail`
     # laufen — `-e` ist also AN. Alle Fehlerpruefungen unten sind deshalb
     # `if`-Bedingungen bzw. `|| …`, damit sie ueberhaupt erreicht werden.
-    - name: Playwright-Version aus dem Lockfile lesen
-      id: pw
-      shell: bash
-      run: |
-        VERSION="$(node -p "require('./package-lock.json').packages['node_modules/playwright-core']?.version ?? ''")"
-        if [ -z "$VERSION" ]; then
-          echo "::error::playwright-core nicht in package-lock.json gefunden — der Cache-Key waere leer."
-          exit 1
-        fi
-        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-        echo "playwright-core: $VERSION"
-
-    - name: Chromium-Cache wiederherstellen
-      id: cache
-      uses: actions/cache/restore@v4
-      with:
-        path: ~/.cache/ms-playwright
-        key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-
     - name: Chromium installieren (ohne apt, mit Wiederholung)
       shell: bash
       run: |
         for versuch in 1 2 3; do
           if timeout -k 10 90 npx playwright install chromium; then
-            echo "Chromium bereit (Versuch $versuch, Cache-Hit: ${{ steps.cache.outputs.cache-hit || 'false' }})."
+            echo "Chromium bereit (Versuch $versuch)."
             exit 0
           fi
           echo "::warning::playwright install chromium fehlgeschlagen oder haengt (Versuch $versuch/3)"
@@ -161,13 +144,3 @@ runs:
         echo "::error::Chromium startet auch nach install-deps nicht."
         exit 1
 
-    # Getrennt vom Restore und mit `if: always()`: `actions/cache@v4` speichert
-    # unter `post-if: success()`. Auf einem roten Job — dem Zustand, der diesen
-    # PR ausgeloest hat — waere der Cache sonst nie geschrieben worden und jeder
-    # Folgelauf wieder kalt.
-    - name: Chromium-Cache speichern
-      if: always() && steps.cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: ~/.cache/ms-playwright
-        key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
