@@ -251,20 +251,39 @@ describe("Dockerfile — Runner-Stage trägt den Pre-Deploy-Pfad", () => {
   // Dieser Test pinnt genau diese Annahme fest, damit ein künftiger Import aus
   // einem anderen Verzeichnis nicht still durchrutscht.
   it("die Guard-Kette bleibt innerhalb der kopierten Verzeichnisse", () => {
-    const guard = readFileSync(
-      path.resolve(process.cwd(), "scripts/lib/ephemeral-db-guard.ts"),
-      "utf8",
-    );
+    // Frueher lautete die Zusicherung "nur `./`-Importe". Das war eine
+    // Naeherung fuer die eigentliche Frage — LIEGT DER IMPORT IM IMAGE? — und
+    // wurde falsch, sobald `ephemeral-db-guard` seine Auswertung nach
+    // `shared/` auslagerte (noetig, weil `server/**` nicht aus `scripts/**`
+    // importieren darf). `shared/` wird kopiert; der Import ist also in
+    // Ordnung, die alte Formulierung war es nicht.
+    //
+    // Jetzt wird gefragt, was gemeint war: jeder relative Import muss in ein
+    // Verzeichnis zeigen, das die Runner-Stage mitbringt.
+    const guardPfad = "scripts/lib/ephemeral-db-guard.ts";
+    const guard = readFileSync(path.resolve(process.cwd(), guardPfad), "utf8");
+    const kopiert = [...dockerfile.matchAll(/^COPY\s+(?!--from)(.+)$/gm)]
+      .flatMap((m) => m[1].trim().split(/\s+/).slice(0, -1))
+      .map((q) => path.posix.normalize(q));
+
     const relatives = [
       ...guard.matchAll(/(?:from|import|require)\s*\(?\s*["'](\.[^"']+)["']/g),
     ].map((m) => m[1]);
+
     for (const rel of relatives) {
+      const ziel = path.posix.normalize(
+        path.posix.join(path.posix.dirname(guardPfad), rel),
+      );
+      const abgedeckt = kopiert.some((q) => ziel === q || ziel.startsWith(`${q}/`));
       expect(
-        rel.startsWith("./"),
-        `ephemeral-db-guard.ts importiert '${rel}' ausserhalb von scripts/lib — ` +
-          `dieses Verzeichnis muss dann ebenfalls ins Image kopiert werden.`,
+        abgedeckt,
+        `ephemeral-db-guard.ts importiert '${rel}' -> '${ziel}', und kein ` +
+          `COPY der Runner-Stage deckt das ab. Im Coolify-Pre-Deploy scheitert ` +
+          `der Config-Load dann mit "Cannot find module".`,
       ).toBe(true);
     }
+    // Sanity: die Aufloesung muss ueberhaupt etwas gefunden haben.
+    expect(relatives.length).toBeGreaterThan(0);
   });
 
   it("kopiert migrate.sh selbst", () => {
