@@ -79,6 +79,11 @@ COPY script ./script
 # von hier. Bewusst NICHT `COPY server ./server` — der Runner soll nicht den
 # ganzen Serverquelltext mitschleppen, `dist/index.cjs` ist die Laufzeit.
 COPY server/lib/db.ts ./server/lib/db.ts
+# Neu mit der Laufzeit-Schreibsperre: `db.ts` importiert sie, also gehoert sie
+# in den Import-Abschluss des Release-Steps. Ohne diese Zeile scheiterte er im
+# Coolify-Pre-Deploy mit "Cannot find module" — der Waechter
+# `migrate-script-guard` hat das beim Bauen sofort gemeldet.
+COPY server/lib/prod-write-lock.ts ./server/lib/prod-write-lock.ts
 COPY server/scripts/lib/prod-write-gate.ts ./server/scripts/lib/prod-write-gate.ts
 # Das Freigabe-Manifest wird zur LAUFZEIT gelesen (new URL(...)), nicht
 # importiert — der Import-Abschluss-Waechter sieht es deshalb nicht. Fehlt es

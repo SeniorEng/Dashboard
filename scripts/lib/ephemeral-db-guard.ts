@@ -73,6 +73,31 @@ export function evaluateTestDbTarget(
   return { ok: false, dbName };
 }
 
+/**
+ * Wie `assertEphemeralTestDb`, aber ohne DB-Pflicht.
+ *
+ * Für das `unit`-Projekt: die meisten Unit-Tests brauchen gar keine Datenbank,
+ * und `assertEphemeralTestDb` wirft bei NICHT gesetzter `DATABASE_URL`
+ * (Pfad 3, `dbName === null`) — ein blosses `vitest run --project unit` wäre
+ * damit neu rot geworden.
+ *
+ * Die gefährliche Richtung bleibt fail-closed: ist eine `DATABASE_URL`
+ * gesetzt, MUSS sie auf eine Wegwerf-DB zeigen. Nur „gar keine DB" ist
+ * erlaubt — daran kann per Konstruktion nichts kaputtgehen.
+ *
+ * Das ist die Zusage, auf der die Test-Ausnahme der Laufzeit-Schreibsperre
+ * (`server/lib/prod-write-lock.ts`) ruht: Test-Kontext ist dort ausgenommen,
+ * und diese Funktion ist der Grund, warum das kein Loch ist.
+ */
+export function assertEphemeralTestDbIfConfigured(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const hatUrl = (env.DATABASE_URL || "").trim().length > 0;
+  const hatOrchestrator = (env.TEST_DATABASE_URLS || "").trim().length > 0;
+  if (!hatUrl && !hatOrchestrator) return;
+  assertEphemeralTestDb(env);
+}
+
 // Bricht den Testlauf hart ab, wenn die Ziel-DB keine Wegwerf-DB ist.
 export function assertEphemeralTestDb(
   env: NodeJS.ProcessEnv = process.env,

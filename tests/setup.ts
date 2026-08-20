@@ -2,6 +2,17 @@ import { beforeAll, afterAll, afterEach } from "vitest";
 import fc from "fast-check";
 import { thawTime } from "./helpers/frozen-clock";
 import { clearTestClock } from "./helpers/test-clock";
+import { assertEphemeralTestDbIfConfigured } from "../scripts/lib/ephemeral-db-guard";
+
+// Läuft in BEIDEN Projekten (`unit` und `integration`) — `tests/setup.ts` ist
+// die einzige Datei, die beide als `setupFiles` laden. `globalSetup` mit dem
+// strengeren `assertEphemeralTestDb` hängt nur am `integration`-Projekt; das
+// `unit`-Projekt hatte bis hierhin GAR KEINEN Wegwerf-DB-Guard.
+//
+// Das ist die Grundlage der Test-Ausnahme in `server/lib/prod-write-lock.ts`:
+// dort ist Test-Kontext vom Ziel-Gate ausgenommen. Diese Zeile ist der Grund,
+// warum das kein Prod-Schreib-Loch ist.
+assertEphemeralTestDbIfConfigured();
 
 if (!process.env.TEST_USER_PASSWORD && process.env.TEST_USER_PASSWORD_INTERNAL) {
   process.env.TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD_INTERNAL;
