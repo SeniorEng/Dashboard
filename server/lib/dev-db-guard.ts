@@ -1,3 +1,4 @@
+import { devZielGeprueft } from "./prod-write-lock";
 /**
  * Dev-DB-CLI-Prod-Schutz-Guards (DB-frei)
  *
@@ -67,6 +68,7 @@ export function dbHostOf(url: string): string {
  *   4. DATABASE_URL-Host == PROD_DATABASE_URL-Host.
  */
 export function assertDevDatabase(): void {
+
   if (process.env.NODE_ENV === "production") {
     throw new Error("ABBRUCH: NODE_ENV=production. db:sweep-dev läuft nur gegen die Dev-DB.");
   }
@@ -90,4 +92,7 @@ export function assertDevDatabase(): void {
     }
   }
   console.log(`Sicherheits-Checks ok. Dev-DB-Host: ${devHost}`);
+  // Erst JETZT, nach allen Pruefungen: der bestandene Dev-DB-Nachweis gilt der
+  // Laufzeit-Schreibsperre als geprueftes Ziel.
+  devZielGeprueft(`dev/${devHost}`);
 }

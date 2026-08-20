@@ -16,6 +16,7 @@
  */
 import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import {
+  devZielGeprueft,
   ermittleKontext,
   freigabeErteilen,
   freigabeZuruecksetzen,
@@ -35,6 +36,12 @@ function alsSkript(pfad = "/repo/server/scripts/irgendein-fix.ts"): void {
   delete process.env.VITEST;
   delete process.env.VITEST_WORKER_ID;
   delete process.env.NODE_ENV;
+  // Skript-Kontext ALLEIN genuegt nicht mehr: seit CI gezeigt hat, dass die
+  // Seeds legitim schreiben, gilt eine verifizierte Wegwerf-DB als zweite
+  // gueltige Zieldeklaration. Fuer „Ziel ungeprueft" muessen diese drei weg.
+  delete process.env.CI;
+  delete process.env.TEST_DATABASE_URLS;
+  delete process.env.DATABASE_URL;
 }
 
 function alsApp(): void {
@@ -243,6 +250,125 @@ describe("Schreibsperre — die Test-Ausnahme und ihr Unterbau", () => {
     );
     const db = mitSchreibsperre(fakeDb());
     expect(() => db.update()).not.toThrow();
+  });
+});
+
+describe("Die zweite gueltige Zieldeklaration: verifizierte Wegwerf-DB", () => {
+  it("Skript-Write auf eine cc_test_-DB geht durch — ohne Prod-Gate", () => {
+    // Der Fall, den CI im ersten Anlauf rot gemacht hat:
+    // `scripts/ci-seed-superadmin.ts` legt den Test-Superadmin an. Er hat kein
+    // Prod-Gate und darf keines haben — er darf nie auf Prod zeigen.
+    alsSkript("/repo/scripts/ci-seed-superadmin.ts");
+    process.env.DATABASE_URL = "postgres://postgres:postgres@localhost:5432/cc_test_x_w0";
+    const db = mitSchreibsperre(fakeDb());
+    expect(() => db.insert()).not.toThrow();
+    expect(() => db.execute("INSERT INTO users (email) VALUES ('x')")).not.toThrow();
+  });
+
+  it("dieselbe Datei auf einer ECHTEN DB wirft weiterhin", () => {
+    alsSkript("/repo/scripts/ci-seed-superadmin.ts");
+    process.env.DATABASE_URL = "postgres://u:p@helium/neondb";
+    const db = mitSchreibsperre(fakeDb());
+    expect(() => db.insert()).toThrow(/ohne Ziel-Freigabe/);
+  });
+
+  it("Orchestrator-Worker-DBs zaehlen ebenfalls als geprueftes Ziel", () => {
+    alsSkript();
+    process.env.TEST_DATABASE_URLS = "postgres://u:p@localhost/cc_test_a_w0";
+    const db = mitSchreibsperre(fakeDb());
+    expect(() => db.update()).not.toThrow();
+  });
+});
+
+describe("Die Loecher, die der Review aufgedeckt hat", () => {
+  it("NODE_ENV=test allein schaltet die Sperre NICHT ab", () => {
+    // CLAUDE.md schreibt fuer den lokalen Testbetrieb
+    // `set -a; . ./.env.test.local; set +a` vor — und diese Datei setzt
+    // NODE_ENV=test. Haette das gereicht, waere die Sperre in genau der Shell
+    // tot gewesen, in der hier taeglich gearbeitet wird.
+    expect(
+      ermittleKontext("/repo/server/scripts/x.ts", { NODE_ENV: "test" } as NodeJS.ProcessEnv),
+    ).toBe("skript");
+    alsSkript();
+    process.env.NODE_ENV = "test";
+    process.env.DATABASE_URL = "postgres://u:p@helium/neondb";
+    const db = mitSchreibsperre(fakeDb());
+    expect(() => db.insert()).toThrow(/ohne Ziel-Freigabe/);
+  });
+
+  it("nur echtes Vitest gilt als Test-Kontext", () => {
+    for (const env of [{ VITEST: "true" }, { VITEST_WORKER_ID: "3" }]) {
+      expect(ermittleKontext("/repo/server/scripts/x.ts", env as NodeJS.ProcessEnv)).toBe("test");
+    }
+  });
+
+  it("der Dev-DB-Nachweis ist eine gueltige Zieldeklaration", () => {
+    // Ohne ihn waeren `npm run db:sweep-dev`, `cleanup:test-data`,
+    // `purge:junk-master-data` und `budget:correct-km-drift` nicht mehr
+    // ausfuehrbar: das Prod-Gate verlangt NODE_ENV=production und lehnt lokale
+    // Hosts ab, kann fuer die Dev-DB also per Konstruktion nie greifen. Eine
+    // Sperre, die legitime Arbeit unmoeglich macht, wird umgangen.
+    alsSkript("/repo/server/scripts/sweep-dev-test-data.ts");
+    process.env.DATABASE_URL = "postgres://u:p@dev-host/careconnect_dev";
+    const db = mitSchreibsperre(fakeDb());
+    expect(() => db.delete()).toThrow(/ohne Ziel-Freigabe/);
+
+    devZielGeprueft("dev/dev-host");
+    expect(() => db.delete()).not.toThrow();
+  });
+});
+
+describe("Die Huelle an einer ECHTEN drizzle-Instanz", () => {
+  // Die uebrigen Faelle laufen gegen ein handgeschriebenes Doppel. Die
+  // teuerste Frage des PR — geht `select`, `$with`, `$count`, `query` durch,
+  // bricht `.bind()` etwas? — beantwortet das nicht. Hier wird sie beantwortet.
+  it("Lesepfade und Query-Builder funktionieren durch die Huelle", async () => {
+    const { drizzle } = await import("drizzle-orm/node-postgres");
+    const { invoices } = await import("@shared/schema");
+    const roh = drizzle({} as never);
+    const gesperrt = mitSchreibsperre(roh);
+
+    alsSkript();
+    // Ein Query-Builder-Aufruf, der NICHT schreibt, muss unveraendert
+    // funktionieren — bis hin zum erzeugten SQL.
+    const abfrage = gesperrt.select().from(invoices).toSQL();
+    expect(abfrage.sql).toMatch(/select/i);
+    expect(abfrage.sql).toMatch(/invoices/i);
+    // Relational-API und interne Felder gehen als Objekte durch.
+    expect(gesperrt.query).toBeDefined();
+    expect(typeof gesperrt.$with).toBe("function");
+  });
+
+  it("schreibende Query-Builder-Aufrufe werden auch dort geblockt", async () => {
+    const { drizzle } = await import("drizzle-orm/node-postgres");
+    const { invoices } = await import("@shared/schema");
+    const gesperrt = mitSchreibsperre(drizzle({} as never));
+    alsSkript();
+    expect(() => gesperrt.delete(invoices)).toThrow(/ohne Ziel-Freigabe/);
+  });
+});
+
+describe("execute — die Formen aus dem Gate-2-Review", () => {
+  it.each([
+    ["SELECT setval('invoice_seq', 5000)", true],
+    ["COPY invoices FROM STDIN", true],
+    ["CREATE OR REPLACE VIEW v AS SELECT 1", true],
+    ["REFRESH MATERIALIZED VIEW mv", true],
+    ["DROP SEQUENCE s", true],
+    ["ALTER SEQUENCE s RESTART", true],
+    ["GRANT SELECT ON invoices TO app", true],
+    // Schreibt selbst nichts, hebt aber den GoBD-Mutations-Riegel der
+    // DB-Trigger auf — gehoert nicht in die harmlose Klasse.
+    ["SET LOCAL app.allow_gobd_mutation = 'on'", true],
+    // Zeilensperren sind LESEND. Ein Riegel, der Reports blockiert, wird
+    // abgeschaltet.
+    ["SELECT * FROM invoices FOR UPDATE SKIP LOCKED", false],
+    ["SELECT * FROM invoices FOR UPDATE OF invoices", false],
+  ])("%s -> blockiert: %s", (sqlText, blockiert) => {
+    alsSkript();
+    const db = mitSchreibsperre(fakeDb());
+    if (blockiert) expect(() => db.execute(sqlText)).toThrow(/ohne Ziel-Freigabe/);
+    else expect(() => db.execute(sqlText)).not.toThrow();
   });
 });
 

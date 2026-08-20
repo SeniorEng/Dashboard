@@ -26,6 +26,10 @@
 // Die Prüfung sitzt jetzt in den Entrypoints selbst.
 // ---------------------------------------------------------------------------
 import { DB_PREFIX } from "./ephemeral-db-sweep.ts";
+import {
+  evaluateTestDbTarget,
+  type WegwerfZiel,
+} from "../../shared/ephemeral-db-target.ts";
 
 function dbNameOf(url: string | undefined): string | null {
   if (!url) return null;
@@ -38,40 +42,19 @@ function dbNameOf(url: string | undefined): string | null {
   }
 }
 
-export type TestDbTarget =
-  | { ok: true; reason: string }
-  | { ok: false; dbName: string | null };
-
-// Entscheidet, ob die effektive Test-Ziel-DB eine erlaubte Wegwerf-/Ephemeral-DB
-// ist. Reine Funktion (env wird übergeben), damit sie unit-getestet werden kann.
-export function evaluateTestDbTarget(
-  env: NodeJS.ProcessEnv = process.env,
-): TestDbTarget {
-  // 1) CI (GitHub Actions): Der gesamte Postgres-Container ist wegwerfbar und
-  //    sitzt hinter dem fix verdrahteten Neon-WS-Proxy. Die DB heißt dort
-  //    statisch `careconnect` (NICHT `cc_test_*`) — der Proxy ignoriert den
-  //    DB-Namen ohnehin. CI daher NIE blockieren.
-  if (env.CI === "true") {
-    return { ok: true, reason: "CI (wegwerfbarer Container-DB-Container)" };
-  }
-
-  // 2) Lokaler Orchestrator (`scripts/with-ephemeral-db.ts`): provisioniert pro
-  //    Worker eine eigene `cc_test_*`-Wegwerf-DB und exportiert deren URLs in
-  //    `TEST_DATABASE_URLS`. Ist diese Variable gesetzt, laufen wir garantiert
-  //    über den Orchestrator gegen Ephemeral-DBs.
-  if ((env.TEST_DATABASE_URLS || "").trim().length > 0) {
-    return { ok: true, reason: "Orchestrator-Ephemeral-Worker-DBs" };
-  }
-
-  // 3) Andernfalls MUSS die effektive `DATABASE_URL` direkt auf eine
-  //    `cc_test_*`-Wegwerf-DB zeigen.
-  const dbName = dbNameOf(env.DATABASE_URL);
-  if (dbName && dbName.startsWith(DB_PREFIX)) {
-    return { ok: true, reason: `Wegwerf-DB ${dbName}` };
-  }
-
-  return { ok: false, dbName };
-}
+// Die Auswertung selbst liegt jetzt in `shared/ephemeral-db-target.ts` — die
+// Laufzeit-Schreibsperre (`server/lib/prod-write-lock.ts`) braucht dieselbe
+// Antwort, und `server/**` darf nicht aus `scripts/**` importieren. Hier bleibt
+// nur die Re-Export-Schicht, damit alle bisherigen Importeure unveraendert
+// weiterlaufen.
+//
+// RELATIVER Import, kein `@shared/*`-Alias: diese Datei wird von
+// `drizzle.config.ts` geladen, und das laedt drizzle-kit ohne tsconfig-Pfade.
+// Mit dem Alias scheiterte der Config-Load mit "Cannot find module" — also
+// genau der Prod-Migrationspfad. Derselbe Grund, aus dem die Config
+// `import type` statt eines Laufzeit-Imports benutzt.
+export type TestDbTarget = WegwerfZiel;
+export { evaluateTestDbTarget };
 
 /**
  * Wie `assertEphemeralTestDb`, aber ohne DB-Pflicht.
@@ -84,10 +67,6 @@ export function evaluateTestDbTarget(
  * Die gefährliche Richtung bleibt fail-closed: ist eine `DATABASE_URL`
  * gesetzt, MUSS sie auf eine Wegwerf-DB zeigen. Nur „gar keine DB" ist
  * erlaubt — daran kann per Konstruktion nichts kaputtgehen.
- *
- * Das ist die Zusage, auf der die Test-Ausnahme der Laufzeit-Schreibsperre
- * (`server/lib/prod-write-lock.ts`) ruht: Test-Kontext ist dort ausgenommen,
- * und diese Funktion ist der Grund, warum das kein Loch ist.
  */
 export function assertEphemeralTestDbIfConfigured(
   env: NodeJS.ProcessEnv = process.env,

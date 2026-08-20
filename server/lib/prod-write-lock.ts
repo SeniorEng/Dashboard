@@ -35,6 +35,7 @@
  */
 import path from "node:path";
 import { istSchreibendesSql } from "@shared/db-write-statements";
+import { evaluateTestDbTarget } from "@shared/ephemeral-db-target";
 
 export type Schreibkontext = "app" | "test" | "skript";
 
@@ -46,8 +47,13 @@ export function ermittleKontext(
   argv1: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): Schreibkontext {
-  // Vitest setzt `VITEST`; `NODE_ENV=test` deckt Nebenwege ab.
-  if (env.VITEST === "true" || env.VITEST_WORKER_ID || env.NODE_ENV === "test") {
+  // NUR Vitest. `NODE_ENV=test` galt hier zunaechst mit — das war ein Loch:
+  // CLAUDE.md schreibt fuer den lokalen Testbetrieb
+  // `set -a; . ./.env.test.local; set +a` vor, und diese Datei setzt
+  // `NODE_ENV=test`. In genau der Shell, in der hier taeglich gearbeitet wird,
+  // waere die Sperre tot gewesen — und ein Skript haette gegen die Prod-Kopie
+  // schreiben koennen, ohne irgendein Ziel zu nennen.
+  if (env.VITEST === "true" || env.VITEST_WORKER_ID) {
     return "test";
   }
   if (!argv1) return "skript"; // fail-closed
@@ -57,24 +63,46 @@ export function ermittleKontext(
   if (/(^|\/)dist\/index\.cjs$/.test(p) || /(^|\/)server\/index\.ts$/.test(p)) {
     return "app";
   }
-  if (/(^|\/)(server\/)?scripts\//.test(p)) return "skript";
+  // Kein eigener Zweig fuer `scripts/`: er waere wirkungsgleich mit dem
+  // Default, und eine Mutation, die ihn loescht, wuerde zwangslaeufig
+  // ueberleben. Alles, was nicht nachweislich App oder Vitest ist, ist Skript.
   return "skript"; // fail-closed
 }
 
-let freigabe: { erteilt: true; ziel: string } | null = null;
+/**
+ * Der erbrachte Zielnachweis. `art` sagt, WELCHE der drei Formen ihn erbracht
+ * hat — das steht in der Fehlermeldung eines spaeteren Abbruchs und im Log.
+ */
+let freigabe: { art: "prod-gate" | "dev-db"; ziel: string } | null = null;
 
 /** Wird ausschliesslich vom Prod-Schreib-Gate gerufen, nach dessen Pruefungen. */
 export function freigabeErteilen(ziel: string): void {
-  freigabe = { erteilt: true, ziel };
+  freigabe = { art: "prod-gate", ziel };
+  // Das Ziel gehoert ins Log, nicht nur ins Feld: bei einem spaeteren Vorfall
+  // ist die erste Frage "wogegen lief das eigentlich?".
+  console.log(`[write-lock] Ziel geprueft (Prod-Gate): ${ziel}`);
+}
+
+/**
+ * Zweite Form: `assertDevDatabase()` hat bestaetigt, dass das Ziel die
+ * Dev-Datenbank ist (kein Prod-Host, kein Prod-Name).
+ *
+ * Ohne sie waeren die dokumentierten Wartungsskripte (`npm run db:sweep-dev`,
+ * `cleanup:test-data`, `purge:junk-master-data`, `budget:correct-km-drift`)
+ * nicht mehr ausfuehrbar: das Prod-Gate verlangt `NODE_ENV=production` und
+ * lehnt lokale Hosts ab, kann also fuer die Dev-DB per Konstruktion nie
+ * greifen. Eine Sperre, die legitime Arbeit unmoeglich macht, wird umgangen —
+ * und der Umgehungsweg waere ausgerechnet das gewesen, was oben gerade
+ * geschlossen wurde.
+ */
+export function devZielGeprueft(ziel: string): void {
+  freigabe = { art: "dev-db", ziel };
+  console.log(`[write-lock] Ziel geprueft (Dev-DB): ${ziel}`);
 }
 
 /** Nur fuer Tests: den Prozess-Zustand zuruecksetzen. */
 export function freigabeZuruecksetzen(): void {
   freigabe = null;
-}
-
-export function freigabeErteilt(): boolean {
-  return freigabe !== null;
 }
 
 const HINWEIS = [
@@ -107,9 +135,30 @@ const HINWEIS = [
  * @param was Name der Operation, fuer die Fehlermeldung (`insert`, `execute`, …)
  */
 export function assertSchreibenErlaubt(was: string): void {
-  if (ermittleKontext(process.argv[1]) !== "skript") return;
-  if (freigabe) return;
+  if (zielIstGeprueft()) return;
   throw new Error(`${HINWEIS}\n  Blockierte Operation: ${was}\n`);
+}
+
+/**
+ * Es gibt ZWEI legitime Arten, ein Ziel zu deklarieren — und die Sperre
+ * verlangt genau das, nicht mehr:
+ *
+ *   1. `assertProdWriteAllowedOrThrow` → bewusster Schreibzugriff auf eine
+ *      echte Datenbank, mit Host + `current_database()` + Superadmin + Grund.
+ *   2. eine verifizierte **Wegwerf-DB** → per Konstruktion unschaedlich.
+ *   3. `assertDevDatabase()` → bestaetigte Dev-Datenbank.
+ *
+ * Form 2 fehlte im ersten Entwurf, und CI hat es sofort gezeigt:
+ * `scripts/ci-seed-superadmin.ts` legt den Test-Superadmin an und wurde
+ * blockiert. Dieselbe Klasse sind der Schema-Migrator und die Test-Cleanups —
+ * sie haben kein Prod-Gate, weil sie nie auf Prod zeigen duerfen. Sie als
+ * Ausnahme zu behandeln waere falsch: sie erfuellen die Regel „kein
+ * Schreibzugriff ohne geprueftes Ziel" auf dem anderen Weg.
+ */
+function zielIstGeprueft(): boolean {
+  if (ermittleKontext(process.argv[1]) !== "skript") return true;
+  if (freigabe) return true; // Prod-Gate oder Dev-DB-Nachweis
+  return evaluateTestDbTarget(process.env).ok; // Wegwerf-DB
 }
 
 /**
@@ -118,8 +167,7 @@ export function assertSchreibenErlaubt(was: string): void {
  * Waechter (`@shared/db-write-statements`), damit beide nicht auseinanderlaufen.
  */
 export function assertExecuteErlaubt(sql: unknown): void {
-  if (ermittleKontext(process.argv[1]) !== "skript") return;
-  if (freigabe) return;
+  if (zielIstGeprueft()) return;
   const text = sqlText(sql);
   // Unlesbare Form ⇒ wie Schreiben behandeln. Fail-closed auch hier: eine
   // Anweisung, die wir nicht lesen koennen, duerfen wir nicht freigeben.
@@ -127,28 +175,44 @@ export function assertExecuteErlaubt(sql: unknown): void {
   throw new Error(`${HINWEIS}\n  Blockierte Operation: execute\n`);
 }
 
-/** Drizzle reicht `SQL`-Objekte durch; wir brauchen nur den Text. */
-function sqlText(sql: unknown): string | null {
+/**
+ * Drizzle reicht `SQL`-Objekte durch; wir brauchen nur den Text.
+ *
+ * REKURSIV, weil ein Chunk selbst wieder ein `SQL`-Objekt sein kann
+ * (`sql\`${sql\`DELETE FROM invoices\`}\``). Die erste Fassung bildete solche
+ * Chunks auf `""` ab — heraus kam Whitespace statt `null`, die Anweisung galt
+ * als lesend und ging durch. Genau das Gegenteil der zugesagten Regel.
+ *
+ * Und: bleibt nach dem Zusammensetzen nur Leerraum, gilt das als UNLESBAR
+ * (`null`) — nicht als "leer, also harmlos".
+ */
+function sqlText(sql: unknown, tiefe = 0): string | null {
   if (typeof sql === "string") return sql;
+  if (tiefe > 8) return null; // Zyklenschutz; im Zweifel unlesbar
   if (sql && typeof sql === "object") {
-    const q = sql as { queryChunks?: unknown[] };
+    const q = sql as { queryChunks?: unknown[]; value?: unknown };
     if (Array.isArray(q.queryChunks)) {
-      // Die statischen Teile genuegen: `UPDATE foo SET x = $1` steht dort,
-      // die Parameter sind irrelevant fuer die Frage "schreibt das?".
-      return q.queryChunks
-        .map((c) => {
-          if (typeof c === "string") return c;
-          const v = (c as { value?: unknown }).value;
-          return Array.isArray(v) ? v.join("") : "";
-        })
-        .join(" ");
+      const teile = q.queryChunks.map((c) => sqlText(c, tiefe + 1) ?? "");
+      const text = teile.join(" ").trim();
+      return text.length > 0 ? text : null;
     }
+    if (Array.isArray(q.value)) return q.value.join("");
+    if (typeof q.value === "string") return q.value;
   }
   return null;
 }
 
 /** Namen der Methoden, die schreiben (vgl. `DbOrTx` in `server/lib/db.ts`). */
-const SCHREIB_METHODEN = new Set(["insert", "update", "delete"]);
+const SCHREIB_METHODEN = new Set([
+  "insert",
+  "update",
+  "delete",
+  // Gemessen an der realen drizzle-Instanz (Reflect.ownKeys ueber die
+  // Prototypenkette): sie hat ausserdem `refreshMaterializedView`, und das
+  // schreibt. Die Menge war als "die Methoden, die schreiben" deklariert und
+  // war es nicht.
+  "refreshMaterializedView",
+]);
 
 /**
  * Legt die Sperre um ein `db`- oder `tx`-Objekt.

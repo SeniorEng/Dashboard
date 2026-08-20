@@ -31,12 +31,39 @@ export const ROH_EXEC_MUSTER = /\b(?:db|tx|trx)\s*\.\s*execute\s*\(/;
  * Anweisungen gleichermaßen, und ein Riegel, der Reports blockiert, wird
  * abgeschaltet. Was hier steht, verändert Daten oder Struktur.
  */
-// Kein abschliessendes `\b`: es verlangte eine Wortgrenze direkt hinter dem
-// ersten Zeichen des Tabellennamens, weshalb `UPDATE invoices …` NICHT traf
-// (`UPDATE i` traf, `UPDATE in` nicht). Der Mutationstest 4 hat das gefunden —
-// ohne ihn waere die Laufzeit-Sperre fuer rohes `UPDATE` blind geblieben.
-export const ROH_SQL_MUSTER =
-  /\b(?:UPDATE\s+\w|INSERT\s+INTO\b|DELETE\s+FROM\b|TRUNCATE\b|ALTER\s+TABLE\b|DROP\s+(?:TABLE|COLUMN|INDEX|TYPE|SCHEMA)\b|CREATE\s+(?:TABLE|INDEX|UNIQUE|TYPE|SCHEMA)\b)/i;
+// Kein abschliessendes `\b` hinter `UPDATE\s+\w`: es verlangte eine Wortgrenze
+// direkt hinter dem ERSTEN Zeichen des Tabellennamens, weshalb
+// `UPDATE invoices …` NICHT traf (`UPDATE i` traf, `UPDATE in` nicht).
+// Mutationstest 4 hat das gefunden.
+//
+// Und `UPDATE` bekommt einen negativen Vorgriff: `… FOR UPDATE SKIP LOCKED`
+// bzw. `FOR UPDATE OF x` sind LESEND. Ohne ihn haette die Sperre
+// Report-Skripte mit Zeilensperren blockiert — und ein Riegel, der Reports
+// blockiert, wird abgeschaltet.
+export const ROH_SQL_MUSTER = new RegExp(
+  [
+    // Daten
+    String.raw`(?:^|[;(\s])UPDATE\s+(?!SKIP\b|OF\b|NOWAIT\b)\w`,
+    String.raw`\bINSERT\s+INTO\b`,
+    String.raw`\bDELETE\s+FROM\b`,
+    String.raw`\bTRUNCATE\b`,
+    String.raw`\bCOPY\s+\w+\s+FROM\b`,
+    String.raw`\bMERGE\s+INTO\b`,
+    // Sequenzen: schreiben, ohne wie Schreiben auszusehen
+    String.raw`\b(?:setval|nextval)\s*\(`,
+    // Struktur
+    String.raw`\bALTER\s+(?:TABLE|SEQUENCE|DATABASE|TYPE|INDEX|VIEW|SCHEMA|FUNCTION)\b`,
+    String.raw`\bDROP\s+(?:TABLE|COLUMN|INDEX|TYPE|SCHEMA|VIEW|SEQUENCE|FUNCTION|DATABASE|TRIGGER|CONSTRAINT)\b`,
+    String.raw`\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TABLE|INDEX|UNIQUE|TYPE|SCHEMA|VIEW|MATERIALIZED|SEQUENCE|FUNCTION|TRIGGER|DATABASE)\b`,
+    String.raw`\bREFRESH\s+MATERIALIZED\s+VIEW\b`,
+    // Rechte
+    String.raw`\b(?:GRANT|REVOKE)\b`,
+    // Riegel-Abschaltung: schreibt selbst nichts, hebt aber den
+    // GoBD-Mutations-Schutz der DB-Trigger auf. Gehoert nicht in „harmlos".
+    String.raw`\bSET\s+(?:LOCAL\s+)?app\.`,
+  ].join("|"),
+  "i",
+);
 
 /**
  * Verändert dieses rohe SQL etwas? Für den **Laufzeit**-Prüfer: er sieht die
