@@ -52,7 +52,7 @@ db_host_of() {
   local url="$1" h
   # IPv6 in eckigen Klammern ZUERST: `[^:/?#]+` stoppt sonst am ersten `:`
   # und liefert nur `[`. Gemessen ergab `postgres://u:p@[::1]:5432/db` in Bash
-  # `[`, in TS `[::1]` — eine stille Divergenz, die kein Test je verglich. Die
+  # `[`, in TS `[::1]` — eine stille Divergenz, die kein Test je verglich.
   # Die Folge: jeder Vergleich, der auf dem extrahierten Host aufbaut, verglich
   # in den zwei Sprachen VERSCHIEDENE Werte — etwa die Host-Gleichheit gegen
   # PROD_DATABASE_URL. (Dass `assert_dev_db` einen Loopback durchlaesst, ist

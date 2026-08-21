@@ -29,7 +29,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dbHostOf, dbNameOf } from "@shared/ephemeral-db-target";
+// NUR `dbNameOf` — `dbHostOf` kommt unten aus `dev-db-guard` (Re-Export der
+// SSoT). Beides zu importieren band denselben Namen zweimal: `tsc` sieht es
+// nicht (tsconfig schliesst `**/*.test.ts` aus), esbuild eliminierte den
+// unbenutzten Specifier — welche Bindung gewinnt, entschied damit der
+// Bundler statt des Quelltexts. Gate-2-Review PR #121.
+import { dbNameOf } from "@shared/ephemeral-db-target";
 import path from "node:path";
 import {
   dbHostOf,
@@ -375,6 +380,12 @@ describe("db_host_of ⇔ dbHostOf — Paritaet der Host-Extraktion", () => {
     "POSTGRES://U:P@Helium/DB",
     "postgres://u:p%2Fx@helium/neondb",
     "postgres://u:p@[::1]:5432/db",
+    // Aus dem Gate-2-Review von PR #121: geklammerte Hosts, an denen
+    // `new URL()` WIRFT — hier entscheidet auf beiden Seiten der Fallback,
+    // und genau dort war die Klammer-Alternative zunaechst nur in bash.
+    "postgres://u:p@[::1]x/db",
+    "postgres://u:p@[::1]./db",
+    "postgres://u:p@[fe80::1%25eth0]:5432/db",
     "postgres ://user@host/db",
     "garbage",
     "",
@@ -388,6 +399,41 @@ describe("db_host_of ⇔ dbHostOf — Paritaet der Host-Extraktion", () => {
     });
     expect(res.status).toBe(0);
     expect(res.stdout).toBe(ts);
+  });
+
+  /**
+   * BEKANNTE, bewusst akzeptierte Divergenz — hier festgenagelt statt
+   * verschwiegen (Gate-2-Review PR #121).
+   *
+   * Fuer geklammerte IPv6-Adressen, die `new URL()` ANNIMMT, normalisiert
+   * WHATWG die Adresse (Nullgruppen-Kompression, IPv4-mapped in Hex); `sed`
+   * kann das nicht. Eine Regex holt das nicht ein, und die Gegenrichtung waere
+   * SCHLECHTER: liesse TS die Normalisierung weg, wuerde
+   * `[0:0:0:0:0:0:0:1]` den Loopback-Screen in prod-write-gate.ts nicht mehr
+   * treffen. Die normalisierende Seite ist die strengere.
+   *
+   * Tragbar ist es, weil die Divergenz in BEIDE Richtungen fail-closed faellt:
+   * die Host-Vergleiche verlangen Gleichheit, ein Auseinanderlaufen bricht ab —
+   * es laesst nie beide Seiten faelschlich passieren. Dieser Test haelt genau
+   * diese Zusage fest: sobald eine Seite still zur anderen kippt, wird er rot.
+   */
+  it.each([
+    ["postgres://u:p@[0:0:0:0:0:0:0:1]/db", "[::1]", "[0:0:0:0:0:0:0:1]"],
+    ["postgres://u:p@[::FFFF:127.0.0.1]:5432/db", "[::ffff:7f00:1]", "[::ffff:127.0.0.1]"],
+  ])("%j divergiert bekannt — und faellt dabei fail-closed", (url, erwartetTs, erwartetBash) => {
+    const ts = dbHostOf(url);
+    const res = spawnSync("bash", ["-c", `source "$0"; db_host_of "$1"`, SHELL_LIB, url], {
+      encoding: "utf8",
+    });
+    expect(ts).toBe(erwartetTs);
+    expect(res.stdout).toBe(erwartetBash);
+
+    // Der Punkt, auf den es ankommt: beide finden EINEN Host (kein fail-open
+    // ueber einen leeren String), und sie sind ungleich — jeder
+    // Gleichheits-Vergleich darueber bricht ab statt durchzulassen.
+    expect(ts).not.toBe("");
+    expect(res.stdout).not.toBe("");
+    expect(ts).not.toBe(res.stdout);
   });
 
   it("ein malformter Scheme-Prefix liefert auf BEIDEN Seiten nichts", () => {

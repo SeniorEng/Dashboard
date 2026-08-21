@@ -64,8 +64,22 @@ export function dbHostOf(url: string | undefined): string | null {
   try {
     return new URL(url).hostname.toLowerCase() || null;
   } catch {
-    // Nur mit GUELTIGEM Schema (`scheme://`) — exakt gespiegelt aus der
-    // sed-Regex in scripts/lib/assert-dev-db.sh.
+    // Nur mit GUELTIGEM Schema (`scheme://`) — zeichengleich zu `db_host_of`
+    // in scripts/lib/assert-dev-db.sh, BEIDE Alternativen in derselben
+    // Reihenfolge:
+    //
+    //   1. geklammerte IPv6 (`[...]`) ZUERST — `[^:/?#]+` stoppt sonst am
+    //      ersten `:` und liefert nur `[`.
+    //   2. sonst das gewoehnliche Host-Muster.
+    //
+    // Die erste Alternative kam im Gate-2-Review von PR #121 dazu, nachdem
+    // sie zunaechst NUR auf der Bash-Seite eingebaut war. Genau daran haette
+    // die Konsolidierung fail-open gedreht: `postgres://u:p@[::1]x/db` lieferte
+    // hier `[`, nach dem Strippen der Klammern `""` — und der Loopback-Screen
+    // in prod-write-gate.ts lief ins Leere. VOR der Konsolidierung war dieser
+    // Pfad dort fallback-frei und starb bei "Host nicht ermittelbar".
+    const geklammert = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/(?:[^@\/?#]*@)?(\[[^\]]*\])/);
+    if (geklammert) return geklammert[1].toLowerCase();
     const m = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/(?:[^@\/?#]*@)?([^:\/?#]+)/);
     return m ? m[1].toLowerCase() : null;
   }
