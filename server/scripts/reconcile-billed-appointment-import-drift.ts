@@ -80,7 +80,7 @@ import {
   persistInvoicePdf,
   schedulePdfPersistInBackground,
 } from "../services/invoice-pdf-orchestrator";
-import { dbHostOf, PROD_HOST_PATTERN } from "../lib/dev-db-guard";
+import { assertProdWriteAllowedOrThrow } from "./lib/prod-write-gate";
 import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 
 export interface Args {
@@ -89,6 +89,7 @@ export interface Args {
   appointmentIds: number[];
   userId?: number;
   reason?: string;
+  confirmTarget?: string;
   importLinkedOnly: boolean;
 }
 
@@ -111,6 +112,7 @@ function parseArgs(): Args {
     customerIds: parseIdList(get("--customer=")),
     appointmentIds: parseIdList(get("--appointment=")),
     userId: userId !== undefined && Number.isFinite(userId) ? userId : undefined,
+    confirmTarget: get("--confirm-target="),
     reason: get("--reason="),
     importLinkedOnly: argv.includes("--import-linked-only"),
   };
@@ -138,36 +140,22 @@ async function assertSuperadminOrThrow(userId: number): Promise<void> {
   }
 }
 
-/**
- * Spiegelbild zu `assertDevDatabase()`: verweigert den SCHARFEN Lauf, wenn NICHT
- * gegen die Produktions-DB gearbeitet wird. Der Drift lebt in Prod und die
- * GoBD-Storno-/Neuausstellungs-Artefakte sind prod-env-scoped — eine Reparatur
- * gegen eine Dev-/Test-DB würde nur dort Rechnungen anlegen und den Prod-Bestand
- * unberührt lassen. Nutzt die SSoT-Host-Helfer aus `dev-db-guard.ts` (kein
- * eigenes URL-Parsing, keine Änderung an dem paritäts-geschützten Modul).
- *
- * Der TROCKENLAUF ist überall erlaubt (read-only) und ruft diesen Guard nicht.
- */
-function assertProdDatabase(): void {
-  const url = process.env.DATABASE_URL || "";
-  if (!url) throw new Error("ABBRUCH: DATABASE_URL ist nicht gesetzt.");
-  const host = dbHostOf(url);
-  // Fail-closed: ohne ermittelbaren Host kann der Prod-Nachweis nicht greifen.
-  if (!host) {
-    throw new Error("ABBRUCH: DB-Host konnte aus DATABASE_URL nicht extrahiert werden (fail-closed).");
-  }
-  const prodUrl = process.env.PROD_DATABASE_URL || "";
-  const prodHost = prodUrl ? dbHostOf(prodUrl) : "";
-  const looksProd = PROD_HOST_PATTERN.test(host) || (prodHost !== "" && host === prodHost);
-  if (!looksProd) {
-    throw new Error(
-      `ABBRUCH: DB-Host '${host}' sieht NICHT nach Produktion aus. ` +
-        `--apply schreibt GoBD-Storno-/Neuausstellungs-Artefakte und darf NUR ` +
-        `gegen die Produktions-DB laufen (Trockenlauf ist überall erlaubt).`,
-    );
-  }
-  console.log(`Prod-DB-Guard ok. DB-Host: ${host}`);
-}
+// `assertProdDatabase()` ist entfallen — ERSETZT durch die SSoT
+// `server/scripts/lib/prod-write-gate.ts`.
+//
+// Sie war ein DRITTER Prod-Begriff, und ein falscher:
+//
+//   const looksProd = PROD_HOST_PATTERN.test(host) || (prodHost !== "" && host === prodHost);
+//
+// Auf Replit heisst der interne Host in Dev und Prod gleich. `host === prodHost`
+// war damit auch fuer `heliumdb` wahr — die Wegwerf-Default-DB galt als
+// Produktion, und ein `--apply` haette GoBD-Storno-/Neuausstellungs-Artefakte
+// dorthin geschrieben. Der 18.08.2026 mit umgekehrtem Vorzeichen.
+//
+// Die SSoT fragt statt der FORM die IDENTITAET: Host + `current_database()` aus
+// der offenen Verbindung gegen `PROD_DATABASE_URL`, plus `--confirm-target`,
+// Superadmin und Begruendung.
+
 
 /** Als geschützt geltender Termin: über LN, Rechnung oder beides versiegelt. */
 function isFlaggedRow(row: BilledImportDriftRow): boolean {
@@ -499,8 +487,16 @@ async function main(): Promise<void> {
       );
       process.exit(1);
     }
-    assertProdDatabase();
-    await assertSuperadminOrThrow(args.userId);
+    const freigabe = await assertProdWriteAllowedOrThrow(
+      {
+        apply: args.apply,
+        userId: args.userId,
+        reason: args.reason,
+        confirmTarget: args.confirmTarget,
+      },
+      "Der Lauf schreibt GoBD-Storno- und Neuausstellungs-Artefakte.",
+    );
+    console.log(`Freigegeben durch: ${freigabe.displayName}`);
   }
 
   console.log(`\n=== Import-Drift-Reparatur (Storno + Neuausstellung) · Task #1651 ===`);

@@ -107,11 +107,9 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
   { datei: "server/scripts/b3-quantify-exposure.ts", sha256: "ad122b582faf1605" },
   { datei: "server/scripts/backfill-missing-import-consumption.ts", sha256: "ab6fb319b8f00d4d" },
   { datei: "server/scripts/cleanup-duplicate-carryovers.ts", sha256: "0dd1cd68ca804ec5" },
-  { datei: "server/scripts/cleanup-duplicate-monthly-proofs.ts", sha256: "f4718563d7a688e0" },
   { datei: "server/scripts/cleanup-orphan-appointments.ts", sha256: "9865c82d2fd47bc2" },
   { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "edced74152e2c84b" },
   { datei: "server/scripts/cleanup-test-data.ts", sha256: "d46beef9193c2384" },
-  { datei: "server/scripts/reconcile-billed-appointment-import-drift.ts", sha256: "68ea413d0cdcacd2" },
   { datei: "server/scripts/reconcile-import-from-excel.ts", sha256: "e5fa5d19206aeb1c" },
   { datei: "server/scripts/reconcile-km-drift.ts", sha256: "0c1b45563cac5e45" },
   { datei: "server/scripts/reconcile-phantom-stornos.ts", sha256: "a01239e0e7fda5ce" },
@@ -122,7 +120,7 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
 ];
 
 /** Muss zur Listenlänge passen — macht jede Ergänzung im Diff sichtbar. */
-const BEKANNTE_LOECHER = 20;
+const BEKANNTE_LOECHER = 18;
 
 function schreibendeSkripte(): string[] {
   return SKRIPT_DIRS.flatMap((dir) =>

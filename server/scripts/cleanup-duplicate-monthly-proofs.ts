@@ -90,7 +90,7 @@ import {
 } from "@shared/schema";
 import { withAudit } from "../lib/with-audit";
 import { addAppointmentsToServiceRecord } from "../storage/service-records-storage";
-import { dbHostOf } from "../lib/dev-db-guard";
+import { assertProdWriteAllowedOrThrow } from "./lib/prod-write-gate";
 
 interface Args {
   apply: boolean;
@@ -123,68 +123,15 @@ function parseArgs(): Args {
   };
 }
 
-/**
- * Host-/Umgebungs-Gate für den Scharflauf (`--apply`). Das Skript ist eine
- * EINMALIGE Prod-Remediation; sein Schreibpfad darf NUR gegen die Prod-Primary
- * laufen — niemals gegen eine Wegwerf-/Test-DB, eine lokale DB oder eine
- * (read-only) Replica, und niemals unbestätigt. Trockenläufe (read-only) sind
- * von diesem Gate ausgenommen und laufen z.B. gegen die Prod-Replica zum
- * Scopen der Blast-Radius. Liegt im CLI-Pfad (`main`), NICHT in der
- * exportierten Funktion — Tests rufen die Funktion direkt gegen die
- * Ephemeral-DB auf.
- */
-function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: string | undefined): void {
-  if (process.env.NODE_ENV !== "production") {
-    throw new Error(
-      `ABBRUCH: --apply erfordert NODE_ENV=production (aktuell: ${process.env.NODE_ENV ?? "(unset)"}). ` +
-        `Der Schreibpfad darf nur gegen die Prod-Primary laufen.`,
-    );
-  }
-  if ((process.env.TEST_DATABASE_URLS || "").trim().length > 0) {
-    throw new Error("ABBRUCH: TEST_DATABASE_URLS gesetzt → Ephemeral-Test-Umgebung. --apply hier verweigert.");
-  }
-  const url = process.env.DATABASE_URL || "";
-  const host = dbHostOf(url);
-  if (!host) {
-    throw new Error("ABBRUCH: DATABASE_URL-Host nicht ermittelbar (fail-closed). --apply verweigert.");
-  }
-  if (/cc_test_/.test(url)) {
-    throw new Error(`ABBRUCH: DATABASE_URL zeigt auf eine Wegwerf-/Test-DB (cc_test_). --apply verweigert.`);
-  }
-  if (/^(localhost|127\.|::1|0\.0\.0\.0)/.test(host)) {
-    throw new Error(`ABBRUCH: DB-Host '${host}' ist lokal. --apply verweigert.`);
-  }
-  // Read-Replicas sind schreibgeschützt — der --apply-Lauf MUSS auf die Primary.
-  if (/replica|readonly|read-only|([.-]ro[.-])/.test(host)) {
-    throw new Error(
-      `ABBRUCH: DB-Host '${host}' sieht nach einer Read-Replica aus. ` +
-        `--apply braucht die Prod-Primary (Replica nur für den Trockenlauf).`,
-    );
-  }
-  // Bewusste Ziel-Bestätigung: der Operator muss den realen Prod-Host nennen.
-  if (!confirmTarget || confirmTarget.toLowerCase() !== host) {
-    throw new Error(
-      `ABBRUCH: --apply erfordert --confirm-target=<host>, exakt passend zum ` +
-        `DATABASE_URL-Host. Erwartet: '${host}'. Übergeben: '${confirmTarget ?? "(fehlt)"}'.`,
-    );
-  }
-}
-
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db
-    .select({ id: users.id, isSuperAdmin: users.isSuperAdmin, isActive: users.isActive, displayName: users.displayName })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `Die LN-Duplikat-Bereinigung ist Task #1527 explizit auf Superadmins beschränkt.`,
-    );
-  }
-}
+// Die beiden lokalen Kopien (`assertApplyTargetIsProdPrimaryOrThrow`,
+// `assertSuperadminOrThrow`) sind entfallen — ERSETZT durch die SSoT
+// `server/scripts/lib/prod-write-gate.ts`.
+//
+// Die Kopie war ihr gegenueber bereits abgedriftet: ihr Loopback-Muster
+// `/^(localhost|127\.|::1|0\.0\.0\.0)/` kannte weder `::ffff:127.` noch die
+// eckigen Klammern, die `new URL().hostname` bei IPv6 liefert — `[::1]`
+// rutschte durch. Und sie war SYNCHRON, konnte `current_database()` also gar
+// nicht abfragen. Genau die Form, an der der 18.08.2026 gescheitert ist.
 
 export interface DuplicatePendingGroup {
   customerId: number;
@@ -446,17 +393,20 @@ async function main() {
   const args = parseArgs();
 
   if (args.apply) {
-    if (args.userId === undefined) {
-      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
-      process.exit(1);
-    }
-    if (!args.reason || args.reason.length < 10) {
-      console.error('Fehler: --apply erfordert --reason="..." (≥10 Zeichen Begründung für den Audit-Log).');
-      process.exit(1);
-    }
-    // Host-/Umgebungs-Gate: --apply darf NUR gegen die Prod-Primary laufen.
-    assertApplyTargetIsProdPrimaryOrThrow(args.confirmTarget);
-    await assertSuperadminOrThrow(args.userId);
+    // EIN Aufruf statt vier Einzelpruefungen: Ziel (Host + current_database()
+    // aus der OFFENEN Verbindung), Superadmin und Begruendung. Er erteilt
+    // ausserdem der Laufzeit-Schreibsperre die Freigabe — ohne ihn wuerde
+    // dieses Skript seit #117 beim ersten Schreibzugriff abbrechen.
+    const freigabe = await assertProdWriteAllowedOrThrow(
+      {
+        apply: args.apply,
+        userId: args.userId,
+        reason: args.reason,
+        confirmTarget: args.confirmTarget,
+      },
+      "Der Lauf merged doppelte Leistungsnachweise und soft-loescht das Duplikat.",
+    );
+    console.log(`Freigegeben durch: ${freigabe.displayName}`);
   }
 
   console.log(`\n=== Doppelte monatliche Leistungsnachweise bereinigen · Task #1527 ===`);
