@@ -160,6 +160,12 @@ function vorhandeneEintraege(): { datei: string; sha256: string }[] {
   return ALTLAST.filter((e) => existsSync(path.resolve(process.cwd(), e.datei)));
 }
 
+/** Ruft die Datei eines der beiden Ziel-Gates AUF (nicht: erwaehnt es)? */
+function ruftGate(text: string): boolean {
+  const ohne = entkommentiert(text);
+  return new RegExp(`\\b(?:${GATE}|${DUAL_GATE})\\s*\\(`).test(ohne);
+}
+
 /** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
 function entkommentiert(text: string): string {
   return text.replace(/\/\/[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
@@ -173,7 +179,12 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
   it("jedes schreibende Skript hat das Gate ODER steht als bekannte Altlast drin", () => {
     const bekannt = new Set(ALTLAST.map((e) => e.datei));
     const ungegatet = schreibendeSkripte().filter(
-      (rel) => !inhalt(rel).includes(GATE) && !inhalt(rel).includes(DUAL_GATE) && !bekannt.has(rel),
+      // AUFRUF im entkommentierten Text, nicht blosse Erwaehnung. Dieser PR
+      // fuegt selbst Kommentare ein, die den Gate-Namen buchstaeblich nennen
+      // ("ERSETZT durch die SSoT assertProdWriteAllowedOrThrow") — mit einer
+      // reinen Textsuche waere jeder davon ein Unterstand geworden. Dieselbe
+      // Falle wie bei der Parser-Regel in PR #119.
+      (rel) => !ruftGate(inhalt(rel)) && !bekannt.has(rel),
     );
     expect(
       ungegatet,
@@ -197,7 +208,7 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
 
   it("Test 2 — kein Altlast-Eintrag ist laengst gegatet", () => {
     const erledigt = vorhandeneEintraege()
-      .filter((e) => inhalt(e.datei).includes(GATE) || inhalt(e.datei).includes(DUAL_GATE))
+      .filter((e) => ruftGate(inhalt(e.datei)))
       .map((e) => e.datei);
     expect(
       erledigt,
@@ -236,7 +247,7 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
     // 10-Zeichen-Schranke und landete VERSTUEMMELT im GoBD-Audit-Log.
     // `parseProdWriteArgs` benutzt `slice(praefix.length)`.
     const ohneParser = schreibendeSkripte()
-      .filter((rel) => inhalt(rel).includes(GATE) || inhalt(rel).includes(DUAL_GATE))
+      .filter((rel) => ruftGate(inhalt(rel)))
       // Auf den AUFRUF pruefen, nicht auf den Namen: ein Kommentar, der
       // `parseProdWriteArgs` erwaehnt, erfuellte eine reine Text-Suche und
       // machte die Regel wirkungslos. Genau das ist beim Gegenpruefen

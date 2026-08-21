@@ -80,7 +80,6 @@ import {
   customers,
   invoices as invoicesTable,
   invoiceLineItems,
-  users,
   type Invoice,
 } from "@shared/schema";
 import { resolveVatTreatment, STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";

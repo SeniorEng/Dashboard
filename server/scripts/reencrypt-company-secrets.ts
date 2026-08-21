@@ -37,18 +37,30 @@
  *   - `--apply` erfordert `--user=<superadmin-id>` (Audit-Attribution) UND
  *     `--reason="…"` (≥10 Zeichen, landet im Audit-Log). Der Audit-Eintrag wird
  *     in DERSELBEN Transaktion wie das UPDATE geschrieben (GoBD).
- *   - `--apply` erfordert ZUSÄTZLICH `--confirm-db=<name>`, der EXAKT dem
- *     tatsächlichen Ziel-DB-Namen (aus `DATABASE_URL`) entsprechen muss. Da das
- *     Skript bewusst in BEIDEN Umgebungen (Dev UND Prod) läuft, ist ein pauschaler
- *     Prod-Hard-Stop unmöglich; der explizite Ziel-Bestätigungs-Flag verhindert
- *     stattdessen ein versehentliches Schreiben in die falsche Datenbank.
+ *   - `--apply` erfordert eine ausdrueckliche ZIELKLASSE: `--target=prod`
+ *     oder `--target=dev`. Sie wird NICHT abgeleitet — sonst haenge die
+ *     Sicherheitsstufe an einem vergessenen Flag.
+ *       · `--target=prod` verlangt `--confirm-target=<host>/<datenbank>`,
+ *         `--user`, `--reason`, `NODE_ENV=production` und ein gesetztes
+ *         `PROD_DATABASE_URL`.
+ *       · `--target=dev`  verlangt `DEV_WRITE_CONFIRM_TARGET=<host>/<datenbank>`
+ *         und ebenfalls ein gesetztes `PROD_DATABASE_URL` (fuer den
+ *         Prod-Reject) sowie `--user` (Aktor-Pruefung).
+ *     Der Datenbankname wird in BEIDEN Faellen an der OFFENEN Verbindung
+ *     geprueft, nicht aus der URL gelesen — das frueher hier stehende
+ *     `--confirm-db=<name>` tat genau das und war damit der Defekt vom
+ *     18.08.2026.
+ *     ACHTUNG: `docs/pre-publish-backup-runbook.md` weist an,
+ *     `PROD_DATABASE_URL` nach dem Backup zu `unset`en. Fuer diesen Lauf muss
+ *     sie WIEDER gesetzt sein.
  *   - Idempotent: Ein erneuter Lauf nach erfolgreicher Migration ist ein No-op.
  *
  * Aufruf
  * ------
  *   - Trockenlauf:  OLD_ENCRYPTION_KEY=<hex64> tsx server/scripts/reencrypt-company-secrets.ts
  *   - Scharf:       OLD_ENCRYPTION_KEY=<hex64> tsx server/scripts/reencrypt-company-secrets.ts \
- *                     --apply --user=<superadmin-id> --reason="Key-Rotation #1794" --confirm-db=<name>
+ *                     --apply --target=prod --user=<superadmin-id> \
+ *                     --reason="Key-Rotation #1794" --confirm-target=<host>/<datenbank>
  *
  * Exit-Code: 0 = nichts zu tun / erfolgreich migriert, 1 = unrecoverable Felder
  * gefunden ODER alter Schlüssel entschlüsselt nichts (Abbruch).
@@ -179,6 +191,14 @@ async function main() {
       "Der Lauf verschluesselt Firmen-Secrets neu (at-rest, AES-256-GCM).",
     );
     console.log(`Ziel-Klasse: ${freigabe.klasse} · bestaetigt: ${freigabe.ziel}`);
+    // Der Prod-Zweig prueft den Superadmin im Gate. Der Dev-Zweig nicht — er
+    // kennt keine Aktor-Frage. Ohne diese Zeile waere `resolveSystemActorOrThrow`
+    // still verwaist und ein beliebiger (existierender) Nicht-Superadmin haette
+    // sich in den Audit-Eintrag geschrieben; eine nicht existierende Id waere
+    // erst an der Fremdschluessel-Bedingung gekippt, mitten in der Transaktion.
+    if (freigabe.klasse === "dev") {
+      await resolveSystemActorOrThrow(args.userId);
+    }
   }
 
   console.log(`\n=== Firmen-Secrets Re-Verschlüsselung · Task #1794 ===`);

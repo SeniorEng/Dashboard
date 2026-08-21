@@ -79,6 +79,23 @@ export async function assertDualTargetOrThrow(
   }
 
   if (klasse === "dev") {
+    // Strenger als der Dev-Pfad allein: HIER ist `PROD_DATABASE_URL` Pflicht.
+    //
+    // Fuer die reinen Dev-Wartungsskripte (#118) ist ihr Fehlen ein bewusst
+    // offener Restrand — dort ist "Dev" der Normalfall. Bei einem Skript, das
+    // BEIDE Klassen bedient, ist Verwechslung dagegen der wahrscheinlichste
+    // Fehler: wer `--target=dev` tippt, waehrend die Shell auf Prod zeigt,
+    // haette ohne `PROD_DATABASE_URL` keinen Prod-Reject — und bei
+    // `reencrypt-company-secrets` heisst das Prod-Secrets, die die App
+    // anschliessend nicht mehr lesen kann.
+    if (!(process.env.PROD_DATABASE_URL || "").trim()) {
+      throw new Error(
+        "ABBRUCH: --target=dev erfordert ein gesetztes PROD_DATABASE_URL.\n" +
+          "  Ohne sie laesst sich nicht ausschliessen, dass das 'Dev'-Ziel in " +
+          "Wahrheit\n  die Produktionsdatenbank ist — der Prod-Reject haette " +
+          "nichts, wogegen er\n  vergleichen koennte.",
+      );
+    }
     const ziel = await assertDevWriteTargetOrThrow();
     return { klasse: "dev", ziel };
   }

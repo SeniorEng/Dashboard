@@ -134,11 +134,35 @@ describe("Dual-Target-Gate — --target=dev", () => {
   it("ohne DEV_WRITE_CONFIRM_TARGET wirft es", async () => {
     process.env.NODE_ENV = "development";
     process.env.DATABASE_URL = "postgres://u:p@dev-host/careconnect_dev";
+    process.env.PROD_DATABASE_URL = "postgres://u:p@ep-x.neon.tech/neondb";
     delete process.env.DEV_WRITE_CONFIRM_TARGET;
-    delete process.env.PROD_DATABASE_URL;
     await expect(assertDualTargetOrThrow(argsAus("--target=dev"), "Zweck")).rejects.toThrow(
       /DEV_WRITE_CONFIRM_TARGET/,
     );
+  });
+
+  it("ohne PROD_DATABASE_URL wirft der Dev-Zweig — strenger als bei reinen Dev-Skripten", async () => {
+    // Fuer die reinen Dev-Wartungsskripte (#118) ist ihr Fehlen ein bewusst
+    // offener Restrand. Bei einem Skript, das BEIDE Klassen bedient, ist die
+    // Verwechslung dagegen der wahrscheinlichste Fehler: wer `--target=dev`
+    // tippt, waehrend die Shell auf Prod zeigt, haette ohne PROD_DATABASE_URL
+    // keinen Prod-Reject.
+    process.env.NODE_ENV = "development";
+    process.env.DATABASE_URL = "postgres://u:p@ep-x.neon.tech/neondb";
+    process.env.DEV_WRITE_CONFIRM_TARGET = "ep-x.neon.tech/neondb";
+    delete process.env.PROD_DATABASE_URL;
+    DB_NAME.wert = "neondb";
+    await expect(assertDualTargetOrThrow(argsAus("--target=dev"), "Zweck")).rejects.toThrow(
+      /--target=dev erfordert ein gesetztes PROD_DATABASE_URL/,
+    );
+  });
+
+  it("mehrfaches --target gewinnt vorne — die Angabe muss eindeutig sein", async () => {
+    // `argv.find` nimmt das erste Vorkommen. `--target=dev --target=prod`
+    // ergibt also `dev`, die SCHWAECHERE Klasse. Das ist festgehalten, damit
+    // niemand es fuer eine Ueberschreibung haelt.
+    const a = parseProdWriteArgs(["node", "s.ts", "--apply", "--target=dev", "--target=prod"]);
+    expect(a.target).toBe("dev");
   });
 
   it("eine echte Dev-DB geht durch", async () => {

@@ -66,12 +66,12 @@ import { db } from "../lib/db";
 import {
   appointments,
   budgetTransactions,
-  users,
 } from "@shared/schema";
 import { createConsumptionTransaction } from "../storage/budget/consumption-engine";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { auditService } from "../services/audit";
-import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
+import { parseProdWriteArgs } from "./lib/prod-write-gate";
+import { assertDualTargetOrThrow } from "./lib/dual-target-gate";
 
 // Auf 0,05 km gesetzt, damit das Skript mindestens alles abdeckt, was der
 // Boot-Audit (`audit-appointment-budget-km-drift.ts`) flaggt. Sonst bliebe
@@ -92,6 +92,8 @@ interface CliArgs {
   allowClosedMonths: boolean;
   /** `--confirm-target=<host>/<datenbank>` — vom Ziel-Gate geprueft. */
   confirmTarget?: string;
+  /** `--target=prod|dev` — dieses Skript bedient beide Umgebungen. */
+  target?: string;
 }
 
 function parseArgs(): CliArgs {
@@ -126,6 +128,13 @@ function parseArgs(): CliArgs {
     toleranceKm: Number.isFinite(toleranceKm) && toleranceKm >= 0 ? toleranceKm : DEFAULT_TOLERANCE_KM,
     userId: userId !== undefined && !isNaN(userId) ? userId : undefined,
     reason: reason && reason.length > 0 ? reason : undefined,
+    // Fehlte: das Feld war im Interface deklariert und wurde gelesen, aber NIE
+    // zurueckgegeben — `args.confirmTarget` war immer `undefined`, das Gate
+    // brach also bei JEDEM Scharflauf ab. `tsc` und `eslint` schweigen dazu,
+    // weil das Feld optional ist. "Sieht gegatet aus, ist unbenutzbar" ist
+    // genau die Klasse, gegen die Welle 1 angetreten ist.
+    confirmTarget: gemeinsam.confirmTarget,
+    target: gemeinsam.target,
     allowClosedMonths,
   };
 }
@@ -484,16 +493,15 @@ async function main() {
   if (args.apply) {
     // Ziel, Superadmin und Begruendung in EINEM Aufruf — und die Freigabe
     // fuer die Laufzeit-Schreibsperre.
-    const freigabe = await assertProdWriteAllowedOrThrow(
-      {
-        apply: args.apply,
-        userId: args.userId,
-        reason: args.reason,
-        confirmTarget: args.confirmTarget,
-      },
+    // DUAL-Target: dieses Skript ist `npm run budget:correct-km-drift` und
+    // steht in `server/lib/prod-write-lock.ts` namentlich als Dev-Wartungsweg.
+    // Das reine Prod-Gate verlangt `NODE_ENV=production` und haette den
+    // Dev-Lauf per Konstruktion unmoeglich gemacht.
+    const freigabe = await assertDualTargetOrThrow(
+      args,
       "Der Lauf korrigiert km-Drift auf abgerechneten Terminen.",
     );
-    console.log(`Freigegeben durch: ${freigabe.displayName}`);
+    console.log(`Ziel-Klasse: ${freigabe.klasse} · bestaetigt: ${freigabe.ziel}`);
   }
 
   console.log(`Modus:               ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);
