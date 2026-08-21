@@ -74,7 +74,15 @@
  *   - Trockenlauf (alle):  tsx server/scripts/cleanup-duplicate-monthly-proofs.ts
  *   - Einzelne Kunden:     tsx server/scripts/cleanup-duplicate-monthly-proofs.ts --customer=39,95
  *   - Scharf:              tsx server/scripts/cleanup-duplicate-monthly-proofs.ts --apply \
- *                            --user=<superadmin-id> --reason="Doppelte LN bereinigen #1527"
+ *                            --user=<superadmin-id> --reason="Doppelte LN bereinigen #1527" \
+ *                            --confirm-target=<host>/<datenbank>
+ *
+ *   Voraussetzungen des scharfen Laufs (seit dem Ziel-Gate, PR #118/#119):
+ *     - `PROD_DATABASE_URL` MUSS gesetzt sein — daraus kommt die Prod-Identitaet
+ *       (Host + `current_database()` aus der OFFENEN Verbindung). ACHTUNG:
+ *       `docs/pre-publish-backup-runbook.md` weist an, sie nach dem Backup zu
+ *       `unset`en. Fuer diesen Lauf muss sie WIEDER gesetzt sein.
+ *     - `NODE_ENV=production`, `TEST_DATABASE_URLS` leer.
  *
  * Exit-Code: 0 = keine Duplikat-Gruppe (mehr) vorhanden, 1 = mindestens eine
  * gefunden. `--apply` setzt den Exit-Code nach der Bereinigung neu (Verifikation).
@@ -86,11 +94,10 @@ import {
   customers,
   monthlyServiceRecords,
   serviceRecordAppointments,
-  users,
 } from "@shared/schema";
 import { withAudit } from "../lib/with-audit";
 import { addAppointmentsToServiceRecord } from "../storage/service-records-storage";
-import { assertProdWriteAllowedOrThrow } from "./lib/prod-write-gate";
+import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
 
 interface Args {
   apply: boolean;
@@ -112,14 +119,18 @@ function parseArgs(): Args {
       if (!Number.isNaN(n)) customerIds.push(n);
     }
   }
-  const userArg = get("--user=");
-  const userId = userArg ? parseInt(userArg, 10) : undefined;
+  // Die vier gemeinsamen Flags kommen aus der SSoT. Der lokale `get` schnitt
+  // per `.split("=")[1]` am ERSTEN `=` ab — eine Begruendung wie
+  // `--reason="… #1651 => Korrektur"` wurde stillschweigend zu `… #1651 `,
+  // blieb ueber der 10-Zeichen-Schranke und landete VERSTUEMMELT im
+  // GoBD-Audit-Log. `parseProdWriteArgs` benutzt `slice(praefix.length)`.
+  const gemeinsam = parseProdWriteArgs(argv);
   return {
-    apply,
+    apply: gemeinsam.apply,
     customerIds,
-    userId: userId !== undefined && Number.isFinite(userId) ? userId : undefined,
-    reason: get("--reason="),
-    confirmTarget: get("--confirm-target="),
+    userId: gemeinsam.userId,
+    reason: gemeinsam.reason,
+    confirmTarget: gemeinsam.confirmTarget,
   };
 }
 

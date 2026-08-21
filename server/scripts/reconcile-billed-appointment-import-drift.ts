@@ -38,7 +38,8 @@
  *                                    KEIN Blind-Bulk über alle Treffer — nur
  *                                    Termine, die auf dieser Allowlist stehen,
  *                                    werden repariert.
- *       · Prod-DB-Guard              `assertProdDatabase()`: der scharfe Lauf
+ *       · Ziel-Gate                  `assertProdWriteAllowedOrThrow()` (SSoT):
+ *                                     der scharfe Lauf
  *                                    MUSS gegen die Produktions-DB gehen. Dort
  *                                    liegt der Drift, und die GoBD-Storno-/
  *                                    Neuausstellungs-Artefakte (PDFs im
@@ -51,7 +52,18 @@
  *     tsx server/scripts/reconcile-billed-appointment-import-drift.ts --customer=108 --import-linked-only
  *   Scharf (nur bestätigte Termine, gegen die Prod-DB):
  *     tsx server/scripts/reconcile-billed-appointment-import-drift.ts --apply \
- *       --appointment=1234,1235 --user=<superadmin-id> --reason="Import-Drift-Reparatur #1651"
+ *       --appointment=1234,1235 --user=<superadmin-id> \
+ *       --reason="Import-Drift-Reparatur #1651" \
+ *       --confirm-target=<host>/<datenbank>
+ *
+ *   Voraussetzungen des scharfen Laufs (seit dem Ziel-Gate, PR #118/#119):
+ *     - `PROD_DATABASE_URL` MUSS gesetzt sein — daraus kommt die Prod-Identitaet
+ *       (Host + `current_database()` aus der OFFENEN Verbindung). ACHTUNG:
+ *       `docs/pre-publish-backup-runbook.md` weist an, sie nach dem Backup zu
+ *       `unset`en. Fuer diesen Lauf muss sie WIEDER gesetzt sein.
+ *     - `NODE_ENV=production`, `TEST_DATABASE_URLS` leer.
+ *     - `--confirm-target=<host>/<datenbank>`: der Datenbankname wird an der
+ *       offenen Verbindung geprueft, nicht aus der URL gelesen.
  *
  * Exit-Code: 0 = keine offenen Drift-Kandidaten (bzw. alle bestätigten repariert),
  * 1 = mindestens ein offener Drift-Kandidat gefunden (CI-/Skript-freundlich).
@@ -80,7 +92,7 @@ import {
   persistInvoicePdf,
   schedulePdfPersistInBackground,
 } from "../services/invoice-pdf-orchestrator";
-import { assertProdWriteAllowedOrThrow } from "./lib/prod-write-gate";
+import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
 import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 
 export interface Args {
@@ -105,40 +117,27 @@ function parseArgs(): Args {
     }
     return out;
   };
-  const userArg = get("--user=");
-  const userId = userArg ? parseInt(userArg, 10) : undefined;
+  // Die vier gemeinsamen Flags kommen aus der SSoT. Der lokale `get` schnitt
+  // per `.split("=")[1]` am ERSTEN `=` ab — `--reason="… #1651 => Korrektur"`
+  // wurde stillschweigend zu `… #1651 `, blieb ueber der 10-Zeichen-Schranke
+  // und landete VERSTUEMMELT im GoBD-Audit-Log. `parseProdWriteArgs` benutzt
+  // `slice(praefix.length)`.
+  const gemeinsam = parseProdWriteArgs(argv);
   return {
-    apply: argv.includes("--apply"),
+    apply: gemeinsam.apply,
     customerIds: parseIdList(get("--customer=")),
     appointmentIds: parseIdList(get("--appointment=")),
-    userId: userId !== undefined && Number.isFinite(userId) ? userId : undefined,
-    confirmTarget: get("--confirm-target="),
-    reason: get("--reason="),
+    userId: gemeinsam.userId,
+    confirmTarget: gemeinsam.confirmTarget,
+    reason: gemeinsam.reason,
     importLinkedOnly: argv.includes("--import-linked-only"),
   };
 }
 
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db
-    .select({
-      id: users.id,
-      isSuperAdmin: users.isSuperAdmin,
-      isActive: users.isActive,
-      displayName: users.displayName,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `Import-Drift-Reparaturen (Storno + Neuausstellung) sind Task #1651 ` +
-        `explizit auf Superadmins beschränkt.`,
-    );
-  }
-}
+// `assertSuperadminOrThrow` ist entfallen — die SSoT
+// `assertProdWriteAllowedOrThrow` prueft den Superadmin mit. Sie blieb nach
+// dem Umbau ohne Aufrufer stehen und haette dazu verleitet, sie wieder zu
+// verdrahten: eine Superadmin-Pruefung OHNE Ziel-Freigabe.
 
 // `assertProdDatabase()` ist entfallen — ERSETZT durch die SSoT
 // `server/scripts/lib/prod-write-gate.ts`.

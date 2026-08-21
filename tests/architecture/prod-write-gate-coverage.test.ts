@@ -156,6 +156,11 @@ function vorhandeneEintraege(): { datei: string; sha256: string }[] {
   return ALTLAST.filter((e) => existsSync(path.resolve(process.cwd(), e.datei)));
 }
 
+/** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
+function entkommentiert(text: string): string {
+  return text.replace(/\/\/[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+}
+
 function hash(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
@@ -218,6 +223,26 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
     expect(new Set(ALTLAST.map((e) => e.datei)).size).toBe(ALTLAST.length);
     // Sortiert, damit ein Zuwachs nicht in der Mitte untergeht.
     expect([...ALTLAST.map((e) => e.datei)].sort()).toEqual(ALTLAST.map((e) => e.datei));
+  });
+
+  it("wer das Gate benutzt, liest die Flags auch aus der SSoT", () => {
+    // Sonst entsteht wieder ein zweiter Leser. Der lokale
+    // `argv.find(...)?.split("=")[1]` schnitt am ERSTEN `=` ab:
+    // `--reason="… #1651 => Korrektur"` wurde zu `… #1651 `, blieb ueber der
+    // 10-Zeichen-Schranke und landete VERSTUEMMELT im GoBD-Audit-Log.
+    // `parseProdWriteArgs` benutzt `slice(praefix.length)`.
+    const ohneParser = schreibendeSkripte()
+      .filter((rel) => inhalt(rel).includes(GATE))
+      // Auf den AUFRUF pruefen, nicht auf den Namen: ein Kommentar, der
+      // `parseProdWriteArgs` erwaehnt, erfuellte eine reine Text-Suche und
+      // machte die Regel wirkungslos. Genau das ist beim Gegenpruefen
+      // passiert.
+      .filter((rel) => !/\bparseProdWriteArgs\s*\(/.test(entkommentiert(inhalt(rel))));
+    expect(
+      ohneParser,
+      `Diese Skripte rufen ${GATE}, lesen die gemeinsamen Flags aber selbst.\n` +
+        `Nimm \`parseProdWriteArgs\` aus derselben SSoT:\n  ${ohneParser.join("\n  ")}`,
+    ).toEqual([]);
   });
 
   it("die Gate-SSoT existiert und wird wirklich benutzt", () => {
