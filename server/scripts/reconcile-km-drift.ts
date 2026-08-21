@@ -71,6 +71,7 @@ import {
 import { createConsumptionTransaction } from "../storage/budget/consumption-engine";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { auditService } from "../services/audit";
+import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
 
 // Auf 0,05 km gesetzt, damit das Skript mindestens alles abdeckt, was der
 // Boot-Audit (`audit-appointment-budget-km-drift.ts`) flaggt. Sonst bliebe
@@ -89,6 +90,8 @@ interface CliArgs {
   userId?: number;
   reason?: string;
   allowClosedMonths: boolean;
+  /** `--confirm-target=<host>/<datenbank>` — vom Ziel-Gate geprueft. */
+  confirmTarget?: string;
 }
 
 function parseArgs(): CliArgs {
@@ -98,8 +101,12 @@ function parseArgs(): CliArgs {
   const apptArg = args.find(a => a.startsWith("--appointment="));
   const customerArg = args.find(a => a.startsWith("--customer="));
   const tolArg = args.find(a => a.startsWith("--tolerance="));
-  const userArg = args.find(a => a.startsWith("--user="));
-  const reasonArg = args.find(a => a.startsWith("--reason="));
+  // Die gemeinsamen Flags aus der SSoT. Anmerkung fuer die Historie: DIESES
+  // Skript parste den Grund korrekt (`.split("=").slice(1).join("=")`) — der
+  // Trunkierungs-Bug aus PR #119 lag in den anderen. Es bleibt trotzdem ein
+  // Zweitbegriff derselben Frage, und der naechste Leser kann nicht wissen,
+  // welche der Fassungen die richtige war.
+  const gemeinsam = parseProdWriteArgs(process.argv);
 
   const parseIds = (s: string | undefined): number[] => {
     if (!s) return [];
@@ -109,8 +116,8 @@ function parseArgs(): CliArgs {
   };
 
   const toleranceKm = tolArg ? parseFloat(tolArg.split("=")[1]) : DEFAULT_TOLERANCE_KM;
-  const userId = userArg ? parseInt(userArg.split("=")[1], 10) : undefined;
-  const reason = reasonArg ? reasonArg.split("=").slice(1).join("=").trim() : undefined;
+  const userId = gemeinsam.userId;
+  const reason = gemeinsam.reason?.trim();
 
   return {
     apply,
@@ -465,36 +472,28 @@ export async function reconcileKmDrift(opts: {
   return { candidates, results, repaired, skipped, closedMonthSkipped, errored, batchId };
 }
 
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db.select({
-    id: users.id,
-    isSuperAdmin: users.isSuperAdmin,
-    isActive: users.isActive,
-    displayName: users.displayName,
-  }).from(users).where(eq(users.id, userId)).limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `km-Drift-Korrekturen sind Task #619 explizit auf Superadmins beschränkt.`,
-    );
-  }
-}
+// `assertSuperadminOrThrow` ist entfallen — ERSETZT durch die SSoT
+// `assertProdWriteAllowedOrThrow`, die Superadmin, Begruendung UND das
+// Ziel in einem Aufruf prueft. Eine Superadmin-Pruefung OHNE
+// Ziel-Freigabe ist genau der Zweitbegriff aus W1.
+
 
 async function main() {
   const args = parseArgs();
 
   if (args.apply) {
-    if (args.userId === undefined) {
-      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
-      process.exit(1);
-    }
-    if (!args.reason || args.reason.length < 10) {
-      console.error("Fehler: --apply erfordert --reason=\"...\" (≥10 Zeichen Begründung für den Audit-Log).");
-      process.exit(1);
-    }
-    await assertSuperadminOrThrow(args.userId);
+    // Ziel, Superadmin und Begruendung in EINEM Aufruf — und die Freigabe
+    // fuer die Laufzeit-Schreibsperre.
+    const freigabe = await assertProdWriteAllowedOrThrow(
+      {
+        apply: args.apply,
+        userId: args.userId,
+        reason: args.reason,
+        confirmTarget: args.confirmTarget,
+      },
+      "Der Lauf korrigiert km-Drift auf abgerechneten Terminen.",
+    );
+    console.log(`Freigegeben durch: ${freigabe.displayName}`);
   }
 
   console.log(`Modus:               ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);

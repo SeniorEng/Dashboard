@@ -34,6 +34,11 @@ export interface ProdWriteArgs {
   userId?: number;
   reason?: string;
   confirmTarget?: string;
+  /**
+   * `--target=prod|dev` — nur fuer Skripte, die legitim in BEIDEN Umgebungen
+   * laufen (siehe `dual-target-gate.ts`). Die uebrigen ignorieren sie.
+   */
+  target?: string;
 }
 
 /** Liest die gemeinsamen Flags aus `process.argv`. */
@@ -52,6 +57,7 @@ export function parseProdWriteArgs(argv: string[] = process.argv): ProdWriteArgs
     userId: userId !== undefined && Number.isFinite(userId) ? userId : undefined,
     reason: get("--reason="),
     confirmTarget: get("--confirm-target="),
+    target: get("--target="),
   };
 }
 

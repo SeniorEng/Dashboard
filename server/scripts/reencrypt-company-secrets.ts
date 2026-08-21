@@ -61,6 +61,8 @@ import { withAudit } from "../lib/with-audit";
 import { companySettings, users } from "@shared/schema";
 import { getSensitivePropsForTable } from "../lib/encrypted-row";
 import { encryptSecret, isEncrypted } from "../lib/crypto";
+import { assertDualTargetOrThrow } from "./lib/dual-target-gate";
+import { parseProdWriteArgs } from "./lib/prod-write-gate";
 
 const PREFIX = "enc:";
 const IV_LENGTH = 12;
@@ -68,25 +70,16 @@ const TAG_LENGTH = 16;
 const MIN_PAYLOAD_LENGTH = IV_LENGTH + TAG_LENGTH;
 const HEX_KEY_PATTERN = /^[0-9a-fA-F]{64}$/;
 
-interface Args {
-  apply: boolean;
-  userId: number | undefined;
-  reason: string | undefined;
-  confirmDb: string | undefined;
-}
+/**
+ * Die gemeinsamen Flags kommen aus der SSoT `parseProdWriteArgs` — inklusive
+ * `--target`. Der frueher hier stehende lokale Leser benutzte
+ * `.split("=")[1]` und schnitt eine Begruendung am ERSTEN `=` ab; der
+ * abgeschnittene Text landete im Audit-Log (siehe PR #119).
+ */
+type Args = ReturnType<typeof parseProdWriteArgs>;
 
 function parseArgs(): Args {
-  const argv = process.argv.slice(2);
-  const get = (p: string) => argv.find((a) => a.startsWith(p))?.split("=")[1];
-  const apply = argv.includes("--apply");
-  const userArg = get("--user=");
-  const userId = userArg ? parseInt(userArg, 10) : undefined;
-  return {
-    apply,
-    userId: userId !== undefined && Number.isFinite(userId) ? userId : undefined,
-    reason: get("--reason="),
-    confirmDb: get("--confirm-db="),
-  };
+  return parseProdWriteArgs(process.argv);
 }
 
 /** Ziel-DB-Name + Host aus DATABASE_URL (best effort, für Safety-Guard + Log). */
@@ -173,25 +166,19 @@ async function main() {
       console.error('Fehler: --apply erfordert --reason="..." (≥10 Zeichen Begründung für den Audit-Log).');
       process.exit(1);
     }
-    // Ziel-DB-Safety-Guard: das Skript läuft bewusst in Dev UND Prod, daher
-    // kein pauschaler Prod-Hard-Stop, sondern eine explizite Ziel-Bestätigung.
-    if (!dbTarget.name) {
-      console.error(
-        "Fehler: Ziel-DB-Name konnte nicht aus DATABASE_URL ermittelt werden — " +
-          "Sicherheits-Guard kann das Schreibziel nicht bestätigen. Abbruch.",
-      );
-      process.exit(1);
-    }
-    if (args.confirmDb !== dbTarget.name) {
-      console.error(
-        `Fehler: --apply erfordert --confirm-db=<name>, der dem tatsächlichen Ziel entspricht.\n` +
-          `  Ziel-DB (aus DATABASE_URL): "${dbTarget.name}" @ ${dbTarget.host || "?"}\n` +
-          `  Übergeben:                  ${args.confirmDb ? `"${args.confirmDb}"` : "(fehlt)"}\n` +
-          `  Schutz gegen versehentliches Schreiben in die falsche Datenbank.`,
-      );
-      process.exit(1);
-    }
-    await resolveSystemActorOrThrow(args.userId);
+    // Ziel-Gate. ERSETZT das eigene `--confirm-db=<name>`, das den Namen aus
+    // der DATABASE_URL las — genau der Defekt vom 18.08.2026: die URL sagte
+    // `neondb`, verbunden war `heliumdb`.
+    //
+    // Dieses Skript laeuft bewusst in BEIDEN Umgebungen (Key-Rotation passiert
+    // in Dev wie Prod), deshalb das Dual-Target-Gate: der Operator NENNT die
+    // Klasse (`--target=prod|dev`), und beide Wege pruefen den Datenbanknamen
+    // an der OFFENEN Verbindung.
+    const freigabe = await assertDualTargetOrThrow(
+      { ...args, target: args.target },
+      "Der Lauf verschluesselt Firmen-Secrets neu (at-rest, AES-256-GCM).",
+    );
+    console.log(`Ziel-Klasse: ${freigabe.klasse} · bestaetigt: ${freigabe.ziel}`);
   }
 
   console.log(`\n=== Firmen-Secrets Re-Verschlüsselung · Task #1794 ===`);
@@ -211,6 +198,8 @@ async function main() {
 
   const results: FieldResult[] = [];
   const updates: Record<string, string> = {};
+  /** prop -> Klartext aus dem ALTEN Schluessel, fuer die Post-Write-Verifikation. */
+  const klartextVorher = new Map<string, string>();
   let oldKeyProved = false;
 
   for (const prop of sensitiveProps) {
@@ -232,6 +221,10 @@ async function main() {
     const plaintextOld = decryptWith(val, oldKey);
     if (plaintextOld !== null) {
       oldKeyProved = true;
+      // Klartext merken: die Post-Write-Verifikation vergleicht spaeter gegen
+      // ihn. Ohne diesen Vergleich pruefte sie nur "irgendetwas ist lesbar",
+      // nicht "es ist DASSELBE".
+      klartextVorher.set(prop, plaintextOld);
       updates[prop] = encryptSecret(plaintextOld);
       results.push({ prop, outcome: "reencrypt" });
       continue;
@@ -292,6 +285,52 @@ async function main() {
 
   await withAudit(async (tx, audit) => {
     await tx.update(companySettings).set(updates as any).where(eq(companySettings.id, rowId));
+
+    // ── Post-Write-Verifikation, IN der Transaktion ───────────────────────
+    //
+    // Das Ziel-Gate deckt die falsche DATENBANK ab. Es deckt NICHT den
+    // falschen SCHLUESSEL ab — und der ist hier der teurere Fehler: ein
+    // Chiffrat, das mit einem falschen `ENCRYPTION_KEY` geschrieben wurde,
+    // ist mit KEINEM Schluessel mehr lesbar. Das laesst sich durch keinen
+    // zweiten Lauf reparieren.
+    //
+    // Der Pre-Flight oben beweist, dass der ALTE Schluessel echt ist. Er
+    // beweist NICHT, dass der aktuelle Schluessel etwas Lesbares erzeugt —
+    // `encryptSecret` nimmt jeden 64-hex-Wert an, auch einen vertippten.
+    // Deshalb hier: zurueckLESEN, was gerade geschrieben wurde, und mit dem
+    // aktuellen Schluessel entschluesseln. Ergebnis muss dem Klartext
+    // entsprechen, der aus dem alten Schluessel kam.
+    //
+    // Ein `throw` rollt die Transaktion zurueck — inklusive des
+    // Audit-Eintrags. Lieber kein Lauf als ein halber.
+    const [nachher] = await tx
+      .select()
+      .from(companySettings)
+      .where(eq(companySettings.id, rowId))
+      .limit(1);
+    if (!nachher) {
+      throw new Error("ABBRUCH: Zeile nach dem UPDATE nicht mehr lesbar. Rollback.");
+    }
+    const kaputt: string[] = [];
+    for (const prop of toReencrypt) {
+      const geschrieben = (nachher as Record<string, unknown>)[prop];
+      const zurueck =
+        typeof geschrieben === "string" ? decryptWith(geschrieben, currentKey) : null;
+      if (zurueck === null || zurueck !== klartextVorher.get(prop)) {
+        kaputt.push(prop);
+      }
+    }
+    if (kaputt.length > 0) {
+      throw new Error(
+        `ABBRUCH: ${kaputt.length} Feld(er) sind nach der Neu-Verschluesselung NICHT ` +
+          `mit dem aktuellen Schluessel lesbar bzw. weichen vom Klartext ab: ` +
+          `${kaputt.join(", ")}.\n` +
+          `Die Transaktion wird zurueckgerollt — die alten Chiffrate bleiben erhalten.\n` +
+          `Pruefen: ist ENCRYPTION_KEY wirklich der Schluessel, unter dem die App laeuft?`,
+      );
+    }
+    console.log(`  Post-Write-Verifikation: ${toReencrypt.length} Feld(er) zurueckgelesen, alle lesbar.`);
+
     audit.record({
       userId: args.userId!,
       action: "company_secrets_reencrypted",
