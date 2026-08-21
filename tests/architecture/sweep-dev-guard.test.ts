@@ -137,12 +137,23 @@ describe("sweep-dev-test-data assertDevDatabase() Guards", () => {
     expect(() => assertDevDatabase()).toThrow(/fail-closed/);
   });
 
-  it("bricht ab, wenn DATABASE_URL-Host == PROD_DATABASE_URL-Host", () => {
+  it("bricht ab, wenn DATABASE_URL == PROD_DATABASE_URL (Host UND Datenbank)", () => {
+    // Verschaerft: frueher genuegte Host-Gleichheit. Auf Replit heisst der
+    // interne Host in Dev und Prod gleich — Host allein sagt also nichts
+    // ueber die tatsaechliche Datenbank. Jetzt zaehlen beide.
     process.env.NODE_ENV = "test";
-    process.env.DATABASE_URL = "postgresql://user:pass@shared-host.example:5432/dev";
-    process.env.PROD_DATABASE_URL = "postgresql://other:secret@shared-host.example:5432/prod";
-    expect(() => assertDevDatabase()).toThrow(/DATABASE_URL-Host == PROD_DATABASE_URL-Host/);
+    process.env.DATABASE_URL = "postgresql://user:pass@shared-host.example:5432/neondb";
+    process.env.PROD_DATABASE_URL = "postgresql://other:secret@shared-host.example:5432/neondb";
+    expect(() => assertDevDatabase()).toThrow(/DATABASE_URL == PROD_DATABASE_URL/);
   });
+
+  it("gleicher Host, ANDERE Datenbank ist erlaubt", () => {
+    process.env.NODE_ENV = "test";
+    process.env.DATABASE_URL = "postgresql://user:pass@shared-host.example:5432/careconnect_dev";
+    process.env.PROD_DATABASE_URL = "postgresql://other:secret@shared-host.example:5432/neondb";
+    expect(() => assertDevDatabase()).not.toThrow();
+  });
+
 
   it("passiert bei einem normalen Dev-Host (auch wenn PROD_DATABASE_URL auf einen anderen Host zeigt)", () => {
     process.env.NODE_ENV = "test";

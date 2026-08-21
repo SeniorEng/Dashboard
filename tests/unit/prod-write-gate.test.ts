@@ -43,11 +43,47 @@ function umgebung(url: string, extra: Record<string, string> = {}) {
   process.env.NODE_ENV = "production";
   process.env.DATABASE_URL = url;
   delete process.env.TEST_DATABASE_URLS;
+  // Prod-Identitaet kommt seit der Reklassifizierung aus PROD_DATABASE_URL —
+  // ohne sie laesst sich nicht feststellen, OB ein Ziel Prod ist. Die
+  // Default-Fixture zeigt auf dieselbe DB wie die Positiv-Faelle.
+  process.env.PROD_DATABASE_URL = "postgres://u:p@db.prod.example.com:5432/neondb";
   Object.assign(process.env, extra);
 }
 
 describe("Prod-Schreib-Gate", () => {
   describe("Ziel-Prüfung — fail-closed", () => {
+    it("Prod-Identitaet kommt aus PROD_DATABASE_URL, nicht aus der Form", async () => {
+      // Vorher entschied ein FORM-Test („nicht cc_test_, nicht lokal, keine
+      // Replica"). Der stufte auch die Replit-Wegwerf-Default-DB als
+      // Prod-Primary ein und reichte sie durch die volle Prod-Zeremonie.
+      umgebung("postgres://u:p@helium:5432/heliumdb", {
+        PROD_DATABASE_URL: "postgres://u:p@neon-prod.example/neondb",
+      });
+      DB_NAME.wert = "heliumdb";
+      await expect(assertApplyTargetIsProdPrimaryOrThrow("helium/heliumdb")).rejects.toThrow(
+        /NICHT die Produktionsdatenbank/,
+      );
+    });
+
+    it("ohne PROD_DATABASE_URL wird gar nicht geschrieben — mit klarer Ansage", async () => {
+      // Weder als Prod nachweisbar noch cc_test_ ⇒ fail-closed. Die Meldung
+      // muss sagen, was zu tun ist, statt kryptisch zu scheitern.
+      umgebung("postgres://u:p@db.prod.example.com/neondb");
+      delete process.env.PROD_DATABASE_URL;
+      DB_NAME.wert = "neondb";
+      const p = assertApplyTargetIsProdPrimaryOrThrow("db.prod.example.com/neondb");
+      await expect(p).rejects.toThrow(/PROD_DATABASE_URL ist nicht gesetzt/);
+      await expect(p).rejects.toThrow(/DEV_WRITE_CONFIRM_TARGET/);
+    });
+
+    it("eine unauswertbare PROD_DATABASE_URL ist fail-closed", async () => {
+      umgebung("postgres://u:p@db.prod.example.com/neondb", { PROD_DATABASE_URL: "kein-url" });
+      DB_NAME.wert = "neondb";
+      await expect(
+        assertApplyTargetIsProdPrimaryOrThrow("db.prod.example.com/neondb"),
+      ).rejects.toThrow(/nicht auswertbar/);
+    });
+
     it("lässt die bestätigte Prod-Primary durch", async () => {
       umgebung("postgres://u:p@db.prod.example.com:5432/neondb");
       DB_NAME.wert = "neondb";

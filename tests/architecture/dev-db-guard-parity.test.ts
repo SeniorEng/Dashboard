@@ -29,6 +29,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { dbNameOf } from "@shared/ephemeral-db-target";
 import path from "node:path";
 import {
   dbHostOf,
@@ -171,10 +172,12 @@ const GUARD_FIXTURES: GuardFixture[] = [
     expectAbort: true,
   },
   {
-    name: "DATABASE_URL-Host == PROD_DATABASE_URL-Host bricht ab",
+    // Verschaerft: Host-Gleichheit allein genuegt nicht mehr, beide
+    // Fixtures nennen deshalb dieselbe Datenbank.
+    name: "DATABASE_URL == PROD_DATABASE_URL bricht ab (Host UND Datenbank)",
     NODE_ENV: "development",
-    DATABASE_URL: "postgresql://user:pass@shared-host.example:5432/dev",
-    PROD_DATABASE_URL: "postgresql://other:secret@shared-host.example:5432/prod",
+    DATABASE_URL: "postgresql://user:pass@shared-host.example:5432/neondb",
+    PROD_DATABASE_URL: "postgresql://other:secret@shared-host.example:5432/neondb",
     expectAbort: true,
   },
   {
@@ -251,7 +254,7 @@ describe("Task #1438: Guard-Verdikt TS ⇔ Shell (Parität)", () => {
  * Paritaet der POSITIVEN Ziel-Pruefung (PR #117).
  *
  * `assert_dev_db` / `assertDevDatabase` sind negative Praedikate — im Gate-2
- * gemessen bestehen `helium` (der echte Prod-Host), die Neon-Prod-Form und
+ * gemessen bestehen `helium` (die Replit-Default-DB, NICHT Prod), die Neon-Prod-Form und
  * `localhost` sie glatt. Deshalb erteilen sie kein Schreibrecht mehr; das tut
  * die positive Pruefung, und die muss es auf BEIDEN Seiten geben — an der
  * Bash-Seite haengen die vier `psql`-Skripte (`reseed-dev-db.sh`,
@@ -310,5 +313,41 @@ describe("positive Dev-Ziel-Pruefung — TS ⇔ Bash", () => {
       },
     );
     expect(res.status).not.toBe(0);
+  });
+});
+
+/**
+ * `db_name_of` ⇔ `dbNameOf` — zeichenweise Parität der Datenbanknamen-Extraktion.
+ *
+ * Diese Tabelle fehlte, und genau deshalb blieb eine echte Divergenz grün: die
+ * erste Bash-Fassung benutzte `sed 's#…#…#'` statt `sed -n … p`. Trifft das
+ * Muster nicht, gibt `sed` die EINGABE unveraendert zurueck — der Rueckgabewert
+ * war also die ganze URL, damit nicht-leer, damit griff der `[[ -z … ]]`-Zweig
+ * der Aufrufer nicht. Fail-OPEN, wo `dbNameOf` fail-closed ist. An
+ * `reseed-dev-db.sh` haengt hinter diesem Guard ein `DROP SCHEMA public CASCADE`.
+ *
+ * Die Faelle unten sind bewusst die haesslichen: kein Pfad, Grossschreibung,
+ * Muell, Fragment, Query, leerer Pfad.
+ */
+describe("db_name_of ⇔ dbNameOf — Paritaet der Namens-Extraktion", () => {
+  const FAELLE = [
+    "postgres://u:p@helium/neondb",
+    "postgres://u:p@helium",
+    "postgres://u:p@helium/",
+    "POSTGRES://u:p@helium/neondb",
+    "garbage-without-host",
+    "",
+    "postgres://h/neondb#frag",
+    "postgres://u:p@h:5432/db?sslmode=require",
+    "postgresql://user:pa%2Fss@host:5432/careconnect_dev",
+  ];
+
+  it.each(FAELLE)("liefert dasselbe fuer %j", (url) => {
+    const ts = (dbNameOf(url) ?? "").toLowerCase();
+    const res = spawnSync("bash", ["-c", `source "$0"; db_name_of "$1"`, SHELL_LIB, url], {
+      encoding: "utf8",
+    });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe(ts);
   });
 });

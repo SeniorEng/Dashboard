@@ -4,7 +4,7 @@
 // Task #1433 hat die Prod-Schutz-Guards des Sweep-Wrappers
 // (`server/scripts/sweep-dev-test-data.ts`) automatisiert getestet. Die ZEICHEN-
 // GLEICHE Schutz-Logik (NODE_ENV=production, Prod-Host-Pattern, fail-closed bei
-// nicht ermittelbarem Host, DATABASE_URL-Host == PROD_DATABASE_URL-Host) lebt
+// nicht ermittelbarem Host, DATABASE_URL == PROD_DATABASE_URL) lebt
 // auch in den beiden Shell-Skripten `scripts/backup-dev-db.sh` und
 // `scripts/reseed-dev-db.sh` — dort bisher NUR manuell ausgeübt. Eine Divergenz
 // oder Regression könnte ein Backup/Reseed auf eine Nicht-Dev-DB richten.
@@ -14,7 +14,7 @@
 //  1. Abbruch bei NODE_ENV=production.
 //  2. Abbruch bei Prod-aussehendem DB-Host.
 //  3. Abbruch (fail-closed) bei nicht ermittelbarem Host.
-//  4. Abbruch bei DATABASE_URL-Host == PROD_DATABASE_URL-Host.
+//  4. Abbruch bei DATABASE_URL == PROD_DATABASE_URL (Host UND Datenbank).
 //  5. Ein normaler Dev-Host PASSIERT die vier Guards — OHNE dass tatsächlich ein
 //     Backup/Reseed gegen eine echte DB läuft (Fake-Host löst nicht auf, und der
 //     Reseed läuft als Trockenlauf; das Backup bricht erst NACH den Guards am
@@ -39,8 +39,8 @@ const RESEED_SCRIPT = path.resolve(process.cwd(), "scripts/reseed-dev-db.sh");
 const DEV_OK = "postgresql://user:pass@db.dev.example:5432/app";
 const PROD_LOOKING = "postgresql://user:pass@db.prod.example:5432/app";
 const UNEXTRACTABLE = "garbage-without-host"; // kein `://` → leerer Host
-const SHARED_DEV = "postgresql://user:pass@shared-host.example:5432/dev";
-const SHARED_PROD = "postgresql://other:secret@shared-host.example:5432/prod";
+const SHARED_DEV = "postgresql://u:p@shared-host.example:5432/neondb";
+const SHARED_PROD = "postgresql://o:s@shared-host.example:5432/neondb";
 
 type RunResult = { status: number | null; stdout: string; stderr: string };
 
@@ -108,14 +108,18 @@ describe.each(SCRIPTS)("Task #1435: $name Prod-Schutz-Guards", ({ path: script }
     expect(r.stderr).toMatch(/fail-closed/);
   });
 
-  it("bricht bei DATABASE_URL-Host == PROD_DATABASE_URL-Host ab", () => {
+  // Verschaerft (PR-Follow zu #117): frueher genuegte Host-Gleichheit. Auf
+  // Replit heisst der interne Host in Dev und Prod gleich — Host allein sagt
+  // also nichts ueber die tatsaechliche Datenbank. Jetzt zaehlen beide, und
+  // die Fixture nennt deshalb zweimal dieselbe DB.
+  it("bricht bei DATABASE_URL == PROD_DATABASE_URL ab (Host UND Datenbank)", () => {
     const r = runScript(script, {
       NODE_ENV: "development",
       DATABASE_URL: SHARED_DEV,
       PROD_DATABASE_URL: SHARED_PROD,
     });
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/DATABASE_URL-Host == PROD_DATABASE_URL-Host/);
+    expect(r.stderr).toMatch(/DATABASE_URL == PROD_DATABASE_URL/);
   });
 });
 

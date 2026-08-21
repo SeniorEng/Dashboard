@@ -27,6 +27,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { users } from "@shared/schema";
 import { freigabeErteilen } from "../../lib/prod-write-lock";
+import { dbNameOf } from "@shared/ephemeral-db-target";
 
 export interface ProdWriteArgs {
   apply: boolean;
@@ -158,6 +159,49 @@ export async function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: strin
       `ABBRUCH: Verbunden mit Datenbank '${istDb}', bestätigt wurde '${zielDb}'. ` +
       `Der Lauf hätte die falsche Datenbank getroffen. ` +
       `(Prüfen: läuft die Shell mit der Deployment-DATABASE_URL oder mit einer eigenen?)`,
+    );
+  }
+
+  // POSITIVE Prod-Identität — die eine Stelle, an der „ist das Prod?"
+  // beantwortet wird.
+  //
+  // Vorher war das ein FORM-Test: „nicht cc_test_, nicht lokal, keine
+  // Replica" ⇒ gilt als Prod-Primary. Gemessen stufte er damit auch
+  // `helium/heliumdb` als Prod-Primary ein — die Replit-Wegwerf-Default-DB,
+  // also ausgerechnet das Near-Miss-Ziel des Vorfalls. Ein Wegwerf-Ziel als
+  // „Prod-Primary" durchzuwinken ist kein harmloser Etikettenfehler: es
+  // reicht eine versehentliche Default-DB durch die volle Prod-Zeremonie.
+  //
+  // Prod ist ab hier, was `PROD_DATABASE_URL` sagt — Host UND Datenbankname,
+  // letzterer aus der offenen Verbindung. Wegwerf bleibt `cc_test_`. Alles
+  // dazwischen (die Default-DB, eine Dev-Kopie) ist WEDER und wird
+  // fail-closed abgelehnt: es muss erst deklariert werden.
+  const prodUrl = (process.env.PROD_DATABASE_URL || "").trim();
+  if (!prodUrl) {
+    throw new Error(
+      `ABBRUCH: PROD_DATABASE_URL ist nicht gesetzt — ohne sie lässt sich nicht ` +
+      `feststellen, OB '${host}/${istDb}' die Produktionsdatenbank ist.\n` +
+      `Ein Ziel, das weder als Prod nachweisbar noch eine Wegwerf-DB (cc_test_) ` +
+      `ist, wird nicht beschrieben.\n` +
+      `Setze PROD_DATABASE_URL (siehe docs/pre-publish-backup-runbook.md, §2) ` +
+      `oder benutze den Dev-Pfad (DEV_WRITE_CONFIRM_TARGET).`,
+    );
+  }
+  const prodHost = (dbHostOf(prodUrl) || "").toLowerCase();
+  const prodDb = (dbNameOf(prodUrl) || "").toLowerCase();
+  if (!prodHost || !prodDb) {
+    throw new Error(
+      "ABBRUCH: PROD_DATABASE_URL ist nicht auswertbar (Host oder Datenbankname fehlt). Fail-closed.",
+    );
+  }
+  if (host !== prodHost || istDb !== prodDb) {
+    throw new Error(
+      `ABBRUCH: '${host}/${istDb}' ist NICHT die Produktionsdatenbank ` +
+      `(PROD_DATABASE_URL nennt '${prodHost}/${prodDb}').\n` +
+      `Weder Prod noch Wegwerf-DB (cc_test_) — dieses Ziel muss erst deklariert ` +
+      `werden. Für die Dev-DB: DEV_WRITE_CONFIRM_TARGET.\n` +
+      `Hinweis: die Replit-Default-DB fällt genau hierunter. Sie galt dem ` +
+      `früheren Form-Test als „Prod-Primary" und wurde durchgereicht.`,
     );
   }
 }
