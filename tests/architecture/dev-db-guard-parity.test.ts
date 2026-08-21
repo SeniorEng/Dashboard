@@ -29,7 +29,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dbNameOf } from "@shared/ephemeral-db-target";
+import { dbHostOf, dbNameOf } from "@shared/ephemeral-db-target";
 import path from "node:path";
 import {
   dbHostOf,
@@ -205,7 +205,11 @@ const GUARD_FIXTURES: GuardFixture[] = [
 
 describe("Task #1438: Host-Extraktion TS ⇔ Shell (Parität)", () => {
   it.each(HOST_URLS)("liefert denselben Host für %j", (url) => {
-    expect(shellDbHostOf(url)).toBe(dbHostOf(url));
+    // Der Vertrag ist seit der Konsolidierung `string | null` statt `string`:
+    // "kein Host ermittelbar" ist jetzt `null` und nicht mehr `""`. Die Shell
+    // kann nur "" ausgeben, deshalb wird hier normalisiert — die AUSSAGE
+    // (beide finden dasselbe bzw. beide finden nichts) bleibt dieselbe.
+    expect(shellDbHostOf(url)).toBe(dbHostOf(url) ?? "");
   });
 });
 
@@ -349,5 +353,53 @@ describe("db_name_of ⇔ dbNameOf — Paritaet der Namens-Extraktion", () => {
     });
     expect(res.status).toBe(0);
     expect(res.stdout).toBe(ts);
+  });
+});
+
+/**
+ * `db_host_of` ⇔ `dbHostOf` — zeichenweise Parität der HOST-Extraktion.
+ *
+ * Das Gegenstück zur Namens-Tabelle aus PR #118. Dort blieb eine echte
+ * Divergenz grün, weil niemand die beiden Implementierungen verglich; hier gab
+ * es sogar ZWEI TS-Fassungen mit verschiedenen Verträgen
+ * (`string` vs `string | null`). Beide sind jetzt eine, und diese Tabelle hält
+ * sie mit der Shell zusammen.
+ *
+ * Die Fälle sind bewusst die hässlichen: malformter Scheme-Prefix, Passwort
+ * mit Sonderzeichen, IPv6, Grossschreibung, Müll, leer.
+ */
+describe("db_host_of ⇔ dbHostOf — Paritaet der Host-Extraktion", () => {
+  const FAELLE = [
+    "postgres://u:p@helium:5432/neondb",
+    "postgres://u:p@helium/neondb",
+    "POSTGRES://U:P@Helium/DB",
+    "postgres://u:p%2Fx@helium/neondb",
+    "postgres://u:p@[::1]:5432/db",
+    "postgres ://user@host/db",
+    "garbage",
+    "",
+    "postgres://u:p@ho st/db",
+  ];
+
+  it.each(FAELLE)("liefert dasselbe fuer %j", (url) => {
+    const ts = dbHostOf(url) ?? "";
+    const res = spawnSync("bash", ["-c", `source "$0"; db_host_of "$1"`, SHELL_LIB, url], {
+      encoding: "utf8",
+    });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe(ts);
+  });
+
+  it("ein malformter Scheme-Prefix liefert auf BEIDEN Seiten nichts", () => {
+    // Der Fall, den der Fallback ausdruecklich NICHT durchlassen darf: eine
+    // reine `@host`-Regex wuerde hier faelschlich `host` extrahieren und die
+    // Guards passieren lassen, waehrend die Shell abbricht.
+    expect(dbHostOf("postgres ://user@host/db")).toBeNull();
+    const res = spawnSync(
+      "bash",
+      ["-c", `source "$0"; db_host_of "$1"`, SHELL_LIB, "postgres ://user@host/db"],
+      { encoding: "utf8" },
+    );
+    expect(res.stdout).toBe("");
   });
 });

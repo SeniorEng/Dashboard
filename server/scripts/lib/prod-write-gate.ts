@@ -27,7 +27,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { users } from "@shared/schema";
 import { freigabeErteilen } from "../../lib/prod-write-lock";
-import { dbNameOf } from "@shared/ephemeral-db-target";
+import { dbHostOf, dbNameOf } from "@shared/ephemeral-db-target";
 
 export interface ProdWriteArgs {
   apply: boolean;
@@ -61,14 +61,11 @@ export function parseProdWriteArgs(argv: string[] = process.argv): ProdWriteArgs
   };
 }
 
-/** Host-Teil einer Postgres-URL, klein geschrieben. `null`, wenn unlesbar. */
-export function dbHostOf(url: string): string | null {
-  try {
-    return new URL(url).hostname.toLowerCase() || null;
-  } catch {
-    return null;
-  }
-}
+// `dbHostOf` kommt jetzt aus `@shared/ephemeral-db-target` — EINE Fassung
+// fuer beide Seiten. Re-Export, damit alle bisherigen Importeure unveraendert
+// weiterlaufen.
+export { dbHostOf };
+
 
 /**
  * Liest den Datenbanknamen aus der TATSÄCHLICHEN Verbindung.

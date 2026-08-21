@@ -63,19 +63,23 @@ describe("sweep-dev-test-data dbHostOf()", () => {
     expect(dbHostOf("postgresql://user:pass@DB.PROD.Example:5432/app")).toBe("db.prod.example");
   });
 
-  it("liefert bei malformtem Schema (Leerzeichen) einen leeren Host (fail-closed)", () => {
+  it("liefert bei malformtem Schema (Leerzeichen) KEINEN Host (fail-closed)", () => {
     // `new URL(...)` wirft hier (kaputtes Schema mit Leerzeichen). Der Fallback
     // akzeptiert NUR ein gültiges `scheme://`-Präfix — zeichengleich zur sed-Regex
     // in scripts/lib/assert-dev-db.sh (Cross-Language-Parität, Task #1438). Ein
-    // malformtes Schema liefert daher KEINEN Host, sondern leer → der Aufrufer
+    // malformtes Schema liefert daher KEINEN Host, sondern `null` → der Aufrufer
     // bricht fail-closed ab (Prod-Schutz). Eine reine `@host`-Regex würde hier
     // fälschlich `legacy-dev-host` extrahieren und die Guards passieren lassen.
-    expect(dbHostOf("postgres ://x@legacy-dev-host:5432/app")).toBe("");
+    expect(dbHostOf("postgres ://x@legacy-dev-host:5432/app")).toBeNull();
   });
 
-  it("liefert leeren String, wenn kein Host ermittelbar ist", () => {
-    expect(dbHostOf("not-a-url-at-all")).toBe("");
-    expect(dbHostOf("")).toBe("");
+  it("liefert null, wenn kein Host ermittelbar ist", () => {
+    // Vertrag seit der Konsolidierung: `string | null` statt `string`.
+    // Der frueher zurueckgegebene Leerstring war die schwaechere Antwort — er
+    // laesst sich still weiterreichen, `null` nicht. Genau daran hat der
+    // Compiler beim Umbau einen Aufrufer gefunden, der ihn ungeprueft benutzte.
+    expect(dbHostOf("not-a-url-at-all")).toBeNull();
+    expect(dbHostOf("")).toBeNull();
   });
 });
 
