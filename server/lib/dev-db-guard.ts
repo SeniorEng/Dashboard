@@ -1,5 +1,5 @@
 import { devZielGeprueft } from "./prod-write-lock";
-import { dbNameOf } from "@shared/ephemeral-db-target";
+import { dbHostOf, dbNameOf } from "@shared/ephemeral-db-target";
 /**
  * Dev-DB-CLI-Prod-Schutz-Guards (DB-frei)
  *
@@ -36,29 +36,11 @@ import { dbNameOf } from "@shared/ephemeral-db-target";
 // scripts/reseed-dev-db.sh und scripts/backup-dev-db.sh.
 export const PROD_HOST_PATTERN = /(^|[.-])prod([.-]|$)|production/;
 
-/**
- * Extrahiert den (lowercased) Hostnamen aus einer Connection-URL. Fällt bei
- * nicht-parsebarer URL auf eine schema-gebundene Regex zurück (gespiegelt aus
- * der Shell-Lib) und liefert einen leeren String, wenn kein Host ermittelbar
- * ist (→ fail-closed im Aufrufer).
- */
-export function dbHostOf(url: string): string {
-  let host = "";
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    // Fallback: parse-bar nur mit GÜLTIGEM Schema (`scheme://`), exakt
-    // gespiegelt aus der sed-Regex in scripts/lib/assert-dev-db.sh. Wichtig für
-    // die Cross-Language-Parität: ein malformter Scheme-Prefix (z.B.
-    // `postgres ://user@host` mit Leerzeichen) darf KEINEN Host liefern, sondern
-    // muss — wie die Shell — leer zurückkommen (→ fail-closed im Aufrufer).
-    // Eine reine `@host`-Regex würde hier fälschlich den Host extrahieren und
-    // die Guards passieren lassen, während die Shell abbricht.
-    const m = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/(?:[^@/?#]*@)?([^:/?#]+)/);
-    host = (m ? m[1] : "").toLowerCase();
-  }
-  return host;
-}
+// `dbHostOf` kommt jetzt aus `shared/ephemeral-db-target.ts` — EINE Fassung
+// statt zweier Vertraege. Der Rueckgabetyp ist damit `string | null` statt
+// `string`: wer "" als "kein Host" las, muss jetzt `null` behandeln.
+export { dbHostOf };
+
 
 /**
  * Verweigert den Lauf, sobald der Verdacht besteht, dass NICHT gegen eine
@@ -149,7 +131,16 @@ export async function assertDevWriteTargetOrThrow(): Promise<string> {
   // Paritaets-Test laeuft aber bewusst ohne. An DIESER Stelle ist die URL per
   // Definition da, der Screen oben hat sie schon geprueft.
   const { currentDatabaseName } = await import("../scripts/lib/prod-write-gate");
-  const host = dbHostOf(process.env.DATABASE_URL || "");
+  // `null` heisst "kein Host ermittelbar" — fail-closed, nicht "leerer Host".
+  // Der frueher hier zurueckgegebene Leerstring lief still in den Vergleich
+  // weiter; genau die Sorte Annahme, die der vereinheitlichte Vertrag sichtbar
+  // macht.
+  const host = dbHostOf(process.env.DATABASE_URL);
+  if (!host) {
+    throw new Error(
+      "ABBRUCH: DB-Host konnte aus DATABASE_URL nicht ermittelt werden (fail-closed).",
+    );
+  }
   const datenbank = await currentDatabaseName();
   const tatsaechlich = `${host}/${datenbank}`;
   if (erwartet !== tatsaechlich) {

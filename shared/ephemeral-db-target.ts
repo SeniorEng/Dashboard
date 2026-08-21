@@ -30,6 +30,61 @@ export type WegwerfZiel =
   | { ok: true; reason: string }
   | { ok: false; dbName: string | null };
 
+/**
+ * Host-Teil einer Connection-URL, klein geschrieben. `null`, wenn keiner
+ * ermittelbar ist — die Aufrufer behandeln das als fail-closed.
+ *
+ * ── Warum es diese eine Fassung gibt ────────────────────────────────────
+ * Bis hierhin existierten ZWEI, mit verschiedenen Verträgen:
+ *   `server/lib/dev-db-guard.ts`      → `string`, "" wenn nichts
+ *   `server/scripts/lib/prod-write-gate.ts` → `string | null`, ohne Fallback
+ *
+ * Das ist dieselbe Divergenz-Klasse, die diese ganze Welle bekämpft: zwei
+ * Antworten auf eine Frage driften auseinander, und die schwächere fällt
+ * fail-open. Genau so ist die Bash-Namensextraktion gekippt (PR #118).
+ *
+ * Vereinheitlicht auf den strengeren Vertrag `string | null`: wer `string`
+ * erwartete, muss `null` jetzt behandeln — sonst versteckt sich dort der
+ * nächste Fehler.
+ *
+ * ── Der Fallback bleibt, und zwar bewusst ───────────────────────────────
+ * `new URL()` wirft bei malformten Hosts. Gemessen feuert der Fallback dort
+ * tatsächlich und liefert z.B. `ho st`, `[bad`, `h|ost`. Das ist kein
+ * Versehen: die Shell-Lib (`scripts/lib/assert-dev-db.sh`, `db_host_of`)
+ * benutzt dieselbe Regex, und die Cross-Language-Parität verlangt dasselbe
+ * Ergebnis. Ein malformter Scheme-Prefix (`postgres ://…`) darf auf BEIDEN
+ * Seiten KEINEN Host liefern.
+ *
+ * Für die Aufrufer bleibt es fail-closed: ein Mülls-Host besteht die
+ * anschliessenden Vergleiche (`--confirm-target`, `current_database()`,
+ * `PROD_DATABASE_URL`) nicht.
+ */
+export function dbHostOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.toLowerCase() || null;
+  } catch {
+    // Nur mit GUELTIGEM Schema (`scheme://`) — zeichengleich zu `db_host_of`
+    // in scripts/lib/assert-dev-db.sh, BEIDE Alternativen in derselben
+    // Reihenfolge:
+    //
+    //   1. geklammerte IPv6 (`[...]`) ZUERST — `[^:/?#]+` stoppt sonst am
+    //      ersten `:` und liefert nur `[`.
+    //   2. sonst das gewoehnliche Host-Muster.
+    //
+    // Die erste Alternative kam im Gate-2-Review von PR #121 dazu, nachdem
+    // sie zunaechst NUR auf der Bash-Seite eingebaut war. Genau daran haette
+    // die Konsolidierung fail-open gedreht: `postgres://u:p@[::1]x/db` lieferte
+    // hier `[`, nach dem Strippen der Klammern `""` — und der Loopback-Screen
+    // in prod-write-gate.ts lief ins Leere. VOR der Konsolidierung war dieser
+    // Pfad dort fallback-frei und starb bei "Host nicht ermittelbar".
+    const geklammert = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/(?:[^@\/?#]*@)?(\[[^\]]*\])/);
+    if (geklammert) return geklammert[1].toLowerCase();
+    const m = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/(?:[^@\/?#]*@)?([^:\/?#]+)/);
+    return m ? m[1].toLowerCase() : null;
+  }
+}
+
 export function dbNameOf(url: string | undefined): string | null {
   if (!url) return null;
   try {
