@@ -42,7 +42,6 @@
  *     tsx server/scripts/cleanup-selbstzahler-statutory-budgets.ts --apply        # schreibend
  */
 import * as fs from "node:fs";
-import { dbHostOf } from "../lib/dev-db-guard";
 import * as path from "node:path";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, pool } from "../lib/db";
@@ -54,6 +53,7 @@ import {
   customerBudgetTypeSettings,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
+import { dbHostOf } from "@shared/ephemeral-db-target";
 import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
 import { upsertBudgetTypeSettings } from "../storage/budget/preferences-storage";
 import { auditService } from "../services/audit";

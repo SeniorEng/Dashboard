@@ -328,6 +328,14 @@ describe("istLoopback — kanonisiert statt Muster zu raten", () => {
     ["[0:0:0:0:0:0:0:1]", "IPv6-Loopback, ausgeschrieben"],
     ["[::ffff:127.0.0.1]", "IPv4-mapped — passierte den alten Screen"],
     ["[::ffff:7f00:1]", "IPv4-mapped, WHATWG-normalisiert (der tote Arm)"],
+    // Gate-2 zu #122: `postgres` ist kein special scheme, WHATWG laesst den
+    // Trailing Dot stehen — er kam an ALLEN Formen vorbei.
+    ["localhost.", "Trailing-Dot-FQDN"],
+    ["LOCALHOST.", "Trailing Dot plus Grossschreibung"],
+    ["127.0.0.1.", "Trailing Dot auf der dotted quad"],
+    ["2130706433.", "Trailing Dot auf der Zahlform"],
+    ["::", "IPv6-unspecified — Pendant zu 0.0.0.0"],
+    ["[::]", "dasselbe, geklammert"],
   ])("%s ist lokal (%s)", (host) => {
     expect(istLoopback(host)).toBe(true);
   });
@@ -343,6 +351,8 @@ describe("istLoopback — kanonisiert statt Muster zu raten", () => {
     ["localhosts", "Praefix-Falle"],
     ["[2001:db8::1]", "regulaeres IPv6"],
     ["[::ffff:8.8.8.8]", "IPv4-mapped, aber nicht Loopback"],
+    ["db.prod.example.", "Trailing Dot macht einen Prod-Host nicht lokal"],
+    ["[::ffff:0:127.0.0.1]", "SIIT-translated, kein Loopback"],
   ])("%s ist NICHT lokal (%s)", (host) => {
     expect(istLoopback(host)).toBe(false);
   });

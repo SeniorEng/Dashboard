@@ -49,22 +49,34 @@ db_name_of() {
 }
 
 db_host_of() {
-  local url="$1" h autoritaet
-  # Mehrdeutige Autoritaet (mehr als ein unkodiertes `@` vor dem Pfad) liefert
-  # KEINEN Host — auf beiden Seiten. Gemessen an
+  local url="$1" h rest bis_slash bis_trenner libpq whatwg
+  # Sind libpq und WHATWG sich uneinig, WO der Host steht, liefert diese
+  # Funktion KEINEN Host — auf beiden Seiten. Gemessen an
   # `postgres://admin:s@cret@dbhost/db` liest libpq (psql/pg_dump) den Host
   # "cret@dbhost", node-postgres/Neon dagegen "dbhost". Beide Guards lagen fuer
   # ihren eigenen Konsumenten richtig; die URL bedeutet schlicht ZWEI
   # Datenbanken, je nachdem wer sie liest — und `scripts/migrate.sh` faehrt
-  # beide Wege im selben Ablauf. Ein Guard, der sie aufloest, gibt eine
-  # Antwort, die fuer den anderen Weg nachweislich falsch ist.
-  # RFC 3986: `@` gehoert in der userinfo als `%40` kodiert; so kodierte
-  # Passwoerter passieren unveraendert. Zwilling: `autoritaetIstMehrdeutig`
-  # in shared/ephemeral-db-target.ts.
-  autoritaet="$(printf '%s' "$url" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]*).*$#\1#p')"
-  if [[ "$(printf '%s' "$autoritaet" | tr -cd '@' | wc -c)" -gt 1 ]]; then
-    printf ''
-    return 0
+  # beide Wege im selben Ablauf.
+  #
+  # ERSETZT die erste Fassung ("mehr als ein `@` vor dem Pfad"): die schnitt an
+  # `?`/`#` ab, was NUR WHATWG tut. Bei `postgres://u:p?x@dbhost/db` las diese
+  # Funktion `u` — den Benutzernamen — als Host, waehrend psql nach `dbhost`
+  # faehrt. Ein unauffaelliger Benutzername passierte damit alle vier Guards.
+  # Gemessen im Gate-2 zu #122. Zwilling: `hostBereichUneinig` in
+  # shared/ephemeral-db-target.ts; RFC 3986 verlangt `@`/`?`/`#` in der
+  # userinfo kodiert, kodierte Passwoerter passieren unveraendert.
+  if [[ "$url" == *"://"* ]]; then
+    rest="${url#*://}"
+    # libpq: nur `/` beendet die Autoritaet, die userinfo endet am ERSTEN `@`.
+    bis_slash="${rest%%/*}"
+    if [[ "$bis_slash" == *@* ]]; then libpq="${bis_slash#*@}"; else libpq="$bis_slash"; fi
+    # WHATWG: `/`, `?` und `#` beenden sie, die userinfo endet am LETZTEN `@`.
+    bis_trenner="${rest%%[/?#]*}"
+    if [[ "$bis_trenner" == *@* ]]; then whatwg="${bis_trenner##*@}"; else whatwg="$bis_trenner"; fi
+    if [[ "$libpq" != "$whatwg" ]]; then
+      printf ''
+      return 0
+    fi
   fi
   # IPv6 in eckigen Klammern ZUERST: `[^:/?#]+` stoppt sonst am ersten `:`
   # und liefert nur `[`. Gemessen ergab `postgres://u:p@[::1]:5432/db` in Bash

@@ -146,7 +146,15 @@ export function assertSchreibenErlaubt(was: string): void {
  *   1. `assertProdWriteAllowedOrThrow` → bewusster Schreibzugriff auf eine
  *      echte Datenbank, mit Host + `current_database()` + Superadmin + Grund.
  *   2. eine verifizierte **Wegwerf-DB** → per Konstruktion unschaedlich.
- *   3. `assertDevDatabase()` → bestaetigte Dev-Datenbank.
+ *   3. `assertDevWriteTargetOrThrow()` → bestaetigte Dev-Datenbank.
+ *
+ * Zu 3 stand hier `assertDevDatabase()`. Das ist FALSCH und war es immer:
+ * `assertDevDatabase()` ruft `devZielGeprueft` nicht, erteilt der Sperre also
+ * keine Freigabe. Nur die POSITIVE Pruefung tut das — was der ganze Punkt von
+ * #118 war (ein negatives „nicht Prod" darf kein Schreibrecht erteilen).
+ * Der Satz las sich wie „mit assertDevDatabase() ist ein Skript benutzbar",
+ * und genau das stimmt nicht: es stirbt beim ersten Schreibzugriff am
+ * HINWEIS-Block unten. Gefunden im Gate-2 zu #122.
  *
  * Form 2 fehlte im ersten Entwurf, und CI hat es sofort gezeigt:
  * `scripts/ci-seed-superadmin.ts` legt den Test-Superadmin an und wurde

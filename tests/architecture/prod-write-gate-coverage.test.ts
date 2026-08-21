@@ -123,7 +123,7 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
   { datei: "server/scripts/backfill-missing-import-consumption.ts", sha256: "27dabaa6a0f800c3" },
   { datei: "server/scripts/cleanup-duplicate-carryovers.ts", sha256: "0dd1cd68ca804ec5" },
   { datei: "server/scripts/cleanup-orphan-appointments.ts", sha256: "9865c82d2fd47bc2" },
-  { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "979a589731261951" },
+  { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "6153c2db039172df" },
   { datei: "server/scripts/cleanup-test-data.ts", sha256: "fc5b0ebc9a8b860d" },
   { datei: "server/scripts/reconcile-import-from-excel.ts", sha256: "e5fa5d19206aeb1c" },
   { datei: "server/scripts/reconcile-phantom-stornos.ts", sha256: "a01239e0e7fda5ce" },
@@ -288,12 +288,38 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
         aufzaehler.push(`${rel} (Literal am Gate)`);
         continue;
       }
-      // Oder das Parser-Ergebnis feldweise in ein lokales Objekt umgeschaufelt?
-      const feldweise = text.match(/\bgemeinsam\.\w+/g) ?? [];
-      if (feldweise.length > 0 && !/\.\.\.gemeinsam\b/.test(text)) {
-        aufzaehler.push(`${rel} (feldweise aus dem Parser-Ergebnis)`);
+      // Und: was `parseProdWriteArgs` liefert, muss AN EINEN Bezeichner
+      // gebunden sein, der dann gespreadet oder ans Gate gereicht wird.
+      //
+      // Die erste Fassung suchte woertlich nach `gemeinsam.` — eine
+      // Namenskonvention, die nirgends erzwungen wird. Der Gate-2-Review zu
+      // #122 hat sie mit vier Formen umgangen (Umbenennung, Destrukturierung,
+      // Zwischenvariable, Aufzaehlung in einer anderen Funktion) und dabei
+      // einen FALSCH-POSITIV gezeigt (`if (gemeinsam.apply) { gate(gemeinsam) }`
+      // war korrekt und wurde geflaggt). Gebunden statt benannt zu pruefen
+      // schliesst die ersten beiden und den Falsch-Positiv.
+      const bindung = text.match(
+        /(?:const|let|var)\s+(\{[^}]*\}|[A-Za-z_$][\w$]*)\s*=\s*parseProdWriteArgs\s*\(/,
+      );
+      if (!bindung) continue; // die Regel oben verlangt den Aufruf bereits
+      const ziel = bindung[1];
+      if (ziel.startsWith("{")) {
+        // Destrukturierung IST die Aufzaehlung — sie nennt genau die Felder,
+        // die jemand vergessen kann. Das ist B1 in Reinform.
+        aufzaehler.push(`${rel} (Parser-Ergebnis destrukturiert)`);
+        continue;
+      }
+      const durchgereicht =
+        new RegExp(`\\.\\.\\.${ziel}\\b`).test(text) ||
+        new RegExp(`\\b(?:${GATE}|${DUAL_GATE})\\s*\\(\\s*${ziel}\\b`).test(text);
+      if (!durchgereicht) {
+        aufzaehler.push(`${rel} (Parser-Ergebnis weder gespreadet noch ans Gate gereicht)`);
       }
     }
+    // BEKANNTE GRENZE, hier benannt statt verschwiegen: eine Zwischenvariable
+    // (`const g = gemeinsam`) und eine Aufzaehlung in einer anderen Funktion
+    // derselben Datei laufen weiterhin durch — die Pruefung ist textuell und
+    // datei-global. Wer das dicht haben will, braucht AST (ESLint-Regel).
     expect(
       aufzaehler,
       "Diese Skripte zaehlen die Gate-Flags auf, statt sie durchzureichen.\n" +

@@ -82,30 +82,6 @@ export async function currentDatabaseName(): Promise<string> {
   return String(erste?.db ?? "");
 }
 
-/**
- * Fail-closed: wirft, wenn `--apply` gegen irgendetwas anderes als die
- * bestätigte Prod-Primary liefe.
- *
- *
- * ── Warum `--confirm-target` jetzt ZWEI Teile hat ───────────────────────
- * Die erste Fassung verglich nur den HOST aus der `DATABASE_URL`. Das hat in
- * der Praxis versagt: auf Replit heißt der interne Postgres-Host `helium` —
- * in der Dev-Umgebung genauso wie in Prod. Ein `--confirm-target=helium` ging
- * damit gegen BEIDE Datenbanken durch, und der Trockenlauf lief unbemerkt
- * gegen die falsche (`heliumdb` statt `neondb`): 0/0/633 statt 54/0/114.
- *
- * Der Host allein kann Prod also nicht identifizieren. Der DATENBANKNAME kann
- * es — und er wird an der offenen Verbindung erfragt, nicht aus der URL
- * geparst. Die alte einteilige Form wird ABGELEHNT statt still weiter
- * akzeptiert: sie ist genau der Weg, auf dem der Fehler passiert ist.
- *
- * ACHTUNG beim Umstellen bestehender Skripte: diese Funktion ist `async`. Die
- * handgeschriebenen Kopien in `cleanup-duplicate-monthly-proofs.ts` und
- * anderswo sind SYNCHRON. Wer nur den Import tauscht, bekommt eine Zeile, die
- * ohne `await` durchkompiliert — das Gate ist dann wirkungslos, und `eslint`
- * meldet es nicht (kein `no-floating-promises` in diesem Repo). Immer ueber
- * `assertProdWriteAllowedOrThrow` gehen, das den Aufruf mit `await` kapselt.
- */
 
 /**
  * IPv4 nach inet_aton-Regeln in eine 32-Bit-Zahl — oder `null`.
@@ -149,12 +125,30 @@ function alsIpv4Zahl(host: string): number | null {
  * Deckt (gemessen, nicht vermutet): `localhost` und `*.localhost` (RFC 6761),
  * jede 127.0.0.0/8-Adresse in ALLEN inet_aton-Schreibweisen, `0.0.0.0` und
  * dessen Zahlform, IPv6-Loopback in jeder Schreibweise (`::1`,
- * `0:0:0:0:0:0:0:1`) sowie IPv4-mapped (`::ffff:127.0.0.1` und die von WHATWG
- * normalisierte Hex-Form `::ffff:7f00:1`).
+ * `0:0:0:0:0:0:0:1`), IPv4-mapped (`::ffff:127.0.0.1` und die von WHATWG
+ * normalisierte Hex-Form `::ffff:7f00:1`), `::` (unspecified) sowie jede
+ * dieser Formen mit Trailing Dot.
+ *
+ * ERWARTET einen Host OHNE Port. `dbHostOf` liefert nie einen, aber
+ * `new URL(...).host` (mit `.host` statt `.hostname`) schon — ein solcher Wert
+ * landet hier still im IPv6-Zweig und kommt als `false` zurueck. Wer eine
+ * andere Quelle anzapft, streift den Port vorher ab.
  */
 export function istLoopback(host: string): boolean {
-  const h = host.replace(/^\[|\]$/g, "").toLowerCase().replace(/%.*$/, "");
+  // Trailing Dot abstreifen: `localhost.` ist derselbe FQDN, `getaddrinfo`
+  // loest ihn genauso auf. `postgres` ist kein "special scheme", WHATWG
+  // normalisiert den Punkt also NICHT weg — `localhost.`, `127.0.0.1.` und
+  // `2130706433.` kamen dadurch an allen Formen vorbei (Gate-2 zu #122).
+  const h = host
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase()
+    .replace(/%.*$/, "")
+    .replace(/\.$/, "");
   if (h === "localhost" || h.endsWith(".localhost")) return true;
+  // `::` ist das IPv6-Pendant zu `0.0.0.0` (unspecified) und wird von
+  // server/index.ts als Bind-Adresse benutzt. Ohne diese Zeile war das
+  // Praedikat asymmetrisch: `0.0.0.0` lokal, `::` nicht.
+  if (h === "::") return true;
 
   const v4 = alsIpv4Zahl(h);
   if (v4 !== null) return v4 >>> 24 === 127 || v4 === 0;
@@ -196,6 +190,30 @@ export function istLoopback(host: string): boolean {
   }
   return false;
 }
+/**
+ * Fail-closed: wirft, wenn `--apply` gegen irgendetwas anderes als die
+ * bestätigte Prod-Primary liefe.
+ *
+ *
+ * ── Warum `--confirm-target` jetzt ZWEI Teile hat ───────────────────────
+ * Die erste Fassung verglich nur den HOST aus der `DATABASE_URL`. Das hat in
+ * der Praxis versagt: auf Replit heißt der interne Postgres-Host `helium` —
+ * in der Dev-Umgebung genauso wie in Prod. Ein `--confirm-target=helium` ging
+ * damit gegen BEIDE Datenbanken durch, und der Trockenlauf lief unbemerkt
+ * gegen die falsche (`heliumdb` statt `neondb`): 0/0/633 statt 54/0/114.
+ *
+ * Der Host allein kann Prod also nicht identifizieren. Der DATENBANKNAME kann
+ * es — und er wird an der offenen Verbindung erfragt, nicht aus der URL
+ * geparst. Die alte einteilige Form wird ABGELEHNT statt still weiter
+ * akzeptiert: sie ist genau der Weg, auf dem der Fehler passiert ist.
+ *
+ * ACHTUNG beim Umstellen bestehender Skripte: diese Funktion ist `async`. Die
+ * handgeschriebenen Kopien in `cleanup-duplicate-monthly-proofs.ts` und
+ * anderswo sind SYNCHRON. Wer nur den Import tauscht, bekommt eine Zeile, die
+ * ohne `await` durchkompiliert — das Gate ist dann wirkungslos, und `eslint`
+ * meldet es nicht (kein `no-floating-promises` in diesem Repo). Immer ueber
+ * `assertProdWriteAllowedOrThrow` gehen, das den Aufruf mit `await` kapselt.
+ */
 export async function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: string | undefined): Promise<void> {
   if (process.env.NODE_ENV !== "production") {
     throw new Error(
