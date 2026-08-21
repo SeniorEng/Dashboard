@@ -42,6 +42,7 @@
  *     tsx server/scripts/cleanup-selbstzahler-statutory-budgets.ts --apply        # schreibend
  */
 import * as fs from "node:fs";
+import { dbHostOf } from "../lib/dev-db-guard";
 import * as path from "node:path";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, pool } from "../lib/db";
@@ -146,14 +147,23 @@ interface CustomerFinding {
   statutoryTransactionCount: number;
 }
 
+/**
+ * ERSETZT die frueher hier nachgebaute Host-Extraktion durch die SSoT
+ * (`dbHostOf`). Der lokale Fallback war eine reine `@host`-Regex und zog auch
+ * aus `postgres ://db.prod.example/app` noch einen Host — die SSoT verweigert
+ * das (kein gueltiges Schema) und ebenso eine mehrdeutige Autoritaet.
+ *
+ * BEWUSST nicht `assertDevDatabase()`: dieses Skript ist zweistufig. Der
+ * Dry-Run-Audit soll ueberall laufen duerfen, auch read-only gegen Prod; nur
+ * `--apply` ist gegated (fail-closed ohne Host, Freigabe-Env bei Prod). Ein
+ * pauschaler Dev-Zwang wuerde den Audit-Pfad brechen. Die Umstellung betrifft
+ * deshalb nur die Extraktion, nicht das Verdikt.
+ *
+ * Der leere String bleibt hier die Aussenschnittstelle, weil `!host` unten
+ * genau der Fail-closed-Zweig ist.
+ */
 function resolveDbHost(): string {
-  const url = process.env.DATABASE_URL || "";
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    const m = url.match(/@([^:/?#]+)/);
-    return (m ? m[1] : "").toLowerCase();
-  }
+  return dbHostOf(process.env.DATABASE_URL) ?? "";
 }
 
 function looksLikeProd(host: string): boolean {

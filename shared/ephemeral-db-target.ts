@@ -59,8 +59,38 @@ export type WegwerfZiel =
  * anschliessenden Vergleiche (`--confirm-target`, `current_database()`,
  * `PROD_DATABASE_URL`) nicht.
  */
+/**
+ * Mehrdeutige Autoritaet: mehr als ein unkodiertes `@` vor dem Pfad.
+ *
+ * ── Warum das KEIN Parser-Angleich-Problem ist ──────────────────────────
+ * Gemessen an `postgres://admin:s@cret@dbhost/db` (unkodiertes `@` im
+ * Passwort) lesen die beiden Konsumenten dieses Repos VERSCHIEDENE Hosts:
+ *
+ *   psql / pg_dump (libpq)         -> "cret@dbhost"   (erstes `@`)
+ *   node-postgres / Neon (WHATWG)  -> "dbhost"        (letztes `@`)
+ *
+ * Beide Guards spiegelten damit ihren jeweiligen Konsumenten KORREKT — die
+ * Shell-Seite libpq, die TS-Seite den Treiber. Angleichen waere deshalb
+ * falsch: es wuerde einen der beiden Guards von seinem eigenen Konsumenten
+ * loesen. Und `scripts/migrate.sh` faehrt beide Wege im selben Ablauf.
+ *
+ * Der Punkt ist also nicht, dass eine Seite irrt, sondern dass so eine URL
+ * ZWEI Datenbanken bedeutet, je nachdem wer sie liest. Ein Guard, der sie
+ * aufloest, gibt eine Antwort, die fuer den anderen Weg nachweislich falsch
+ * ist. Deshalb loest sie hier keiner mehr auf.
+ *
+ * RFC 3986 deckt das: `@` ist in der userinfo nicht erlaubt, es gehoert als
+ * `%40` kodiert. Kodierte Passwoerter (`p%40w`) passieren unveraendert.
+ */
+function autoritaetIstMehrdeutig(url: string): boolean {
+  const nachSchema = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^\/?#]*)/);
+  if (!nachSchema) return false;
+  return (nachSchema[1].match(/@/g) ?? []).length > 1;
+}
+
 export function dbHostOf(url: string | undefined): string | null {
   if (!url) return null;
+  if (autoritaetIstMehrdeutig(url)) return null;
   try {
     return new URL(url).hostname.toLowerCase() || null;
   } catch {

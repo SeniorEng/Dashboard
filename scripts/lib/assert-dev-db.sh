@@ -49,7 +49,23 @@ db_name_of() {
 }
 
 db_host_of() {
-  local url="$1" h
+  local url="$1" h autoritaet
+  # Mehrdeutige Autoritaet (mehr als ein unkodiertes `@` vor dem Pfad) liefert
+  # KEINEN Host — auf beiden Seiten. Gemessen an
+  # `postgres://admin:s@cret@dbhost/db` liest libpq (psql/pg_dump) den Host
+  # "cret@dbhost", node-postgres/Neon dagegen "dbhost". Beide Guards lagen fuer
+  # ihren eigenen Konsumenten richtig; die URL bedeutet schlicht ZWEI
+  # Datenbanken, je nachdem wer sie liest — und `scripts/migrate.sh` faehrt
+  # beide Wege im selben Ablauf. Ein Guard, der sie aufloest, gibt eine
+  # Antwort, die fuer den anderen Weg nachweislich falsch ist.
+  # RFC 3986: `@` gehoert in der userinfo als `%40` kodiert; so kodierte
+  # Passwoerter passieren unveraendert. Zwilling: `autoritaetIstMehrdeutig`
+  # in shared/ephemeral-db-target.ts.
+  autoritaet="$(printf '%s' "$url" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]*).*$#\1#p')"
+  if [[ "$(printf '%s' "$autoritaet" | tr -cd '@' | wc -c)" -gt 1 ]]; then
+    printf ''
+    return 0
+  fi
   # IPv6 in eckigen Klammern ZUERST: `[^:/?#]+` stoppt sonst am ersten `:`
   # und liefert nur `[`. Gemessen ergab `postgres://u:p@[::1]:5432/db` in Bash
   # `[`, in TS `[::1]` — eine stille Divergenz, die kein Test je verglich.

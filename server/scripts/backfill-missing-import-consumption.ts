@@ -42,6 +42,7 @@
  */
 
 import { writeFileSync } from "node:fs";
+import { assertDevDatabase } from "../lib/dev-db-guard";
 import { eq, and, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
@@ -100,20 +101,13 @@ function assertNotProduction(): void {
       "ABBRUCH: NODE_ENV=production. Dieses Skript darf nie auf Produktion laufen.",
     );
   }
-  const url = process.env.DATABASE_URL || "";
-  let host = "";
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    const m = url.match(/@([^:/?#]+)/);
-    host = (m ? m[1] : "").toLowerCase();
-  }
-  if (host && /(^|[.-])prod([.-]|$)|production/.test(host)) {
-    throw new Error(
-      `ABBRUCH: DB-Host '${host}' sieht nach Produktion aus. Dieses Skript darf nie auf Produktion laufen.`,
-    );
-  }
-  console.log(`Sicherheits-Check ok. DB-Host: ${host || "(unbekannt)"}`);
+  // ERSETZT die frueher hier nachgebaute Host-Pruefung durch die SSoT
+  // (server/lib/dev-db-guard.ts). Die lokale Kopie war an drei Stellen
+  // SCHWAECHER: sie las den Host mit einer reinen `@host`-Regex (die auch aus
+  // `postgres ://db.prod.example/app` noch etwas zog), sie prueft mit
+  // `if (host && ...)` und liess damit einen NICHT ermittelbaren Host
+  // durch (fail-open), und sie kannte PROD_DATABASE_URL nicht.
+  assertDevDatabase();
 }
 
 async function assertSuperadminOrThrow(userId: number): Promise<void> {

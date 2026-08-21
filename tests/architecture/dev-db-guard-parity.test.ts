@@ -113,6 +113,14 @@ const HOST_URLS = [
   "", // leer → ""
   "postgres ://user@db.dev.example:5432/app", // malformtes Schema (Leerzeichen) → "" (fail-closed)
   "user@db.dev.example:5432/app", // kein Schema, nur @host → "" (fail-closed)
+  // Mehrdeutige Autoritaet: unkodiertes `@` im Passwort. BEIDE Seiten
+  // verweigern (W3, siehe Block unten) — vorher lasen sie verschiedene Hosts.
+  "postgresql://admin:s@cret@db.dev.example:5432/app",
+  // Gegenprobe: `@` im Query-String ist NICHT Teil der Autoritaet und darf
+  // die Verweigerung nicht ausloesen.
+  "postgresql://user:pass@db.dev.example:5432/app?options=a@b",
+  // Gegenprobe: korrekt als %40 kodiert → ganz normaler Host.
+  "postgresql://admin:s%40cret@db.dev.example:5432/app",
 ] as const;
 
 interface GuardFixture {
@@ -124,6 +132,27 @@ interface GuardFixture {
 }
 
 const DEV_OK = "postgresql://user:pass@db.dev.example:5432/app";
+
+/**
+ * Mehrdeutige Autoritaet — der W3-Fall, gemessen statt vermutet.
+ *
+ * Gate-2 von PR #121 meldete die Divergenz als "bash irrt". Nachgemessen
+ * gegen die tatsaechlichen Konsumenten stimmt das nicht — sie irrten beide
+ * nicht, sie bedienten verschiedene Parser:
+ *
+ *   psql/pg_dump (libpq)          -> "cret@db.dev.example"   (erstes `@`)
+ *   node-postgres/Neon (WHATWG)   -> "db.dev.example"        (letztes `@`)
+ *
+ * (libpq-Messung: `psql "postgres://admin:s@cret@dbhost.invalid/db"` meldet
+ * `could not translate host name "cret@dbhost.invalid"`; die node-Seite ueber
+ * `pg-connection-string`, den node-postgres benutzt.)
+ *
+ * Angleichen waere daher falsch gewesen — es haette einen der Guards von
+ * seinem eigenen Konsumenten geloest. Die URL bedeutet schlicht ZWEI
+ * Datenbanken, je nachdem wer sie liest, und `scripts/migrate.sh` faehrt
+ * beide Wege im selben Ablauf. Also loest sie keiner mehr auf.
+ */
+const MEHRDEUTIG = "postgresql://admin:s@cret@db.dev.example:5432/app";
 
 // Die vier Schutz-Bedingungen + Pass-Fälle. Erwartetes Verdikt ist hier nur die
 // dritte Wächter-Instanz — entscheidend ist, dass TS UND Shell IDENTISCH urteilen.
@@ -184,6 +213,23 @@ const GUARD_FIXTURES: GuardFixture[] = [
     DATABASE_URL: "postgresql://user:pass@shared-host.example:5432/neondb",
     PROD_DATABASE_URL: "postgresql://other:secret@shared-host.example:5432/neondb",
     expectAbort: true,
+  },
+  {
+    // Der W3-Fall: die URL loest fuer libpq und fuer den Treiber auf
+    // VERSCHIEDENE Hosts auf. Kein Guard darf sie aufloesen — beide Seiten
+    // muessen abbrechen, und zwar IDENTISCH.
+    name: "mehrdeutige Autoritaet (unkodiertes @ im Passwort) bricht ab",
+    NODE_ENV: "development",
+    DATABASE_URL: MEHRDEUTIG,
+    expectAbort: true,
+  },
+  {
+    // Gegenprobe: korrekt kodiert ist es ein voellig normaler Dev-Host. Die
+    // Verweigerung darf legitime Passwoerter mit `@` nicht mittreffen.
+    name: "korrekt kodiertes @ im Passwort (%40) passiert",
+    NODE_ENV: "development",
+    DATABASE_URL: "postgresql://admin:s%40cret@db.dev.example:5432/app",
+    expectAbort: false,
   },
   {
     name: "normaler Dev-Host passiert (PROD_DATABASE_URL auf anderem Host)",

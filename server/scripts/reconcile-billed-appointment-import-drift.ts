@@ -123,13 +123,14 @@ function parseArgs(): Args {
   // und landete VERSTUEMMELT im GoBD-Audit-Log. `parseProdWriteArgs` benutzt
   // `slice(praefix.length)`.
   const gemeinsam = parseProdWriteArgs(argv);
+  // SPREAD statt Feld-fuer-Feld: die feldweise Form ist genau der Weg, auf
+  // dem `confirmTarget` in reconcile-km-drift verlorenging (B1, Gate-2 zu
+  // #120) — deklariert, nie zugewiesen, das Gate brach bei JEDEM --apply ab.
+  // Was man nicht aufzaehlt, kann man nicht vergessen.
   return {
-    apply: gemeinsam.apply,
+    ...gemeinsam,
     customerIds: parseIdList(get("--customer=")),
     appointmentIds: parseIdList(get("--appointment=")),
-    userId: gemeinsam.userId,
-    confirmTarget: gemeinsam.confirmTarget,
-    reason: gemeinsam.reason,
     importLinkedOnly: argv.includes("--import-linked-only"),
   };
 }
@@ -487,12 +488,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     const freigabe = await assertProdWriteAllowedOrThrow(
-      {
-        apply: args.apply,
-        userId: args.userId,
-        reason: args.reason,
-        confirmTarget: args.confirmTarget,
-      },
+      args,
       "Der Lauf schreibt GoBD-Storno- und Neuausstellungs-Artefakte.",
     );
     console.log(`Freigegeben durch: ${freigabe.displayName}`);

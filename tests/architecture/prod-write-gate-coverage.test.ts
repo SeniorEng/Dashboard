@@ -101,6 +101,14 @@ const DUAL_GATE = "assertDualTargetOrThrow";
  * Wellenplan: W1 = die zwei kaputt-gegateten (nur Host), W2 = hoher
  * Blast-Radius, W3+ = Rest.
  *
+ * W3 hat vier Eintraege NEU GEHASHT statt entfernt: sie haben in W3 ihre
+ * lokal nachgebaute Host-Pruefung gegen `assertDevDatabase()` getauscht (die
+ * Kopie war fail-open — `if (host && …)` liess einen nicht ermittelbaren Host
+ * durch). Damit sind sie strenger, aber NICHT auf der Prod-Gate-SSoT: das
+ * bleibt ein negativer Dev-Screen, und der erteilt nach #117/#118 kein
+ * Schreibrecht. Sie bleiben deshalb Altlast. Genau dafuer ist die Pinnung da —
+ * sie hat die Aenderung sichtbar gemacht, statt sie durchrutschen zu lassen.
+ *
  * Jeder Eintrag traegt den SHA-256 seines Inhalts: wird die Datei geaendert,
  * passt der Hash nicht mehr und Test 3 wird rot. Die Liste duldet BESTEHENDEN
  * ungegateten Code, nicht WACHSENDEN.
@@ -110,13 +118,13 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
   { datei: "scripts/ci-seed-superadmin.ts", sha256: "8393502e6c045110" },
   { datei: "scripts/migrate-schema.ts", sha256: "cc2ada92e0ac3ec6" },
   { datei: "scripts/verify-advice-backfill.ts", sha256: "1584bebf75ad95a3" },
-  { datei: "server/scripts/apply-vacation-policy-2026.ts", sha256: "37dcf9af44d0ae6d" },
+  { datei: "server/scripts/apply-vacation-policy-2026.ts", sha256: "1b94c87b72830db7" },
   { datei: "server/scripts/b3-quantify-exposure.ts", sha256: "ad122b582faf1605" },
-  { datei: "server/scripts/backfill-missing-import-consumption.ts", sha256: "ab6fb319b8f00d4d" },
+  { datei: "server/scripts/backfill-missing-import-consumption.ts", sha256: "27dabaa6a0f800c3" },
   { datei: "server/scripts/cleanup-duplicate-carryovers.ts", sha256: "0dd1cd68ca804ec5" },
   { datei: "server/scripts/cleanup-orphan-appointments.ts", sha256: "9865c82d2fd47bc2" },
-  { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "edced74152e2c84b" },
-  { datei: "server/scripts/cleanup-test-data.ts", sha256: "d46beef9193c2384" },
+  { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "979a589731261951" },
+  { datei: "server/scripts/cleanup-test-data.ts", sha256: "fc5b0ebc9a8b860d" },
   { datei: "server/scripts/reconcile-import-from-excel.ts", sha256: "e5fa5d19206aeb1c" },
   { datei: "server/scripts/reconcile-phantom-stornos.ts", sha256: "a01239e0e7fda5ce" },
   { datei: "server/scripts/reconcile-reversal-chains.ts", sha256: "34af822d4f0cca67" },
@@ -257,6 +265,41 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
       ohneParser,
       `Diese Skripte rufen ${GATE}, lesen die gemeinsamen Flags aber selbst.\n` +
         `Nimm \`parseProdWriteArgs\` aus derselben SSoT:\n  ${ohneParser.join("\n  ")}`,
+    ).toEqual([]);
+  });
+
+  it("das Parser-Ergebnis erreicht das Gate — kein feldweiser Nachbau", () => {
+    // DIE Luecke, durch die B1 kam (Gate-2 zu #120): `reconcile-km-drift`
+    // deklarierte `confirmTarget`, gab es aber nie zurueck. `args.confirmTarget`
+    // war immer `undefined`, das Gate brach bei JEDEM `--apply` ab — "sieht
+    // gegatet aus, ist unbenutzbar". `tsc` und `eslint` schweigen, weil das
+    // Feld optional ist, und die bestehende Regel oben pruefte nur, DASS
+    // `parseProdWriteArgs` aufgerufen wird, nicht dass sein Ergebnis ankommt.
+    //
+    // Statisch ist "kommt an" nicht entscheidbar. Entscheidbar ist die Form,
+    // die den Fehler ueberhaupt erst moeglich macht: eine Aufzaehlung. Wer das
+    // Objekt durchreicht (`gate(args, …)`), kann kein Feld vergessen.
+    const aufzaehler: string[] = [];
+    for (const rel of schreibendeSkripte()) {
+      const text = entkommentiert(inhalt(rel));
+      if (!ruftGate(text)) continue;
+      // Objekt-LITERAL als erstes Argument des Gates?
+      if (new RegExp(`\\b(?:${GATE}|${DUAL_GATE})\\s*\\(\\s*\\{`).test(text)) {
+        aufzaehler.push(`${rel} (Literal am Gate)`);
+        continue;
+      }
+      // Oder das Parser-Ergebnis feldweise in ein lokales Objekt umgeschaufelt?
+      const feldweise = text.match(/\bgemeinsam\.\w+/g) ?? [];
+      if (feldweise.length > 0 && !/\.\.\.gemeinsam\b/.test(text)) {
+        aufzaehler.push(`${rel} (feldweise aus dem Parser-Ergebnis)`);
+      }
+    }
+    expect(
+      aufzaehler,
+      "Diese Skripte zaehlen die Gate-Flags auf, statt sie durchzureichen.\n" +
+        "Reich das Parser-Ergebnis direkt weiter (`{ ...gemeinsam, <eigene Flags> }`\n" +
+        "bzw. `gate(args, …)`) — eine Aufzaehlung kann ein Feld verlieren:\n  " +
+        aufzaehler.join("\n  "),
     ).toEqual([]);
   });
 

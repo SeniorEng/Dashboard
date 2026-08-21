@@ -187,7 +187,10 @@ async function main() {
     // Klasse (`--target=prod|dev`), und beide Wege pruefen den Datenbanknamen
     // an der OFFENEN Verbindung.
     const freigabe = await assertDualTargetOrThrow(
-      { ...args, target: args.target },
+      // Direkt durchgereicht. Vorher `{ ...args, target: args.target }` — der
+      // Spread trug `target` laengst, die Wiederholung suggerierte nur, das
+      // Feld brauche eine Sonderbehandlung.
+      args,
       "Der Lauf verschluesselt Firmen-Secrets neu (at-rest, AES-256-GCM).",
     );
     console.log(`Ziel-Klasse: ${freigabe.klasse} · bestaetigt: ${freigabe.ziel}`);
