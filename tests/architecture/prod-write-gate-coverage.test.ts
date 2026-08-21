@@ -77,6 +77,13 @@ import { quelltextSchreibt } from "@shared/db-write-statements";
 // damit ganz ausserhalb der Reichweite des Waechters.
 const SKRIPT_DIRS = ["server/scripts", "scripts"] as const;
 const GATE = "assertProdWriteAllowedOrThrow";
+/**
+ * Zweite gueltige Form: das Dual-Target-Gate fuer Skripte, die legitim in Dev
+ * UND Prod laufen (`server/scripts/lib/dual-target-gate.ts`). Es delegiert an
+ * genau dieselben zwei Gates und ist deshalb kein Zweitbegriff, sondern eine
+ * Auswahl davor.
+ */
+const DUAL_GATE = "assertDualTargetOrThrow";
 
 /**
  * Die Erkennung teilt sich die SSoT mit der Laufzeit-Sperre
@@ -111,16 +118,13 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
   { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "edced74152e2c84b" },
   { datei: "server/scripts/cleanup-test-data.ts", sha256: "d46beef9193c2384" },
   { datei: "server/scripts/reconcile-import-from-excel.ts", sha256: "e5fa5d19206aeb1c" },
-  { datei: "server/scripts/reconcile-km-drift.ts", sha256: "0c1b45563cac5e45" },
   { datei: "server/scripts/reconcile-phantom-stornos.ts", sha256: "a01239e0e7fda5ce" },
   { datei: "server/scripts/reconcile-reversal-chains.ts", sha256: "34af822d4f0cca67" },
   { datei: "server/scripts/reconcile-trimmed-imports.ts", sha256: "5852ae1ce11cc0fc" },
-  { datei: "server/scripts/reencrypt-company-secrets.ts", sha256: "630437941645c519" },
-  { datei: "server/scripts/reissue-selbstzahler-vat-invoices.ts", sha256: "c22147a672a8a1be" },
 ];
 
 /** Muss zur Listenlänge passen — macht jede Ergänzung im Diff sichtbar. */
-const BEKANNTE_LOECHER = 18;
+const BEKANNTE_LOECHER = 15;
 
 function schreibendeSkripte(): string[] {
   return SKRIPT_DIRS.flatMap((dir) =>
@@ -156,6 +160,12 @@ function vorhandeneEintraege(): { datei: string; sha256: string }[] {
   return ALTLAST.filter((e) => existsSync(path.resolve(process.cwd(), e.datei)));
 }
 
+/** Ruft die Datei eines der beiden Ziel-Gates AUF (nicht: erwaehnt es)? */
+function ruftGate(text: string): boolean {
+  const ohne = entkommentiert(text);
+  return new RegExp(`\\b(?:${GATE}|${DUAL_GATE})\\s*\\(`).test(ohne);
+}
+
 /** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
 function entkommentiert(text: string): string {
   return text.replace(/\/\/[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
@@ -169,7 +179,12 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
   it("jedes schreibende Skript hat das Gate ODER steht als bekannte Altlast drin", () => {
     const bekannt = new Set(ALTLAST.map((e) => e.datei));
     const ungegatet = schreibendeSkripte().filter(
-      (rel) => !inhalt(rel).includes(GATE) && !bekannt.has(rel),
+      // AUFRUF im entkommentierten Text, nicht blosse Erwaehnung. Dieser PR
+      // fuegt selbst Kommentare ein, die den Gate-Namen buchstaeblich nennen
+      // ("ERSETZT durch die SSoT assertProdWriteAllowedOrThrow") — mit einer
+      // reinen Textsuche waere jeder davon ein Unterstand geworden. Dieselbe
+      // Falle wie bei der Parser-Regel in PR #119.
+      (rel) => !ruftGate(inhalt(rel)) && !bekannt.has(rel),
     );
     expect(
       ungegatet,
@@ -193,7 +208,7 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
 
   it("Test 2 — kein Altlast-Eintrag ist laengst gegatet", () => {
     const erledigt = vorhandeneEintraege()
-      .filter((e) => inhalt(e.datei).includes(GATE))
+      .filter((e) => ruftGate(inhalt(e.datei)))
       .map((e) => e.datei);
     expect(
       erledigt,
@@ -232,7 +247,7 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
     // 10-Zeichen-Schranke und landete VERSTUEMMELT im GoBD-Audit-Log.
     // `parseProdWriteArgs` benutzt `slice(praefix.length)`.
     const ohneParser = schreibendeSkripte()
-      .filter((rel) => inhalt(rel).includes(GATE))
+      .filter((rel) => ruftGate(inhalt(rel)))
       // Auf den AUFRUF pruefen, nicht auf den Namen: ein Kommentar, der
       // `parseProdWriteArgs` erwaehnt, erfuellte eine reine Text-Suche und
       // machte die Regel wirkungslos. Genau das ist beim Gegenpruefen

@@ -80,7 +80,6 @@ import {
   customers,
   invoices as invoicesTable,
   invoiceLineItems,
-  users,
   type Invoice,
 } from "@shared/schema";
 import { resolveVatTreatment, STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
@@ -88,12 +87,15 @@ import { isInvoiceIssued, neverIssuedCondition } from "../lib/invoice-issued";
 import { stornoInvoiceCascade } from "../services/invoice-storno";
 import { generateInvoiceCore } from "../services/invoice-calc";
 import { persistInvoicePdf } from "../services/invoice-pdf-orchestrator";
+import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
 
 interface Args {
   apply: boolean;
   invoiceNumbers: string[];
   userId: number | undefined;
   reason: string | undefined;
+  /** `--confirm-target=<host>/<datenbank>` — vom Ziel-Gate geprueft. */
+  confirmTarget?: string;
 }
 
 /** Der historische Bug: Prozent-Rate roh durch 10000 → 100× zu niedrig. */
@@ -129,36 +131,24 @@ function parseArgs(): Args {
   const invoiceNumbers = invArg
     ? invArg.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
-  const userArg = get("--user=");
-  const userId = userArg ? parseInt(userArg, 10) : undefined;
+  // Die gemeinsamen Flags aus der SSoT: der lokale `get` schnitt per
+  // `.split("=")[1]` am ERSTEN `=` ab — eine Begruendung mit `=>` landete
+  // verstuemmelt im GoBD-Audit-Log (PR #119).
+  const gemeinsam = parseProdWriteArgs(process.argv);
   return {
     apply,
     invoiceNumbers,
-    userId: userId !== undefined && Number.isFinite(userId) ? userId : undefined,
-    reason: get("--reason="),
+    userId: gemeinsam.userId,
+    reason: gemeinsam.reason,
+    confirmTarget: gemeinsam.confirmTarget,
   };
 }
 
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db
-    .select({
-      id: users.id,
-      isSuperAdmin: users.isSuperAdmin,
-      isActive: users.isActive,
-      displayName: users.displayName,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `USt-Korrektur-Stornos sind Task #1659 explizit auf Superadmins beschränkt.`,
-    );
-  }
-}
+// `assertSuperadminOrThrow` ist entfallen — ERSETZT durch die SSoT
+// `assertProdWriteAllowedOrThrow`, die Superadmin, Begruendung UND das
+// Ziel in einem Aufruf prueft. Eine Superadmin-Pruefung OHNE
+// Ziel-Freigabe ist genau der Zweitbegriff aus W1.
+
 
 /** Lädt Kandidaten (kein Storno-Beleg, nicht storniert), optional auf Nummern gescopt. */
 async function loadCandidates(invoiceNumbers: string[]) {
@@ -363,15 +353,18 @@ async function main() {
       );
       process.exit(1);
     }
-    if (args.userId === undefined) {
-      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
-      process.exit(1);
-    }
-    if (!args.reason || args.reason.length < 10) {
-      console.error('Fehler: --apply erfordert --reason="..." (≥10 Zeichen Begründung für den Audit-Log).');
-      process.exit(1);
-    }
-    await assertSuperadminOrThrow(args.userId);
+    // Ziel, Superadmin und Begruendung in EINEM Aufruf — und die Freigabe
+    // fuer die Laufzeit-Schreibsperre.
+    const freigabe = await assertProdWriteAllowedOrThrow(
+      {
+        apply: args.apply,
+        userId: args.userId,
+        reason: args.reason,
+        confirmTarget: args.confirmTarget,
+      },
+      "Der Lauf storniert Selbstzahler-Rechnungen und stellt sie neu aus (GoBD).",
+    );
+    console.log(`Freigegeben durch: ${freigabe.displayName}`);
   }
 
   console.log(`\n=== Selbstzahler-USt-Korrektur · Task #1659 ===`);
