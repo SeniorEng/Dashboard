@@ -16,8 +16,25 @@ import {
 // damit exakt die Annahme, die er belegen sollte. Der echte Treiber-Pfad liegt
 // jetzt in `tests/startup/prod-write-gate-db-name.test.ts`.
 vi.mock("../../server/lib/db", () => ({
-  db: { execute: async () => ({ rows: [{ db: DB_NAME.wert }] }) },
+  db: {
+    execute: async () => ({ rows: [{ db: DB_NAME.wert }] }),
+    // Die Superadmin-Pruefung des komponierten Gates liest ueber `select`.
+    // `SUPERADMIN` steuert, was sie findet — so laesst sich der VOLLE Pfad
+    // pruefen und nicht nur die Abbruch-Zweige davor.
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => (SUPERADMIN.zeile ? [SUPERADMIN.zeile] : []),
+        }),
+      }),
+    }),
+  },
 }));
+const SUPERADMIN = {
+  zeile: { id: 1, isSuperAdmin: true, isActive: true, displayName: "Testadmin" } as
+    | { id: number; isSuperAdmin: boolean; isActive: boolean; displayName: string }
+    | null,
+};
 const DB_NAME = { wert: "neondb" };
 
 /**
@@ -154,6 +171,56 @@ describe("Prod-Schreib-Gate", () => {
   });
 
   describe("Argument-Auswertung", () => {
+    /**
+     * Der GoBD-Bug, gepinnt.
+     *
+     * Beide W1-Skripte lasen ihre Flags bis PR #119 mit einem eigenen
+     * `argv.find(...)?.split("=")[1]`. Das schneidet am ERSTEN `=` ab. Eine
+     * Begruendung wie `--reason="Import-Drift #1651 => Korrektur"` wurde
+     * stillschweigend zu `Import-Drift #1651 ` — blieb ueber der
+     * 10-Zeichen-Schranke, ging also durch, und landete VERSTUEMMELT im
+     * Audit-Log. Kein Signal fuer den Operator.
+     *
+     * Der Weg ist direkt: `parseProdWriteArgs` -> `args.reason` -> Audit-Eintrag
+     * (`cleanup-duplicate-monthly-proofs.ts` uebergibt ihn als `opts.reason`,
+     * `reconcile-billed-appointment-import-drift.ts` als `auditExtra.reason`).
+     * Was dieser Parser liefert, IST der Text im Audit-Log.
+     */
+    it.each([
+      ["Import-Drift #1651 => Korrektur", "Pfeil-Operator"],
+      ["Storno a=b, Neuausstellung c=d", "mehrere Gleichheitszeichen"],
+      ["Grund mit = am Ende =", "Gleichheitszeichen am Ende"],
+      ["Betrag 12,50 EUR => 0,00 EUR (Storno #1527)", "realistischer GoBD-Grund"],
+    ])("reicht ein --reason mit '=' unverstuemmelt durch (%j — %s)", (grund) => {
+      const a = parseProdWriteArgs(["node", "s.ts", "--apply", `--reason=${grund}`]);
+      expect(a.reason).toBe(grund);
+
+      // Gegenprobe: der alte lokale Leser haette an dieser Stelle gekuerzt.
+      const alt = ["node", "s.ts", "--apply", `--reason=${grund}`]
+        .find((x) => x.startsWith("--reason="))
+        ?.split("=")[1];
+      expect(alt).not.toBe(grund);
+    });
+
+    it("der volle Grund kommt auch aus dem komponierten Gate zurueck", async () => {
+      // Nicht nur der Parser: was `assertProdWriteAllowedOrThrow` zurueckgibt,
+      // ist der Text, den die Skripte protokollieren.
+      const grund = "Import-Drift #1651 => Korrektur, Betrag 12,50 => 0,00";
+      umgebung("postgres://u:p@db.prod.example.com:5432/neondb");
+      DB_NAME.wert = "neondb";
+      const args = parseProdWriteArgs([
+        "node",
+        "s.ts",
+        "--apply",
+        "--user=1",
+        `--reason=${grund}`,
+        "--confirm-target=db.prod.example.com/neondb",
+      ]);
+      expect(args.reason).toBe(grund);
+      const v = await assertProdWriteAllowedOrThrow(args, "Testfall");
+      expect(v.reason).toBe(grund);
+    });
+
     it("liest die Flags und weist eine unbrauchbare User-Id ab", () => {
       const a = parseProdWriteArgs([
         "node", "skript.ts", "--apply",

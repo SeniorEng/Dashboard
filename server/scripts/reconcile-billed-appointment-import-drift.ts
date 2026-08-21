@@ -38,7 +38,8 @@
  *                                    KEIN Blind-Bulk über alle Treffer — nur
  *                                    Termine, die auf dieser Allowlist stehen,
  *                                    werden repariert.
- *       · Prod-DB-Guard              `assertProdDatabase()`: der scharfe Lauf
+ *       · Ziel-Gate                  `assertProdWriteAllowedOrThrow()` (SSoT):
+ *                                     der scharfe Lauf
  *                                    MUSS gegen die Produktions-DB gehen. Dort
  *                                    liegt der Drift, und die GoBD-Storno-/
  *                                    Neuausstellungs-Artefakte (PDFs im
@@ -51,7 +52,18 @@
  *     tsx server/scripts/reconcile-billed-appointment-import-drift.ts --customer=108 --import-linked-only
  *   Scharf (nur bestätigte Termine, gegen die Prod-DB):
  *     tsx server/scripts/reconcile-billed-appointment-import-drift.ts --apply \
- *       --appointment=1234,1235 --user=<superadmin-id> --reason="Import-Drift-Reparatur #1651"
+ *       --appointment=1234,1235 --user=<superadmin-id> \
+ *       --reason="Import-Drift-Reparatur #1651" \
+ *       --confirm-target=<host>/<datenbank>
+ *
+ *   Voraussetzungen des scharfen Laufs (seit dem Ziel-Gate, PR #118/#119):
+ *     - `PROD_DATABASE_URL` MUSS gesetzt sein — daraus kommt die Prod-Identitaet
+ *       (Host + `current_database()` aus der OFFENEN Verbindung). ACHTUNG:
+ *       `docs/pre-publish-backup-runbook.md` weist an, sie nach dem Backup zu
+ *       `unset`en. Fuer diesen Lauf muss sie WIEDER gesetzt sein.
+ *     - `NODE_ENV=production`, `TEST_DATABASE_URLS` leer.
+ *     - `--confirm-target=<host>/<datenbank>`: der Datenbankname wird an der
+ *       offenen Verbindung geprueft, nicht aus der URL gelesen.
  *
  * Exit-Code: 0 = keine offenen Drift-Kandidaten (bzw. alle bestätigten repariert),
  * 1 = mindestens ein offener Drift-Kandidat gefunden (CI-/Skript-freundlich).
@@ -80,7 +92,7 @@ import {
   persistInvoicePdf,
   schedulePdfPersistInBackground,
 } from "../services/invoice-pdf-orchestrator";
-import { dbHostOf, PROD_HOST_PATTERN } from "../lib/dev-db-guard";
+import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
 import { activeInvoiceCondition } from "../lib/appointment-invoiced";
 
 export interface Args {
@@ -89,6 +101,7 @@ export interface Args {
   appointmentIds: number[];
   userId?: number;
   reason?: string;
+  confirmTarget?: string;
   importLinkedOnly: boolean;
 }
 
@@ -104,70 +117,44 @@ function parseArgs(): Args {
     }
     return out;
   };
-  const userArg = get("--user=");
-  const userId = userArg ? parseInt(userArg, 10) : undefined;
+  // Die vier gemeinsamen Flags kommen aus der SSoT. Der lokale `get` schnitt
+  // per `.split("=")[1]` am ERSTEN `=` ab — `--reason="… #1651 => Korrektur"`
+  // wurde stillschweigend zu `… #1651 `, blieb ueber der 10-Zeichen-Schranke
+  // und landete VERSTUEMMELT im GoBD-Audit-Log. `parseProdWriteArgs` benutzt
+  // `slice(praefix.length)`.
+  const gemeinsam = parseProdWriteArgs(argv);
   return {
-    apply: argv.includes("--apply"),
+    apply: gemeinsam.apply,
     customerIds: parseIdList(get("--customer=")),
     appointmentIds: parseIdList(get("--appointment=")),
-    userId: userId !== undefined && Number.isFinite(userId) ? userId : undefined,
-    reason: get("--reason="),
+    userId: gemeinsam.userId,
+    confirmTarget: gemeinsam.confirmTarget,
+    reason: gemeinsam.reason,
     importLinkedOnly: argv.includes("--import-linked-only"),
   };
 }
 
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db
-    .select({
-      id: users.id,
-      isSuperAdmin: users.isSuperAdmin,
-      isActive: users.isActive,
-      displayName: users.displayName,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `Import-Drift-Reparaturen (Storno + Neuausstellung) sind Task #1651 ` +
-        `explizit auf Superadmins beschränkt.`,
-    );
-  }
-}
+// `assertSuperadminOrThrow` ist entfallen — die SSoT
+// `assertProdWriteAllowedOrThrow` prueft den Superadmin mit. Sie blieb nach
+// dem Umbau ohne Aufrufer stehen und haette dazu verleitet, sie wieder zu
+// verdrahten: eine Superadmin-Pruefung OHNE Ziel-Freigabe.
 
-/**
- * Spiegelbild zu `assertDevDatabase()`: verweigert den SCHARFEN Lauf, wenn NICHT
- * gegen die Produktions-DB gearbeitet wird. Der Drift lebt in Prod und die
- * GoBD-Storno-/Neuausstellungs-Artefakte sind prod-env-scoped — eine Reparatur
- * gegen eine Dev-/Test-DB würde nur dort Rechnungen anlegen und den Prod-Bestand
- * unberührt lassen. Nutzt die SSoT-Host-Helfer aus `dev-db-guard.ts` (kein
- * eigenes URL-Parsing, keine Änderung an dem paritäts-geschützten Modul).
- *
- * Der TROCKENLAUF ist überall erlaubt (read-only) und ruft diesen Guard nicht.
- */
-function assertProdDatabase(): void {
-  const url = process.env.DATABASE_URL || "";
-  if (!url) throw new Error("ABBRUCH: DATABASE_URL ist nicht gesetzt.");
-  const host = dbHostOf(url);
-  // Fail-closed: ohne ermittelbaren Host kann der Prod-Nachweis nicht greifen.
-  if (!host) {
-    throw new Error("ABBRUCH: DB-Host konnte aus DATABASE_URL nicht extrahiert werden (fail-closed).");
-  }
-  const prodUrl = process.env.PROD_DATABASE_URL || "";
-  const prodHost = prodUrl ? dbHostOf(prodUrl) : "";
-  const looksProd = PROD_HOST_PATTERN.test(host) || (prodHost !== "" && host === prodHost);
-  if (!looksProd) {
-    throw new Error(
-      `ABBRUCH: DB-Host '${host}' sieht NICHT nach Produktion aus. ` +
-        `--apply schreibt GoBD-Storno-/Neuausstellungs-Artefakte und darf NUR ` +
-        `gegen die Produktions-DB laufen (Trockenlauf ist überall erlaubt).`,
-    );
-  }
-  console.log(`Prod-DB-Guard ok. DB-Host: ${host}`);
-}
+// `assertProdDatabase()` ist entfallen — ERSETZT durch die SSoT
+// `server/scripts/lib/prod-write-gate.ts`.
+//
+// Sie war ein DRITTER Prod-Begriff, und ein falscher:
+//
+//   const looksProd = PROD_HOST_PATTERN.test(host) || (prodHost !== "" && host === prodHost);
+//
+// Auf Replit heisst der interne Host in Dev und Prod gleich. `host === prodHost`
+// war damit auch fuer `heliumdb` wahr — die Wegwerf-Default-DB galt als
+// Produktion, und ein `--apply` haette GoBD-Storno-/Neuausstellungs-Artefakte
+// dorthin geschrieben. Der 18.08.2026 mit umgekehrtem Vorzeichen.
+//
+// Die SSoT fragt statt der FORM die IDENTITAET: Host + `current_database()` aus
+// der offenen Verbindung gegen `PROD_DATABASE_URL`, plus `--confirm-target`,
+// Superadmin und Begruendung.
+
 
 /** Als geschützt geltender Termin: über LN, Rechnung oder beides versiegelt. */
 function isFlaggedRow(row: BilledImportDriftRow): boolean {
@@ -499,8 +486,16 @@ async function main(): Promise<void> {
       );
       process.exit(1);
     }
-    assertProdDatabase();
-    await assertSuperadminOrThrow(args.userId);
+    const freigabe = await assertProdWriteAllowedOrThrow(
+      {
+        apply: args.apply,
+        userId: args.userId,
+        reason: args.reason,
+        confirmTarget: args.confirmTarget,
+      },
+      "Der Lauf schreibt GoBD-Storno- und Neuausstellungs-Artefakte.",
+    );
+    console.log(`Freigegeben durch: ${freigabe.displayName}`);
   }
 
   console.log(`\n=== Import-Drift-Reparatur (Storno + Neuausstellung) · Task #1651 ===`);

@@ -107,11 +107,9 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
   { datei: "server/scripts/b3-quantify-exposure.ts", sha256: "ad122b582faf1605" },
   { datei: "server/scripts/backfill-missing-import-consumption.ts", sha256: "ab6fb319b8f00d4d" },
   { datei: "server/scripts/cleanup-duplicate-carryovers.ts", sha256: "0dd1cd68ca804ec5" },
-  { datei: "server/scripts/cleanup-duplicate-monthly-proofs.ts", sha256: "f4718563d7a688e0" },
   { datei: "server/scripts/cleanup-orphan-appointments.ts", sha256: "9865c82d2fd47bc2" },
   { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "edced74152e2c84b" },
   { datei: "server/scripts/cleanup-test-data.ts", sha256: "d46beef9193c2384" },
-  { datei: "server/scripts/reconcile-billed-appointment-import-drift.ts", sha256: "68ea413d0cdcacd2" },
   { datei: "server/scripts/reconcile-import-from-excel.ts", sha256: "e5fa5d19206aeb1c" },
   { datei: "server/scripts/reconcile-km-drift.ts", sha256: "0c1b45563cac5e45" },
   { datei: "server/scripts/reconcile-phantom-stornos.ts", sha256: "a01239e0e7fda5ce" },
@@ -122,7 +120,7 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
 ];
 
 /** Muss zur Listenlänge passen — macht jede Ergänzung im Diff sichtbar. */
-const BEKANNTE_LOECHER = 20;
+const BEKANNTE_LOECHER = 18;
 
 function schreibendeSkripte(): string[] {
   return SKRIPT_DIRS.flatMap((dir) =>
@@ -156,6 +154,11 @@ function inhalt(rel: string): string {
  */
 function vorhandeneEintraege(): { datei: string; sha256: string }[] {
   return ALTLAST.filter((e) => existsSync(path.resolve(process.cwd(), e.datei)));
+}
+
+/** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
+function entkommentiert(text: string): string {
+  return text.replace(/\/\/[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
 }
 
 function hash(text: string): string {
@@ -220,6 +223,26 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
     expect(new Set(ALTLAST.map((e) => e.datei)).size).toBe(ALTLAST.length);
     // Sortiert, damit ein Zuwachs nicht in der Mitte untergeht.
     expect([...ALTLAST.map((e) => e.datei)].sort()).toEqual(ALTLAST.map((e) => e.datei));
+  });
+
+  it("wer das Gate benutzt, liest die Flags auch aus der SSoT", () => {
+    // Sonst entsteht wieder ein zweiter Leser. Der lokale
+    // `argv.find(...)?.split("=")[1]` schnitt am ERSTEN `=` ab:
+    // `--reason="… #1651 => Korrektur"` wurde zu `… #1651 `, blieb ueber der
+    // 10-Zeichen-Schranke und landete VERSTUEMMELT im GoBD-Audit-Log.
+    // `parseProdWriteArgs` benutzt `slice(praefix.length)`.
+    const ohneParser = schreibendeSkripte()
+      .filter((rel) => inhalt(rel).includes(GATE))
+      // Auf den AUFRUF pruefen, nicht auf den Namen: ein Kommentar, der
+      // `parseProdWriteArgs` erwaehnt, erfuellte eine reine Text-Suche und
+      // machte die Regel wirkungslos. Genau das ist beim Gegenpruefen
+      // passiert.
+      .filter((rel) => !/\bparseProdWriteArgs\s*\(/.test(entkommentiert(inhalt(rel))));
+    expect(
+      ohneParser,
+      `Diese Skripte rufen ${GATE}, lesen die gemeinsamen Flags aber selbst.\n` +
+        `Nimm \`parseProdWriteArgs\` aus derselben SSoT:\n  ${ohneParser.join("\n  ")}`,
+    ).toEqual([]);
   });
 
   it("die Gate-SSoT existiert und wird wirklich benutzt", () => {
