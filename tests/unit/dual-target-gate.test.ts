@@ -165,14 +165,61 @@ describe("Dual-Target-Gate — --target=dev", () => {
     expect(a.target).toBe("dev");
   });
 
-  it("eine echte Dev-DB geht durch", async () => {
+  /**
+   * Audit-Attribution auf dem DEV-Zweig.
+   *
+   * Der Zweig verlangte frueher NUR das Ziel. Ein Skript, das von
+   * handgeschriebenen `--user`/`--reason`-Pruefungen auf dieses Gate umstellt,
+   * tauschte damit ein Ziel-Loch gegen ein AUDIT-Loch — gemessen an
+   * `reconcile-import-from-excel` im Gate-2 zu #125:
+   *
+   *   --target=dev ohne --user
+   *     -> userId undefined -> created_by_user_id = NULL
+   *     -> auditService.log(undefined, …) verletzt audit_log.user_id NOT NULL
+   *     -> der Legacy-Pfad FAENGT den Fehler, meldet nur auf stderr
+   *     -> das Skript meldet Erfolg
+   *
+   * Nachgestellt gegen die echte DB: `auditService.log(undefined, …)` liefert
+   * `null`. Die Umbuchung waere gebucht und unauffindbar.
+   */
+  function devUmgebung(): void {
     process.env.NODE_ENV = "development";
     process.env.DATABASE_URL = "postgres://u:p@dev-host/careconnect_dev";
     process.env.DEV_WRITE_CONFIRM_TARGET = "dev-host/careconnect_dev";
     process.env.PROD_DATABASE_URL = "postgres://u:p@ep-x.neon.tech/neondb";
     DB_NAME.wert = "careconnect_dev";
-    const v = await assertDualTargetOrThrow(argsAus("--target=dev"), "Zweck");
+  }
+
+  it("Dev-Zweig ohne --user wirft (Audit-Attribution)", async () => {
+    devUmgebung();
+    await expect(
+      assertDualTargetOrThrow(argsAus("--target=dev", "--reason=Lange genug begruendet"), "Zweck"),
+    ).rejects.toThrow(/--user=<superadmin-id>/);
+  });
+
+  it("Dev-Zweig ohne --reason wirft", async () => {
+    devUmgebung();
+    await expect(
+      assertDualTargetOrThrow(argsAus("--target=dev", "--user=1"), "Zweck"),
+    ).rejects.toThrow(/--reason/);
+  });
+
+  it("Dev-Zweig mit zu kurzem --reason wirft", async () => {
+    devUmgebung();
+    await expect(
+      assertDualTargetOrThrow(argsAus("--target=dev", "--user=1", "--reason=kurz"), "Zweck"),
+    ).rejects.toThrow(/--reason/);
+  });
+
+  it("eine echte Dev-DB geht durch — mit Urheber und Begruendung", async () => {
+    devUmgebung();
+    const v = await assertDualTargetOrThrow(
+      argsAus("--target=dev", "--user=1", "--reason=Probelauf vor dem Prod-Reconcile"),
+      "Zweck",
+    );
     expect(v.klasse).toBe("dev");
     expect(v.ziel).toBe("dev-host/careconnect_dev");
+    // Der Superadmin wird auch hier geprueft, nicht nur auf dem Prod-Zweig.
+    expect(v.displayName).toBe("Testadmin");
   });
 });

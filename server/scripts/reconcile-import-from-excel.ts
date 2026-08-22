@@ -25,23 +25,35 @@
  *   Trockenlauf:        tsx server/scripts/reconcile-import-from-excel.ts --file=tmp/schroeder.xlsx
  *   CSV-Export:         … --csv=tmp/drift.csv
  *   Bestimmter Kunde:   … --customer=39
- *   Scharf:             … --apply --user=<superadmin-id> --reason="Pilot Reconcile Import-Drift Schröder"
  *   Inkl. geschl. Mon.: … --apply … --allow-closed-months
  *
- * GoBD-Hinweise identisch zu `audit-appointment-budget-drift.ts`:
- *   - `--apply` erfordert `--user=<superadmin-id>` + `--reason="…"` (≥10 Zeichen).
+ *   Scharf auf DEV (Probelauf):
+ *     DEV_WRITE_CONFIRM_TARGET="<host>/<datenbank>" \
+ *       … --apply --target=dev --user=<superadmin-id> --reason="…"
+ *
+ *   Scharf auf PROD:
+ *     … --apply --target=prod --confirm-target="<host>/<datenbank>" \
+ *       --user=<superadmin-id> --reason="…"
+ *
+ * GoBD-Hinweise:
+ *   - `--apply` erfordert `--target=prod|dev` — die Klasse wird NICHT
+ *     abgeleitet, Vergessen ist ein Abbruch und keine Herabstufung.
+ *   - BEIDE Klassen verlangen `--user=<superadmin-id>` und `--reason="…"`
+ *     (≥10 Zeichen); der Datenbankname wird an der OFFENEN Verbindung geprüft,
+ *     nicht aus der URL gelesen.
  *   - Geschlossene Monate werden standardmäßig übersprungen.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { eq, and, like, isNull, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
+import { parseProdWriteArgs } from "./lib/prod-write-gate";
+import { assertDualTargetOrThrow } from "./lib/dual-target-gate";
 import {
   appointments,
   appointmentServices,
   services,
-  users,
-} from "@shared/schema";
+  } from "@shared/schema";
 import { parseExcelFile, matchRows, type MatchedRow } from "../services/appointment-import";
 import { rebookAppointmentConsumption } from "../storage/budget/km-rebook";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
@@ -50,11 +62,13 @@ import { auditService } from "../services/audit";
 
 const KM_TOLERANCE = 0.01;
 
-interface CliArgs {
+/**
+ * Die gemeinsamen Flags kommen aus der SSoT, nicht aus einer Zweitliste.
+ * Abgeleitet kann sie nicht auseinanderlaufen — vorher fehlte hier bereits
+ * `--confirm-target`, das das Ziel-Gate braucht.
+ */
+type CliArgs = ReturnType<typeof parseProdWriteArgs> & {
   file?: string;
-  apply: boolean;
-  userId?: number;
-  reason?: string;
   csvPath?: string;
   customerIds: number[];
   allowClosedMonths: boolean;
@@ -62,23 +76,24 @@ interface CliArgs {
 
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
-  const get = (prefix: string): string | undefined => {
-    const a = args.find(x => x.startsWith(prefix));
-    if (!a) return undefined;
-    const v = a.split("=").slice(1).join("=").trim();
-    return v.length > 0 ? v : undefined;
-  };
   const parseIds = (s: string | undefined): number[] => {
     if (!s) return [];
     return s.split(",").map(x => parseInt(x.trim(), 10)).filter(n => !isNaN(n));
   };
-  const userStr = get("--user=");
-  const userId = userStr ? parseInt(userStr, 10) : undefined;
+  const get = (prefix: string): string | undefined => {
+    const a = args.find(x => x.startsWith(prefix));
+    if (!a) return undefined;
+    const v = a.slice(prefix.length).trim();
+    return v.length > 0 ? v : undefined;
+  };
+  // Die gemeinsamen Flags (--apply/--user/--reason/--confirm-target/--target)
+  // kommen aus der SSoT, nicht aus dem lokalen `get`. SPREAD statt
+  // Feld-fuer-Feld: eine Aufzaehlung kann ein Feld verlieren, und genau so ist
+  // `confirmTarget` in reconcile-km-drift verlorengegangen (B1, Gate-2 zu #120).
+  const gemeinsam = parseProdWriteArgs(process.argv);
   return {
+    ...gemeinsam,
     file: get("--file="),
-    apply: args.includes("--apply"),
-    userId: userId !== undefined && !isNaN(userId) ? userId : undefined,
-    reason: get("--reason="),
     csvPath: get("--csv="),
     customerIds: parseIds(get("--customer=")),
     allowClosedMonths: args.includes("--allow-closed-months"),
@@ -343,22 +358,6 @@ export interface ApplyOutcome {
   monthClosed?: boolean;
 }
 
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db.select({
-    id: users.id,
-    isSuperAdmin: users.isSuperAdmin,
-    isActive: users.isActive,
-    displayName: users.displayName,
-  }).from(users).where(eq(users.id, userId)).limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `Termin-Reconcile ist auf Superadmins beschränkt.`,
-    );
-  }
-}
 
 export async function applyDrift(
   drift: ExcelDriftRow,
@@ -518,15 +517,29 @@ async function main() {
   }
 
   if (args.apply) {
-    if (args.userId === undefined) {
-      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
-      process.exit(1);
-    }
-    if (!args.reason || args.reason.length < 10) {
-      console.error("Fehler: --apply erfordert --reason=\"...\" (≥10 Zeichen Begründung für den Audit-Log).");
-      process.exit(1);
-    }
-    await assertSuperadminOrThrow(args.userId);
+    // KLASSE: Dual-Target, nicht Prod-only.
+    //
+    // Beide Wege sind legitim: die Reparatur laeuft am Ende gegen Prod, wird
+    // aber sinnvollerweise ZUERST auf der Dev-Kopie geprobt (die Dev-DB ist
+    // laut CLAUDE.md eine Prod-Kopie). Ein reines Prod-Gate verlangt
+    // NODE_ENV=production und haette den Probelauf unmoeglich gemacht —
+    // gemessen beim Verhaltenstest, nicht vermutet.
+    //
+    // Die Klasse wird NICHT abgeleitet: ohne `--target` bricht es ab. Waere
+    // sie ableitbar, haenge die Sicherheitsstufe an einem vergessenen Flag.
+    //
+    // Das Gate prueft auf DERSELBEN Verbindung, ueber die danach geschrieben
+    // wird (`current_database()`, nicht die URL), und erteilt die Freigabe fuer
+    // die Laufzeit-Schreibsperre (#117).
+    //
+    // ERSETZT drei Handpruefungen (--user vorhanden, --reason >= 10 Zeichen,
+    // lokale Superadmin-Kopie) UND ergaenzt das, was allen dreien fehlte: die
+    // Ziel-Pruefung.
+    const freigabe = await assertDualTargetOrThrow(
+      args,
+      "Termin-Reconcile gegen die Original-Excel (Felder + Budget-Neubuchung).",
+    );
+    console.log(`Ziel-Klasse: ${freigabe.klasse} · bestaetigt: ${freigabe.ziel}`);
   }
 
   console.log(`Modus:               ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);
