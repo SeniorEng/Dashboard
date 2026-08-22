@@ -36,6 +36,7 @@
  *   tsx server/scripts/apply-vacation-policy-2026.ts --apply    # schreibend
  */
 import { and, eq } from "drizzle-orm";
+import { assertDevDatabase } from "../lib/dev-db-guard";
 import { db } from "../lib/db";
 import { users, type EmploymentType } from "@shared/schema";
 import { timeTrackingStorage } from "../storage/time-tracking";
@@ -67,18 +68,14 @@ async function safetyChecks(apply: boolean): Promise<void> {
   if (process.env.NODE_ENV === "production") {
     throw new Error("ABBRUCH: NODE_ENV=production. Dieses Skript darf nie auf Produktion laufen.");
   }
-  const url = process.env.DATABASE_URL || "";
-  let host = "";
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    const m = url.match(/@([^:/?#]+)/);
-    host = (m ? m[1] : "").toLowerCase();
-  }
-  if (host && /(^|[.-])prod([.-]|$)|production/.test(host)) {
-    throw new Error(`ABBRUCH: DB-Host '${host}' sieht nach Produktion aus. Dieses Skript darf nie auf Produktion laufen.`);
-  }
-  console.log(`Sicherheits-Checks ok. DB-Host: ${host || "(unbekannt)"} · Modus: ${apply ? "APPLY (schreibend)" : "DRY-RUN"}`);
+  // ERSETZT die frueher hier nachgebaute Host-Pruefung durch die SSoT
+  // (server/lib/dev-db-guard.ts). Die lokale Kopie war an drei Stellen
+  // SCHWAECHER: sie las den Host mit einer reinen `@host`-Regex (die auch aus
+  // `postgres ://db.prod.example/app` noch etwas zog), sie prueft mit
+  // `if (host && ...)` und liess damit einen NICHT ermittelbaren Host
+  // durch (fail-open), und sie kannte PROD_DATABASE_URL nicht.
+  assertDevDatabase();
+  console.log(`Modus: ${apply ? "APPLY (schreibend)" : "DRY-RUN"}`);
 }
 
 export async function resolveActorUserId(): Promise<number | null> {

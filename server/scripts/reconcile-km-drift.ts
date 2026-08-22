@@ -121,20 +121,20 @@ function parseArgs(): CliArgs {
   const userId = gemeinsam.userId;
   const reason = gemeinsam.reason?.trim();
 
+  // SPREAD statt Feld-fuer-Feld. Hier ist der Fall entstanden, gegen den die
+  // Regel jetzt steht (B1, Gate-2 zu #120): `confirmTarget` war im Interface
+  // deklariert und wurde gelesen, aber NIE zurueckgegeben —
+  // `args.confirmTarget` blieb `undefined`, das Gate brach bei JEDEM
+  // Scharflauf ab. `tsc` und `eslint` schweigen dazu, weil das Feld optional
+  // ist. Aufgezaehlt wird deshalb nur noch, was dieses Skript SELBST beitraegt.
   return {
+    ...gemeinsam,
     apply,
     appointmentIds: parseIds(apptArg),
     customerIds: parseIds(customerArg),
     toleranceKm: Number.isFinite(toleranceKm) && toleranceKm >= 0 ? toleranceKm : DEFAULT_TOLERANCE_KM,
     userId: userId !== undefined && !isNaN(userId) ? userId : undefined,
     reason: reason && reason.length > 0 ? reason : undefined,
-    // Fehlte: das Feld war im Interface deklariert und wurde gelesen, aber NIE
-    // zurueckgegeben — `args.confirmTarget` war immer `undefined`, das Gate
-    // brach also bei JEDEM Scharflauf ab. `tsc` und `eslint` schweigen dazu,
-    // weil das Feld optional ist. "Sieht gegatet aus, ist unbenutzbar" ist
-    // genau die Klasse, gegen die Welle 1 angetreten ist.
-    confirmTarget: gemeinsam.confirmTarget,
-    target: gemeinsam.target,
     allowClosedMonths,
   };
 }

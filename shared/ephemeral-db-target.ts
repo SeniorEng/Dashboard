@@ -31,6 +31,70 @@ export type WegwerfZiel =
   | { ok: false; dbName: string | null };
 
 /**
+ * Sind die beiden Parser sich uneinig, WO der Host steht?
+ *
+ * ── Warum das KEIN Parser-Angleich-Problem ist ──────────────────────────
+ * Gemessen an `postgres://admin:s@cret@dbhost/db` (unkodiertes `@` im
+ * Passwort) lesen die beiden Konsumenten dieses Repos VERSCHIEDENE Hosts:
+ *
+ *   psql / pg_dump (libpq)         -> "cret@dbhost"   (erstes `@`)
+ *   node-postgres / Neon (WHATWG)  -> "dbhost"        (letztes `@`)
+ *
+ * Beide Guards spiegelten damit ihren jeweiligen Konsumenten KORREKT — die
+ * Shell-Seite libpq, die TS-Seite den Treiber. Angleichen waere deshalb
+ * falsch: es wuerde einen der beiden Guards von seinem eigenen Konsumenten
+ * loesen. Und `scripts/migrate.sh` faehrt beide Wege im selben Ablauf.
+ *
+ * Der Punkt ist also nicht, dass eine Seite irrt, sondern dass so eine URL
+ * ZWEI Datenbanken bedeutet, je nachdem wer sie liest. Ein Guard, der sie
+ * aufloest, gibt eine Antwort, die fuer den anderen Weg nachweislich falsch
+ * ist. Deshalb loest sie hier keiner mehr auf.
+ *
+ * ── ERSETZT die erste Fassung („mehr als ein `@` vor dem Pfad") ──────────
+ * Die zaehlte `@` innerhalb der WHATWG-Autoritaet — und schnitt damit an
+ * `?`/`#` ab. libpq tut das NICHT: dort beendet nur `/` die Autoritaet.
+ * Gemessen (Gate-2 zu #122):
+ *
+ *   postgres://u:p?x@dbhost.invalid/db
+ *     libpq  -> "dbhost.invalid"      (userinfo laeuft ueber das `?` hinweg)
+ *     WHATWG -> "u"                   (Autoritaet endet am `?`, kein `@` mehr)
+ *
+ * Beide Guards lasen dort den BENUTZERNAMEN als Host — und `careconnect` als
+ * Host sieht nach nichts Verdaechtigem aus, passiert also alle vier
+ * Bash-Guards, waehrend `psql` gegen den echten Prod-Host faehrt. Genau die
+ * Klasse, die geschlossen sein sollte, mit `?` statt `@` als Trennzeichen.
+ *
+ * Eine zweite Syntaxregel danebenzustellen haette dieselbe Wette nur
+ * wiederholt. Geprueft wird deshalb die Frage selbst: beide Regeln bestimmen
+ * den Host-BEREICH, und nur wenn sie zeichengleich denselben meinen, wird
+ * ueberhaupt weitergelesen.
+ *
+ * Verglichen wird der rohe Ausschnitt, NICHT der geparste Host — sonst
+ * schluege die bekannte WHATWG-Normalisierung (`[0:0:0:0:0:0:0:1]` -> `[::1]`)
+ * faelschlich als Uneinigkeit an und wuerde legitime IPv6-URLs verweigern.
+ *
+ * RFC 3986 deckt beides: `@`, `?` und `#` gehoeren in der userinfo kodiert.
+ * Kodierte Passwoerter (`p%40w`, `p%3Fx`) passieren unveraendert.
+ */
+function hostBereichUneinig(url: string): boolean {
+  const nachSchema = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([\s\S]*)$/);
+  if (!nachSchema) return false;
+  const rest = nachSchema[1];
+
+  // libpq: nur `/` beendet die Autoritaet, die userinfo endet am ERSTEN `@`.
+  const bisSlash = rest.split("/")[0];
+  const libpq = bisSlash.includes("@") ? bisSlash.slice(bisSlash.indexOf("@") + 1) : bisSlash;
+
+  // WHATWG: `/`, `?` und `#` beenden sie, die userinfo endet am LETZTEN `@`.
+  const bisTrenner = rest.split(/[/?#]/)[0];
+  const whatwg = bisTrenner.includes("@")
+    ? bisTrenner.slice(bisTrenner.lastIndexOf("@") + 1)
+    : bisTrenner;
+
+  return libpq !== whatwg;
+}
+
+/**
  * Host-Teil einer Connection-URL, klein geschrieben. `null`, wenn keiner
  * ermittelbar ist — die Aufrufer behandeln das als fail-closed.
  *
@@ -61,6 +125,7 @@ export type WegwerfZiel =
  */
 export function dbHostOf(url: string | undefined): string | null {
   if (!url) return null;
+  if (hostBereichUneinig(url)) return null;
   try {
     return new URL(url).hostname.toLowerCase() || null;
   } catch {

@@ -23,6 +23,7 @@
 
 import { sql } from "drizzle-orm";
 import { db, pool } from "../lib/db";
+import { assertDevDatabase } from "../lib/dev-db-guard";
 import {
   DOCUMENT_TYPE_WHITELIST,
   customerIsolationMatchSql,
@@ -77,23 +78,13 @@ async function safetyChecks(apply: boolean): Promise<void> {
   if (process.env.NODE_ENV === "production") {
     throw new Error("ABBRUCH: NODE_ENV=production. Dieses Skript darf nie auf Produktion laufen.");
   }
-  // Hostname-Check, nicht Substring-Check: parse die URL und prüfe Host
-  // gegen Deny-Pattern (prod, production). DATABASE_URL kann eine valide URL
-  // sein oder ein Postgres-Connection-String.
-  const url = process.env.DATABASE_URL || "";
-  let host = "";
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    // Fallback: postgres://user:pass@host:port/db ohne valides URL-Schema
-    const m = url.match(/@([^:/?#]+)/);
-    host = (m ? m[1] : "").toLowerCase();
-  }
-  // Hard-Stop bei Hostname-Match auf prod-Pattern (auch im Trockenlauf)
-  if (host && /(^|[.-])prod([.-]|$)|production/.test(host)) {
-    throw new Error(`ABBRUCH: DB-Host '${host}' sieht nach Produktion aus. Dieses Skript darf nie auf Produktion laufen.`);
-  }
-  log(`Sicherheits-Checks ok. DB-Host: ${host || "(unbekannt)"}, Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN"}`);
+  // ERSETZT die frueher hier nachgebaute Host-Pruefung durch die SSoT
+  // (server/lib/dev-db-guard.ts). Die lokale Kopie war an drei Stellen
+  // SCHWAECHER: reine `@host`-Regex als Fallback, `if (host && ...)` liess
+  // einen NICHT ermittelbaren Host durch (fail-open), und PROD_DATABASE_URL
+  // kannte sie nicht.
+  assertDevDatabase();
+  log(`Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN"}`);
 }
 
 async function listWhitelistEntities(): Promise<void> {

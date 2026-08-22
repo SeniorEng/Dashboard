@@ -125,12 +125,13 @@ function parseArgs(): Args {
   // blieb ueber der 10-Zeichen-Schranke und landete VERSTUEMMELT im
   // GoBD-Audit-Log. `parseProdWriteArgs` benutzt `slice(praefix.length)`.
   const gemeinsam = parseProdWriteArgs(argv);
+  // SPREAD statt Feld-fuer-Feld: die feldweise Form ist genau der Weg, auf
+  // dem `confirmTarget` in reconcile-km-drift verlorenging (B1, Gate-2 zu
+  // #120) — deklariert, nie zugewiesen, das Gate brach bei JEDEM --apply
+  // ab. Was man nicht aufzaehlt, kann man nicht vergessen.
   return {
-    apply: gemeinsam.apply,
+    ...gemeinsam,
     customerIds,
-    userId: gemeinsam.userId,
-    reason: gemeinsam.reason,
-    confirmTarget: gemeinsam.confirmTarget,
   };
 }
 
@@ -409,12 +410,7 @@ async function main() {
     // ausserdem der Laufzeit-Schreibsperre die Freigabe — ohne ihn wuerde
     // dieses Skript seit #117 beim ersten Schreibzugriff abbrechen.
     const freigabe = await assertProdWriteAllowedOrThrow(
-      {
-        apply: args.apply,
-        userId: args.userId,
-        reason: args.reason,
-        confirmTarget: args.confirmTarget,
-      },
+      args,
       "Der Lauf merged doppelte Leistungsnachweise und soft-loescht das Duplikat.",
     );
     console.log(`Freigegeben durch: ${freigabe.displayName}`);
