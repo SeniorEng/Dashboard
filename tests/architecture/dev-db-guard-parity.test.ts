@@ -28,7 +28,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 // NUR `dbNameOf` — `dbHostOf` kommt unten aus `dev-db-guard` (Re-Export der
 // SSoT). Beides zu importieren band denselben Namen zweimal: `tsc` sieht es
 // nicht (tsconfig schliesst `**/*.test.ts` aus), esbuild eliminierte den
@@ -493,5 +493,157 @@ describe("db_host_of ⇔ dbHostOf — Paritaet der Host-Extraktion", () => {
       { encoding: "utf8" },
     );
     expect(res.stdout).toBe("");
+  });
+});
+
+/**
+ * Destruktive Shell-Skripte muessen die POSITIVE Ziel-Pruefung rufen.
+ *
+ * ── Der Anlass ──────────────────────────────────────────────────────────
+ * `assert_dev_write_target` existierte seit #118 als Spiegelbild zu
+ * `assertDevWriteTargetOrThrow` — und hatte im Gate-2 zu #122 gemessen
+ * KEINEN einzigen Aufrufer. Die positive Pruefung lag als tote Zeichenkette
+ * herum, waehrend `reseed-dev-db.sh` sein `DROP SCHEMA public CASCADE` am
+ * NEGATIVEN Screen (`assert_dev_db`) haengen hatte. Genau die Konstellation,
+ * gegen die #118 angetreten war: "nicht Prod" ist auch fuer eine unbekannte
+ * oder falsch konfigurierte DB wahr.
+ *
+ * Ein Test, der nur „die Funktion existiert" prueft, haette das nie gezeigt.
+ * Dieser prueft die Kopplung: wer zerstoert, benennt sein Ziel.
+ *
+ * Kommentare werden entfernt, bevor gesucht wird — `backup-prod-db.sh`
+ * ERWAEHNT `DROP TABLE` in seinem Kopfkommentar und ist trotzdem ein reines
+ * Lese-Skript. Dieselbe Falle, die auf der TS-Seite schon zweimal eine Regel
+ * wirkungslos gemacht hat.
+ */
+describe("destruktive Shell-Skripte deklarieren ihr Ziel positiv", () => {
+  const DESTRUKTIV = /\b(DROP\s+SCHEMA|DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b/i;
+
+  /** Shell-Kommentare raus (ohne Zeilen in Here-Docs zu zerstoeren). */
+  function ohneKommentare(text: string): string {
+    return text
+      .split("\n")
+      .map((z) => (/^\s*#/.test(z) ? "" : z))
+      .join("\n");
+  }
+
+  it("jedes zerstoerende scripts/*.sh ruft assert_dev_write_target", () => {
+    const verzeichnis = path.resolve(process.cwd(), "scripts");
+    const dateien = readdirSync(verzeichnis).filter((d) => d.endsWith(".sh"));
+    // Gegenprobe gegen einen leeren Glob: findet der Test gar nichts, waere er
+    // trivial gruen. Beim Schreiben lagen 10 Skripte dort.
+    expect(dateien.length).toBeGreaterThan(3);
+
+    const ungegatet = dateien.filter((d) => {
+      const text = ohneKommentare(readFileSync(path.join(verzeichnis, d), "utf8"));
+      if (!DESTRUKTIV.test(text)) return false;
+      return !/\bassert_dev_write_target\s+/.test(text);
+    });
+    expect(
+      ungegatet,
+      "Diese Skripte fuehren zerstoerendes SQL aus, benennen ihr Ziel aber nicht:\n  " +
+        ungegatet.join("\n  ") +
+        "\nRuf `assert_dev_write_target \"<name>\"` vor dem ersten destruktiven Schritt.",
+    ).toEqual([]);
+  });
+
+  it("die Regel greift ueberhaupt — mindestens ein Skript ist destruktiv", () => {
+    // Ohne diese Zeile waere die Regel oben auch dann gruen, wenn das
+    // Destruktiv-Muster ins Leere liefe (Tippfehler, umbenanntes Skript).
+    const verzeichnis = path.resolve(process.cwd(), "scripts");
+    const destruktive = readdirSync(verzeichnis)
+      .filter((d) => d.endsWith(".sh"))
+      .filter((d) => DESTRUKTIV.test(ohneKommentare(readFileSync(path.join(verzeichnis, d), "utf8"))));
+    expect(destruktive).toContain("reseed-dev-db.sh");
+  });
+
+  it("ein blosser Kommentar erfuellt die Destruktiv-Erkennung NICHT", () => {
+    // backup-prod-db.sh nennt `DROP TABLE` im Kopfkommentar und ist ein reines
+    // Lese-Skript. Ohne `ohneKommentare` haette die Regel es geflaggt.
+    expect(DESTRUKTIV.test(ohneKommentare("#   DROP TABLE) auf die Production-DB"))).toBe(false);
+    expect(DESTRUKTIV.test(ohneKommentare("DROP SCHEMA public CASCADE;"))).toBe(true);
+  });
+});
+
+/**
+ * Keine VIERTE Host-/Loopback-Fassung.
+ *
+ * ── Der Anlass ──────────────────────────────────────────────────────────
+ * #121 hat zwei `dbHostOf` zusammengefuehrt, W3 sechs weitere — und der
+ * Gate-2-Review zu #122 fand trotzdem noch drei lokale Eigenformen. Jedes Mal
+ * dieselbe Sorte Fehler, jedes Mal erst durch einen Menschen gefunden. Der
+ * Grund: es gab nie einen WAECHTER, nur Kommentare mit dem Wort "SSoT".
+ *
+ * Diese Regel ist der Waechter. Sie ERSETZT die Kommentar-Behauptung durch
+ * etwas, das rot wird.
+ *
+ * Bewusst eng gefasst: geprueft wird auf die beiden Muster, mit denen die
+ * gefundenen Eigenformen gebaut waren — Host aus einer DATABASE_URL/
+ * Verbindungs-URL ziehen, und Loopback per Schreibweisen-Vergleich erkennen.
+ * Eine Regel auf `new URL(` schlechthin waere unbrauchbar (das Repo parst
+ * ueberall legitim URLs) und haette als erstes ihre eigene SSoT geflaggt.
+ */
+describe("keine zweite Antwort auf 'welcher Host?' / 'ist das lokal?'", () => {
+  const SSOT_DATEIEN = new Set([
+    "shared/ephemeral-db-target.ts", // die SSoT selbst
+    "tests/architecture/dev-db-guard-parity.test.ts", // diese Datei
+  ]);
+
+  function quellen(): string[] {
+    const wurzeln = ["server", "scripts", "shared"];
+    const treffer: string[] = [];
+    const lauf = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const voll = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (e.name === "node_modules" || e.name === "dist") continue;
+          lauf(voll);
+        } else if (e.name.endsWith(".ts") && !e.name.endsWith(".d.ts")) {
+          treffer.push(path.relative(process.cwd(), voll));
+        }
+      }
+    };
+    for (const w of wurzeln) lauf(path.resolve(process.cwd(), w));
+    return treffer;
+  }
+
+  /** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
+  function entkommentiert(text: string): string {
+    return text.replace(/\/\/[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+  }
+
+  it("niemand zieht den Host selbst aus DATABASE_URL", () => {
+    const eigenbau = quellen().filter((rel) => {
+      if (SSOT_DATEIEN.has(rel)) return false;
+      const text = entkommentiert(readFileSync(path.resolve(process.cwd(), rel), "utf8"));
+      if (!/DATABASE_URL/.test(text)) return false;
+      // `new URL(...).host`/`.hostname` ODER die alte `@host`-Regex.
+      return (
+        /new URL\([^)]*\)\s*\.\s*host(?:name)?\b/.test(text) ||
+        /\.match\(\s*\/\^?\.*@\(\[\^/.test(text)
+      );
+    });
+    expect(
+      eigenbau,
+      "Diese Dateien lesen den DB-Host selbst statt ueber `dbHostOf`:\n  " +
+        eigenbau.join("\n  ") +
+        "\nNimm `dbHostOf` aus @shared/ephemeral-db-target.",
+    ).toEqual([]);
+  });
+
+  it("niemand beantwortet 'ist das lokal?' per Schreibweisen-Vergleich", () => {
+    // Genau die Form aus scripts/deactivate-selbstzahler-45b.ts:
+    //   h === "localhost" || h === "127.0.0.1" || h === "::1"
+    const eigenbau = quellen().filter((rel) => {
+      if (SSOT_DATEIEN.has(rel)) return false;
+      const text = entkommentiert(readFileSync(path.resolve(process.cwd(), rel), "utf8"));
+      return /===\s*["'](localhost|127\.0\.0\.1|::1)["']/.test(text);
+    });
+    expect(
+      eigenbau,
+      "Diese Dateien vergleichen Loopback-Schreibweisen statt `istLoopback` zu nutzen:\n  " +
+        eigenbau.join("\n  ") +
+        "\n`0177.0.0.1`, `2130706433` und Trailing-Dot-Formen loesen genauso auf 127.0.0.1 auf.",
+    ).toEqual([]);
   });
 });

@@ -116,6 +116,23 @@ if [[ "$APPLY" != "1" ]]; then
   exit 0
 fi
 
+# --- Guard: POSITIVE Ziel-Prüfung vor dem ersten destruktiven Schritt -----
+# `assert_dev_db` oben ist ein NEGATIVES Prädikat ("sieht nicht nach Prod
+# aus") und reicht für einen Trockenlauf. Für `DROP SCHEMA public CASCADE`
+# reicht es NICHT: "nicht Prod" ist auch für eine unbekannte oder falsch
+# konfigurierte DB wahr — dasselbe NULL-Loch, wegen dem die TS-Seite in #118
+# die positive Prüfung bekommen hat.
+#
+# `assert_dev_write_target` existierte seither, hatte aber KEINEN einzigen
+# Aufrufer (Gate-2 zu #122): die positive Prüfung lag als tote Zeichenkette
+# herum, während das destruktivste Skript des Repos am schwächeren Screen
+# hing. Das ist die Lücke, die diese Zeile schliesst.
+#
+# Sie steht VOR der `RESEED`-Rückfrage, damit niemand erst tippt und dann
+# abbricht — und sie ist der maschinenprüfbare Ersatz für genau diese
+# Rückfrage auf dem `--yes`-Pfad, der sie überspringt.
+assert_dev_write_target "reseed-dev-db.sh"
+
 if [[ "$ASSUME_YES" != "1" ]]; then
   echo "Dies LÖSCHT ALLE Daten in der Dev-DB ($DEV_HOST) unwiderruflich."
   read -r -p "Zum Fortfahren 'RESEED' eingeben: " CONFIRM

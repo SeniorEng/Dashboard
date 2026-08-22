@@ -67,6 +67,7 @@
  */
 
 import { createDecipheriv } from "crypto";
+import { dbHostOf, dbNameOf } from "@shared/ephemeral-db-target";
 import { asc, eq } from "drizzle-orm";
 import { db } from "../lib/db";
 import { withAudit } from "../lib/with-audit";
@@ -96,13 +97,12 @@ function parseArgs(): Args {
 
 /** Ziel-DB-Name + Host aus DATABASE_URL (best effort, für Safety-Guard + Log). */
 function resolveDbTarget(): { name: string; host: string } {
+  // ERSETZT das lokale `new URL(...)` durch die SSoT. Die Eigenform kannte
+  // weder den Regex-Fallback noch die Uneinigkeits-Pruefung aus W3 — sie
+  // haette aus `postgres://u:p?x@host/db` still den BENUTZERNAMEN als Host
+  // geliefert, waehrend psql zu einem anderen Ziel faehrt.
   const url = process.env.DATABASE_URL || "";
-  try {
-    const u = new URL(url);
-    return { name: u.pathname.replace(/^\//, ""), host: u.hostname.toLowerCase() };
-  } catch {
-    return { name: "", host: "" };
-  }
+  return { name: dbNameOf(url) ?? "", host: dbHostOf(url) ?? "" };
 }
 
 /**

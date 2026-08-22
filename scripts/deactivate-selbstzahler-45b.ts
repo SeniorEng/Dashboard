@@ -39,6 +39,8 @@
  * Credentials kommen ausschließlich aus der Umgebung (keine Klartext-Fallbacks).
  */
 
+import { dbHostOf, istLoopback } from "@shared/ephemeral-db-target";
+
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 const EMAIL = process.env.TEST_USER_EMAIL;
 const PASSWORD = process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWORD_INTERNAL;
@@ -46,13 +48,25 @@ const PASSWORD = process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWOR
 const APPLY = process.argv.includes("--apply");
 const REMOTE_CONFIRM = process.argv.includes("--remote-confirm");
 
+/**
+ * ERSETZT die frueher hier stehende Eigen-Antwort
+ * (`h === "localhost" || h === "127.0.0.1" || h === "::1"`) durch die SSoT.
+ *
+ * Die Eigenform war genau die Schreibweisen-Pruefung, die W3 im Prod-Gate
+ * abgeloest hat: `0177.0.0.1`, `2130706433`, `[::ffff:127.0.0.1]` und jede
+ * Form mit Trailing Dot loesen auf 127.0.0.1 auf, galten hier aber als
+ * "remote" — und daran haengt das `--remote-confirm`-Gate.
+ *
+ * ACHTUNG zur Richtung: hier wirkt die SSoT GROSSZUEGIGER, nicht strenger.
+ * Wer bisher gegen `http://0177.0.0.1:5000` lief, brauchte `--remote-confirm`;
+ * jetzt nicht mehr. Das ist richtig so — die Adresse IST localhost, das
+ * Confirm war ein Falsch-Positiv und keine Schutzwirkung. Die Richtung, auf
+ * die es ankommt, bleibt unveraendert: ein echtes fernes Ziel gilt weiter als
+ * remote, und Praefix-Fallen wie `127.0.0.1.evil.com` ebenfalls (geprueft).
+ */
 function isLocalHost(url: string): boolean {
-  try {
-    const h = new URL(url).hostname;
-    return h === "localhost" || h === "127.0.0.1" || h === "::1";
-  } catch {
-    return false;
-  }
+  const host = dbHostOf(url);
+  return host !== null && istLoopback(host);
 }
 
 type SettingPayload = {
