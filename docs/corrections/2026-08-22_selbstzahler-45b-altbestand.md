@@ -28,8 +28,10 @@ Betroffen waren zwei Ablagen:
 
 ## Maßnahme
 
-Zwei Eingriffe, beide auditiert, beide über den regulären Schreibpfad statt per
-rohem SQL:
+Zwei Eingriffe, beide auditiert — aber **auf verschiedenen Wegen**: Maßnahme 1
+lief über den regulären Schreibpfad, Maßnahme 2 über einen bewussten
+GoBD-Trigger-Bypass. Das ist der Unterschied, auf den es in einem
+GoBD-Nachweis ankommt:
 
 1. **Aktivierte gesetzliche Topf-Einstellungen geschlossen.** Nicht per
    `UPDATE`, sondern über `upsertBudgetTypeSettings`: alle *anderen* offenen
@@ -54,10 +56,19 @@ Die sind GoBD-immutabel; eine Korrektur dort liefe über Storno. Das Skript hat
 solche Buchungen im Report nur **warnend** ausgewiesen, damit ein Mensch den
 Einzelfall prüfen kann.
 
-Die Topf-Erkennung lief ausschließlich über den SSoT-Validator
-(`validateSelbstzahlerBudget` mit `billingType:"selbstzahler"`), nicht über eine
-zweite Liste im Skript — mit einer Konsistenzprüfung, die abbricht, falls die
-lokale Liste und der Validator auseinanderlaufen.
+**Zur Topf-Erkennung, genau:** das Skript hatte sehr wohl eine lokale Liste
+(`STATUTORY_POTS` mit den drei Töpfen) und benutzte **sie** für die beiden
+DB-Abfragen auf `budget_allocations` und `budget_transactions`. Nur die
+Settings-Seite lief über den SSoT-Validator `validateSelbstzahlerBudget`.
+
+Eine Konsistenzprüfung gab es, aber nur in **eine** Richtung: jeder Topf der
+lokalen Liste musste vom Validator als gesetzlich erkannt werden. Die
+Gegenrichtung — der Validator kennt einen gesetzlichen Topf, der in der Liste
+fehlt — war trotz gegenteiligem Kommentar **nicht** implementiert.
+
+Praktisch entstand daraus kein Datenfehler: Liste und Validator waren
+deckungsgleich (dieselben drei Töpfe). Aber die Zusage unten gilt streng
+genommen für **diese drei Töpfe**, nicht für „alles, was der Validator sperrt".
 
 ## Vorher/Nachher
 
@@ -71,19 +82,84 @@ zeilengenau — dort sind beide Aktionen mit Kunden-, Topf- und Allokations-IDs
 protokolliert:
 
 ```sql
--- Rückbau-Umfang, nachträglich aus dem Audit-Log
+-- Rückbau-Umfang, nachträglich aus dem Audit-Log.
+-- Spalte heißt `metadata` (jsonb), nicht `details`.
+-- Die beiden Aktionen tragen VERSCHIEDENE Marker:
+--   budget_type_settings_updated   -> metadata->>'task'   = 'T1235'
+--   budget_allocation_soft_deleted -> metadata->>'reason' LIKE 'T1235:%'
 SELECT action, count(*), min(created_at), max(created_at)
 FROM audit_log
-WHERE details->>'reason' LIKE 'T1235:%'
-   OR (action = 'budget_type_settings_updated' AND created_at BETWEEN <von> AND <bis>)
+WHERE metadata->>'task' = 'T1235'
+   OR metadata->>'reason' LIKE 'T1235:%'
 GROUP BY action;
 ```
 
-Der Endzustand ist dagegen aus der Invariante prüfbar und braucht keine
-historischen Zahlen: **kein Selbstzahler hält einen aktivierten gesetzlichen
-Topf oder eine aktive gesetzliche Allokation.** Ein erneuter Lauf des Skripts
-hätte „nichts zu tun" gemeldet — es war idempotent gebaut, genau damit dieser
-Zustand nachprüfbar bleibt, ohne das Skript aufzubewahren.
+Die **per-Topf-Details** liegen nicht unter diesen beiden Aktionen, sondern
+unter `budget_type_settings_transition` — die schreibt der reguläre
+Schreibpfad selbst (`upsertBudgetTypeSettings`), mit `kind`, `previous`,
+`next` und `closedAt`. Wer den Rückbau im Detail nachvollziehen will, findet
+ihn dort, zeitlich um die obigen Einträge herum.
+
+### Akteur im Audit-Log
+
+**Der Urheber der Einträge ist NICHT die handelnde Person.** Das Skript wählte
+ihn per `SELECT id FROM users WHERE is_super_admin = true LIMIT 1` — ohne
+`ORDER BY`, also einen beliebigen aktiven Superadmin. Wer die Einträge später
+liest, darf daraus keinen Rückschluss auf den Auslöser ziehen.
+
+Ergänzend zur Beweiskraft: die Audit-Einträge zu Maßnahme 2 wurden **außerhalb**
+der Transaktion und über den Legacy-Pfad von `auditService.log` geschrieben —
+der fängt Insert-Fehler und meldet sie nur auf stderr. Ein fehlgeschlagener
+Audit-Insert hätte die Soft-Deletes also nicht verhindert. Rückwirkend nicht
+mehr änderbar, aber der Nachweis ist damit best-effort und nicht garantiert.
+
+### Endzustand: die Invariante, direkt prüfbar
+
+Der Endzustand braucht keine historischen Zahlen: **kein Selbstzahler hält
+einen aktivierten gesetzlichen Topf oder eine aktive gesetzliche Allokation.**
+
+Der bisherige Prüfweg war der idempotente Re-Lauf des Skripts („nichts zu
+tun"). Der fällt mit der Löschung weg — deshalb hier der Ersatz, der die
+einzige echte Fähigkeit der Datei erhält:
+
+```sql
+-- Muss 0 Zeilen liefern. Beide Hälften der Invariante in einer Abfrage.
+SELECT 'setting' AS art, s.customer_id, s.budget_type
+FROM customer_budget_type_settings s
+JOIN customers c ON c.id = s.customer_id
+WHERE c.billing_type = 'selbstzahler'
+  AND s.valid_to IS NULL
+  AND s.enabled
+  AND s.budget_type IN ('entlastungsbetrag_45b','umwandlung_45a','ersatzpflege_39_42a')
+UNION ALL
+SELECT 'allocation', a.customer_id, a.budget_type
+FROM budget_allocations a
+JOIN customers c ON c.id = a.customer_id
+WHERE c.billing_type = 'selbstzahler'
+  AND a.deleted_at IS NULL
+  AND a.budget_type IN ('entlastungsbetrag_45b','umwandlung_45a','ersatzpflege_39_42a');
+```
+
+### Offen geblieben: gesetzliche `budget_transactions` bei Selbstzahlern
+
+Das Skript wies Kunden mit vorhandenen gesetzlichen **Buchungen** nur warnend
+aus — sie sind GoBD-immutabel, eine Korrektur liefe über Storno und war
+ausdrücklich als **manuelle Einzelfallprüfung** vorgesehen. **Ob es solche
+Fälle gab, stand nur im nicht existierenden Report.** Mit der Löschung ist die
+Frage sonst nicht mehr auffindbar, deshalb steht sie hier:
+
+```sql
+-- Gab/gibt es gesetzliche Buchungen bei Selbstzahlern? -> Einzelfallprüfung.
+SELECT t.customer_id, t.budget_type, count(*), sum(t.amount_cents)
+FROM budget_transactions t
+JOIN customers c ON c.id = t.customer_id
+WHERE c.billing_type = 'selbstzahler'
+  AND t.budget_type IN ('entlastungsbetrag_45b','umwandlung_45a','ersatzpflege_39_42a')
+GROUP BY t.customer_id, t.budget_type;
+```
+
+Liefert sie Zeilen, ist das **kein** Widerspruch zum Rückbau oben — die
+Buchungen waren nie Teil davon.
 
 ## Warum das Skript jetzt weg ist
 
