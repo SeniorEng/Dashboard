@@ -25,6 +25,7 @@
 // registriert — es läuft nur on-demand über `server/scripts/purge-junk-master-data.ts`.
 // ---------------------------------------------------------------------------
 import { sql, and, not, inArray } from "drizzle-orm";
+import { dbHostOf } from "@shared/ephemeral-db-target";
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import { log } from "../lib/log";
 import { ensureMigrationLedger } from "./ensure-migration-ledger";
@@ -69,14 +70,19 @@ export interface JunkPurgeReport {
   realDocumentTypeIds: number[];
 }
 
+/**
+ * ERSETZT `new URL(url).host` durch die SSoT `dbHostOf`.
+ *
+ * `.host` enthaelt den PORT, `.hostname` nicht — dieser Wert wich damit als
+ * einziger im Repo von allem ab, womit er je verglichen worden waere, und
+ * `istLoopback` haette ihn still als "nicht lokal" gelesen (Gate-2 zu #122).
+ * Er wird hier nur protokolliert, deshalb bleiben die sprechenden Ersatztexte
+ * statt `null`.
+ */
 function dbHostFromEnv(): string {
-  try {
-    const url = process.env.DATABASE_URL ?? "";
-    if (!url) return "(DATABASE_URL nicht gesetzt)";
-    return new URL(url).host;
-  } catch {
-    return "(unparsbar)";
-  }
+  const url = process.env.DATABASE_URL ?? "";
+  if (!url) return "(DATABASE_URL nicht gesetzt)";
+  return dbHostOf(url) ?? "(unparsbar)";
 }
 
 // --- Klassifikation (read-only, executor-agnostisch: db oder tx) ------------

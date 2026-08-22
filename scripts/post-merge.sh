@@ -23,15 +23,43 @@ install_deps() {
 }
 install_deps
 
-# Task #50: Add service_details column to invoice_line_items
-psql "$DATABASE_URL" -c "ALTER TABLE invoice_line_items ADD COLUMN IF NOT EXISTS service_details TEXT;" 2>/dev/null || true
+# --- Ziel-Screen vor den DB-Schritten ------------------------------------
+# Dieses Skript schrieb bisher OHNE jeden Ziel-Guard: ein `ALTER TABLE` per
+# psql und ein `db:push`, beide gegen die geerbte DATABASE_URL. CLAUDE.md nennt
+# post-merge ausdruecklich "der einzige Weg, bei dem 'Absicht erklaert' nicht
+# heisst, dass gerade jemand hinsieht" — genau deshalb gehoert hier ein Screen
+# hin und nicht bloss Vertrauen in die Umgebung.
+#
+# Bewusst der NEGATIVE `assert_dev_db`, nicht die positive Ziel-Pruefung: die
+# verlangt DEV_WRITE_CONFIRM_TARGET, und ein unbeaufsichtigter Merge-Hook kann
+# sie nicht setzen. Das ist eine bewusste Schwaeche und als FINDING vermerkt.
+#
+# Und bewusst SKIP statt Abbruch: `assert_dev_db` beendet den Prozess, das
+# wuerde den Merge scheitern lassen. Fail-closed ist hier "nicht schreiben",
+# nicht "Merge kaputt" — die DB-Schritte sind ohnehin idempotent und werden
+# beim naechsten Lauf nachgeholt.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/assert-dev-db.sh
+source "$SCRIPT_DIR/lib/assert-dev-db.sh"
+if ( assert_dev_db "post-merge.sh" ) >/dev/null 2>&1; then
+  # Task #50: Add service_details column to invoice_line_items
+  psql "$DATABASE_URL" -c "ALTER TABLE invoice_line_items ADD COLUMN IF NOT EXISTS service_details TEXT;" 2>/dev/null || true
+  POST_MERGE_DB_OK=1
+else
+  echo "[post-merge] DB-Schritte UEBERSPRUNGEN — Ziel-Screen nicht bestanden."
+  echo "[post-merge] (NODE_ENV=production, prod-aussehender Host, kein ermittelbarer"
+  echo "[post-merge]  Host, oder DATABASE_URL == PROD_DATABASE_URL.)"
+  POST_MERGE_DB_OK=0
+fi
 
 # Drizzle introspect kann bei Neon-Cold-Start minutenlang hängen (Task #540
 # Post-Merge: 3400+ Spinner-Frames, 440s gelaufen bis Hard-Kill). Wir geben
 # dem Push 60s Zeit; danach wird der nächste Merge oder ein manueller Push
 # die Drift einsammeln. Idempotent: kein Schaden, wenn übersprungen.
-timeout --signal=TERM --kill-after=5s 60s npm run db:push 2>/dev/null || \
-  echo "[post-merge] db:push skipped/timed out — wird beim nächsten Lauf nachgeholt"
+if [[ "$POST_MERGE_DB_OK" == "1" ]]; then
+  timeout --signal=TERM --kill-after=5s 60s npm run db:push 2>/dev/null || \
+    echo "[post-merge] db:push skipped/timed out — wird beim nächsten Lauf nachgeholt"
+fi
 
 # Task #1900: Karteileichen-Remotes (subrepl-*) aus .git/config entfernen.
 # Jeder Task-Agent-Lauf hinterlässt ein Remote mit toter SSH-URL; ohne Pflege

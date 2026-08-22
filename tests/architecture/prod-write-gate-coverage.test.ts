@@ -176,7 +176,14 @@ function ruftGate(text: string): boolean {
 
 /** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
 function entkommentiert(text: string): string {
-  return text.replace(/\/\/[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+  // Die Zeichenklasse vor dem Doppel-Slash: die naive Fassung schnitt an JEDEM
+  // Doppel-Slash ab und fraß damit den Rest der Zeile auch bei einem escapten
+  // Slash in einem Regex-Literal und beim Schema-Trenner einer http-URL. Das
+  // hat drueben in dev-db-guard-parity eine Gegenprobe still gruen gehalten
+  // (Gate-2 zu #123) — hier konnte es genauso einen Gate-Aufruf verstecken.
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^\\:])\/\/[^\n]*/gm, "$1 ");
 }
 
 function hash(text: string): string {
