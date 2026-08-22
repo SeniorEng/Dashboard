@@ -123,7 +123,6 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
   { datei: "server/scripts/backfill-missing-import-consumption.ts", sha256: "27dabaa6a0f800c3" },
   { datei: "server/scripts/cleanup-duplicate-carryovers.ts", sha256: "0dd1cd68ca804ec5" },
   { datei: "server/scripts/cleanup-orphan-appointments.ts", sha256: "9865c82d2fd47bc2" },
-  { datei: "server/scripts/cleanup-selbstzahler-statutory-budgets.ts", sha256: "6153c2db039172df" },
   { datei: "server/scripts/cleanup-test-data.ts", sha256: "fc5b0ebc9a8b860d" },
   { datei: "server/scripts/reconcile-import-from-excel.ts", sha256: "e5fa5d19206aeb1c" },
   { datei: "server/scripts/reconcile-phantom-stornos.ts", sha256: "a01239e0e7fda5ce" },
@@ -132,7 +131,7 @@ const ALTLAST: readonly { datei: string; sha256: string }[] = [
 ];
 
 /** Muss zur Listenlänge passen — macht jede Ergänzung im Diff sichtbar. */
-const BEKANNTE_LOECHER = 15;
+const BEKANNTE_LOECHER = 14;
 
 function schreibendeSkripte(): string[] {
   return SKRIPT_DIRS.flatMap((dir) =>
