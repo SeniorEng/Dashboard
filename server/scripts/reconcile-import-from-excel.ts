@@ -25,11 +25,22 @@
  *   Trockenlauf:        tsx server/scripts/reconcile-import-from-excel.ts --file=tmp/schroeder.xlsx
  *   CSV-Export:         … --csv=tmp/drift.csv
  *   Bestimmter Kunde:   … --customer=39
- *   Scharf:             … --apply --user=<superadmin-id> --reason="Pilot Reconcile Import-Drift Schröder"
  *   Inkl. geschl. Mon.: … --apply … --allow-closed-months
  *
- * GoBD-Hinweise identisch zu `audit-appointment-budget-drift.ts`:
- *   - `--apply` erfordert `--user=<superadmin-id>` + `--reason="…"` (≥10 Zeichen).
+ *   Scharf auf DEV (Probelauf):
+ *     DEV_WRITE_CONFIRM_TARGET="<host>/<datenbank>" \
+ *       … --apply --target=dev --user=<superadmin-id> --reason="…"
+ *
+ *   Scharf auf PROD:
+ *     … --apply --target=prod --confirm-target="<host>/<datenbank>" \
+ *       --user=<superadmin-id> --reason="…"
+ *
+ * GoBD-Hinweise:
+ *   - `--apply` erfordert `--target=prod|dev` — die Klasse wird NICHT
+ *     abgeleitet, Vergessen ist ein Abbruch und keine Herabstufung.
+ *   - BEIDE Klassen verlangen `--user=<superadmin-id>` und `--reason="…"`
+ *     (≥10 Zeichen); der Datenbankname wird an der OFFENEN Verbindung geprüft,
+ *     nicht aus der URL gelesen.
  *   - Geschlossene Monate werden standardmäßig übersprungen.
  */
 
@@ -42,8 +53,7 @@ import {
   appointments,
   appointmentServices,
   services,
-  users,
-} from "@shared/schema";
+  } from "@shared/schema";
 import { parseExcelFile, matchRows, type MatchedRow } from "../services/appointment-import";
 import { rebookAppointmentConsumption } from "../storage/budget/km-rebook";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";

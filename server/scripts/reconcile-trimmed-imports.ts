@@ -25,8 +25,20 @@
  *
  * Aufruf:
  *   - Trockenlauf:        tsx server/scripts/reconcile-trimmed-imports.ts --customer=<id>
- *   - Scharf ausführen:   tsx server/scripts/reconcile-trimmed-imports.ts --customer=<id> --apply
- *   - Mehrere Kunden:     tsx server/scripts/reconcile-trimmed-imports.ts --customer=12,34 --apply
+ *   - Mehrere Kunden:     … --customer=12,34
+ *
+ *   Scharf auf DEV (Probelauf):
+ *     DEV_WRITE_CONFIRM_TARGET="<host>/<datenbank>" \
+ *       … --customer=<id> --apply --target=dev --user=<superadmin-id> --reason="…"
+ *
+ *   Scharf auf PROD:
+ *     … --customer=<id> --apply --target=prod --confirm-target="<host>/<datenbank>" \
+ *       --user=<superadmin-id> --reason="…"
+ *
+ *   `--apply` erfordert `--target=prod|dev`; BEIDE Klassen verlangen `--user`
+ *   und `--reason`. Die `--user`-Id ist zugleich die Audit-Attribution — ohne
+ *   sie bliebe `created_by_user_id` leer und der Audit-Eintrag scheiterte
+ *   still (audit_log.user_id ist NOT NULL, der Insert-Fehler wird gefangen).
  */
 
 import { randomUUID } from "node:crypto";
