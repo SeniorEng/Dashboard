@@ -44,6 +44,8 @@ import { calculateAppointmentCost } from "../storage/budget/appointment-cost-cal
 import { getAvailableForDate } from "../storage/budget/import-availability";
 import { createConsumptionTransaction } from "../storage/budget/consumption-engine";
 import { auditService } from "../services/audit";
+import { parseProdWriteArgs } from "./lib/prod-write-gate";
+import { assertDualTargetOrThrow } from "./lib/dual-target-gate";
 
 const TRIM_REGEX = /Budget (gekürzt|erschöpft):\s*(\d+)\s*→\s*(\d+)\s*Min/;
 const RECONCILED_MARKER = "Reconciled #116";
@@ -65,17 +67,18 @@ interface CandidateAppt {
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const apply = args.includes("--apply");
   const customerArg = args.find(a => a.startsWith("--customer="));
   const customerIds: number[] = [];
   if (customerArg) {
-    const ids = customerArg.split("=")[1].split(",");
-    for (const idStr of ids) {
+    for (const idStr of customerArg.slice("--customer=".length).split(",")) {
       const n = parseInt(idStr.trim(), 10);
       if (!isNaN(n)) customerIds.push(n);
     }
   }
-  return { apply, customerIds };
+  // Gemeinsame Flags aus der SSoT, per SPREAD. Vorher las dieses Skript nur
+  // `--apply` und kannte weder `--user` noch `--confirm-target` — deshalb
+  // schrieb es ohne Urheber und ohne Ziel-Nachweis.
+  return { ...parseProdWriteArgs(process.argv), customerIds };
 }
 
 async function normalizeCarryoverValidFrom(customerId: number, apply: boolean): Promise<number> {
@@ -365,57 +368,89 @@ export async function reconcileCustomerStructured(
   return { customerId, customerName, carryoverNormalized, results, restored, insufficient, skipped, batchId };
 }
 
-export async function reconcileCustomer(customerId: number, apply: boolean) {
-  const [customer] = await db.select({ vorname: customers.vorname, nachname: customers.nachname })
-    .from(customers).where(eq(customers.id, customerId)).limit(1);
-  const name = customer ? `${customer.vorname} ${customer.nachname}` : `#${customerId}`;
-  console.log(`\n=== Kunde ${name} (#${customerId}) ===`);
-
-  const carryoverChanges = await normalizeCarryoverValidFrom(customerId, apply);
-  if (carryoverChanges > 0) {
-    console.log(`  Carryover-validFrom normalisiert: ${carryoverChanges} Eintrag/Einträge`);
-  } else {
-    console.log(`  Carryover-validFrom: bereits korrekt`);
+/**
+ * CLI-Huelle ueber `reconcileCustomerStructured` — nur Konsolen-Ausgabe.
+ *
+ * ── Was das ERSETZT ─────────────────────────────────────────────────────
+ * Eine vollstaendige ZWEITFASSUNG derselben Operation: dieselbe
+ * Carryover-Normalisierung, dieselbe Kandidatensuche, dieselbe Schleife —
+ * nur ohne `userId`. Und genau daran haing ein Loch:
+ *
+ * `main()` rief `reconcileCustomer(id, apply)`, die Funktion kannte den
+ * Parameter gar nicht, `reconcileAppointment` bekam `userId === undefined`.
+ * Folge auf dem CLI-Pfad, gemessen am Code:
+ *
+ *   - `budget_transactions.createdByUserId` = NULL bei jeder Storno-Zeile
+ *   - `if (userId !== undefined)` → KEIN `audit_log`-Eintrag, weder pro
+ *     Termin noch als Sammel-Eintrag
+ *   - `batchId` blieb `undefined`, die Reparatur-Sitzung war nicht auffindbar
+ *
+ * Das Skript reversiert Budget-Buchungen, schreibt neue und aendert
+ * `durationPromised` — ohne Urheber und ohne Audit-Spur. Der Weg ueber die
+ * Admin-Route (`server/routes/admin/import-appointments.ts`) war nie
+ * betroffen, der reicht `userId` durch.
+ *
+ * Als Huelle kann die Divergenz nicht wiederkommen.
+ */
+export async function reconcileCustomer(customerId: number, apply: boolean, userId?: number) {
+  const r = await reconcileCustomerStructured(customerId, apply, userId);
+  console.log(`\n=== Kunde ${r.customerName} (#${customerId}) ===`);
+  console.log(
+    r.carryoverNormalized > 0
+      ? `  Carryover-validFrom normalisiert: ${r.carryoverNormalized} Eintrag/Einträge`
+      : `  Carryover-validFrom: bereits korrekt`,
+  );
+  console.log(`  Kandidaten (gekürzte Importe): ${r.results.length}`);
+  for (const e of r.results) {
+    const prefix = `  Termin #${e.appointmentId} ${e.date}:`;
+    console.log(e.status === "ok" ? `${prefix} ${e.detail}` : `${prefix} übersprungen (${e.detail})`);
   }
-
-  const candidates = await findCandidates(customerId);
-  console.log(`  Kandidaten (gekürzte Importe): ${candidates.length}`);
-
-  let restored = 0;
-  let insufficient = 0;
-  let skipped = 0;
-
-  for (const c of candidates) {
-    const result = await reconcileAppointment(c, apply);
-    const prefix = `  Termin #${c.id} ${c.date}:`;
-    if (result.status === "ok") {
-      restored++;
-      console.log(`${prefix} ${result.detail}`);
-    } else if (result.status === "insufficient") {
-      insufficient++;
-      console.log(`${prefix} übersprungen (${result.detail})`);
-    } else {
-      skipped++;
-      console.log(`${prefix} übersprungen (${result.detail})`);
-    }
-  }
-
-  console.log(`  Zusammenfassung: ${restored} wiederhergestellt, ${insufficient} unzureichend, ${skipped} übersprungen`);
-  return { restored, insufficient, skipped };
+  console.log(
+    `  Zusammenfassung: ${r.restored} wiederhergestellt, ${r.insufficient} unzureichend, ${r.skipped} übersprungen`,
+  );
+  return { restored: r.restored, insufficient: r.insufficient, skipped: r.skipped };
 }
 
 async function main() {
-  const { apply, customerIds } = parseArgs();
+  const args = parseArgs();
+  const { apply, customerIds } = args;
   if (customerIds.length === 0) {
     console.error("Fehler: --customer=<id>[,<id>...] erforderlich.");
     process.exit(1);
+  }
+  if (apply) {
+    // KLASSE: Dual-Target, nicht Prod-only.
+    //
+    // Beide Wege sind legitim: die Reparatur laeuft am Ende gegen Prod, wird
+    // aber sinnvollerweise ZUERST auf der Dev-Kopie geprobt (die Dev-DB ist
+    // laut CLAUDE.md eine Prod-Kopie). Ein reines Prod-Gate verlangt
+    // NODE_ENV=production und haette den Probelauf unmoeglich gemacht —
+    // gemessen beim Verhaltenstest, nicht vermutet.
+    //
+    // Die Klasse wird NICHT abgeleitet: ohne `--target` bricht es ab. Waere
+    // sie ableitbar, haenge die Sicherheitsstufe an einem vergessenen Flag.
+    //
+    // Das Gate prueft auf DERSELBEN Verbindung, ueber die danach geschrieben
+    // wird (`current_database()`, nicht die URL), und erteilt die Freigabe fuer
+    // die Laufzeit-Schreibsperre (#117).
+    //
+    // Zuvor hatte das Skript NULL Ziel-Guards: `--apply` in einer Shell mit
+    // geerbter DATABASE_URL reversierte Budget-Buchungen gegen die getroffene
+    // DB. Und `--user` ist jetzt auf dem Prod-Zweig Pflicht — dieselbe Id geht
+    // unten in `reconcileCustomer`, wodurch der auf dem CLI-Weg tote
+    // Audit-Pfad ueberhaupt erst scharf wird (Kommentar dort).
+    const freigabe = await assertDualTargetOrThrow(
+      args,
+      "Reconcile faelschlich gekuerzter Altdaten-Importe (Storno + Neubuchung, Task #116).",
+    );
+    console.log(`Ziel-Klasse: ${freigabe.klasse} · bestaetigt: ${freigabe.ziel}`);
   }
   console.log(`Modus: ${apply ? "SCHARF (--apply)" : "Trockenlauf"}`);
   console.log(`Kunden: ${customerIds.join(", ")}`);
 
   let totals = { restored: 0, insufficient: 0, skipped: 0 };
   for (const id of customerIds) {
-    const r = await reconcileCustomer(id, apply);
+    const r = await reconcileCustomer(id, apply, args.userId);
     totals.restored += r.restored;
     totals.insufficient += r.insufficient;
     totals.skipped += r.skipped;
