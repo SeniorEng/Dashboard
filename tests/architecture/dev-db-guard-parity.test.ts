@@ -547,6 +547,33 @@ describe("destruktive Shell-Skripte deklarieren ihr Ziel positiv", () => {
     ).toEqual([]);
   });
 
+  it("jedes schreibende scripts/*.sh hat mindestens den Ziel-Screen", () => {
+    // Zweite Stufe, aus dem Gate-2 zu #123: `post-merge.sh` fuhr ein
+    // `ALTER TABLE` per psql und ein `db:push` gegen die geerbte DATABASE_URL,
+    // ohne JEDEN Ziel-Guard — und laeuft laut CLAUDE.md unbeaufsichtigt. Das
+    // Destruktiv-Muster oben kannte weder `ALTER TABLE` noch `db:push`.
+    //
+    // Bewusst zwei Stufen: zerstoerend verlangt die POSITIVE Pruefung (oben),
+    // schreibend verlangt mindestens den negativen Screen. Ein unbeaufsichtigter
+    // Hook kann `DEV_WRITE_CONFIRM_TARGET` nicht setzen; ihm die positive
+    // Pruefung aufzuzwingen hiesse, ihn dauerhaft zu deaktivieren.
+    const SCHREIBEND = /\b(ALTER\s+TABLE|CREATE\s+TABLE|INSERT\s+INTO|UPDATE\s+\w+\s+SET|db:push)\b/i;
+    const verzeichnis = path.resolve(process.cwd(), "scripts");
+    const ungegatet = readdirSync(verzeichnis)
+      .filter((d) => d.endsWith(".sh"))
+      .filter((d) => {
+        const text = ohneKommentare(readFileSync(path.join(verzeichnis, d), "utf8"));
+        if (!SCHREIBEND.test(text)) return false;
+        return !/\bassert_dev_(db|write_target)\b/.test(text);
+      });
+    expect(
+      ungegatet,
+      "Diese Skripte schreiben in die DB, pruefen ihr Ziel aber nicht:\n  " +
+        ungegatet.join("\n  ") +
+        "\nMindestens `assert_dev_db` vor den Schreibschritten.",
+    ).toEqual([]);
+  });
+
   it("die Regel greift ueberhaupt — mindestens ein Skript ist destruktiv", () => {
     // Ohne diese Zeile waere die Regel oben auch dann gruen, wenn das
     // Destruktiv-Muster ins Leere liefe (Tippfehler, umbenanntes Skript).
@@ -584,10 +611,14 @@ describe("destruktive Shell-Skripte deklarieren ihr Ziel positiv", () => {
  * ueberall legitim URLs) und haette als erstes ihre eigene SSoT geflaggt.
  */
 describe("keine zweite Antwort auf 'welcher Host?' / 'ist das lokal?'", () => {
-  const SSOT_DATEIEN = new Set([
-    "shared/ephemeral-db-target.ts", // die SSoT selbst
-    "tests/architecture/dev-db-guard-parity.test.ts", // diese Datei
-  ]);
+  // NUR die SSoT selbst. Der frueher hier ebenfalls gelistete Eintrag fuer
+  // DIESE Testdatei war tot: `quellen()` laeuft ueber server/scripts/shared,
+  // `tests/**` kann also nie getroffen werden. Ein toter Eintrag suggeriert
+  // eine Abdeckung, die es nicht gibt (Gate-2 zu #123).
+  //
+  // BEKANNTE GRENZE, hier benannt: ungeprueft bleiben `tests/`, `client/`,
+  // `script/` (Singular) und das Repo-Root, sowie `.mjs`/`.js` generell.
+  const SSOT_DATEIEN = new Set(["shared/ephemeral-db-target.ts"]);
 
   function quellen(): string[] {
     const wurzeln = ["server", "scripts", "shared"];
@@ -607,21 +638,70 @@ describe("keine zweite Antwort auf 'welcher Host?' / 'ist das lokal?'", () => {
     return treffer;
   }
 
-  /** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
+  /**
+   * Kommentare raus — sonst erfuellt eine blosse Erwaehnung die Regel.
+   *
+   * Die Zeichenklasse vor dem Doppel-Slash ist NICHT kosmetisch. Die naive
+   * Fassung schnitt an JEDEM Doppel-Slash ab und fraß damit zwei haeufige
+   * Nicht-Kommentare: einen escapten Slash in einem Regex-Literal, und den
+   * Schema-Trenner in einer http-URL. In beiden Faellen verschwand der REST
+   * DER ZEILE.
+   *
+   * Genau daran ist die Gegenprobe zu dieser Regel zuerst gruen geblieben:
+   * in `reencrypt-company-secrets.resolveDbTarget` stehen der pathname-Zugriff
+   * mit so einem Regex-Literal und `host: u.hostname` in DERSELBEN Zeile — der
+   * Host-Zugriff wurde mitgeloescht, und die Regel sah nichts. (Gate-2 zu
+   * #123.) Ausgenommen sind deshalb ein vorangehender Backslash und ein
+   * vorangehender Doppelpunkt.
+   */
   function entkommentiert(text: string): string {
-    return text.replace(/\/\/[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+    return text
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^\\:])\/\/[^\n]*/gm, "$1 ");
   }
 
   it("niemand zieht den Host selbst aus DATABASE_URL", () => {
     const eigenbau = quellen().filter((rel) => {
       if (SSOT_DATEIEN.has(rel)) return false;
       const text = entkommentiert(readFileSync(path.resolve(process.cwd(), rel), "utf8"));
-      if (!/DATABASE_URL/.test(text)) return false;
-      // `new URL(...).host`/`.hostname` ODER die alte `@host`-Regex.
-      return (
-        /new URL\([^)]*\)\s*\.\s*host(?:name)?\b/.test(text) ||
-        /\.match\(\s*\/\^?\.*@\(\[\^/.test(text)
-      );
+      // Die einzeilige Kette `new URL(x).hostname` war NICHT die haeufigste
+      // Bauform — zwei der drei in W4 entfernten Eigenformen waren anders
+      // gebaut, und die erste Fassung dieser Regel fing sie nicht (Gate-2 zu
+      // #123). Deshalb zwei Lockerungen:
+      //
+      //   1. KEIN `DATABASE_URL`-Vorfilter mehr. Er schloss
+      //      `deactivate-selbstzahler-45b.ts` aus, das nur `TEST_BASE_URL`
+      //      kennt — und dessen Host-Frage genau dieselbe ist.
+      //   2. Die Bindung darf ueber Zeilen laufen: `const u = new URL(x);`
+      //      gefolgt von `u.hostname` irgendwo danach. Das war die Form von
+      //      `reencrypt-company-secrets.resolveDbTarget` und ist die
+      //      naheliegendste ueberhaupt.
+      if (/new URL\([\s\S]*?\)\s*\.\s*host(?:name)?\b/.test(text)) return true;
+      if (/\.match\(\s*\/\^?\.*@\(\[\^/.test(text)) return true;
+      // Zweizeilig: an einen Bezeichner gebunden, dann `.host`/`.hostname`.
+      //
+      // ABER: wer vom selben Bezeichner auch `.protocol`/`.search` liest,
+      // ZERLEGT eine URL fuer einen Request und beantwortet keine Host-Frage — `server/services/letterxpress-http.ts` baut so seine
+      // https.request-Optionen. `dbHostOf` waere dort schlicht das falsche
+      // Werkzeug. Unterschieden wird an der Bauform, nicht an einer
+      // Dateiliste: eine Namensliste waechst mit jedem neuen HTTP-Client.
+      //
+      // `.pathname` gehoert AUSDRUECKLICH NICHT in diese Ausschlussliste —
+      // `dbNameOf` liest genau das, und die erste Fassung dieser Zeile liess
+      // deshalb `reencrypt-company-secrets.resolveDbTarget` (Host + Pfad in
+      // einem) wieder durch. Beim Gegenproben aufgefallen. Ein DB-Ziel-Leser
+      // braucht `.protocol` nie, ein HTTP-Client immer.
+      const gebunden = text.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new URL\(/g) ?? [];
+      for (const treffer of gebunden) {
+        const name = treffer.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)/)?.[1];
+        if (!name) continue;
+        const liestHost = new RegExp(`\\b${name}\\s*\\.\\s*host(?:name)?\\b`).test(text);
+        const zerlegt = new RegExp(
+          `\\b${name}\\s*\\.\\s*(?:protocol|search)\\b`,
+        ).test(text);
+        if (liestHost && !zerlegt) return true;
+      }
+      return false;
     });
     expect(
       eigenbau,

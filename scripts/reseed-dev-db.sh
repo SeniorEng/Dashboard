@@ -41,6 +41,13 @@
 #   bash scripts/reseed-dev-db.sh --apply --yes        # scharf, ohne Rückfrage
 #   bash scripts/reseed-dev-db.sh --apply --no-backup  # ohne Pre-Reseed-Backup
 #   npm run db:reseed-dev -- --apply
+#
+# PFLICHT ab W4: schreibende Laeufe (`--apply`) verlangen
+#   DEV_WRITE_CONFIRM_TARGET="<host>/<datenbank>"
+# Der Datenbankname wird an der OFFENEN Verbindung geprueft, nicht aus der URL
+# gelesen. Trockenlaeufe brauchen die Env NICHT.
+#   DEV_WRITE_CONFIRM_TARGET="localhost/careconnect_dev" \
+#     npm run db:reseed-dev -- --apply
 
 set -euo pipefail
 
@@ -112,7 +119,9 @@ if [[ "$OTHER_CONNS" != "0" && "$OTHER_CONNS" != "?" ]]; then
 fi
 
 if [[ "$APPLY" != "1" ]]; then
-  echo "TROCKENLAUF — nichts wurde verändert. Mit --apply scharf ausführen."
+  echo "TROCKENLAUF — nichts wurde verändert."
+  echo "Scharf:  DEV_WRITE_CONFIRM_TARGET=\"${DEV_HOST}/<datenbank>\" ... --apply"
+  echo "         (Datenbankname = current_database() der offenen Verbindung)"
   exit 0
 fi
 

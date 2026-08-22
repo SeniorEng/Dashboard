@@ -52,17 +52,31 @@ const REMOTE_CONFIRM = process.argv.includes("--remote-confirm");
  * ERSETZT die frueher hier stehende Eigen-Antwort
  * (`h === "localhost" || h === "127.0.0.1" || h === "::1"`) durch die SSoT.
  *
- * Die Eigenform war genau die Schreibweisen-Pruefung, die W3 im Prod-Gate
- * abgeloest hat: `0177.0.0.1`, `2130706433`, `[::ffff:127.0.0.1]` und jede
- * Form mit Trailing Dot loesen auf 127.0.0.1 auf, galten hier aber als
- * "remote" — und daran haengt das `--remote-confirm`-Gate.
+ * Die Eigenform verglich drei Schreibweisen. Die SSoT kanonisiert stattdessen.
  *
- * ACHTUNG zur Richtung: hier wirkt die SSoT GROSSZUEGIGER, nicht strenger.
- * Wer bisher gegen `http://0177.0.0.1:5000` lief, brauchte `--remote-confirm`;
- * jetzt nicht mehr. Das ist richtig so — die Adresse IST localhost, das
- * Confirm war ein Falsch-Positiv und keine Schutzwirkung. Die Richtung, auf
- * die es ankommt, bleibt unveraendert: ein echtes fernes Ziel gilt weiter als
- * remote, und Praefix-Fallen wie `127.0.0.1.evil.com` ebenfalls (geprueft).
+ * ACHTUNG zur Richtung: hier wirkt die SSoT GROSSZUEGIGER, nicht strenger —
+ * mehr Ziele gelten als lokal und brauchen damit KEIN `--remote-confirm`.
+ * Gemessen alt-vs-neu wechseln genau diese Formen von "remote" auf "lokal":
+ *
+ *   127.0.0.0/8 ausser .1 (z.B. 127.0.0.2) · [::1] · [0:0:0:0:0:0:0:1]
+ *   [::ffff:127.0.0.1] · [::ffff:7f00:1] · localhost. · *.localhost
+ *   0.0.0.0 · [::]
+ *
+ * NICHT dabei — und das ist die Korrektur einer Fehlannahme aus W3:
+ * `0177.0.0.1`, `2130706433` und `127.0.0.1.` galten hier SCHON VORHER als
+ * lokal. `http` ist ein WHATWG-"special scheme", `new URL().hostname`
+ * normalisiert sie also bereits. Die W3-Begruendung galt fuer `postgres://`
+ * (kein special scheme) und traegt hier nicht.
+ *
+ * Alle Wechsel-Kandidaten loesen tatsaechlich auf Loopback auf, die Aufweichung
+ * ist also korrekt: das Confirm war dort ein Falsch-Positiv, keine
+ * Schutzwirkung. Die Richtung, auf die es ankommt, bleibt unveraendert —
+ * `127.0.0.1.evil.com`, `http://127.0.0.1@evil.com` und
+ * `http://admin:s@cret@evil.com` gelten weiter als remote (geprueft).
+ *
+ * EINZIGE Erweiterung, die nicht per Konstruktion Loopback ist: `*.localhost`
+ * haengt an der Resolver-Lage. Auf einem Host mit Wildcard-DNS statt
+ * RFC-6761-Aufloesung koennte `evil.localhost` fern aufloesen.
  */
 function isLocalHost(url: string): boolean {
   const host = dbHostOf(url);
@@ -108,6 +122,16 @@ const PROD_TARGETS: Record<number, SettingPayload[]> = {
 };
 
 // Ziel-Liste automatisch nach BASE_URL: localhost → Dev, remote → Prod.
+// ZWEITE Wirkung von `isLocalHost` — leicht zu uebersehen: sie waehlt nicht nur
+// das `--remote-confirm`-Gate, sondern auch, WELCHE Kunden angefasst werden.
+// Die Umstellung auf die SSoT aendert damit hier ebenfalls Verhalten. Konkret:
+//
+//   TEST_BASE_URL=http://[::1]:5000 … --apply --remote-confirm
+//     vorher : remote -> PROD_TARGETS -> PUT auf Kunde 41
+//     nachher: lokal  -> DEV_TARGETS  -> PUT auf 138911 / 145919 / 203042
+//
+// Richtungs-korrekt (`[::1]` IST der lokale Dev-Server), aber es ist eine
+// Verhaltensaenderung auf einem schreibenden §45b-Pfad und gehoert benannt.
 const TARGETS: Record<number, SettingPayload[]> = isLocalHost(BASE_URL) ? DEV_TARGETS : PROD_TARGETS;
 
 const FORBIDDEN = new Set([203052, 203058]);
