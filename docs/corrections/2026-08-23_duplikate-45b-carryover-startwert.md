@@ -12,9 +12,15 @@ bildet das Restguthaben ab seinem Stichmonat bereits vollständig ab. Existierte
 daneben noch die **automatische Carryover-Allokation** für Y+1, zählte derselbe
 Betrag zweimal — einmal im Startwert, einmal im Übertrag.
 
-Der Fehler ist rein additiv und deshalb tückisch: er lässt das Budget größer
-erscheinen, als es ist. Termine, die eigentlich am Monatscap oder am
-Jahresbetrag hätten scheitern müssen, wurden gebucht.
+Der Fehler ist rein additiv: er lässt das Budget größer erscheinen, als es ist.
+
+**Wie weit er sich ausgewirkt hat, ist offen** — und wird hier nicht behauptet.
+Der Doppelzähl-Schutz in `server/storage/budget/allocation-storage.ts`
+(Schritt 5) benutzt **dasselbe Prädikat** wie das Rückbau-Skript. Solange er
+da war, hatten die doppelten Zeilen auf `calculateAllocatedCents` keine
+Wirkung, und der Rückbau war Hygiene. Für die Zeit *davor* konnten Termine
+gebucht worden sein, die am Monatscap oder Jahresbetrag hätten scheitern
+müssen; belegen lässt sich das aus dem Repository nicht.
 
 ## Maßnahme
 
@@ -27,6 +33,10 @@ Ein Audit-Eintrag pro Zeile, Action `budget_carryover_cleanup_soft_deleted`,
 mit `allocationId`, `carryoverYear`, `carryoverAmountCents`,
 `initialBalanceYear`, `initialBalanceAmountCents` und der Begründung
 „Manueller Startwert für Jahr Y überlagert automatischen Carryover (Task #101)".
+
+**Achtung beim Suchen:** der Begründungstext liegt unter dem Schlüssel
+`obsoleteReason`, **nicht** `reason` — wer nach `metadata->>'reason'` filtert,
+findet nichts.
 
 **Nicht betroffen:** `budget_transactions`. Der gebuchte Verbrauch blieb
 unverändert — korrigiert wurde die verfügbare Menge, nicht der Verbrauch.

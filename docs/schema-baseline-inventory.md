@@ -219,11 +219,16 @@ was in Prod steht), wohl aber für den Folge-Task.
 
 `migrate-erstberatung-customers.ts:32-35` zählt **ohne** `deleted_at`-Filter —
 für einen Tabellen-CHECK korrekt, er gilt auch für soft-gelöschte Zeilen. Das
-Aufräum-Skript zu genau diesen Waisen (`server/scripts/cleanup-orphan-appointments.ts`)
-filtert dagegen auf `deleted_at IS NULL` und **soft-deletet** die Funde
+Aufräum-Skript zu genau diesen Waisen (Task #151, nach Anwendung gelöscht —
+Protokoll: `docs/corrections/2026-08-23_verwaiste-termine-ohne-person.md`)
+filterte dagegen auf `deleted_at IS NULL` und **soft-deletete** die Funde
 (`.set({ deletedAt: now })`), ohne `prospect_id`/`customer_id` zu setzen. Das
-Aufräumen erzeugt also selbst Zeilen, die den CHECK weiter verletzen und ihn
-dauerhaft blockieren.
+Aufräumen hat also selbst Zeilen erzeugt, die den CHECK weiter verletzen und
+ihn dauerhaft blockieren würden.
+
+Die Zählung dieser Grabsteine steht als Query im Protokoll — sie ist die
+Voraussetzung für die Entscheidung unten und war sonst mit dem Skript
+verschwunden.
 
 Wenn es so gelaufen ist, hält Prod die Invariante für alle **lebenden** Termine
 längst ein, und die Maßnahme ist viel kleiner als „fachliche Entscheidung +
