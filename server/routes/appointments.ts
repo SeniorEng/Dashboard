@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { toPolicyUser, toPolicyAppointment, loadPolicyFlags } from "../lib/appointment-policy-adapter";
 import { cancelAppointments } from "../services/appointment-cancellation";
-import { wickleBudgetZurueck } from "../services/appointment-budget-unwind";
+import { pruefeRechnungsSperre, rechnungsSperreMeldung, wickleBudgetZurueck } from "../services/appointment-budget-unwind";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { storage } from "../storage";
@@ -71,7 +71,6 @@ import {
   type PolicyAppointment,
 } from "@shared/policies/appointments";
 import type { AppointmentStatus } from "@shared/domain/appointments";
-import { findActiveInvoicesForAppointments } from "../lib/appointment-invoiced";
 import type { ServiceRecordAppointmentRemoval } from "../storage/service-records-storage";
 
 const router = Router();
@@ -1295,7 +1294,6 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       },
     });
   }
-  const cascadedCancelledLegIds: number[] = [];
 
   const updated = await db.transaction(async (tx) => {
     // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx. Der oben über
@@ -1360,18 +1358,49 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
         if (/Leistungsnachweis/.test(grund)) {
           throw new AppError(409, "APPOINTMENT_LOCKED", grund);
         }
-        throw new AppError(409, "APPOINTMENT_CANCEL_REJECTED", grund);
+        // Denselben Code wie Loesch- und Serien-Pfad, damit der Client EINMAL
+        // verzweigen kann (Gate-2 zu #128: drei Vertraege fuer dieselbe
+        // Ablehnung).
+        throw new AppError(
+          409,
+          /Rechnung/.test(grund) ? "APPOINTMENT_INVOICED" : "APPOINTMENT_CANCEL_REJECTED",
+          grund,
+        );
       }
-      cascadedCancelledLegIds.push(...ergebnis.cancelled.filter((c: number) => c !== id));
     }
 
     if (Object.keys(dataForUpdate).length === 0) {
-      return await storage.getAppointment(id) ?? existingAppointment;
+      // Aus der laufenden Transaktion lesen, nicht ueber das globale `db`.
+      // `storage.getAppointment` kennt keinen `tx`-Parameter und ginge damit
+      // ueber eine ANDERE Pool-Verbindung — unter READ COMMITTED saehe die den
+      // noch nicht committeten Statuswechsel nicht, die 200-Antwort meldete
+      // weiter `scheduled`. Und ein geschachtelter Pool-Zugriff aus einer
+      // offenen Transaktion heraus ist bei `max: 20` ein Starvation-Risiko.
+      const [frischerStand] = await appointmentsRepo
+        .selectFrom(tx)
+        .where(and(eq(appointments.id, id), isNull(appointments.deletedAt)));
+      return frischerStand ?? existingAppointment;
     }
 
     const result = await storage.updateAppointment(id, dataForUpdate as typeof validatedData, tx);
 
-    if (shouldRebookKm && result && result.customerId) {
+    // GATE-2-FUND: NICHT neu buchen, wenn derselbe Request absagt.
+    //
+    // `wickleBudgetZurueck` legt oben eine `reversal`-Zeile an, laesst die
+    // `consumption` aber am Termin. `rebookAppointmentConsumption` liest genau
+    // die (`type='consumption' AND appointment_id=X`), findet sie, und legt
+    // bei einer km-/Datums-/Dauer-Aenderung eine NEUE Consumption an — plus
+    // frische Holds, weil `getPlannedHoldInputs` nicht auf den Status filtert.
+    //
+    // Netto stuende dann auf einem ABGESAGTEN Termin wieder ein Verbrauch:
+    // genau das Leck, das dieser PR schliesst, nur ueber EINEN Request statt
+    // zwei. Reproduktion: `PATCH {"status":"cancelled",
+    // "confirmDiscardDocumentation":true,"travelKilometers":9}` auf einem
+    // `documenting`-Termin mit Buchung.
+    //
+    // Ueberspringen statt ablehnen: die Absage ist das staerkere Signal, und
+    // ein 400 wuerde einen Aufruf brechen, der heute funktioniert.
+    if (shouldRebookKm && !isCancelling && result && result.customerId) {
       kmRebookHolder.value = await rebookAppointmentConsumption({
         appointmentId: id,
         userId: req.user?.id,
@@ -1428,7 +1457,14 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
 
-  const changedFields = Object.keys(validatedData).filter(k => (validatedData as Record<string, unknown>)[k] !== undefined);
+  // `status` ist bei einer Absage AUSGENOMMEN: `cancelAppointments` hat dafuer
+  // bereits einen `appointment_cancelled`-Eintrag geschrieben. Ohne diesen
+  // Filter schriebe eine reine Absage ZWEI Eintraege — den Absage-Typ und
+  // zusaetzlich ein `appointment_updated` mit `changedFields:["status"]`, das
+  // nur sagt "Status geaendert", ohne wohin. (Gate-2 zu #128.)
+  const changedFields = Object.keys(validatedData)
+    .filter(k => (validatedData as Record<string, unknown>)[k] !== undefined)
+    .filter(k => !(isCancelling && k === "status"));
   if (changedFields.length > 0) {
     const ip = req.ip || req.socket.remoteAddress;
     await auditService.appointmentUpdated(
@@ -1979,17 +2015,12 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
     // Guard auch hier im Zweig, würde in dieser Lage das Budget
     // zurückgebucht, während die gestellte Rechnung den Verbrauch weiter
     // ausweist.
-    const activeInvoices = await findActiveInvoicesForAppointments([removeLegId], txClient);
-    if (activeInvoices.length > 0) {
-      const numbers = [...new Set(activeInvoices.map((i) => i.invoiceNumber))].join(", ");
-      const allDraft = activeInvoices.every((i) => i.status === "entwurf");
-      throw new AppError(
-        409,
-        "APPOINTMENT_INVOICED",
-        allDraft
-          ? `Für diesen Termin existiert der Rechnungsentwurf ${numbers}. Bitte zuerst den Entwurf verwerfen, danach kann der Einsatz entkoppelt werden.`
-          : `Dieser Termin ist auf der Rechnung ${numbers} abgerechnet. Bitte zuerst die Rechnung stornieren, danach kann der Einsatz entkoppelt werden.`,
-      );
+    // Ueber die Rueckabwicklungs-SSoT statt einer eigenen Kopie. Dieser Guard
+    // war schon immer UNBEDINGT (nicht im locked-Zweig) — er ist die Vorlage,
+    // nach der der Loesch-Pfad im Gate-2 korrigiert wurde.
+    const sperre = await pruefeRechnungsSperre(removeLegId, txClient);
+    if (sperre) {
+      throw new AppError(409, "APPOINTMENT_INVOICED", rechnungsSperreMeldung(sperre, "der Einsatz entkoppelt"));
     }
 
     if (await storage.lockAndCheckAppointmentLocked(removeLegId, txClient)) {
@@ -2193,7 +2224,7 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   // Insert mit dem Tx-Client würde MITGEROLLT und die Ablehnung hinterließe
   // keine Spur. Der Eintrag wird deshalb nach dem Rollback ohne `exec`
   // geschrieben (globaler Pool).
-  let coVisitBlock: { legs: { id: number; reason: "own_outcome" | "signed" }[]; groupId: string } | null = null;
+  let coVisitBlock: { legs: { id: number; reason: "own_outcome" | "signed" | "invoiced" }[]; groupId: string } | null = null;
 
   // Task #1544 — Das Löschen läuft IMMER in einer Transaktion, damit die
   // Race-sichere Lock-Prüfung greift. Die junction `service_record_appointments`
@@ -2249,12 +2280,19 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
         // Ausgang, dann Versiegelung. Der Grund wird mitgeführt, weil die
         // beiden Fälle dem Admin GRUNDVERSCHIEDENE Dinge sagen müssen — ein
         // `completed`-Partner hängt an keinem Nachweis.
-        const blockingLegs: { id: number; reason: "own_outcome" | "signed" }[] = [];
+        const blockingLegs: { id: number; reason: "own_outcome" | "signed" | "invoiced" }[] = [];
         for (const partner of partners) {
           if (!canModifyAppointment(partner.status as AppointmentStatus)) {
             blockingLegs.push({ id: partner.id, reason: "own_outcome" });
           } else if (await storage.lockAndCheckAppointmentLocked(partner.id, txClient)) {
             blockingLegs.push({ id: partner.id, reason: "signed" });
+          } else if (await pruefeRechnungsSperre(partner.id, txClient)) {
+            // GATE-2-FUND: dieser Zweig fehlte. Die Kaskade unten loescht den
+            // Partner und bucht sein Budget zurueck — an einer gestellten
+            // Rechnung vorbei. "Versiegelt" und "abgerechnet" sind nicht
+            // dasselbe; der Guard fuer das PRIMAERE Leg prueft beides, der
+            // Vorabblock fuer den Partner prueft nur das erste.
+            blockingLegs.push({ id: partner.id, reason: "invoiced" });
           }
         }
         if (blockingLegs.length > 0) {
@@ -2264,7 +2302,9 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
           const legList = blockingLegs.map((l) => `#${l.id}`).join(", ");
           const reasonText = blockingLegs[0].reason === "signed"
             ? "liegt auf einem unterschriebenen Leistungsnachweis"
-            : "ist bereits abgeschlossen oder als „nicht angetroffen“ vermerkt";
+            : blockingLegs[0].reason === "invoiced"
+              ? "ist bereits abgerechnet — bitte zuerst die Rechnung stornieren"
+              : "ist bereits abgeschlossen oder als „nicht angetroffen“ vermerkt";
           // Für den Audit-Eintrag NACH dem Rollback aufheben (siehe unten).
           coVisitBlock = { legs: blockingLegs, groupId: appointment.coVisitGroupId };
           throw new AppError(
@@ -2276,27 +2316,28 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
         }
       }
 
-      // GoBD — Storno first: Termine auf einer AKTIVEN Rechnung dürfen nicht
-      // entfernt werden. Der Guard läuft INNERHALB der Transaktion unter dem
-      // FOR-UPDATE-Lock, nicht als check-then-write daneben.
-      const activeInvoices = await findActiveInvoicesForAppointments([id], txClient);
-      if (activeInvoices.length > 0) {
-        const numbers = [...new Set(activeInvoices.map((i) => i.invoiceNumber))].join(", ");
-        // Entwurfs-Rechnungen zählen als „aktiv" (sie binden den Termin), aber
-        // ein Entwurf wird VERWORFEN, nicht storniert — GoBD verlangt für den
-        // noch nicht gestellten Beleg kein Storno. Der Admin bekommt sonst
-        // einen Weg genannt, den es für ihn nicht gibt.
-        const allDraft = activeInvoices.every((i) => i.status === "entwurf");
-        throw new AppError(
-          409,
-          "APPOINTMENT_INVOICED",
-          allDraft
-            ? `Für diesen Termin existiert der Rechnungsentwurf ${numbers}. Bitte zuerst den Entwurf verwerfen, danach kann der Termin entfernt werden.`
-            : `Dieser Termin ist auf der Rechnung ${numbers} abgerechnet. Bitte zuerst die Rechnung stornieren, danach kann der Termin entfernt werden.`,
-        );
-      }
-
       serviceRecordRemovals = await storage.removeAppointmentFromServiceRecords(id, txClient);
+    }
+
+    // GoBD — Storno first: Termine auf einer AKTIVEN Rechnung duerfen nicht
+    // entfernt werden.
+    //
+    // GATE-2-FUND: dieser Guard stand BISHER INNERHALB des `if (locked)`-Zweigs
+    // darueber. Ein Termin, der ABGERECHNET, aber NICHT versiegelt ist, lief
+    // damit ungeprueft in die Rueckabwicklung — Budget zurueckgebucht, waehrend
+    // die gestellte Rechnung den Verbrauch weiter ausweist.
+    //
+    // Dass dieser Zustand erreichbar ist, steht im Decouple-Pfad dieser Datei
+    // im Klartext: `revoke-signature/service_record/:id` setzt einen Nachweis
+    // auf `pending` zurueck, OHNE eine bereits gestellte Rechnung zu pruefen.
+    // Der Decouple-Guard ist deshalb schon immer unbedingt — dieser war es nicht.
+    //
+    // Frage und Meldungstext kommen jetzt aus der Rueckabwicklungs-SSoT, nicht
+    // aus einer eigenen Kopie: aus zwei Formulierungen waeren sonst drei
+    // geworden.
+    const sperre = await pruefeRechnungsSperre(id, txClient);
+    if (sperre) {
+      throw new AppError(409, "APPOINTMENT_INVOICED", rechnungsSperreMeldung(sperre, "der Termin entfernt"));
     }
     // Ueber die Rueckabwicklungs-SSoT (`appointment-budget-unwind.ts`) — dieselbe,
     // die Absage und Serien-Verkuerzen benutzen. Die frueher hier stehende Kette

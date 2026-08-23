@@ -763,6 +763,15 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
     if (/Leistungsnachweis/.test(grund)) {
       return res.status(409).json({ code: "APPOINTMENT_LOCKED", message: grund });
     }
+    // Dieselbe Vereinheitlichung wie oben fuer die LN-Sperre (Gate-2-Fund S3),
+    // jetzt fuer die RECHNUNGS-Sperre: der Loesch-Pfad antwortet dafuer seit
+    // jeher 409/APPOINTMENT_INVOICED, der PATCH-Pfad ebenfalls 409. Nur dieser
+    // Zweig meldete 400 — der Client kann darauf nicht verzweigen, obwohl es
+    // dieselbe Ablehnung mit derselben Abhilfe ist (Rechnung stornieren bzw.
+    // Entwurf verwerfen). (Gate-2 zu #128.)
+    if (/Rechnung/.test(grund)) {
+      return res.status(409).json({ code: "APPOINTMENT_INVOICED", message: grund });
+    }
     return sendBadRequest(res, grund);
   }
 

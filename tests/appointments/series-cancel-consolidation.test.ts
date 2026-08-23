@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { appointments, auditLog, budgetTransactions, invoices, invoiceLineItems } from "@shared/schema";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
@@ -113,6 +113,30 @@ afterAll(async () => {
   // erzeugen. Der Gate ist aus dem DELETE-Pfad wieder heraus (B1/B2), damit
   // raeumt `apiDelete` wie vorher vollstaendig auf. Die Zusicherung unten haelt
   // fest, dass das auch so bleibt.
+  // Test 6 legt bewusst eine AKTIVE Rechnung auf einen Termin. Seit dem
+  // Gate-2-Fix verweigert `DELETE /api/appointments/:id` genau das (409,
+  // APPOINTMENT_INVOICED) — und zwar richtig: zurueckbuchen an einer
+  // gestellten Rechnung vorbei ist der Defekt, den dieser PR schliesst.
+  //
+  // Der Cleanup muss die Rechnung deshalb selbst wegraeumen. Dass er es MUSS,
+  // ist das Gegenteil eines Problems: er belegt, dass der Guard beisst. Ohne
+  // ihn blieb der Termin liegen und die Datei scheiterte an der
+  // Karteileichen-Zusicherung unten.
+  const testRechnungen = await db.select({ id: invoices.id })
+    .from(invoices)
+    .where(like(invoices.invoiceNumber, "RE-TEST-%"));
+  if (testRechnungen.length > 0) {
+    const ids = testRechnungen.map((r) => r.id);
+    // Erst entfinalisieren: `invoice_line_items_prevent_finalized_mutation`
+    // verbietet das Loeschen von Posten einer GESTELLTEN Rechnung — auch das
+    // korrekt, und auch das ein Beleg dafuer, dass die Schutzschichten greifen.
+    // Ein Test raeumt seine Fixture ueber den regulaeren Weg weg (Entwurf), er
+    // umgeht den Trigger nicht.
+    await db.update(invoices).set({ status: "entwurf" }).where(inArray(invoices.id, ids));
+    await db.delete(invoiceLineItems).where(inArray(invoiceLineItems.invoiceId, ids));
+    await db.delete(invoices).where(inArray(invoices.id, ids));
+  }
+
   for (const sid of cleanupSeriesIds) {
     const rows = await db.select({ id: appointments.id }).from(appointments).where(eq(appointments.seriesId, sid));
     for (const r of rows) { try { await apiDelete(`/api/appointments/${r.id}`); } catch { /* egal */ } }
@@ -335,8 +359,10 @@ describe("Absage-Konsolidierung — begonnene Dokumentation wird nicht still ver
     expect(
       res.status,
       "Eine Ablehnung wegen aktiver Rechnung muss als Fehler ankommen, sonst " +
-        "glaubt der Aufrufer an Erfolg, obwohl nichts geschah.",
-    ).toBe(400);
+        "glaubt der Aufrufer an Erfolg, obwohl nichts geschah. 409 statt 400: " +
+        "derselbe Vertrag wie Loesch- und PATCH-Pfad, damit der Client EINMAL " +
+        "verzweigen kann.",
+    ).toBe(409);
   });
 
   it("4 — eine abgelehnte single-Absage meldet einen Fehler, keinen stillen Teilerfolg", async () => {
