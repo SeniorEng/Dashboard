@@ -414,3 +414,20 @@ export interface SinglePdfExportSummary {
     message?: string;
   }>;
 }
+
+/**
+ * IST/PLAN je Kunde aus `GET /billing/customer-amounts` (Task 6hJRF6h8).
+ *
+ * EINE Form fuer Server und Client. Der Client hatte sie zunaechst inline
+ * zweitdefiniert — eine Aenderung der Server-Form haette dann nichts gebrochen
+ * und waere in `tsc` unsichtbar geblieben (Gate-2 zu #129).
+ *
+ * `null` = nicht berechenbar (fehlender Katalogpreis). "Noch nicht geladen" ist
+ * KEIN Wert dieses Typs: dafuer fehlt der Eintrag ganz bzw. die Antwort ist noch
+ * nicht da. Die beiden Zustaende auseinanderzuhalten ist der Grund, warum die
+ * Anzeige sie verschieden darstellt.
+ */
+export interface CustomerAmounts {
+  actualAmountCents: number | null;
+  plannedAmountCents: number | null;
+}

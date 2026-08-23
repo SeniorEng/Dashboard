@@ -114,6 +114,7 @@ function PendingCustomerRow({
   selected,
   onToggleSelect,
   showReasonNotes,
+  betraegeGeladen,
 }: {
   customer: BillingCustomerItem;
   onCreateForCustomer: (customerId: number) => void;
@@ -130,6 +131,8 @@ function PendingCustomerRow({
   // ist davon NICHT betroffen: sie ist eine Handlungs-Möglichkeit (Unterschrift
   // nachholen), keine Cluster-Begründung.
   showReasonNotes: boolean;
+  /** Liegen die Betraege dieser Gruppe vor? Trennt "noch nicht da" von "nicht berechenbar". */
+  betraegeGeladen: boolean;
 }) {
   // Task #1885: Dokumentierte Termine, aber noch gar kein Leistungsnachweis
   // (`coveredAppointments === 0`). Gemeinsame SSoT `isServiceRecordMissing`.
@@ -306,7 +309,16 @@ function PendingCustomerRow({
         className="shrink-0 text-right text-sm tabular-nums"
         data-testid={`text-pending-amount-${c.id}`}
       >
-        {rowTotal === null ? (
+        {!betraegeGeladen ? (
+          // GATE-2-FUND: die Zeile hatte KEINEN Ladezustand — nur der
+          // Gruppenkopf hatte einen. Waehrend des Batches behauptete jede
+          // sichtbare Zeile per amber "?" einen Katalogfehler, den es nicht
+          // gibt, mitsamt der Aufforderung, den Dienstleistungskatalog zu
+          // pruefen. Bei 100 Kunden dauert der Batch Sekunden bis Minuten.
+          <span className="text-gray-400" data-testid={`text-pending-amount-pending-${c.id}`}>
+            …
+          </span>
+        ) : rowTotal === null ? (
           // Nicht berechenbar (fehlender Katalogpreis). Bewusst KEINE Zahl: eine
           // 0 oder ein Teilbetrag wäre hier still falsch.
           <span
@@ -415,7 +427,7 @@ function PendingSection({
 
   // Beträge dieser Gruppe — EIN Batch-Aufruf, ausgelöst durch das Öffnen.
   const gruppenIds = customers.map((c) => c.id);
-  const { data: betraege, isLoading: betraegeLaden } = useCustomerAmounts(
+  const { data: betraege, isLoading: betraegeLaden, isError: betraegeFehler } = useCustomerAmounts(
     selectedYear,
     selectedMonth,
     gruppenIds,
@@ -423,6 +435,12 @@ function PendingSection({
     dateFrom,
     dateTo,
   );
+
+  // EIN Begriff fuer "die Betraege dieser Gruppe liegen vor". Er trennt die
+  // beiden Bedeutungen von `null`, die sonst zusammenfallen: "noch nicht
+  // geladen" (kein Betrag da) und "nicht berechenbar" (Katalogfehler). Nur der
+  // zweite rechtfertigt den "?"-Marker und seinen Tooltip.
+  const betraegeGeladen = betraege !== undefined;
 
   // Die geladenen Beträge über die Zeilen legen. Solange sie fehlen, bleibt es
   // bei `null` aus der Liste — also „keine Zahl", nicht „0".
@@ -498,17 +516,21 @@ function PendingSection({
               : undefined
           }
         >
-          {betraegeLaden
-            ? /* Waehrend der Batch laeuft KEINE Zahl zeigen — eine 0 oder ein
-                 "—" liest sich wie "nichts offen" und waere fuer die Sekunden
-                 der Ladezeit eine Falschaussage in einer Geld-Spalte. */
-              "lädt …"
+          {!betraegeGeladen
+            ? /* GATE-2-FUND: hier stand vorher nur ein `isLoading`-Zweig. Bei
+                 ZUGEKLAPPTER Gruppe — dem Standardzustand jedes Seitenaufrufs —
+                 ist die Query `enabled: false`, also ist `isLoading` FALSE. Der
+                 Kopf fiel damit in den Else-Zweig und zeigte "—" plus (siehe
+                 unten) den Katalogfehler-Marker. Zwei Falschaussagen auf
+                 einmal, im Normalfall.
+                 Jetzt entscheidet "sind die Betraege da?", nicht "laedt gerade". */
+              (betraegeFehler ? "Betrag nicht ladbar" : betraegeLaden ? "lädt …" : "")
             : groupTotalCents > 0
               ? formatEuroDE(groupTotalCents)
               : "—"}
           {/* Mindestens ein Kunde der Gruppe ist nicht berechenbar — die Summe
               ist damit unvollständig und sagt das auch. */}
-          {hasUnknown && (
+          {betraegeGeladen && hasUnknown && (
             <span
               className="ml-1 font-normal text-amber-700"
               title="Mindestens ein Betrag in dieser Gruppe ist nicht berechenbar (fehlender Preis im Dienstleistungskatalog) — die Summe ist unvollständig."
@@ -549,6 +571,7 @@ function PendingSection({
                 selected={selection?.has(c.id)}
                 onToggleSelect={selection?.toggle}
                 showReasonNotes={showReasonNotes}
+                betraegeGeladen={betraegeGeladen}
               />
             ))}
           </ul>
@@ -651,7 +674,7 @@ export function PendingInvoicesCard({
   // ist. Auswaehlen setzt voraus, dass die "Bereit"-Gruppe offen ist — der
   // Batch liegt dann bereits im Cache (gleicher Query-Key, react-query
   // dedupliziert), dieser Aufruf holt ihn nur heran statt ihn zu wiederholen.
-  const { data: readyBetraege } = useCustomerAmounts(
+  const { data: readyBetraege, isLoading: readyLaedt, isError: readyFehler } = useCustomerAmounts(
     selectedYear,
     selectedMonth,
     readyIds,
@@ -666,6 +689,8 @@ export function PendingInvoicesCard({
     const b = readyBetraege?.[String(c.id)];
     return b ? { ...c, actualAmountCents: b.actualAmountCents } : c;
   });
+  // Wie in der Gruppe: "noch nicht geladen" ist NICHT "nicht berechenbar".
+  const readyBetraegeGeladen = readyBetraege !== undefined;
   const selectedTotalCents = selectedReady.reduce(
     (s, c) => s + (c.actualAmountCents ?? 0),
     0,
@@ -749,8 +774,22 @@ export function PendingInvoicesCard({
                     </label>
                     {selectedReadyCount > 0 && (
                       <span className="text-sm text-gray-600" data-testid="text-pending-selected-count">
-                        {selectedReadyCount} ausgewählt · {formatEuroDE(selectedTotalCents)}
-                        {selectedHasUnknown && (
+                        {selectedReadyCount} ausgewählt · {
+                          /* GATE-2-FUND: hier stand `formatEuroDE(selectedTotalCents)`
+                             unbedingt — und `selectedTotalCents` glaettet `null`
+                             per `?? 0`. Solange die Betraege fehlten, stand
+                             "0,00 €" direkt neben dem Sammel-Schreibknopf: genau
+                             die Zahl, an der ein Admin entscheidet, ob er den
+                             Lauf ausloest.
+                             Meine Annahme, Auswaehlen setze eine offene Gruppe
+                             voraus, war falsch — die Gruppen-Checkbox und
+                             "Alle auswaehlen" liegen AUSSERHALB des
+                             einklappbaren Bereichs. */
+                          !readyBetraegeGeladen
+                            ? (readyFehler ? "Betrag nicht ladbar" : "Betrag lädt …")
+                            : formatEuroDE(selectedTotalCents)
+                        }
+                        {readyBetraegeGeladen && selectedHasUnknown && (
                           <span
                             className="ml-1 text-amber-700"
                             title="Mindestens ein ausgewählter Betrag ist nicht berechenbar (fehlender Preis im Dienstleistungskatalog) — die Summe ist unvollständig."

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
 import type { BillingCustomerItem } from "@shared/api";
@@ -58,6 +58,33 @@ function makeSelection(selected: number[]) {
   } as unknown as Parameters<typeof PendingInvoicesCard>[0]["selection"];
 }
 
+/**
+ * 6hJRF6h8 — die Karte holt die Betraege NICHT mehr aus der Listen-Antwort,
+ * sondern per Batch (`GET /billing/customer-amounts`), wenn eine Gruppe
+ * geoeffnet wird. Der Mock beantwortet genau diesen Aufruf aus denselben
+ * Fixture-Werten, die vorher als Prop hereinkamen.
+ *
+ * Die Tests fahren damit den ECHTEN Pfad: zugeklappt -> keine Zahl, geoeffnet
+ * -> Batch -> Zahl. Die frueheren Fassungen pruefen dieselbe Aussage, aber ueber
+ * einen Transportweg, den es in Produktion nicht mehr gibt.
+ */
+function mockAmounts(customers: BillingCustomerItem[]) {
+  const body: Record<string, { actualAmountCents: number | null; plannedAmountCents: number | null }> = {};
+  for (const c of customers) {
+    body[String(c.id)] = {
+      actualAmountCents: c.actualAmountCents,
+      plannedAmountCents: c.plannedAmountCents,
+    };
+  }
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/billing/customer-amounts")) {
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  }));
+}
+
 function renderCard(
   customers: BillingCustomerItem[],
   selection?: Parameters<typeof PendingInvoicesCard>[0]["selection"],
@@ -69,7 +96,9 @@ function renderCard(
     <QueryClientProvider client={qc}>
       <Router>
         <PendingInvoicesCard
-          customers={customers}
+          selectedYear={2026}
+          selectedMonth={7}
+          customers={customers.map((c) => ({ ...c, actualAmountCents: null, plannedAmountCents: null }))}
           isLoading={false}
           onCreateForCustomer={vi.fn()}
           selection={selection}
@@ -77,6 +106,29 @@ function renderCard(
       </Router>
     </QueryClientProvider>,
   );
+}
+
+/**
+ * Rendert und OEFFNET Karte + alle Gruppen — erst dann laedt der Betrags-Batch.
+ * Das ist der Weg, den ein Nutzer geht; zugeklappt gibt es per Konstruktion
+ * keine Zahlen (6hJRF6h8).
+ */
+async function renderCardOffen(
+  customers: BillingCustomerItem[],
+  selection?: Parameters<typeof PendingInvoicesCard>[0]["selection"],
+) {
+  mockAmounts(customers);
+  const r = renderCard(customers, selection);
+  fireEvent.click(screen.getByTestId("button-pending-toggle"));
+  for (const key of ["ready", "ln-missing", "documentation"]) {
+    const btn = screen.queryByTestId(`button-pending-section-toggle-${key}`);
+    if (btn) fireEvent.click(btn);
+  }
+  // Auf die Betraege warten — vorher steht dort bewusst "lädt …"/"…".
+  await waitFor(() => {
+    expect(screen.queryByTestId("text-pending-amount-pending-" + customers[0].id)).toBeNull();
+  });
+  return r;
 }
 
 /** Die IDs der Kunden, die in einer Sektion gerendert wurden. */
@@ -102,6 +154,10 @@ const AWAITING_SIGNATURE_CUSTOMER = {
 };
 
 afterEach(() => {
+  // `mockAmounts` stubbt global.fetch — ohne dieses Zuruecksetzen leckt der Stub
+  // in andere Dateien. Der Waechter `no-leaked-fetch-stub` (Task #1611) faengt
+  // genau das und hat es hier auch getan.
+  vi.unstubAllGlobals();
   cleanup();
   vi.clearAllMocks();
 });
@@ -175,7 +231,7 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
     expect(idsInSection("ready")).toEqual([c.id]);
   });
 
-  it("Cluster-Summe = Σ (IST + PLAN) der Gruppe", () => {
+  it("Cluster-Summe = Σ (IST + PLAN) der Gruppe", async () => {
     const a = makeCustomer({ id: 501, openAppointments: 1, plannedAmountCents: 1000 });
     const b = makeCustomer({
       id: 502,
@@ -185,13 +241,13 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
       actualAmountCents: 2500,
       plannedAmountCents: 500,
     });
-    renderCard([a, b]);
+    await renderCardOffen([a, b]);
 
     // 10,00 + 25,00 + 5,00 = 40,00 €
     expect(screen.getByTestId("text-pending-documentation-total").textContent).toContain("40,00");
   });
 
-  it("nicht berechenbarer Betrag zeigt Fragezeichen statt 0 (fehlender Katalogpreis)", () => {
+  it("nicht berechenbarer Betrag zeigt Fragezeichen statt 0 (fehlender Katalogpreis)", async () => {
     // `null` statt 0: eine 0 in einer Geld-Spalte liest sich wie „nichts offen"
     // und wäre eine stille Falschaussage. Die Gruppensumme weist sich zusätzlich
     // als unvollständig aus, statt still zu klein zu sein.
@@ -211,7 +267,7 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
       unbilledAppointmentCount: 1,
       actualAmountCents: null,
     });
-    renderCard([known, unknown]);
+    await renderCardOffen([known, unknown]);
 
     expect(screen.getByTestId(`text-pending-amount-unknown-${unknown.id}`).textContent).toBe("?");
     expect(screen.queryByTestId(`text-pending-amount-unknown-${known.id}`)).toBeNull();
@@ -220,7 +276,7 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
     expect(screen.getByTestId("text-pending-ready-incomplete")).not.toBeNull();
   });
 
-  it("Auswahl-Summe glättet einen nicht berechenbaren Betrag NICHT zu 0", () => {
+  it("Auswahl-Summe glättet einen nicht berechenbaren Betrag NICHT zu 0", async () => {
     // Diese Zahl steht direkt neben dem Sammel-Schreibknopf. Sie still zu klein
     // zu zeigen wäre genau die Falschaussage, die Zeile und Gruppensumme
     // vermeiden — also weist sie sich ebenfalls als unvollständig aus.
@@ -241,7 +297,7 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
       actualAmountCents: null,
     });
     const selection = makeSelection([known.id, unknown.id]);
-    renderCard([known, unknown], selection);
+    await renderCardOffen([known, unknown], selection);
 
     const label = screen.getByTestId("text-pending-selected-count").textContent ?? "";
     expect(label).toContain("2 ausgewählt");
@@ -249,17 +305,17 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
     expect(screen.getByTestId("text-pending-selected-incomplete")).not.toBeNull();
   });
 
-  it("PLAN-Anteil ist als „vorläufig“ gekennzeichnet — Zeile und Gruppensumme", () => {
+  it("PLAN-Anteil ist als „vorläufig“ gekennzeichnet — Zeile und Gruppensumme", async () => {
     // Tragend, nicht kosmetisch: PLAN wird bewusst konservativ gerechnet (keine
     // spekulative USt). Das ist nur vertretbar, solange der Prognose-Anteil als
     // solcher erkennbar ist und nicht als blanker Euro neben dem IST steht.
     const c = makeCustomer({ id: 600, openAppointments: 1, plannedAmountCents: 1000 });
-    renderCard([c]);
+    await renderCardOffen([c]);
     expect(screen.getByTestId(`text-pending-provisional-${c.id}`)).not.toBeNull();
     expect(screen.getByTestId("text-pending-documentation-provisional")).not.toBeNull();
   });
 
-  it("ohne PLAN-Anteil KEINE „vorläufig“-Kennzeichnung (reines IST ist exakt)", () => {
+  it("ohne PLAN-Anteil KEINE „vorläufig“-Kennzeichnung (reines IST ist exakt)", async () => {
     const c = makeCustomer({
       id: 601,
       completedAppointments: 1,
@@ -268,7 +324,7 @@ describe("Task #1905 — drei Cluster in der Karte „Noch zu erstellen“", () 
       unbilledAppointmentCount: 1,
       actualAmountCents: 5000,
     });
-    renderCard([c]);
+    await renderCardOffen([c]);
     expect(screen.queryByTestId(`text-pending-provisional-${c.id}`)).toBeNull();
     expect(screen.queryByTestId("text-pending-ready-provisional")).toBeNull();
   });

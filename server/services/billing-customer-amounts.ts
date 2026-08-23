@@ -9,6 +9,7 @@ import {
   buildLineItemsFromAppointments,
 } from "./invoice-data";
 import { buildInvoiceDraft, computeDocumentedGrossCents } from "./invoice-calc";
+import type { CustomerAmounts } from "@shared/api/billing";
 
 /**
  * **IST- und PLAN-Betrag je Kunde** (Task #1905) — herausgelöst aus
@@ -39,12 +40,7 @@ import { buildInvoiceDraft, computeDocumentedGrossCents } from "./invoice-calc";
  * offen" und wäre eine stille Falschaussage.
  */
 
-export interface CustomerAmounts {
-  /** Dokumentierte, noch nicht abgerechnete Arbeit. `null` = nicht berechenbar. */
-  actualAmountCents: number | null;
-  /** Offene, noch nicht geleistete Termine — PROGNOSE, reine Anzeige (GoBD). */
-  plannedAmountCents: number | null;
-}
+export type { CustomerAmounts } from "@shared/api/billing";
 
 /**
  * Begrenzt parallel, damit ein Batch den DB-Pool (`max: 20`) nicht leerräumt.
@@ -102,7 +98,13 @@ export async function computeCustomerAmounts(
           try {
             return await compute();
           } catch (err) {
-            if (err instanceof AppError && err.statusCode === 400) {
+            // 400 UND 404: die ID-Menge kommt jetzt vom CLIENT, potenziell aus
+            // einer bis zu 30 s alten Listen-Antwort. `buildInvoiceDraft` wirft
+            // bei unbekanntem Kunden 404 — vorher unmoeglich, weil die IDs aus
+            // derselben Anfrage stammten. Ungefangen risse ein einziger solcher
+            // Kunde den GANZEN Batch mit, statt nur sich selbst auf `null` zu
+            // setzen (Gate-2 zu #129).
+            if (err instanceof AppError && (err.statusCode === 400 || err.statusCode === 404)) {
               log(
                 `customer-amounts Betrag nicht berechenbar customer=${id} month=${month}/${year}: ${err.message}`,
                 "billing",
