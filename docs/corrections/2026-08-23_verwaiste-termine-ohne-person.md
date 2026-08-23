@@ -70,12 +70,39 @@ WHERE customer_id IS NULL
   AND deleted_at IS NULL;
 ```
 
+Ergänzend die **Grabsteine** — die vom Rückbau selbst erzeugten soft-gelöschten
+Waisen. Sie sind kein Mangel, aber `docs/schema-baseline-inventory.md`
+argumentiert, dass ausgerechnet sie einen geplanten CHECK-Constraint auf
+`appointments` dauerhaft blockieren würden. Diese Zahl liefert nach der
+Löschung sonst niemand mehr:
+
+```sql
+SELECT count(*) AS grabsteine
+FROM appointments
+WHERE customer_id IS NULL AND prospect_id IS NULL AND deleted_at IS NOT NULL;
+```
+
 ## Warum das Skript jetzt weg ist
 
-Der **Schreibpfad ist seit Task #149 gesperrt** — die Validierung verhindert,
-dass neue Waisen entstehen. Damit ist dieses Skript genau das, was CLAUDE.md
-als Einmal-Korrekturwerkzeug beschreibt: es räumte den Altbestand aus der Zeit
-*vor* dem Guard auf und kann per Konstruktion nichts mehr finden.
+Neue Waisen können nicht mehr entstehen — aber **nicht aus dem Grund, den das
+gelöschte Skript in seinem Kopfkommentar nannte.** Dort stand „seit Task #149
+verhindert die Validierung neue Waisen"; ich hatte das zunächst übernommen.
+Nachgeprüft: **`#149` kommt in `server/**` und `shared/**` nirgends vor**, und
+eine solche Validierung gibt es nicht.
+
+Der tatsächliche Grund ist struktureller und belastbarer:
+
+1. **Interessenten werden soft-gelöscht** (`server/storage/prospects.ts`,
+   `.set({ deletedAt: new Date() })`). Die Zeile bleibt stehen, also feuert
+   `ON DELETE SET NULL` auf `appointments.prospect_id` überhaupt nicht mehr —
+   der Entstehungsweg der Waisen ist zu.
+2. Der einzige verbliebene **Hard-Delete**-Pfad
+   (`server/services/test-data-cleanup.ts`) löscht die zugehörigen Termine
+   **vorher** und lässt damit keine Waise zurück.
+
+Damit ist dieses Skript genau das, was CLAUDE.md als Einmal-Korrekturwerkzeug
+beschreibt: es räumte den Altbestand aus der Zeit vor dieser Umstellung auf und
+kann per Konstruktion nichts mehr finden.
 
 Dazu kommt, dass es **selbst ein Loch trug** (der Audit-Skip oben) und **keinen
 einzigen Ziel-Guard** hatte — ein `--apply` in einer Shell mit geerbter
