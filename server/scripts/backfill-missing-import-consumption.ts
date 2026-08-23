@@ -42,6 +42,8 @@
  */
 
 import { writeFileSync } from "node:fs";
+import { assertSuperadminOrThrow, parseProdWriteArgs, REASON_MIN_LAENGE } from "./lib/prod-write-gate";
+import { assertDevWriteTargetOrThrow } from "../lib/dev-db-guard";
 import { assertDevDatabase } from "../lib/dev-db-guard";
 import { eq, and, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../lib/db";
@@ -49,8 +51,7 @@ import {
   appointments,
   budgetTransactions,
   customers,
-  users,
-} from "@shared/schema";
+  } from "@shared/schema";
 import { budgetStorage } from "../storage/budget-storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { loadCurrentServiceMinutes } from "../storage/budget/km-rebook";
@@ -58,10 +59,11 @@ import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { auditService } from "../services/audit";
 
-interface CliArgs {
-  apply: boolean;
-  userId?: number;
-  reason?: string;
+/**
+ * Gemeinsame Flags aus der SSoT abgeleitet statt zweitgelistet — eine Kopie
+ * driftet lautlos, und hier fehlte bereits `--confirm-target`.
+ */
+type CliArgs = ReturnType<typeof parseProdWriteArgs> & {
   csvPath?: string;
   customerIds: number[];
   batchId?: number;
@@ -73,21 +75,20 @@ function parseArgs(): CliArgs {
   const get = (prefix: string): string | undefined => {
     const a = args.find((x) => x.startsWith(prefix));
     if (!a) return undefined;
-    const v = a.split("=").slice(1).join("=").trim();
+    const v = a.slice(prefix.length).trim();
     return v.length > 0 ? v : undefined;
   };
   const parseIds = (s: string | undefined): number[] => {
     if (!s) return [];
     return s.split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n));
   };
-  const userStr = get("--user=");
-  const userId = userStr ? parseInt(userStr, 10) : undefined;
   const batchStr = get("--batch=");
   const batchId = batchStr ? parseInt(batchStr, 10) : undefined;
+  // Gemeinsame Flags aus der SSoT, per SPREAD. Vorher zaehlte dieses parseArgs
+  // sie selbst auf — und `confirmTarget`/`target` fehlten dabei, also genau
+  // die Felder, die das Ziel-Gate braucht.
   return {
-    apply: args.includes("--apply"),
-    userId: userId !== undefined && !isNaN(userId) ? userId : undefined,
-    reason: get("--reason="),
+    ...parseProdWriteArgs(process.argv),
     csvPath: get("--csv="),
     customerIds: parseIds(get("--customer=")),
     batchId: batchId !== undefined && !isNaN(batchId) ? batchId : undefined,
@@ -110,26 +111,6 @@ function assertNotProduction(): void {
   assertDevDatabase();
 }
 
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db
-    .select({
-      id: users.id,
-      isSuperAdmin: users.isSuperAdmin,
-      isActive: users.isActive,
-      displayName: users.displayName,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `Bestandskorrektur ist auf Superadmins beschränkt.`,
-    );
-  }
-}
 
 export interface MissingConsumptionRow {
   appointmentId: number;
@@ -405,15 +386,41 @@ async function main() {
   assertNotProduction();
 
   if (args.apply) {
+    // KLASSE: DEV, nicht Dual-Target.
+    //
+    // Korrektur aus dem Gate-2 zu #127: ich hatte hier zuerst das
+    // Dual-Target-Gate gesetzt und "es bedient beide Umgebungen" dazugeschrieben.
+    // Das stimmte nicht — zwei Zeilen darueber steht `assertNotProduction()`,
+    // und `assertDevDatabase()` weist zusaetzlich Prod-Hosts und die
+    // PROD_DATABASE_URL-Identitaet ab. Der `--target=prod`-Zweig war damit
+    // UNERREICHBAR: ein `--apply --target=prod` waere mit "Dieses Skript darf
+    // nie auf Produktion laufen" gestorben, nie mit einer Gate-Meldung.
+    //
+    // Fail-closed war das schon vorher, aber ein Gate, dessen einer Zweig tot
+    // ist, behauptet eine Faehigkeit, die es nicht gibt. Das Skript deklariert
+    // sich selbst als dev-only — also bekommt es die Dev-Klasse.
+    //
+    // `--user`/`--reason` bleiben Pflicht: sie sind die Audit-Attribution, und
+    // ohne sie schriebe der Backfill Budget-Buchungen ohne Urheber.
     if (args.userId === undefined) {
-      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
-      process.exit(1);
+      throw new Error(
+        "ABBRUCH: --apply erfordert --user=<superadmin-id> fuer die Audit-Attribution.",
+      );
     }
-    if (!args.reason || args.reason.length < 10) {
-      console.error('Fehler: --apply erfordert --reason="..." (≥10 Zeichen Begründung für den Audit-Log).');
-      process.exit(1);
+    if (!args.reason || args.reason.trim().length < REASON_MIN_LAENGE) {
+      throw new Error(
+        `ABBRUCH: --apply erfordert --reason="…" (mindestens ${REASON_MIN_LAENGE} Zeichen).`,
+      );
     }
-    await assertSuperadminOrThrow(args.userId);
+    await assertSuperadminOrThrow(
+      args.userId,
+      "Backfill fehlender Import-Konsumption (Budget-Buchungen nachziehen).",
+    );
+    // POSITIVE Ziel-Pruefung auf DERSELBEN Verbindung (`current_database()`),
+    // nicht aus der URL gelesen. Erteilt zugleich die Freigabe fuer die
+    // Laufzeit-Schreibsperre (#117).
+    const ziel = await assertDevWriteTargetOrThrow();
+    console.log(`Dev-Ziel bestaetigt: ${ziel}`);
   }
 
   console.log(`Modus:               ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);

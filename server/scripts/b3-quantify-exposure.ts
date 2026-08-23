@@ -34,7 +34,7 @@
  *   … --as-of=2026-06-30      Stichtag (Default: heute)
  *   … --json
  */
-import { assertDevDatabase } from "../lib/dev-db-guard";
+import { assertDevDatabase, assertDevWriteTargetOrThrow } from "../lib/dev-db-guard";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { budgetAllocations } from "@shared/schema";
@@ -73,9 +73,24 @@ function stichtag(): string {
  * Für ein Werkzeug, das (wenn auch mit Rollback) SCHREIBT, ist ein schwächerer
  * Zweitguard neben einer bewachten SSoT das falsche Sparen.
  */
-function assertKopie(): void {
+async function assertKopie(): Promise<void> {
   try {
     assertDevDatabase();
+    // POSITIVE Ziel-Pruefung zusaetzlich zum negativen Screen.
+    //
+    // Dieses Werkzeug schreibt zwar nur innerhalb einer Transaktion, die IMMER
+    // zurueckrollt — aber es fuehrt echte INSERT/UPDATE gegen die getroffene
+    // Datenbank aus. Zwei Gruende, warum "rollt eh zurueck" hier nicht traegt:
+    //
+    //   1. "nicht Prod" ist auch fuer eine unbekannte oder falsch
+    //      konfigurierte DB wahr (das NULL-Loch aus #118). Der Screen allein
+    //      erteilt kein Schreibrecht.
+    //   2. Die Laufzeit-Schreibsperre (#117) verlangt eine DEKLARIERTE
+    //      Zielklasse. `assertDevDatabase()` ruft `devZielGeprueft` NICHT —
+    //      der Lauf waere am ersten Schreibbefehl gestorben, ohne dass der
+    //      Rollback je zum Zug kaeme.
+    const ziel = await assertDevWriteTargetOrThrow();
+    console.log(`[b3] Dev-Ziel bestaetigt: ${ziel}`);
   } catch (err) {
     console.error(`[b3] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(2);
@@ -93,7 +108,7 @@ interface Zeile {
 }
 
 async function main(): Promise<void> {
-  assertKopie();
+  await assertKopie();
   const asOfIso = stichtag();
   const asJson = process.argv.includes("--json");
 
