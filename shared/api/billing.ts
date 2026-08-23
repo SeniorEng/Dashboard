@@ -68,9 +68,18 @@ export interface BillingCustomerItem {
   // Cluster-Erwartung: „Bereit" und „Leistungsnachweis fehlt" tragen nur IST
   // (`plannedAmountCents === 0`, da beide keine offenen Termine haben);
   // „Dokumentation ausstehend" ist gemischt.
-  // `null` = NICHT BERECHENBAR (ein Termin trägt eine Dienstleistung ohne
-  // auflösbaren Preis am Termindatum). Bewusst nicht 0: eine 0 wäre eine stille
-  // Falschaussage in einer Geld-Spalte. Das Frontend zeigt dafür „?" statt einer
+  // `null` hat seit 6hJRF6h8 ZWEI Bedeutungen, beide „keine Zahl anzeigen":
+  //   1. NOCH NICHT GELADEN — die Liste liefert die Beträge nicht mehr eager.
+  //      Sie kosteten pro Kunde einen vollen `buildInvoiceDraft` und
+  //      blockierten damit den ersten Load (bei 111 Kunden grob 2.000
+  //      DB-Runden). Der Client holt sie beim Öffnen einer Gruppe über
+  //      `GET /billing/customer-amounts` nach.
+  //   2. NICHT BERECHENBAR (ein Termin trägt eine Dienstleistung ohne
+  //      auflösbaren Preis am Termindatum) — so liefert es auch der
+  //      Batch-Endpunkt.
+  // Beide Fälle führen zur selben Darstellung („?" bzw. „—"), deshalb reicht
+  // EIN Wert. Bewusst nicht 0: eine 0 wäre eine stille Falschaussage in einer
+  // Geld-Spalte. Das Frontend zeigt dafür „?" statt einer
   // Zahl; alle übrigen Kunden bleiben rechenbar (ein einzelner Katalog-Fehler
   // darf die Abrechnungsliste nicht leeren).
   actualAmountCents: number | null;

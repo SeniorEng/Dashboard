@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useCustomerAmounts } from "../hooks/use-billing-queries";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -93,6 +94,11 @@ interface PendingInvoicesCardProps {
   // Gruppen bleiben sichtbar, aber read-only.
   selection?: Selection;
   onCreateSelected?: () => void;
+  // 6hJRF6h8 — durchgereicht bis zur Sektion, die ihre Betraege beim Oeffnen laedt.
+  selectedYear: number;
+  selectedMonth: number;
+  dateFrom?: string;
+  dateTo?: string;
   createSelectedPending?: boolean;
 }
 
@@ -374,6 +380,10 @@ function PendingSection({
   selection,
   testIdKey,
   showReasonNotes = true,
+  selectedYear,
+  selectedMonth,
+  dateFrom = "",
+  dateTo = "",
 }: {
   title: string;
   icon: ReactNode;
@@ -387,20 +397,56 @@ function PendingSection({
   testIdKey: string;
   // Task #1905 — siehe `PendingCustomerRow`: in „Dokumentation ausstehend" aus.
   showReasonNotes?: boolean;
+  // 6hJRF6h8 — Zeitraum fuer den Betrags-Batch, der beim Oeffnen geladen wird.
+  selectedYear: number;
+  selectedMonth: number;
+  dateFrom?: string;
+  dateTo?: string;
 }) {
-  const { visible, showAll, setShowAll, hiddenCount, capped, total } =
-    useRowCap(customers);
   // Task #1772: Jede Sektion ist einzeln einklappbar — die Überschrift dient
   // als Toggle, der Zähler bleibt auch im eingeklappten Zustand sichtbar.
-  // Standard: aufgeklappt.
-  const [open, setOpen] = useState(true);
+  //
+  // 6hJRF6h8 — Standard jetzt ZUGEKLAPPT. Das ist keine Kosmetik: die
+  // Betrags-Zahlen kosten serverseitig pro Kunde einen vollen
+  // `buildInvoiceDraft`, und sie werden erst beim Öffnen einer Gruppe geladen.
+  // Startete eine Gruppe offen, liefe genau der alte Zustand wieder an — nur
+  // asynchron, mit unverändertem Serveraufwand.
+  const [open, setOpen] = useState(false);
+
+  // Beträge dieser Gruppe — EIN Batch-Aufruf, ausgelöst durch das Öffnen.
+  const gruppenIds = customers.map((c) => c.id);
+  const { data: betraege, isLoading: betraegeLaden } = useCustomerAmounts(
+    selectedYear,
+    selectedMonth,
+    gruppenIds,
+    open,
+    dateFrom,
+    dateTo,
+  );
+
+  // Die geladenen Beträge über die Zeilen legen. Solange sie fehlen, bleibt es
+  // bei `null` aus der Liste — also „keine Zahl", nicht „0".
+  const customersMitBetraegen: BillingCustomerItem[] = betraege
+    ? customers.map((c) => {
+        const b = betraege[String(c.id)];
+        return b
+          ? { ...c, actualAmountCents: b.actualAmountCents, plannedAmountCents: b.plannedAmountCents }
+          : c;
+      })
+    : customers;
   // Task #1905 — Cluster-Summe = Σ (IST + PLAN) der Kunden dieser Gruppe. Die
   // Summe wird GENAU HIER gebildet (eine Stelle, dieselbe wie die Auswahl-Summe
   // unten) — der Server liefert die beiden Beträge pro Kunde, nicht pro Gruppe.
   // „Bereit" und „Leistungsnachweis fehlt" tragen per Konstruktion nur IST (beide
   // Gruppen haben keine offenen Termine); „Dokumentation ausstehend" ist gemischt.
+  // NACH der Anreicherung: die Zeilen sollen die geladenen Betraege sehen.
+  // Vorher lief `useRowCap` auf den rohen Kunden und die Zeilen zeigten
+  // weiterhin "keine Zahl", obwohl der Batch laengst da war.
+  const { visible, showAll, setShowAll, hiddenCount, capped, total } =
+    useRowCap(customersMitBetraegen);
+
   const { totalCents: groupTotalCents, plannedCents: groupPlannedCents, hasUnknown } =
-    groupTotals(customers);
+    groupTotals(customersMitBetraegen);
   // Task #1888 — Gruppen-Auswahlzustand (alle/teils/keine) für die Header-Checkbox
   // „ganze Gruppe auswählen" (analog Cluster-Auswahl der Rechnungs-Liste).
   const groupIds = customers.map((c) => c.id);
@@ -452,7 +498,14 @@ function PendingSection({
               : undefined
           }
         >
-          {groupTotalCents > 0 ? formatEuroDE(groupTotalCents) : "—"}
+          {betraegeLaden
+            ? /* Waehrend der Batch laeuft KEINE Zahl zeigen — eine 0 oder ein
+                 "—" liest sich wie "nichts offen" und waere fuer die Sekunden
+                 der Ladezeit eine Falschaussage in einer Geld-Spalte. */
+              "lädt …"
+            : groupTotalCents > 0
+              ? formatEuroDE(groupTotalCents)
+              : "—"}
           {/* Mindestens ein Kunde der Gruppe ist nicht berechenbar — die Summe
               ist damit unvollständig und sagt das auch. */}
           {hasUnknown && (
@@ -535,6 +588,10 @@ export function PendingInvoicesCard({
   selection,
   onCreateSelected,
   createSelectedPending,
+  selectedYear,
+  selectedMonth,
+  dateFrom = "",
+  dateTo = "",
 }: PendingInvoicesCardProps) {
   // Task #1501: Karte einklappbar — der Kopf dient als Toggle, der Zähler bleibt
   // auch im eingeklappten Zustand sichtbar.
@@ -589,9 +646,26 @@ export function PendingInvoicesCard({
   // Summe als unvollständig — analog zur Gruppensumme. Diese Zahl steht direkt
   // neben dem Sammel-Schreibknopf; sie stillschweigend zu klein zu zeigen wäre
   // genau die Falschaussage, die `rowTotalCents`/`groupTotals` verhindern.
-  const selectedReady = selection
+  // 6hJRF6h8 — die Betraege stehen nicht mehr in der Listen-Antwort. Die
+  // Auswahl-Summe braucht sie aber, und zwar genau dann, wenn etwas ausgewaehlt
+  // ist. Auswaehlen setzt voraus, dass die "Bereit"-Gruppe offen ist — der
+  // Batch liegt dann bereits im Cache (gleicher Query-Key, react-query
+  // dedupliziert), dieser Aufruf holt ihn nur heran statt ihn zu wiederholen.
+  const { data: readyBetraege } = useCustomerAmounts(
+    selectedYear,
+    selectedMonth,
+    readyIds,
+    selectedReadyCount > 0,
+    dateFrom,
+    dateTo,
+  );
+  const selectedReady = (selection
     ? readyCustomers.filter((c) => selection.has(c.id))
-    : [];
+    : []
+  ).map((c) => {
+    const b = readyBetraege?.[String(c.id)];
+    return b ? { ...c, actualAmountCents: b.actualAmountCents } : c;
+  });
   const selectedTotalCents = selectedReady.reduce(
     (s, c) => s + (c.actualAmountCents ?? 0),
     0,
@@ -704,6 +778,10 @@ export function PendingInvoicesCard({
                   </div>
                 )}
                 <PendingSection
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
                   title="Bereit zum Abrechnen"
                   icon={<CheckCircle2 className={`${iconSize.sm} text-green-600`} />}
                   headerClassName="text-green-700"
@@ -717,6 +795,10 @@ export function PendingInvoicesCard({
                 {/* Task #1905 — die Sektion selbst ist die Begründung; die
                     Kundenzeilen bleiben ohne Inline-Detail (`showReasonNotes`). */}
                 <PendingSection
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
                   title="Dokumentation ausstehend"
                   icon={<CalendarClock className={`${iconSize.sm} text-amber-600`} />}
                   headerClassName="text-amber-700"
@@ -730,6 +812,10 @@ export function PendingInvoicesCard({
                     (kundensignierten) Nachweis. NICHT abrechenbar → keine
                     „Erstellen"-Aktion (canCreate=false). */}
                 <PendingSection
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
                   title="Leistungsnachweis fehlt"
                   icon={<FilePlus className={`${iconSize.sm} text-amber-600`} />}
                   headerClassName="text-amber-700"

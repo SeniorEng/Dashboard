@@ -249,3 +249,49 @@ export function useDeliveryHistory(expandedInvoiceId: number | null) {
     enabled: !!expandedInvoiceId,
   });
 }
+
+/**
+ * IST/PLAN-Beträge für eine MENGE von Kunden — geladen, wenn eine Gruppe
+ * geöffnet wird.
+ *
+ * Warum nicht mehr in der Liste: die beiden Zahlen kosteten SERVERSEITIG pro
+ * Kunde einen vollen `buildInvoiceDraft` (grob 15–25 DB-Runden). Bei 111
+ * Kunden lief das bei jedem Öffnen des Tabs, bevor die Liste erschien.
+ * Gemessen (Gate-1 zu 6hJRF6h8) war das der Engpass — nicht die
+ * Pipeline-Aggregation, die daneben 45 ms braucht.
+ *
+ * BATCH statt pro Zeile: ein Aufruf je Gruppe. Ein Endpunkt pro Zeile hätte
+ * die Rundenzahl nur verlagert und N HTTP-Requests daraus gemacht.
+ *
+ * `enabled` erst beim Öffnen — sonst wäre der alte Zustand wieder da, nur
+ * asynchron. Der Serveraufwand bliebe derselbe.
+ */
+export function useCustomerAmounts(
+  selectedYear: number,
+  selectedMonth: number,
+  customerIds: number[],
+  enabled: boolean,
+  dateFrom = "",
+  dateTo = "",
+) {
+  // Stabiler Schlüssel: die Reihenfolge der IDs darf keinen zweiten
+  // Cache-Eintrag für dieselbe Menge erzeugen.
+  const idsKey = [...customerIds].sort((a, b) => a - b).join(",");
+  return useQuery({
+    queryKey: ["billing", "customer-amounts", selectedYear, selectedMonth, idsKey, dateFrom, dateTo],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      params.set("customerIds", idsKey);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      const result = await api.get<Record<string, { actualAmountCents: number | null; plannedAmountCents: number | null }>>(
+        `/billing/customer-amounts?${params.toString()}`,
+        signal,
+      );
+      return unwrapResult(result);
+    },
+    enabled: enabled && idsKey.length > 0,
+  });
+}

@@ -87,6 +87,7 @@ import {
     storedInvoicePdfContainsLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
+import { computeCustomerAmounts } from "../services/billing-customer-amounts";
 import { getAlreadyInvoicedAppointmentIds, getBlockingDraftInvoices, getClusterAmountAppointmentsByCustomer, getDocumentationCoverageByCustomer, getUnbilledSignedAppointmentFactsByCustomer, buildLineItemsFromAppointments, type UnbilledSignedFacts } from "../services/invoice-data";
 import { buildInvoiceDraft, computeDocumentedGrossCents, generateInvoiceCore, PartialBillingConfirmationRequiredError } from "../services/invoice-calc";
 import { reduceInvoice45bToPaidAmount } from "../services/invoice-45b-reduction";
@@ -697,167 +698,23 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     statusesByCustomer.set(r.customerId, arr);
   }
 
-  // Task #1905 — Zwei Beträge je Kunde: IST (dokumentierte, noch nicht
-  // abgerechnete Arbeit) und PLAN (offene, noch nicht geleistete Termine).
-  // ERSETZT den früheren einzelnen `estimatedAmountCents`, der nur den
-  // abrechenbaren Teil kannte und bei allen übrigen Kunden 0 war — genau deshalb
-  // stand in den Nicht-Bereit-Gruppen bisher „—".
+  // Task #1905 / 6hJRF6h8 — die beiden Betrags-Zahlen (IST/PLAN) sind aus
+  // DIESEM Endpunkt HERAUSGELÖST.
   //
-  // IST hat ZWEI Quellen, die zusammen jeden Termin GENAU EINMAL zählen:
-  //  1. Der abrechenbare Anteil kommt weiterhin aus `buildInvoiceDraft`
-  //     (preview) — DIESELBE SSoT wie `/billing/preview` und die echte
-  //     Erstellung. Nur so entspricht die „Bereit"-Summe exakt der späteren
-  //     Rechnungssumme (inkl. Topf-Split/USt).
-  //  2. Der REST — dokumentierte, noch nicht abgerechnete Termine, die der Draft
-  //     mangels gültigem signiertem LN NICHT enthält — über denselben
-  //     Zeilen-Bauer (`buildLineItemsFromAppointments`), aus dem auch der Draft
-  //     seine Summen zieht. Kein zweiter Preis-Pfad.
+  // Sie riefen `buildInvoiceDraft` PRO KUNDE — die vollständige
+  // Rechnungsberechnung, grob 15–25 DB-Runden je Kunde. Bei 111 Kunden liefen
+  // damit rund 2.000 Runden, BEVOR die Liste erschien, obwohl der Rest dieses
+  // Endpunkts mengenbasiert und billig ist. Gemessen (Gate-1): die
+  // Pipeline-Aggregation daneben braucht 45 ms und war nie das Problem.
   //
-  // PLAN nutzt denselben Zeilen-Bauer über die offenen Termine; er fällt intern
-  // auf `plannedDurationMinutes` zurück, wenn keine Ist-Dauer erfasst ist, und
-  // bepreist über dieselbe `priceFor`-SSoT. PLAN ist eine PROGNOSE und erreicht
-  // ausschließlich diese Anzeige — kein Rechnungs-, Buchungs- oder
-  // Nachweis-Pfad (GoBD), verankert in
-  // `tests/architecture/billing-planned-amount-display-only.test.ts`.
+  // Die Berechnung liegt jetzt in `server/services/billing-customer-amounts.ts`
+  // und wird über `GET /billing/customer-amounts` geholt, wenn der Client eine
+  // Gruppe öffnet — ein Batch je Gruppe statt N Einzelrufe. Dieser Endpunkt ist
+  // damit unabhängig von der Kundenzahl.
   //
-  // Begrenzt parallel (Chunks), damit die Liste bei vielen Kunden nicht spürbar
-  // langsamer wird und der DB-Pool nicht überlastet. Datums-/Kassenfilter sind
-  // bereits im Scope (`finalIds` gefiltert, `dateFromQ`/`dateToQ` durchgereicht).
-  // `null` = nicht berechenbar (fehlender Katalogpreis), siehe `grossOrNull`.
-  const actualByCustomer = new Map<number, number | null>();
-  const plannedByCustomer = new Map<number, number | null>();
-  const clusterAppts = apptScopeByCustomer;
-  // Task #1905 — `acceptsPrivatePayment` entscheidet, ob ein privater Überhang
-  // überhaupt zulässig ist (SSoT `isPrivatePaymentAllowed`) und damit, ob der
-  // IST-Betrag auf 19 % umgerechnet wird. Bewusst eine EIGENE, schmale Abfrage
-  // statt einer weiteren Spalte in `customerRows`: deren Zeilen werden unten per
-  // `...c` in die API-Antwort gespreadet, ein zusätzliches Feld landete also
-  // ungewollt im öffentlichen Response-Schema.
-  const acceptsPrivateById = new Map<number, boolean>();
-  if (finalIds.length > 0) {
-    const rows = await db.select({
-      id: customersTable.id,
-      acceptsPrivatePayment: customersTable.acceptsPrivatePayment,
-    })
-      .from(customersTable)
-      .where(inArray(customersTable.id, finalIds));
-    for (const r of rows) acceptsPrivateById.set(r.id, r.acceptsPrivatePayment ?? false);
-  }
-  const AMOUNT_CONCURRENCY = 8;
-  for (let i = 0; i < finalIds.length; i += AMOUNT_CONCURRENCY) {
-    const chunk = finalIds.slice(i, i + AMOUNT_CONCURRENCY);
-    await Promise.all(
-      chunk.map(async (id) => {
-        // Ein aufgelöster Zahler-Typ für BEIDE Betrags-Pfade — vorher nutzte der
-        // IST-Pfad `?? "selbstzahler"` (nullish) und der PLAN-Pfad den rohen
-        // Wert, `buildInvoiceDraft` wiederum `|| "selbstzahler"` (falsy). Heute
-        // folgenlos, bei einem leeren String wären die Pfade auseinandergelaufen.
-        const billingType = billingTypeById.get(id) || "selbstzahler";
-        const sets = clusterAppts.get(id);
-        // Ein fachlicher Fehler (400) beim Rechnen eines EINZELNEN Kunden macht
-        // dessen Betrag „nicht berechenbar" — er darf nicht die Liste für ALLE
-        // Kunden des Monats leeren. Technische Fehler (DB, Programmierfehler)
-        // fliegen weiter: sie sind eine Störung und sollen als solche auffallen,
-        // statt sich als Katalog-Problem zu tarnen.
-        const billableOrNull = async <T>(compute: () => Promise<T>): Promise<T | null> => {
-          try {
-            return await compute();
-          } catch (err) {
-            if (err instanceof AppError && err.statusCode === 400) {
-              log(
-                `eligible-customers Betrag nicht berechenbar customer=${id} month=${month}/${year}: ${err.message}`,
-                "billing",
-              );
-              return null;
-            }
-            throw err;
-          }
-        };
-
-        // 1. Abrechenbarer Anteil (nur wo es ihn gibt — sonst wirft/liefert der
-        //    Draft ohnehin nichts Zählbares). Auch dieser Aufruf ist gefangen:
-        //    er zieht denselben Zeilen-Bauer und kann an einem fehlenden
-        //    Katalogpreis (oder dem #1353-Privatanteil-Backstop) scheitern.
-        //    Scheitert er, ist der IST dieses Kunden als Ganzes nicht bestimmbar
-        //    — dann wird auch der Rest NICHT gerechnet, sonst stünde dort ein zu
-        //    kleiner Teilbetrag, der wie eine vollständige Zahl aussieht.
-        let draftApptIds: number[] = [];
-        let actualCents = 0;
-        let draftFailed = false;
-        if ((unbilledFacts.get(id)?.unbilledAppointmentCount ?? 0) > 0) {
-          const draft = await billableOrNull(() =>
-            buildInvoiceDraft({
-              customerId: id,
-              billingMonth: month,
-              billingYear: year,
-              dateFrom: dateFromQ,
-              dateTo: dateToQ,
-              mode: "preview",
-            }),
-          );
-          if (draft === null) {
-            draftFailed = true;
-          } else {
-            draftApptIds = draft.apptIds;
-            actualCents = draft.grossAmountCents;
-          }
-        }
-        // 2. Rest = dokumentiert + unabgerechnet, aber nicht im Draft.
-        const draftSet = new Set(draftApptIds);
-        const restIds = (sets?.documentedUnbilledIds ?? []).filter((a) => !draftSet.has(a));
-        const openIds = sets?.openIds ?? [];
-
-        // IST-Rest über DENSELBEN Weg wie die echte Rechnung (Zeilen-Bauer →
-        // Topf-Split → `summarizePotAmounts`), damit die angezeigte Ist-Zahl dem
-        // entspricht, was tatsächlich abgerechnet würde — inklusive der 19 % auf
-        // einen privaten Überhang (Pflegekasse mit `acceptsPrivatePayment` und
-        // ausgeschöpftem Topf). Vorher las die Liste die Bauer-Summen roh und lag
-        // in genau diesem Fall bis zu 19 % zu niedrig.
-        //
-        // PLAN dagegen bewusst KONSERVATIV: für offene, noch nicht durchgeführte
-        // Termine ist die Topf-Lage zum Abrechnungszeitpunkt offen, ein
-        // spekulativer Privat-Aufschlag wäre erfundene Genauigkeit. PLAN nimmt
-        // deshalb die Bauer-Summen (Selbstzahler tragen dort ohnehin ihre 19 %,
-        // das ist keine Spekulation) und wird über `SHOW_PROVISIONAL_MARKER` als
-        // vorläufig kenntlich gemacht.
-        //
-        // Fehlender Katalogpreis (`priceFor` ist zeitversioniert — z.B. ein
-        // rückdatierter Termin vor dem `validFrom` seines Katalog-Eintrags):
-        // weder verschlucken noch die Seite abschießen.
-        //  • Verschlucken (früher: `catch → 0`) zeigte eine zu kleine Geldsumme
-        //    ohne jeden Hinweis. Das darf eine Geld-Spalte nicht.
-        //  • Durchwerfen setzt `GET /eligible-customers` auf 400 — die Liste
-        //    wäre für den GANZEN Monat leer, auch für alle unbetroffenen Kunden.
-        //    Ein einzelner Katalog-Fehler legt damit die Abrechnung still.
-        // Stattdessen `null` = „nicht berechenbar": der betroffene Kunde zeigt
-        // ein „?" statt einer Zahl, alle anderen bleiben rechenbar.
-        const [restCents, plannedCents] = await Promise.all([
-          draftFailed
-            ? Promise.resolve(null)
-            : billableOrNull(() =>
-                computeDocumentedGrossCents({
-                  customerId: id,
-                  appointmentIds: restIds,
-                  billingType,
-                  acceptsPrivatePayment: acceptsPrivateById.get(id),
-                }),
-              ),
-          openIds.length === 0
-            ? Promise.resolve(0)
-            : billableOrNull(() =>
-                buildLineItemsFromAppointments(openIds, id, billingType).then(
-                  (r) => r.totalNetCents + r.totalVatCents,
-                ),
-              ),
-        ]);
-        actualByCustomer.set(
-          id,
-          draftFailed || restCents === null ? null : actualCents + restCents,
-        );
-        plannedByCustomer.set(id, plannedCents);
-      }),
-    );
-  }
+  // Die Felder fehlen in der Antwort NICHT: sie stehen auf `null` und heißen
+  // damit „noch nicht geladen". Sie zu 0 zu setzen wäre eine stille
+  // Falschaussage in einer Geld-Spalte gewesen.
 
   // Termin-Fakten (signiert / noch nicht abgerechnet) je Kunde aus DER EINEN
   // SSoT `unbilledFacts` (oben berechnet) — keine zweite Kopie der Regel mehr.
@@ -882,8 +739,10 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
       // Task #1905 — IST (dokumentiert, noch nicht abgerechnet) und PLAN
       // (offene Termine, Prognose). Ersetzt `estimatedAmountCents`.
       // `null` = nicht berechenbar; `undefined` (Kunde ohne Betrags-Lauf) → 0.
-      actualAmountCents: actualByCustomer.has(c.id) ? actualByCustomer.get(c.id)! : 0,
-      plannedAmountCents: plannedByCustomer.has(c.id) ? plannedByCustomer.get(c.id)! : 0,
+      // `null` = noch nicht geladen (siehe Kommentar oben). Der Client holt
+      // sie beim Öffnen der Gruppe über `/billing/customer-amounts` nach.
+      actualAmountCents: null,
+      plannedAmountCents: null,
     };
   });
 
@@ -896,6 +755,49 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
 // „bereits abgerechnet"), dokumentierte Termine im Monat (Partial-Signing-
 // Hinweis) und Brutto-Summe über alle entstehenden Folge-Rechnungen
 // (Kassen-/Privatanteil bei Split). Persistiert nichts.
+// Task 6hJRF6h8 — IST/PLAN-Beträge für eine MENGE von Kunden.
+//
+// Herausgelöst aus `GET /eligible-customers`, weil sie dort pro Kunde einen
+// vollen `buildInvoiceDraft` kosteten und damit die Liste blockierten (Gate-1:
+// bei 111 Kunden grob 2.000 DB-Runden vor dem ersten Rendern).
+//
+// BATCH statt pro Kunde: der Client öffnet eine Gruppe und holt deren Beträge
+// in EINEM Aufruf. Ein Endpunkt pro Zeile hätte die Rundenzahl nur verlagert.
+//
+// Reine Sicht, keine Mutation. `null` je Kunde = nicht berechenbar (fehlender
+// Katalogpreis) — nicht zu 0 geglättet.
+router.get("/customer-amounts", asyncHandler("Beträge konnten nicht geladen werden", async (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    throw badRequest("Jahr ist erforderlich (2020–2100).");
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw badRequest("Monat ist erforderlich (1–12).");
+  }
+  const roh = String(req.query.customerIds ?? "").trim();
+  const ids = roh.length === 0
+    ? []
+    : [...new Set(roh.split(",").map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n > 0))];
+  if (ids.length === 0) {
+    throw badRequest("customerIds ist erforderlich (kommagetrennte Kunden-IDs).");
+  }
+  // Obergrenze: ein Aufruf soll eine GRUPPE abdecken, nicht den ganzen Monat.
+  // Ohne sie wäre der alte Zustand über einen Query-Parameter wieder
+  // herstellbar — genau das, was dieser Vorgang beseitigt.
+  if (ids.length > 100) {
+    throw badRequest("Höchstens 100 Kunden pro Aufruf. Bitte gruppenweise laden.");
+  }
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  const dateFrom = typeof req.query.dateFrom === "string" && isoDate.test(req.query.dateFrom)
+    ? req.query.dateFrom : undefined;
+  const dateTo = typeof req.query.dateTo === "string" && isoDate.test(req.query.dateTo)
+    ? req.query.dateTo : undefined;
+
+  const betraege = await computeCustomerAmounts(ids, { year, month, dateFrom, dateTo });
+  res.json(Object.fromEntries([...betraege].map(([id, b]) => [String(id), b])));
+}));
+
 router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", async (req, res) => {
   const customerId = parseInt(String(req.query.customerId ?? ""), 10);
   const month = parseInt(String(req.query.month ?? ""), 10);
