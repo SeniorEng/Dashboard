@@ -37,6 +37,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { budgetTransactions, customers, users } from "@shared/schema";
@@ -69,24 +70,12 @@ function parseArgs(): Args {
   }
   const userArg = get("--user=");
   const userId = userArg ? parseInt(userArg, 10) : undefined;
-  return { apply, customerIds, userId: Number.isFinite(userId) ? userId : undefined, reason: get("--reason=") };
+  // Gemeinsame Flags aus der SSoT, per SPREAD — eine Aufzaehlung kann ein
+  // Feld verlieren (B1, Gate-2 zu #120). Hier fehlte `confirmTarget`, das
+  // das Ziel-Gate braucht.
+  return { ...parseProdWriteArgs(process.argv), customerIds };
 }
 
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db
-    .select({ id: users.id, isSuperAdmin: users.isSuperAdmin, isActive: users.isActive, displayName: users.displayName })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `Reversal-Ketten-Korrekturen sind Task #1170 explizit auf Superadmins beschränkt.`,
-    );
-  }
-}
 
 const negate = (v: number | null | undefined): number | null => (v == null ? null : -v);
 
@@ -276,15 +265,13 @@ async function main() {
   const args = parseArgs();
 
   if (args.apply) {
-    if (args.userId === undefined) {
-      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
-      process.exit(1);
-    }
-    if (!args.reason || args.reason.length < 10) {
-      console.error('Fehler: --apply erfordert --reason="..." (≥10 Zeichen Begründung für den Audit-Log).');
-      process.exit(1);
-    }
-    await assertSuperadminOrThrow(args.userId);
+    // ERSETZT drei Handpruefungen (--user vorhanden, --reason >= 10 Zeichen,
+    // lokale assertSuperadminOrThrow-Kopie) UND ergaenzt, was allen dreien
+    // fehlte: die ZIEL-Pruefung. Das Gate vergleicht `--confirm-target` gegen
+    // `current_database()` auf DERSELBEN Verbindung, ueber die danach
+    // geschrieben wird — eine URL sagt nur, wohin verbunden werden sollte.
+    // Es erteilt zugleich die Freigabe fuer die Laufzeit-Schreibsperre (#117).
+    await assertProdWriteAllowedOrThrow(args, "Reconcile von Reversal-Ketten (Import-Drift).");
   }
 
   console.log(`Modus:        ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);

@@ -23,7 +23,7 @@
 
 import { sql } from "drizzle-orm";
 import { db, pool } from "../lib/db";
-import { assertDevDatabase } from "../lib/dev-db-guard";
+import { assertDevDatabase, assertDevWriteTargetOrThrow } from "../lib/dev-db-guard";
 import {
   DOCUMENT_TYPE_WHITELIST,
   customerIsolationMatchSql,
@@ -84,6 +84,21 @@ async function safetyChecks(apply: boolean): Promise<void> {
   // einen NICHT ermittelbaren Host durch (fail-open), und PROD_DATABASE_URL
   // kannte sie nicht.
   assertDevDatabase();
+
+  // Schreibende Laeufe verlangen die POSITIVE Ziel-Pruefung.
+  //
+  // `assertDevDatabase()` allein ist ein NEGATIVES Praedikat ("sieht nicht nach
+  // Prod aus") und reicht fuer einen Trockenlauf. Fuer den Schreibpfad reicht
+  // es NICHT: "nicht Prod" ist auch fuer eine unbekannte oder falsch
+  // konfigurierte DB wahr — dasselbe NULL-Loch, wegen dem #118 die positive
+  // Pruefung eingefuehrt hat.
+  //
+  // Sie erteilt zugleich die Freigabe fuer die Laufzeit-Schreibsperre (#117);
+  // ohne sie braeche der Lauf beim ersten Schreibzugriff ab.
+  if (apply) {
+    const ziel = await assertDevWriteTargetOrThrow();
+    console.log(`Dev-Ziel bestaetigt: ${ziel}`);
+  }
   log(`Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN"}`);
 }
 

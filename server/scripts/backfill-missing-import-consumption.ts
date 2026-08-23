@@ -42,6 +42,8 @@
  */
 
 import { writeFileSync } from "node:fs";
+import { assertDualTargetOrThrow } from "./lib/dual-target-gate";
+import { parseProdWriteArgs } from "./lib/prod-write-gate";
 import { assertDevDatabase } from "../lib/dev-db-guard";
 import { eq, and, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../lib/db";
@@ -58,10 +60,11 @@ import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { auditService } from "../services/audit";
 
-interface CliArgs {
-  apply: boolean;
-  userId?: number;
-  reason?: string;
+/**
+ * Gemeinsame Flags aus der SSoT abgeleitet statt zweitgelistet — eine Kopie
+ * driftet lautlos, und hier fehlte bereits `--confirm-target`.
+ */
+type CliArgs = ReturnType<typeof parseProdWriteArgs> & {
   csvPath?: string;
   customerIds: number[];
   batchId?: number;
@@ -73,21 +76,20 @@ function parseArgs(): CliArgs {
   const get = (prefix: string): string | undefined => {
     const a = args.find((x) => x.startsWith(prefix));
     if (!a) return undefined;
-    const v = a.split("=").slice(1).join("=").trim();
+    const v = a.slice(prefix.length).trim();
     return v.length > 0 ? v : undefined;
   };
   const parseIds = (s: string | undefined): number[] => {
     if (!s) return [];
     return s.split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n));
   };
-  const userStr = get("--user=");
-  const userId = userStr ? parseInt(userStr, 10) : undefined;
   const batchStr = get("--batch=");
   const batchId = batchStr ? parseInt(batchStr, 10) : undefined;
+  // Gemeinsame Flags aus der SSoT, per SPREAD. Vorher zaehlte dieses parseArgs
+  // sie selbst auf — und `confirmTarget`/`target` fehlten dabei, also genau
+  // die Felder, die das Ziel-Gate braucht.
   return {
-    apply: args.includes("--apply"),
-    userId: userId !== undefined && !isNaN(userId) ? userId : undefined,
-    reason: get("--reason="),
+    ...parseProdWriteArgs(process.argv),
     csvPath: get("--csv="),
     customerIds: parseIds(get("--customer=")),
     batchId: batchId !== undefined && !isNaN(batchId) ? batchId : undefined,
@@ -110,26 +112,6 @@ function assertNotProduction(): void {
   assertDevDatabase();
 }
 
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db
-    .select({
-      id: users.id,
-      isSuperAdmin: users.isSuperAdmin,
-      isActive: users.isActive,
-      displayName: users.displayName,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `Bestandskorrektur ist auf Superadmins beschränkt.`,
-    );
-  }
-}
 
 export interface MissingConsumptionRow {
   appointmentId: number;
@@ -405,15 +387,20 @@ async function main() {
   assertNotProduction();
 
   if (args.apply) {
-    if (args.userId === undefined) {
-      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
-      process.exit(1);
-    }
-    if (!args.reason || args.reason.length < 10) {
-      console.error('Fehler: --apply erfordert --reason="..." (≥10 Zeichen Begründung für den Audit-Log).');
-      process.exit(1);
-    }
-    await assertSuperadminOrThrow(args.userId);
+    // KLASSE: Dual-Target. Das Skript hat einen Dev-Screen UND `--user`/
+    // `--reason` — es bedient beide Umgebungen. Ein reines Prod-Gate verlangt
+    // NODE_ENV=production und haette den Probelauf auf der Dev-Kopie
+    // unmoeglich gemacht.
+    //
+    // ERSETZT drei Handpruefungen und die lokale Superadmin-Kopie, und
+    // ergaenzt die ZIEL-Pruefung auf DERSELBEN Verbindung
+    // (`current_database()`, nicht die URL). BEIDE Klassen verlangen Urheber
+    // und Begruendung.
+    const freigabe = await assertDualTargetOrThrow(
+      args,
+      "Backfill fehlender Import-Konsumption (Budget-Buchungen nachziehen).",
+    );
+    console.log(`Ziel-Klasse: ${freigabe.klasse} · bestaetigt: ${freigabe.ziel}`);
   }
 
   console.log(`Modus:               ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);

@@ -40,6 +40,7 @@
 // ---------------------------------------------------------------------------
 
 import { writeFileSync } from "node:fs";
+import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "../server/scripts/lib/prod-write-gate";
 import { resolve } from "node:path";
 import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { db } from "../server/lib/db";
@@ -508,46 +509,30 @@ export async function applyProposals(
 }
 
 /** Stellt sicher, dass die Audit-Attribution ein aktiver Superadmin ist. */
-async function assertSuperadminOrThrow(userId: number): Promise<void> {
-  const [row] = await db
-    .select({
-      id: users.id,
-      isSuperAdmin: users.isSuperAdmin,
-      isActive: users.isActive,
-      displayName: users.displayName,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
-  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
-  if (!row.isSuperAdmin) {
-    throw new Error(
-      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
-        `Der Sammel-Avis-Backfill-Schreiblauf ist auf Superadmins beschränkt (GoBD-Audit).`,
-    );
-  }
-}
 
 async function main() {
   const argv = process.argv.slice(2);
-  const apply = argv.includes("--apply");
-  const get = (p: string) => argv.find((a) => a.startsWith(p))?.split("=")[1];
-  const userArg = get("--user=");
-  const parsedUserId = userArg ? parseInt(userArg, 10) : undefined;
-  const userId = parsedUserId !== undefined && Number.isFinite(parsedUserId) ? parsedUserId : undefined;
-  const reason = get("--reason=");
+  // Gemeinsame Flags aus der SSoT. Der lokale `get` benutzte
+  // `?.split("=")[1]` und schnitt damit am ERSTEN `=` ab — genau der
+  // Trunkierungs-Bug aus PR #119: eine Begruendung wie
+  // `--reason="Korrektur #1651 => Nachbuchung"` wurde stillschweigend zu
+  // `Korrektur #1651 `, blieb ueber der 10-Zeichen-Schranke und landete
+  // VERSTUEMMELT im GoBD-Audit-Log. `parseProdWriteArgs` nimmt
+  // `slice(praefix.length)`.
+  const args = parseProdWriteArgs(process.argv);
+  const { apply, userId, reason } = args;
 
   if (apply) {
-    if (userId === undefined) {
-      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
-      process.exit(1);
-    }
-    if (!reason || reason.length < 10) {
-      console.error('Fehler: --apply erfordert --reason="..." (≥10 Zeichen Begründung für den Audit-Log).');
-      process.exit(1);
-    }
-    await assertSuperadminOrThrow(userId);
+    // ERSETZT drei Handpruefungen (--user vorhanden, --reason >= 10 Zeichen,
+    // lokale assertSuperadminOrThrow-Kopie) UND ergaenzt, was allen dreien
+    // fehlte: die ZIEL-Pruefung. Das Gate vergleicht `--confirm-target` gegen
+    // `current_database()` auf DERSELBEN Verbindung, ueber die danach
+    // geschrieben wird. Es erteilt zugleich die Freigabe fuer die
+    // Laufzeit-Schreibsperre (#117).
+    await assertProdWriteAllowedOrThrow(
+      args,
+      "Backfill-Verifikation mit Korrektur der Beratungs-Datensaetze.",
+    );
   }
 
   console.log("═".repeat(78));
@@ -597,7 +582,11 @@ async function main() {
   // werden als CSV UND JSON auf Platte geschrieben, damit ein Operator sie
   // außerhalb der Konsolen-Ausgabe abarbeiten kann (Task #1683).
   if (ambiguous.length > 0) {
-    const outPrefix = get("--out=") ?? "advice-backfill-ambiguous";
+    // `--out=` ist skript-eigen, nicht Teil der gemeinsamen Flags. Bewusst
+    // `slice` statt `split("=")[1]`, damit ein Pfad mit `=` nicht abgeschnitten
+    // wird — dieselbe Falle wie beim frueheren `--reason`.
+    const outArg = argv.find((a) => a.startsWith("--out="));
+    const outPrefix = (outArg ? outArg.slice("--out=".length) : "") || "advice-backfill-ambiguous";
     const csvPath = resolve(process.cwd(), `${outPrefix}.csv`);
     const jsonPath = resolve(process.cwd(), `${outPrefix}.json`);
     writeFileSync(csvPath, formatAmbiguousReportCsv(ambiguous), "utf8");

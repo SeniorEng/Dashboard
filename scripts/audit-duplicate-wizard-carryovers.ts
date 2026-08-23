@@ -47,6 +47,7 @@
  *   3 — Unerwarteter Fehler / kein Audit-Akteur verfügbar
  */
 import { and, eq, isNull, sql } from "drizzle-orm";
+import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "../server/scripts/lib/prod-write-gate";
 import { db } from "../server/lib/db";
 import {
   auditLog,
@@ -67,10 +68,6 @@ interface DuplicateGroup {
   candidates: Array<{ row: AllocRow; linkedTxIds: number[] }>;
 }
 
-function isProdHost(): boolean {
-  const url = process.env.DATABASE_URL ?? "";
-  return /neon\.tech|prod|production/i.test(url) && !/test|dev|staging/i.test(url);
-}
 
 async function loadDuplicates(): Promise<DuplicateGroup[]> {
   const rows = await db
@@ -137,13 +134,6 @@ async function loadDuplicates(): Promise<DuplicateGroup[]> {
   return result;
 }
 
-async function getAuditUserId(): Promise<number | null> {
-  const r = await db.execute(
-    /* sql */ `SELECT id FROM users WHERE role IN ('superadmin','admin') ORDER BY id ASC LIMIT 1`,
-  );
-  const rows = (r as { rows: Array<{ id: number }> }).rows;
-  return rows[0]?.id ?? null;
-}
 
 async function alreadyStorno(allocationId: number): Promise<boolean> {
   const r = await db
@@ -201,12 +191,8 @@ async function writeStorno(
 }
 
 async function main(): Promise<void> {
-  const apply = process.argv.includes("--apply");
-  const allowProd = process.argv.includes("--allow-prod");
-  if (isProdHost() && !allowProd) {
-    console.error("REFUSE: DATABASE_URL sieht nach Produktion aus. Mit --allow-prod erneut aufrufen.");
-    process.exit(2);
-  }
+  const args = parseProdWriteArgs(process.argv);
+  const apply = args.apply;
   const mode = apply ? "APPLY (schreibt Storno + Audit)" : "DRY-RUN (Default)";
   console.log(`\n=== §45b-Carryover-Duplikate Audit (${mode}) ===\n`);
 
@@ -256,11 +242,29 @@ async function main(): Promise<void> {
     return;
   }
 
-  const actorId = await getAuditUserId();
-  if (actorId == null) {
-    console.error("Kein admin/superadmin-User für Audit-Akteur gefunden — Abbruch.");
-    process.exit(3);
-  }
+  // ERSETZT den bisherigen Eigenbau `--allow-prod` + `isProdHost()`.
+  //
+  // Der war in zwei Richtungen schwach: `--allow-prod` ist ein BOOLEAN —
+  // gesetzt genehmigt es jeden Lauf, ohne zu sagen WOHIN. Und `isProdHost()`
+  // war eine vierte lokale Host-Fassung, die gegen die GANZE URL matchte
+  // (`/neon\.tech|prod|production/`), nicht gegen den Host: ein Passwort mit
+  // "prod" darin haette angeschlagen, ein Prod-Host ohne diese Zeichenfolge
+  // nicht.
+  //
+  // Das Gate nennt stattdessen das Ziel (`--confirm-target`, geprueft gegen
+  // `current_database()` auf DERSELBEN Verbindung), verlangt Superadmin und
+  // Begruendung — und erteilt die Freigabe fuer die Laufzeit-Schreibsperre.
+  //
+  // ZUR RICHTUNG, weil sie sich aendert: der TROCKENLAUF darf jetzt auch gegen
+  // Prod laufen (vorher verweigerte `isProdHost()` ihn ohne `--allow-prod`).
+  // Das ist gewollt — das Skript ist ein AUDIT, und der Dry-Run ist read-only.
+  // Der schreibende Pfad ist dafuer deutlich strenger als zuvor.
+  await assertProdWriteAllowedOrThrow(
+    args,
+    "Storno fuer doppelte §45b-Carryover-Allokationen aus dem Wizard-Pfad (Task #604).",
+  );
+
+  const actorId = args.userId;
   let written = 0;
   for (const g of groups) {
     for (const c of g.candidates) {

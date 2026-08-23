@@ -1,0 +1,89 @@
+
+======================================================================
+Cleanup Test-Daten — Modus: APPLY (scharf), Scope: all
+======================================================================
+Modus: APPLY (scharf)
+
+======================================================================
+Sanity-Check: Liste der echten (whitelist) Entitäten
+======================================================================
+
+Echte Mitarbeiter (1):
+   #1  Superadmin           <ci-test@example.com>
+
+Echte Services (0):
+
+Echte Kunden (0 gesamt, erste 20):
+
+[VOR Cleanup] Whitelist-Counts (echte Daten, dürfen nicht abnehmen):
+   echte Kunden:                              0
+   echte Interessenten:                       0
+   echte Mitarbeiter:                         1
+   echte Services:                            0
+   echte Dokumenttypen:                       0
+   Rechnungen echter Kunden:                  0
+   weich-gelöschte Termine echter Kunden:     0
+   weich-gelöschte Zeit-Einträge echter User: 0
+   Termin-Serien echter Kunden:               0
+   Monats-LN echter Kunden:                   0
+   Zuweisungs-Historie echter Kunden:         0
+
+[VOR Cleanup] Test-Entitäten:
+   Test-Kunden:       0
+   Test-Interessenten:0
+   Test-Mitarbeiter:  0
+   Test-Services:     0
+   Test-Dokumenttypen:0
+
+======================================================================
+Phase 1: Test-Kunden (mit Cascade über Termine, Rechnungen, Budget, Series)
+======================================================================
+Gefunden: 0 Test-Kunden
+
+======================================================================
+Phase 2: Test-Interessenten
+======================================================================
+Gefunden: 0 Test-Interessenten
+
+======================================================================
+Phase 3: Test-Services (nur unreferenzierte hart löschen)
+======================================================================
+Gefunden: 0 Test-Services
+
+======================================================================
+Phase 6: Test-Dokumenttypen (^DOC<n>_<epoch>_ — unreferenzierte löschen, referenzierte deaktivieren)
+======================================================================
+Gefunden: 0 Test-Dokumenttypen
+
+======================================================================
+Phase 4: Test-Mitarbeiter (mit Cascade über Time-Entries, Notifications, FK-Set-Null)
+======================================================================
+Gefunden: 0 Test-Mitarbeiter
+
+======================================================================
+Phase 5: Verwaiste soft-deleted Reihen ohne FK-Ziel (nur Test-Datenmüll)
+======================================================================
+Verwaiste soft-deleted Termine (Kunde weg):       0
+Verwaiste soft-deleted Zeit-Einträge (User weg):  0
+
+[NACH Cleanup] Whitelist-Counts (echte Daten, dürfen nicht abnehmen):
+   echte Kunden:                              0
+   echte Interessenten:                       0
+   echte Mitarbeiter:                         1
+   echte Services:                            0
+   echte Dokumenttypen:                       0
+   Rechnungen echter Kunden:                  0
+   weich-gelöschte Termine echter Kunden:     0
+   weich-gelöschte Zeit-Einträge echter User: 0
+   Termin-Serien echter Kunden:               0
+   Monats-LN echter Kunden:                   0
+   Zuweisungs-Historie echter Kunden:         0
+
+Whitelist-Verifikation OK: alle echten Daten unverändert.
+
+[NACH Cleanup] Test-Entitäten:
+   Test-Kunden:       0 → 0
+   Test-Interessenten:0 → 0
+   Test-Mitarbeiter:  0 → 0
+   Test-Services:     0 → 0
+   Test-Dokumenttypen:0 → 0

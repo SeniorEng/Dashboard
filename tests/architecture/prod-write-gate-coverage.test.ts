@@ -86,6 +86,36 @@ const GATE = "assertProdWriteAllowedOrThrow";
 const DUAL_GATE = "assertDualTargetOrThrow";
 
 /**
+ * Dritte gueltige Form: die WEGWERF-Klasse.
+ *
+ * CLAUDE.md kennt drei legitime Arten, ein Ziel zu deklarieren — Prod-Gate,
+ * verifizierte Wegwerf-DB, Dev-Nachweis. Dieser Waechter kannte nur die erste
+ * (und seit #120 die Auswahl davor). Folge: `scripts/ci-seed-superadmin.ts`
+ * stand als "ungegatet" in der Altlast, OBWOHL es die Wegwerf-Pruefung laengst
+ * ruft — ueber den Seiteneffekt-Import `./lib/assert-write-target`, der
+ * `assertEphemeralDbForWrite` ausfuehrt.
+ *
+ * Das war ein Loch im WAECHTER, nicht im Skript: die Altlast fuehrte einen
+ * Eintrag, den es nicht haette fuehren duerfen. Ein Waechter, der eine
+ * legitime Form nicht kennt, erzeugt Alarm-Muedigkeit — und irgendwann traut
+ * ihm niemand mehr.
+ *
+ * Erkannt wird BEIDES: der direkte Aufruf und der Seiteneffekt-Import.
+ */
+const WEGWERF_GATE = "assertEphemeralDbForWrite";
+
+/**
+ * Vierte gueltige Form: die DEV-Klasse — die POSITIVE Ziel-Pruefung aus #118.
+ *
+ * Bewusst NICHT `assertDevDatabase`: das ist der negative Screen ("sieht nicht
+ * nach Prod aus") und erteilt kein Schreibrecht. Genau diese Unterscheidung
+ * war der Punkt von #118, und ein Waechter, der beide gleich behandelte,
+ * wuerde sie wieder einebnen.
+ */
+const DEV_GATE = "assertDevWriteTargetOrThrow";
+const WEGWERF_IMPORT = /import\s+["'][^"']*assert-write-target["']/;
+
+/**
  * Die Erkennung teilt sich die SSoT mit der Laufzeit-Sperre
  * (`@shared/db-write-statements`). Zwei Pruefer, EINE Antwort auf „schreibt
  * das?" — liefen sie auseinander, meldete der eine ein Skript als harmlos,
@@ -114,20 +144,11 @@ const DUAL_GATE = "assertDualTargetOrThrow";
  * ungegateten Code, nicht WACHSENDEN.
  */
 const ALTLAST: readonly { datei: string; sha256: string }[] = [
-  { datei: "scripts/audit-duplicate-wizard-carryovers.ts", sha256: "e68b65e32f201702" },
-  { datei: "scripts/ci-seed-superadmin.ts", sha256: "8393502e6c045110" },
   { datei: "scripts/migrate-schema.ts", sha256: "cc2ada92e0ac3ec6" },
-  { datei: "scripts/verify-advice-backfill.ts", sha256: "1584bebf75ad95a3" },
-  { datei: "server/scripts/apply-vacation-policy-2026.ts", sha256: "1b94c87b72830db7" },
-  { datei: "server/scripts/b3-quantify-exposure.ts", sha256: "ad122b582faf1605" },
-  { datei: "server/scripts/backfill-missing-import-consumption.ts", sha256: "27dabaa6a0f800c3" },
-  { datei: "server/scripts/cleanup-test-data.ts", sha256: "fc5b0ebc9a8b860d" },
-  { datei: "server/scripts/reconcile-phantom-stornos.ts", sha256: "a01239e0e7fda5ce" },
-  { datei: "server/scripts/reconcile-reversal-chains.ts", sha256: "34af822d4f0cca67" },
 ];
 
 /** Muss zur Listenlänge passen — macht jede Ergänzung im Diff sichtbar. */
-const BEKANNTE_LOECHER = 10;
+const BEKANNTE_LOECHER = 1;
 
 function schreibendeSkripte(): string[] {
   return SKRIPT_DIRS.flatMap((dir) =>
@@ -166,7 +187,8 @@ function vorhandeneEintraege(): { datei: string; sha256: string }[] {
 /** Ruft die Datei eines der beiden Ziel-Gates AUF (nicht: erwaehnt es)? */
 function ruftGate(text: string): boolean {
   const ohne = entkommentiert(text);
-  return new RegExp(`\\b(?:${GATE}|${DUAL_GATE})\\s*\\(`).test(ohne);
+  if (WEGWERF_IMPORT.test(ohne)) return true;
+  return new RegExp(`\\b(?:${GATE}|${DUAL_GATE}|${WEGWERF_GATE}|${DEV_GATE})\\s*\\(`).test(ohne);
 }
 
 /** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
@@ -257,7 +279,15 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
     // 10-Zeichen-Schranke und landete VERSTUEMMELT im GoBD-Audit-Log.
     // `parseProdWriteArgs` benutzt `slice(praefix.length)`.
     const ohneParser = schreibendeSkripte()
-      .filter((rel) => ruftGate(inhalt(rel)))
+      // NUR die Klassen, die diese Flags ueberhaupt kennen. Die WEGWERF-Klasse
+      // hat weder `--user` noch `--reason` noch `--confirm-target` — sie
+      // deklariert ihr Ziel ueber den DB-Namen. `ruftGate` allein als Filter
+      // haette `ci-seed-superadmin` verlangt, `parseProdWriteArgs` zu rufen,
+      // obwohl es keine einzige dieser Flags entgegennimmt.
+      .filter((rel) => {
+        const text = entkommentiert(inhalt(rel));
+        return new RegExp(`\\b(?:${GATE}|${DUAL_GATE})\\s*\\(`).test(text);
+      })
       // Auf den AUFRUF pruefen, nicht auf den Namen: ein Kommentar, der
       // `parseProdWriteArgs` erwaehnt, erfuellte eine reine Text-Suche und
       // machte die Regel wirkungslos. Genau das ist beim Gegenpruefen
