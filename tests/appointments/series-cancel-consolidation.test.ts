@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../../server/lib/db";
-import { appointments, auditLog, budgetTransactions } from "@shared/schema";
+import { appointments, auditLog, budgetTransactions, invoices, invoiceLineItems } from "@shared/schema";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 import {
   apiDelete,
@@ -250,6 +250,93 @@ describe("Absage-Konsolidierung — begonnene Dokumentation wird nicht still ver
         "Budget verbraucht für eine Leistung, die nie erbracht wird — genau der " +
         "Zustand, den `sweepOrphanHolds` an der Hold-Seite als Waise meldet.",
     ).toBeGreaterThan(0);
+  });
+
+  it("6 — bei aktiver Rechnung wird NICHT zurueckgebucht, sondern uebersprungen", async () => {
+    // GoBD: eine Rueckbuchung waehrend eine gestellte Rechnung den Verbrauch
+    // ausweist, laesst Rechnung und Budget auseinanderlaufen. Die Regel gab es
+    // schon — aber nur auf dem LOESCH-Pfad; die Absage-SSoT kannte sie nicht,
+    // obwohl sie dasselbe tut.
+    //
+    // Der Test misst BEIDES: dass nicht abgesagt wird UND dass die Buchung
+    // unangetastet bleibt. Nur der Status waere zu wenig — der eigentliche
+    // Schaden ist die Rueckbuchung.
+    const { seriesId, termine } = await serieAnlegen(180);
+    const ziel = termine[0];
+
+    const setup = await apiPost(`/api/budget/${customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${new Date().getFullYear()}-01-01`,
+    });
+    expect([200, 201]).toContain(setup.status);
+
+    const txn = await createConsumptionTransaction({
+      customerId,
+      appointmentId: ziel.id,
+      transactionDate: ziel.date,
+      hauswirtschaftMinutes: 30,
+      alltagsbegleitungMinutes: 0,
+      travelKilometers: 0,
+      customerKilometers: 0,
+      userId: auth.user.id,
+    });
+    expect(txn, "Vorbedingung: ohne Buchung misst der Test nichts").toBeDefined();
+
+    // Aktive Rechnung mit einem Posten auf genau diesem Termin.
+    const [rechnung] = await db.insert(invoices).values({
+      customerId,
+      invoiceNumber: `RE-TEST-${ziel.id}`,
+      billingType: "selbstzahler",
+      invoiceType: "rechnung",
+      recipientName: "Testempfaenger",
+      status: "gestellt",
+      billingYear: Number(ziel.date.slice(0, 4)),
+      billingMonth: Number(ziel.date.slice(5, 7)),
+      netAmountCents: 1000,
+      vatAmountCents: 0,
+      grossAmountCents: 1000,
+    }).returning({ id: invoices.id });
+    await db.insert(invoiceLineItems).values({
+      invoiceId: rechnung.id,
+      appointmentId: ziel.id,
+      appointmentDate: ziel.date,
+      serviceDescription: "Testposten",
+      durationMinutes: 30,
+      unitPriceCents: 1000,
+      totalCents: 1000,
+    });
+
+    await db.update(appointments)
+      .set({ status: "documenting", actualStart: "09:00:00", actualEnd: "10:00:00" })
+      .where(eq(appointments.id, ziel.id));
+
+    const res = await absage(seriesId, ziel.id, { mode: "single", confirmDiscardDocumentation: true });
+
+    const danach = await db.select({ status: appointments.status })
+      .from(appointments).where(eq(appointments.id, ziel.id));
+    expect(
+      danach[0].status,
+      "Der Termin darf NICHT abgesagt sein, solange die Rechnung steht — sonst " +
+        "muesste zuerst storniert werden (GoBD: Storno vor Korrektur).",
+    ).not.toBe("cancelled");
+
+    const buchungen = await db.select({ typ: budgetTransactions.transactionType })
+      .from(budgetTransactions).where(eq(budgetTransactions.appointmentId, ziel.id));
+    expect(
+      buchungen.filter((t) => t.typ === "reversal").length,
+      "KEINE Rueckbuchung, solange die Rechnung den Verbrauch ausweist — sonst " +
+        "laufen Rechnung und Budget auseinander.",
+    ).toBe(0);
+
+    // Und der Aufrufer erfaehrt es: bei `single` ist eine Ablehnung ein Fehler,
+    // kein 200 mit `cancelled: 0` — derselbe Vertrag, den Test 4 festhaelt.
+    expect(
+      res.status,
+      "Eine Ablehnung wegen aktiver Rechnung muss als Fehler ankommen, sonst " +
+        "glaubt der Aufrufer an Erfolg, obwohl nichts geschah.",
+    ).toBe(400);
   });
 
   it("4 — eine abgelehnte single-Absage meldet einen Fehler, keinen stillen Teilerfolg", async () => {

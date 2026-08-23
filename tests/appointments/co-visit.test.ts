@@ -15,6 +15,10 @@ import {
   getFutureDate,
 } from "../test-utils";
 import { validSignatureDataUrl } from "../helpers/valid-signature";
+import { eq } from "drizzle-orm";
+import { db } from "../../server/lib/db";
+import { budgetTransactions } from "@shared/schema";
+import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 
 /**
  * KALENDER-INVARIANTE DIESER DATEI: jeder Test, der einen Termin ANLEGT, nutzt
@@ -281,6 +285,55 @@ describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
     expect(a.data.status).toBe("cancelled");
     expect(b.data.status).toBe("cancelled");
     void legs;
+  });
+
+  it("CV-4.1b – die Kaskade wickelt das Budget des Partner-Legs mit zurueck", async () => {
+    // DER eigentliche Fund: die Kaskade sagte den Partner-Leg zwar ab, liess
+    // aber seine Budget-Buchung stehen. Ein abgesagter Termin, dessen Verbrauch
+    // weiterlaeuft — dasselbe Leck, das `sweepOrphanHolds` an der Hold-Seite
+    // als Waise meldet, nur auf der Transaktions-Seite.
+    //
+    // Der Test misst den PARTNER-Leg, nicht den handelnden: dort lag die Luecke.
+    const { legA, legB, customerId, date } = await createCoVisit(43, "08:00");
+
+    const setup = await apiPost(`/api/budget/${customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${new Date().getFullYear()}-01-01`,
+    });
+    expect([200, 201]).toContain(setup.status);
+
+    const txn = await createConsumptionTransaction({
+      customerId,
+      appointmentId: legB.id,
+      transactionDate: date,
+      hauswirtschaftMinutes: 30,
+      alltagsbegleitungMinutes: 0,
+      travelKilometers: 0,
+      customerKilometers: 0,
+      userId: empA!.id,
+    });
+    expect(txn, "Vorbedingung: ohne Buchung auf dem Partner-Leg misst der Test nichts").toBeDefined();
+
+    const vorher = await db.select({ typ: budgetTransactions.transactionType })
+      .from(budgetTransactions).where(eq(budgetTransactions.appointmentId, legB.id));
+    expect(vorher.filter((t) => t.typ === "consumption").length).toBeGreaterThan(0);
+    expect(vorher.filter((t) => t.typ === "reversal").length).toBe(0);
+
+    const patch = await apiPatch<any>(`/api/appointments/${legA.id}`, { status: "cancelled" });
+    expect(patch.status).toBe(200);
+
+    const b = await apiGet<any>(`/api/appointments/${legB.id}`);
+    expect(b.data.status, "Vorbedingung: die Kaskade muss den Partner ueberhaupt absagen").toBe("cancelled");
+
+    const nachher = await db.select({ typ: budgetTransactions.transactionType })
+      .from(budgetTransactions).where(eq(budgetTransactions.appointmentId, legB.id));
+    expect(
+      nachher.filter((t) => t.typ === "reversal").length,
+      "Der kaskadiert abgesagte Partner-Leg muss seine Buchung storniert bekommen — " +
+        "sonst bleibt Budget verbraucht fuer eine Leistung, die nie erbracht wird.",
+    ).toBeGreaterThan(0);
   });
 
   it("CV-4.2 – Löschen eines Legs löscht den Partner-Leg mit", async () => {

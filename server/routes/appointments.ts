@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { toPolicyUser, toPolicyAppointment, loadPolicyFlags } from "../lib/appointment-policy-adapter";
+import { cancelAppointments } from "../services/appointment-cancellation";
+import { wickleBudgetZurueck } from "../services/appointment-budget-unwind";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { storage } from "../storage";
@@ -1320,8 +1322,51 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       dataForUpdate.durationPromised = sync.effectiveDurationPromised;
     }
 
+    // ── Absage laeuft ueber die SSoT, nicht ueber das generische Update ─────
+    //
+    // Bis hierhin setzte dieser Pfad `status: "cancelled"` als GEWOEHNLICHES
+    // Feld-Update. Was dabei fehlte, stand seit dem Gate-2 von #1615 als
+    // offener Punkt im Kommentar oben: die Budget-Rueckabwicklung und der
+    // `appointment_cancelled`-Audit-Typ. Ein Termin galt als abgesagt, waehrend
+    // seine Buchung weiterlief.
+    //
+    // Die Bedingung, an der das hing, ist jetzt erfuellt: die
+    // Co-Visit-Kaskade sitzt in `cancelAppointments`. Damit kann dieser Pfad
+    // sie rufen, ohne Funktion zu verlieren — und die kaskadierten Partner-Legs
+    // laufen durch DIESELBE Rueckabwicklung wie das primaere Leg. Genau die
+    // waren vorher die geleakte Menge: abgesagt, Buchung stehen geblieben.
+    //
+    // `status` wird deshalb aus dem generischen Update HERAUSGENOMMEN. Bliebe
+    // es drin, schriebe der Pfad den Status zweimal — einmal ueber die SSoT,
+    // einmal generisch — und das zweite Update liefe an Audit und
+    // Rueckabwicklung vorbei.
+    if (isCancelling) {
+      delete dataForUpdate.status;
+      const ergebnis = await cancelAppointments(
+        [id],
+        toPolicyUser(req.user!),
+        {
+          userId: req.user!.id,
+          confirmDiscardDocumentation: req.body?.confirmDiscardDocumentation === true,
+          ipAddress: req.ip || req.socket.remoteAddress,
+        },
+        tx,
+      );
+      // Wie im `single`-Zweig der Serien-Route: hier geht es um GENAU EINEN
+      // Termin. Eine Ablehnung als Erfolg zu melden waere dieselbe Klasse
+      // stiller Meldung, die diese Konsolidierung beseitigt.
+      if (ergebnis.cancelled.length === 0) {
+        const grund = ergebnis.uebersprungen[0]?.grund ?? "Termin konnte nicht abgesagt werden.";
+        if (/Leistungsnachweis/.test(grund)) {
+          throw new AppError(409, "APPOINTMENT_LOCKED", grund);
+        }
+        throw new AppError(409, "APPOINTMENT_CANCEL_REJECTED", grund);
+      }
+      cascadedCancelledLegIds.push(...ergebnis.cancelled.filter((c: number) => c !== id));
+    }
+
     if (Object.keys(dataForUpdate).length === 0) {
-      return existingAppointment;
+      return await storage.getAppointment(id) ?? existingAppointment;
     }
 
     const result = await storage.updateAppointment(id, dataForUpdate as typeof validatedData, tx);
@@ -1363,21 +1408,11 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       }
     }
 
-    // Task #1615 — Absage-Kaskade auf die Partner-Legs, in DERSELBEN Tx.
-    if (isCancelling && existingAppointment.coVisitGroupId != null) {
-      const partners = await storage.getCoVisitPartnerAppointments(existingAppointment.coVisitGroupId, id, tx);
-      for (const partner of partners) {
-        // Nur ein noch geplanter, nicht versiegelter Partner kann abgesagt
-        // werden (Absage ist ausschließlich aus `scheduled` gültig). Partner mit
-        // eigenem Ausgang (completed/no_show/bereits cancelled) bleiben bestehen.
-        if (partner.status !== "scheduled") continue;
-        if (await storage.lockAndCheckAppointmentLocked(partner.id, tx)) continue;
-        const partnerUpdated = await storage.updateAppointment(partner.id, { status: "cancelled" }, tx);
-        if (partnerUpdated) {
-          cascadedCancelledLegIds.push(partner.id);
-        }
-      }
-    }
+    // Die Co-Visit-Kaskade (Task #1615) stand hier als eigenes Status-Update.
+    // Sie ist ERSETZT durch die Kaskade in `cancelAppointments` (oben gerufen):
+    // dieselbe Eignungsregel (`scheduled` + nicht versiegelt), aber MIT
+    // Rueckabwicklung und `appointment_cancelled`-Audit je Leg. Die Kopie hier
+    // war die Stelle, an der die kaskadierten Legs ihre Budget-Buchung behielten.
 
     return result;
   }).catch((err) => {
@@ -1408,28 +1443,11 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     );
   }
 
-  // Task #1615 — je kaskadiert abgesagtem Partner-Leg ein eigener Audit-Eintrag,
-  // damit der Absagegrund (Co-Visit-Kaskade) im Verlauf jedes Legs sichtbar ist.
-  if (cascadedCancelledLegIds.length > 0) {
-    const ip = req.ip || req.socket.remoteAddress;
-    for (const partnerId of cascadedCancelledLegIds) {
-      await auditService.log(
-        req.user!.id,
-        "appointment_updated",
-        "appointment",
-        partnerId,
-        {
-          customerId: existingAppointment.customerId ?? undefined,
-          changedFields: ["status"],
-          status: "cancelled",
-          coVisitGroupId: existingAppointment.coVisitGroupId ?? undefined,
-          coVisitCascadeFromLegId: id,
-          actor: { role: actorRole(req.user!) },
-        },
-        ip
-      );
-    }
-  }
+  // Der frueher hier stehende Kaskaden-Audit (`appointment_updated` je
+  // Partner-Leg) ist ERSETZT: `cancelAppointments` schreibt fuer jedes
+  // kaskadierte Leg einen `appointment_cancelled`-Eintrag mit
+  // `coVisitCascadeFromLegId` — also den Absage-Typ statt eines generischen
+  // Update-Eintrags, und in DERSELBEN Transaktion wie die Rueckabwicklung.
 
   // Task #613/#618: separater Audit-Eintrag für den automatischen Rebook,
   // damit Auswertungen sehen, dass ein Termin-Edit (nicht das manuelle
@@ -1893,7 +1911,11 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
   }
 
   const removeLegWasLocked = removeFlags.isLocked;
-  const transactions = await budgetStorage.getTransactionsByAppointmentId(removeLegId);
+  // Zaehler fuer den Audit-Eintrag. Er kommt aus der Rueckabwicklungs-SSoT und
+  // damit aus dem Stand INNERHALB der Transaktion — die frueher hier gelesene
+  // Liste war ein Vor-Transaktions-Stand und haette eine im Race-Fenster
+  // entstandene Buchung nicht mitgezaehlt.
+  let reversedCount = 0;
   let serviceRecordRemovals: ServiceRecordAppointmentRemoval[] = [];
   // Erst in der Transaktion verbindlich gesetzt (siehe Sperre unten).
   let surviving: Awaited<ReturnType<typeof storage.getAppointment>> | undefined;
@@ -1981,12 +2003,10 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
       serviceRecordRemovals = await storage.removeAppointmentFromServiceRecords(removeLegId, txClient);
     }
 
-    for (const tx of transactions) {
-      await budgetStorage.reverseBudgetTransaction(tx.id, user.id, txClient);
-    }
-    if (budgetStorage.hardHoldsEnabled()) {
-      await budgetStorage.releaseHolds(removeLegId, user.id, txClient);
-    }
+    // Ueber die Rueckabwicklungs-SSoT — vierte Kopie derselben Kette auf den
+    // Termin-Pfaden, jetzt die letzte, die verschwindet. Auch hier liest die
+    // SSoT die Buchungen INNERHALB der Transaktion statt oben ausserhalb.
+    reversedCount = (await wickleBudgetZurueck(removeLegId, user.id, txClient)).reversedTransactionIds.length;
     const deleted = await storage.deleteAppointment(removeLegId, txClient);
     if (!deleted) {
       throw new Error("Das weichende Leg konnte nicht entfernt werden");
@@ -2064,7 +2084,7 @@ router.post("/:id/decouple", asyncHandler("Termin konnte nicht entkoppelt werden
       // diesen Pfad entfernten Legs mitzählen.
       adminForceDelete: isAdmin && removeLeg.status === "completed",
       wasLocked: removeLegWasLocked,
-      reversedTransactions: transactions.length,
+      reversedTransactions: reversedCount,
       removedFromServiceRecordIds: serviceRecordRemovals.length > 0
         ? serviceRecordRemovals.map((r) => r.recordId)
         : undefined,
@@ -2154,7 +2174,6 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   const ip = req.ip || req.socket.remoteAddress;
 
   let reversedTransactions = 0;
-  const transactions = await budgetStorage.getTransactionsByAppointmentId(id);
 
   // Task #1615 — Zwei-Kräfte-Einsatz: Ein Co-Visit ist EIN logischer Einsatz aus
   // zwei verknüpften Legs. Wird ein Leg gelöscht, muss der Partner-Leg (gleiche
@@ -2279,13 +2298,17 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
 
       serviceRecordRemovals = await storage.removeAppointmentFromServiceRecords(id, txClient);
     }
-    for (const tx of transactions) {
-      await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
-    }
-    // Task #875 (gated) — aktive Holds des Termins freigeben (R6). Flag aus = No-op.
-    if (budgetStorage.hardHoldsEnabled()) {
-      await budgetStorage.releaseHolds(id, req.user!.id, txClient);
-    }
+    // Ueber die Rueckabwicklungs-SSoT (`appointment-budget-unwind.ts`) — dieselbe,
+    // die Absage und Serien-Verkuerzen benutzen. Die frueher hier stehende Kette
+    // war die Vorlage dafuer; sie hier stehen zu lassen hiesse, die SSoT gegen
+    // ihre eigene Vorlage antreten zu lassen.
+    //
+    // Nebeneffekt, der zaehlt: die Buchungen werden jetzt INNERHALB der
+    // Transaktion gelesen. Die alte Fassung las sie oben ausserhalb (Zeile
+    // ~2174) und buchte hier drinnen zurueck — ein Check-then-Act, bei dem eine
+    // zwischenzeitlich entstandene Buchung stehen geblieben waere.
+    const rueck = await wickleBudgetZurueck(id, req.user!.id, txClient);
+    reversedTransactions = rueck.reversedTransactionIds.length;
     const deleted = await storage.deleteAppointment(id, txClient);
     if (!deleted) {
       throw new Error("Termin konnte nicht gelöscht werden");
@@ -2302,13 +2325,7 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
         // Versiegelter Partner (unterschriebener LN) darf nicht mutiert werden.
         if (await storage.lockAndCheckAppointmentLocked(partner.id, txClient)) continue;
 
-        const partnerTx = await budgetStorage.getTransactionsByAppointmentId(partner.id);
-        for (const tx of partnerTx) {
-          await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
-        }
-        if (budgetStorage.hardHoldsEnabled()) {
-          await budgetStorage.releaseHolds(partner.id, req.user!.id, txClient);
-        }
+        await wickleBudgetZurueck(partner.id, req.user!.id, txClient);
         const partnerDeleted = await storage.deleteAppointment(partner.id, txClient);
         if (partnerDeleted) {
           cascadedDeletedLegIds.push(partner.id);
@@ -2346,7 +2363,6 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     }
     throw err;
   });
-  reversedTransactions = transactions.length;
 
   await auditService.log(
     req.user!.id,

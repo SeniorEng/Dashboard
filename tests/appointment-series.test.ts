@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { eq } from "drizzle-orm";
+import { db } from "../server/lib/db";
+import { budgetTransactions } from "@shared/schema";
+import { createConsumptionTransaction } from "../server/storage/budget/consumption-engine";
 import {
   apiGet,
   apiPost,
@@ -222,6 +226,62 @@ describe("SER-5: Verlängern & Verkürzen", () => {
 
     const afterRes = await apiGet<any>(`/api/appointment-series/${extendSeriesId}`);
     expect(afterRes.data.appointments.length).toBeGreaterThan(countBefore);
+  });
+
+  it("SER-5.3 – Verkürzen wickelt das Budget der entfernten Termine zurück", async () => {
+    // Der Fund: `shorten` war ein nacktes `UPDATE ... SET deleted_at`. Der
+    // Termin verschwand, seine Budget-Buchung blieb — verbrauchtes Budget für
+    // eine Leistung, die nie erbracht wird. Härter als beim Absagen, weil hier
+    // gelöscht statt abgesagt wird: der Termin ist danach nicht mal mehr
+    // sichtbar, an dem das Budget hängt.
+    const beforeRes = await apiGet<any>(`/api/appointment-series/${extendSeriesId}`);
+    const termine = beforeRes.data.appointments as Array<{ id: number; date: string }>;
+    const heute = new Date().toISOString().split("T")[0];
+    const zukunft = termine.filter((a) => a.date > heute).sort((a, b) => b.date.localeCompare(a.date));
+    expect(zukunft.length, "Vorbedingung: es muss zukünftige Termine geben").toBeGreaterThan(0);
+    const ziel = zukunft[0];
+
+    const setup = await apiPost(`/api/budget/${testCustomerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${new Date().getFullYear()}-01-01`,
+    });
+    expect([200, 201]).toContain(setup.status);
+
+    const txn = await createConsumptionTransaction({
+      customerId: testCustomerId,
+      appointmentId: ziel.id,
+      transactionDate: ziel.date,
+      hauswirtschaftMinutes: 30,
+      alltagsbegleitungMinutes: 0,
+      travelKilometers: 0,
+      customerKilometers: 0,
+      userId: auth.user.id,
+    });
+    expect(txn, "Vorbedingung: ohne Buchung misst der Test nichts").toBeDefined();
+
+    const vorher = await db.select({ typ: budgetTransactions.transactionType })
+      .from(budgetTransactions).where(eq(budgetTransactions.appointmentId, ziel.id));
+    expect(vorher.filter((t) => t.typ === "consumption").length).toBeGreaterThan(0);
+    expect(vorher.filter((t) => t.typ === "reversal").length).toBe(0);
+
+    // Endedatum VOR den Zieltermin legen, damit er ins Verkürzen fällt.
+    const neuesEnde = new Date(ziel.date + "T00:00:00");
+    neuesEnde.setDate(neuesEnde.getDate() - 1);
+    const res = await apiPost<any>(`/api/appointment-series/${extendSeriesId}/shorten`, {
+      newEndDate: neuesEnde.toISOString().split("T")[0],
+    });
+    expect(res.status).toBe(200);
+
+    const nachher = await db.select({ typ: budgetTransactions.transactionType })
+      .from(budgetTransactions).where(eq(budgetTransactions.appointmentId, ziel.id));
+    expect(
+      nachher.filter((t) => t.typ === "reversal").length,
+      "Der beim Verkürzen entfernte Termin muss seine Buchung storniert bekommen — " +
+        "sonst bleibt Budget verbraucht für eine gelöschte Leistung, und der Termin " +
+        "ist nicht mal mehr da, um es zu bemerken.",
+    ).toBeGreaterThan(0);
   });
 
   it("SER-5.2 – Serie verkürzen entfernt zukünftige Termine", async () => {
