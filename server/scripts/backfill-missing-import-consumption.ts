@@ -42,8 +42,8 @@
  */
 
 import { writeFileSync } from "node:fs";
-import { assertDualTargetOrThrow } from "./lib/dual-target-gate";
-import { parseProdWriteArgs } from "./lib/prod-write-gate";
+import { assertSuperadminOrThrow, parseProdWriteArgs, REASON_MIN_LAENGE } from "./lib/prod-write-gate";
+import { assertDevWriteTargetOrThrow } from "../lib/dev-db-guard";
 import { assertDevDatabase } from "../lib/dev-db-guard";
 import { eq, and, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../lib/db";
@@ -51,8 +51,7 @@ import {
   appointments,
   budgetTransactions,
   customers,
-  users,
-} from "@shared/schema";
+  } from "@shared/schema";
 import { budgetStorage } from "../storage/budget-storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { loadCurrentServiceMinutes } from "../storage/budget/km-rebook";
@@ -387,20 +386,41 @@ async function main() {
   assertNotProduction();
 
   if (args.apply) {
-    // KLASSE: Dual-Target. Das Skript hat einen Dev-Screen UND `--user`/
-    // `--reason` — es bedient beide Umgebungen. Ein reines Prod-Gate verlangt
-    // NODE_ENV=production und haette den Probelauf auf der Dev-Kopie
-    // unmoeglich gemacht.
+    // KLASSE: DEV, nicht Dual-Target.
     //
-    // ERSETZT drei Handpruefungen und die lokale Superadmin-Kopie, und
-    // ergaenzt die ZIEL-Pruefung auf DERSELBEN Verbindung
-    // (`current_database()`, nicht die URL). BEIDE Klassen verlangen Urheber
-    // und Begruendung.
-    const freigabe = await assertDualTargetOrThrow(
-      args,
+    // Korrektur aus dem Gate-2 zu #127: ich hatte hier zuerst das
+    // Dual-Target-Gate gesetzt und "es bedient beide Umgebungen" dazugeschrieben.
+    // Das stimmte nicht — zwei Zeilen darueber steht `assertNotProduction()`,
+    // und `assertDevDatabase()` weist zusaetzlich Prod-Hosts und die
+    // PROD_DATABASE_URL-Identitaet ab. Der `--target=prod`-Zweig war damit
+    // UNERREICHBAR: ein `--apply --target=prod` waere mit "Dieses Skript darf
+    // nie auf Produktion laufen" gestorben, nie mit einer Gate-Meldung.
+    //
+    // Fail-closed war das schon vorher, aber ein Gate, dessen einer Zweig tot
+    // ist, behauptet eine Faehigkeit, die es nicht gibt. Das Skript deklariert
+    // sich selbst als dev-only — also bekommt es die Dev-Klasse.
+    //
+    // `--user`/`--reason` bleiben Pflicht: sie sind die Audit-Attribution, und
+    // ohne sie schriebe der Backfill Budget-Buchungen ohne Urheber.
+    if (args.userId === undefined) {
+      throw new Error(
+        "ABBRUCH: --apply erfordert --user=<superadmin-id> fuer die Audit-Attribution.",
+      );
+    }
+    if (!args.reason || args.reason.trim().length < REASON_MIN_LAENGE) {
+      throw new Error(
+        `ABBRUCH: --apply erfordert --reason="…" (mindestens ${REASON_MIN_LAENGE} Zeichen).`,
+      );
+    }
+    await assertSuperadminOrThrow(
+      args.userId,
       "Backfill fehlender Import-Konsumption (Budget-Buchungen nachziehen).",
     );
-    console.log(`Ziel-Klasse: ${freigabe.klasse} · bestaetigt: ${freigabe.ziel}`);
+    // POSITIVE Ziel-Pruefung auf DERSELBEN Verbindung (`current_database()`),
+    // nicht aus der URL gelesen. Erteilt zugleich die Freigabe fuer die
+    // Laufzeit-Schreibsperre (#117).
+    const ziel = await assertDevWriteTargetOrThrow();
+    console.log(`Dev-Ziel bestaetigt: ${ziel}`);
   }
 
   console.log(`Modus:               ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);

@@ -38,13 +38,24 @@
  *
  * Aufruf:
  *   npx tsx scripts/audit-duplicate-wizard-carryovers.ts             # Dry-Run
- *   npx tsx scripts/audit-duplicate-wizard-carryovers.ts --apply     # Schreibt Storno + Audit
- *   npx tsx scripts/audit-duplicate-wizard-carryovers.ts --allow-prod
+ *
+ *   Scharf (schreibt Storno + Audit) — nur gegen PROD:
+ *     npx tsx scripts/audit-duplicate-wizard-carryovers.ts --apply \
+ *       --confirm-target="<host>/<datenbank>" \
+ *       --user=<superadmin-id> --reason="…"
+ *
+ *   `--allow-prod` gibt es NICHT mehr: es war ein Boolean, das jeden Lauf
+ *   genehmigte, ohne zu sagen wohin. Das Ziel-Gate verlangt stattdessen den
+ *   Datenbanknamen, geprüft an der OFFENEN Verbindung.
+ *
+ *   Der Trockenlauf ist read-only und läuft überall, auch gegen Prod.
+ *   Der SCHREIBENDE Pfad ist prod-only (`NODE_ENV=production`); ein
+ *   `--apply`-Probelauf auf der Dev-Kopie ist damit nicht möglich.
  *
  * Exit-Codes:
  *   0 — Lauf erfolgreich (egal ob es Duplikate gab)
- *   2 — Prod-Guard ausgelöst (DATABASE_URL sieht nach Produktion aus)
- *   3 — Unerwarteter Fehler / kein Audit-Akteur verfügbar
+ *   1 — Ziel-Gate ausgelöst (Ziel/Superadmin/Begründung fehlt oder passt nicht)
+ *   3 — Unerwarteter Fehler
  */
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "../server/scripts/lib/prod-write-gate";
@@ -154,40 +165,58 @@ async function writeStorno(
   dupe: AllocRow,
   actorId: number,
 ): Promise<{ stornoId: number }> {
-  const [car] = await db
-    .insert(budgetAllocations)
-    .values({
-      customerId: dupe.customerId,
-      budgetType: dupe.budgetType,
-      source: "carryover",
-      year: dupe.year,
-      month: dupe.month,
-      amountCents: -dupe.amountCents,
-      validFrom: dupe.validFrom,
-      expiresAt: dupe.expiresAt,
-      createdByUserId: actorId,
-      notes: `Task #604 Carryover-Storno für Duplikat ${dupe.id} (Wizard-vs-Auto, #601). Original bleibt wegen verlinkter Buchungen erhalten.`,
-    })
-    .returning({ id: budgetAllocations.id });
-  await auditService.log(
-    actorId,
-    "budget_allocation_storno",
-    "budget",
-    dupe.customerId,
-    {
-      task: "#604",
-      reason: "duplicate_carryover_wizard_vs_auto_with_linked_tx",
-      stornoOfAllocationId: dupe.id,
-      keptAllocationId: group.keep.id,
-      stornoAllocationId: car.id,
-      budgetType: dupe.budgetType,
-      amountCents: dupe.amountCents,
-      validFrom: dupe.validFrom,
-      expiresAt: dupe.expiresAt,
-      linkedTxCount: group.candidates.find((c) => c.row.id === dupe.id)?.linkedTxIds.length ?? 0,
-    },
-  );
-  return { stornoId: car.id };
+  // Insert UND Audit in EINER Transaktion, und der Audit ueber `tx`.
+  //
+  // Vorher lief `auditService.log(...)` OHNE `exec` und damit ueber den
+  // Legacy-Pfad — der faengt Insert-Fehler und meldet sie nur auf stderr
+  // (server/services/audit.ts). Scheiterte der Audit-Eintrag, war die
+  // Storno-Allokation trotzdem committet: eine GoBD-Buchung ohne Spur, und das
+  // Skript meldete Erfolg.
+  //
+  // Das ist exakt der Defekt, den PR #126 zum Loeschgrund der beiden
+  // Cleanup-Skripte erklaert (dort als `if (auditUserId == null) continue`) —
+  // hier nur in der Variante "Fehler wird gefressen" statt "Zweig wird
+  // uebersprungen". Ihn im selben Zug stehen zu lassen, waere widerspruechlich
+  // gewesen. Gefunden im Gate-2 zu #127.
+  const stornoId = await db.transaction(async (tx) => {
+    const [car] = await tx
+      .insert(budgetAllocations)
+      .values({
+        customerId: dupe.customerId,
+        budgetType: dupe.budgetType,
+        source: "carryover",
+        year: dupe.year,
+        month: dupe.month,
+        amountCents: -dupe.amountCents,
+        validFrom: dupe.validFrom,
+        expiresAt: dupe.expiresAt,
+        createdByUserId: actorId,
+        notes: `Task #604 Carryover-Storno für Duplikat ${dupe.id} (Wizard-vs-Auto, #601). Original bleibt wegen verlinkter Buchungen erhalten.`,
+      })
+      .returning({ id: budgetAllocations.id });
+    await auditService.log(
+      actorId,
+      "budget_allocation_storno",
+      "budget",
+      dupe.customerId,
+      {
+        task: "#604",
+        reason: "duplicate_carryover_wizard_vs_auto_with_linked_tx",
+        stornoOfAllocationId: dupe.id,
+        keptAllocationId: group.keep.id,
+        stornoAllocationId: car.id,
+        budgetType: dupe.budgetType,
+        amountCents: dupe.amountCents,
+        validFrom: dupe.validFrom,
+        expiresAt: dupe.expiresAt,
+        linkedTxCount: group.candidates.find((c) => c.row.id === dupe.id)?.linkedTxIds.length ?? 0,
+      },
+      undefined,
+      tx,
+    );
+    return car.id;
+  });
+  return { stornoId };
 }
 
 async function main(): Promise<void> {
@@ -259,12 +288,21 @@ async function main(): Promise<void> {
   // Prod laufen (vorher verweigerte `isProdHost()` ihn ohne `--allow-prod`).
   // Das ist gewollt — das Skript ist ein AUDIT, und der Dry-Run ist read-only.
   // Der schreibende Pfad ist dafuer deutlich strenger als zuvor.
-  await assertProdWriteAllowedOrThrow(
+  // Den Akteur aus dem GATE nehmen, nicht aus `args.userId`.
+  //
+  // `args.userId` ist `number | undefined` — dass das Gate vorher wirft, wenn
+  // die Id fehlt, weiss der Compiler nicht. Die erste Fassung reichte deshalb
+  // ein `number | undefined` an `writeStorno(…: number)` weiter. Und `tsc`
+  // schwieg dazu, weil tsconfig.json genau diese Datei AUSSCHLIESST — die
+  // Zusage "tsc 0" deckte sie nie ab (Gate-2 zu #127).
+  //
+  // Der Rueckgabewert des Gates ist der geprueft aktive Superadmin; ihn zu
+  // nehmen macht die Zusage explizit statt sie zu unterstellen.
+  const freigabe = await assertProdWriteAllowedOrThrow(
     args,
     "Storno fuer doppelte §45b-Carryover-Allokationen aus dem Wizard-Pfad (Task #604).",
   );
-
-  const actorId = args.userId;
+  const actorId = freigabe.userId;
   let written = 0;
   for (const g of groups) {
     for (const c of g.candidates) {

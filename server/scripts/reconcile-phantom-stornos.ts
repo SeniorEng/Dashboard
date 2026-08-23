@@ -21,6 +21,8 @@
  *
  * Sicherheit / GoBD:
  *   - Trockenlauf ist Default; `--apply` schreibt erst nach explizitem Opt-in.
+ *   - `--apply` erfordert zusätzlich `--confirm-target=<host>/<datenbank>`,
+ *     geprüft gegen `current_database()` der OFFENEN Verbindung.
  *   - `--apply` erfordert `--user=<superadmin-id>` (Audit-Attribution, nur
  *     Superadmins) UND `--reason="…"` (≥10 Zeichen, landet im Audit-Log).
  *   - Jede Korrektur + ein Sammel-Eintrag werden ins Audit-Log geschrieben.
@@ -38,7 +40,7 @@ import { randomUUID } from "node:crypto";
 import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { db } from "../lib/db";
-import { appointments, budgetTransactions, customers, users } from "@shared/schema";
+import { appointments, budgetTransactions, customers } from "@shared/schema";
 import { auditService } from "../services/audit";
 import {
   classifyOrphanStornos,
@@ -66,8 +68,6 @@ function parseArgs(): Args {
       if (!Number.isNaN(n)) customerIds.push(n);
     }
   }
-  const userArg = get("--user=");
-  const userId = userArg ? parseInt(userArg, 10) : undefined;
   // Gemeinsame Flags aus der SSoT, per SPREAD — eine Aufzaehlung kann ein
   // Feld verlieren (B1, Gate-2 zu #120). Hier fehlte `confirmTarget`, das
   // das Ziel-Gate braucht.

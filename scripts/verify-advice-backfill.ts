@@ -49,8 +49,7 @@ import {
   paymentAdvices,
   paymentAdviceItems,
   invoices,
-  users,
-} from "@shared/schema";
+  } from "@shared/schema";
 import { auditService } from "../server/services/audit";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeIban } from "@shared/domain/qonto/monitored-ibans";

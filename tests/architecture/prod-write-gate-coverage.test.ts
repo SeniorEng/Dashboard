@@ -116,6 +116,27 @@ const DEV_GATE = "assertDevWriteTargetOrThrow";
 const WEGWERF_IMPORT = /import\s+["'][^"']*assert-write-target["']/;
 
 /**
+ * Die Wegwerf-Klasse ist NICHT so stark wie die anderen drei.
+ *
+ * `assertEphemeralDbForWrite` kehrt bei `CI=true` SOFORT zurueck, ohne das
+ * Ziel je anzusehen — und dieselbe Env schaltet auch die Laufzeit-Sperre ab.
+ * CLAUDE.md nennt genau das als lokale Falle ("CI NICHT setzen"). In so einer
+ * Shell gilt ein wegwerf-gegatetes Skript als geschuetzt und ist es nicht.
+ * Dasselbe fuer ein von Hand gesetztes `ALLOW_NON_EPHEMERAL_DB_WRITE=1`.
+ *
+ * Deshalb ist die Gutschrift an eine ALLOWLIST gebunden statt an die blosse
+ * Anwesenheit des Imports. Ohne sie holte sich jedes kuenftige Korrekturskript
+ * den Stempel "gegatet" mit EINER Import-Zeile — der Waechter waere blind, wo
+ * er greifen soll. Gefunden im Gate-2 zu #127.
+ *
+ * Die Liste wachsen zu lassen ist eine bewusste Entscheidung: sie steht im Diff.
+ */
+const WEGWERF_ERLAUBT = new Set<string>([
+  "scripts/ci-seed-superadmin.ts",
+  "scripts/seed-test-reference-data.ts",
+]);
+
+/**
  * Die Erkennung teilt sich die SSoT mit der Laufzeit-Sperre
  * (`@shared/db-write-statements`). Zwei Pruefer, EINE Antwort auf „schreibt
  * das?" — liefen sie auseinander, meldete der eine ein Skript als harmlos,
@@ -185,10 +206,15 @@ function vorhandeneEintraege(): { datei: string; sha256: string }[] {
 }
 
 /** Ruft die Datei eines der beiden Ziel-Gates AUF (nicht: erwaehnt es)? */
-function ruftGate(text: string): boolean {
+function ruftGate(text: string, rel?: string): boolean {
   const ohne = entkommentiert(text);
-  if (WEGWERF_IMPORT.test(ohne)) return true;
-  return new RegExp(`\\b(?:${GATE}|${DUAL_GATE}|${WEGWERF_GATE}|${DEV_GATE})\\s*\\(`).test(ohne);
+  // Wegwerf-Klasse NUR fuer die Allowlist — siehe WEGWERF_ERLAUBT.
+  const wegwerfErlaubt = rel !== undefined && WEGWERF_ERLAUBT.has(rel);
+  if (wegwerfErlaubt && WEGWERF_IMPORT.test(ohne)) return true;
+  const formen = wegwerfErlaubt
+    ? [GATE, DUAL_GATE, WEGWERF_GATE, DEV_GATE]
+    : [GATE, DUAL_GATE, DEV_GATE];
+  return new RegExp(`\\b(?:${formen.join("|")})\\s*\\(`).test(ohne);
 }
 
 /** Kommentare raus — sonst erfuellt eine Erwaehnung die Regel. */
@@ -216,7 +242,7 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
       // ("ERSETZT durch die SSoT assertProdWriteAllowedOrThrow") — mit einer
       // reinen Textsuche waere jeder davon ein Unterstand geworden. Dieselbe
       // Falle wie bei der Parser-Regel in PR #119.
-      (rel) => !ruftGate(inhalt(rel)) && !bekannt.has(rel),
+      (rel) => !ruftGate(inhalt(rel), rel) && !bekannt.has(rel),
     );
     expect(
       ungegatet,
@@ -240,7 +266,7 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
 
   it("Test 2 — kein Altlast-Eintrag ist laengst gegatet", () => {
     const erledigt = vorhandeneEintraege()
-      .filter((e) => ruftGate(inhalt(e.datei)))
+      .filter((e) => ruftGate(inhalt(e.datei), e.datei))
       .map((e) => e.datei);
     expect(
       erledigt,
@@ -367,5 +393,50 @@ describe("server/scripts/** — schreibende Skripte deklarieren ihr Ziel", () =>
     // oder, schlimmer, die Suche liefe ins Leere.
     const ssot = inhalt("server/scripts/lib/prod-write-gate.ts");
     expect(ssot).toContain(`export async function ${GATE}`);
+  });
+});
+
+/**
+ * `ruftGate` selbst — mit Fixtures statt ueber den Dateibestand.
+ *
+ * Die Regeln oben sind datengetrieben: solange jede reale Datei passiert,
+ * bleibt jede Regex-Aenderung gruen. Ausgerechnet die NEGATIVE Zusage, die das
+ * ganze #118-Argument traegt — `assertDevDatabase` zaehlt NICHT als Gate —
+ * war damit ungesichert und stand nur im Kommentar. Gate-2 zu #127.
+ */
+describe("ruftGate — welche Formen zaehlen als Ziel-Deklaration", () => {
+  const DEV_DATEI = "server/scripts/beispiel.ts";
+  const SEED = "scripts/ci-seed-superadmin.ts";
+
+  it.each([
+    ["Prod-Gate", "await assertProdWriteAllowedOrThrow(args, 'z');", DEV_DATEI],
+    ["Dual-Target", "await assertDualTargetOrThrow(args, 'z');", DEV_DATEI],
+    ["Dev-positiv", "await assertDevWriteTargetOrThrow();", DEV_DATEI],
+    ["Wegwerf (auf der Allowlist)", 'import "./lib/assert-write-target";', SEED],
+    ["Wegwerf direkt (auf der Allowlist)", "assertEphemeralDbForWrite('x');", SEED],
+  ])("%s zaehlt", (_n, quelle, datei) => {
+    expect(ruftGate(quelle, datei)).toBe(true);
+  });
+
+  it("assertDevDatabase zaehlt NICHT — es ist der negative Screen", () => {
+    // Der Kern von #118: "sieht nicht nach Prod aus" ist auch fuer eine
+    // unbekannte DB wahr und erteilt kein Schreibrecht. Ein Waechter, der
+    // beide Formen gleich behandelte, wuerde die Unterscheidung einebnen.
+    expect(ruftGate("assertDevDatabase();", DEV_DATEI)).toBe(false);
+  });
+
+  it("ein Gate-Name im KOMMENTAR zaehlt nicht", () => {
+    // Diese Falle hat auf der TS-Seite schon zweimal eine Regel wirkungslos
+    // gemacht.
+    expect(ruftGate("// await assertProdWriteAllowedOrThrow(args, 'z');", DEV_DATEI)).toBe(false);
+  });
+
+  it("die Wegwerf-Form zaehlt NUR auf der Allowlist", () => {
+    // Ohne diese Bindung holte sich jedes Korrekturskript den Stempel
+    // "gegatet" mit einer Import-Zeile — und `assertEphemeralDbForWrite` ist
+    // bei CI=true wirkungslos.
+    expect(ruftGate('import "./lib/assert-write-target";', SEED)).toBe(true);
+    expect(ruftGate('import "./lib/assert-write-target";', DEV_DATEI)).toBe(false);
+    expect(ruftGate("assertEphemeralDbForWrite('x');", DEV_DATEI)).toBe(false);
   });
 });

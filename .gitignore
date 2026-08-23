@@ -19,6 +19,12 @@ __pycache__/
 
 # Pre-publish DB-Backups (siehe docs/pre-publish-backup-runbook.md)
 tmp/db-backups/
+# Lauf-Protokolle der Korrekturskripte. `cleanup-test-data.ts` schreibt dort
+# NAMEN und E-MAILS aller echten Mitarbeiter und Kunden hinein — laeuft es
+# gegen die Dev-Prod-Kopie, liegt eine PII-Datei in einem Pfad, den bis hierhin
+# nichts ignoriert hat. Zwei solche Dateien sind in W5.2b versehentlich
+# mitcommittet worden (aus einem Verhaltenstest gegen die Wegwerf-DB).
+tmp/*.log
 # DB-Dumps (auch Root-Level) — nie ins Repo (Task #1840)
 *.dump
 # Playwright artifacts
