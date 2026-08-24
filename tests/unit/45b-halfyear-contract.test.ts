@@ -62,6 +62,29 @@ describe("§45b-Halbjahres-Vertrag — reine Funktion gegen bekannte Antworten",
         .toEqual({ id: c.id, wert: c.expected.phantomCents });
       expect({ id: c.id, wert: r.shortfallCents })
         .toEqual({ id: c.id, wert: c.expected.shortfallCents });
+
+      // ── Die ausgewiesenen Zwischenwerte muessen zum Ergebnis passen ──────
+      //
+      // Sie existieren, damit ein Fehlbetrag GEPRUEFT statt nachgebaut werden
+      // muss (Kunde 54: 211,95 EUR gemeldet, Nachrechnung 429,90 EUR, Differenz
+      // unerklaert). Wuerden sie neben der Rechnung herlaufen, waeren sie
+      // schlimmer als gar keine Auskunft — man pruefte gegen eine zweite
+      // Erfindung. Deshalb hier die beiden Identitaeten selbst, ueber ALLE
+      // Vertragsfaelle, statt einer Zusage im Docblock.
+      expect(
+        { id: c.id, available: r.availableCents },
+        `${c.id}: available muss Anspruch + angerechneter Uebertrag sein`,
+      ).toEqual({ id: c.id, available: r.targetYearEntitlementCents + r.carryoverInSollCents });
+
+      expect(
+        { id: c.id, shortfall: r.shortfallCents },
+        `${c.id}: shortfall muss aus claimed und available folgen`,
+      ).toEqual({ id: c.id, shortfall: Math.max(0, r.claimedCents - r.availableCents) });
+
+      // Der Deckel selbst: angerechnet wird nie mehr, als der korrigierte
+      // Uebertrag hergibt — und nie mehr, als er laut Ledger getragen hat.
+      expect(r.carryoverInSollCents, `${c.id}: Uebertrags-Deckel verletzt`)
+        .toBe(Math.min(r.carryoverOutSollCents, r.absorbedInTargetCents));
     });
   }
 
