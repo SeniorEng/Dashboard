@@ -4,10 +4,12 @@
  *
  * ── One-off-Disziplin (CLAUDE.md) ────────────────────────────────────────
  * Temporäres Werkzeug. Nach „angewendet + verifiziert" wird diese Datei samt
- * `lib/45b-halfyear-math.ts` und `lib/__fixtures__/**` GELÖSCHT und durch ein
+ * `lib/__fixtures__/**` GELÖSCHT und durch ein
  * Protokoll unter `docs/corrections/<datum>_45b-halbjahres-split.md` ersetzt.
- * Die SSoT-Teile in `shared/domain/budget/anchor-45b.ts` bleiben — sie sind
- * Produktionscode, kein Werkzeug.
+ * Die SSoT-Teile in `shared/domain/budget/anchor-45b.ts` UND die Arithmetik in
+ * `shared/domain/budget/halfyear-45b.ts` bleiben — beide sind Produktionscode,
+ * kein Werkzeug. Die Formel speist seit dem Halbjahres-Split die
+ * Übertrags-Anlage selbst; dieses Skript ist nur noch ihr Lese-Aufrufer.
  *
  * ── Was es misst ─────────────────────────────────────────────────────────
  * `allocation-storage.ts:1598` verrechnet Verbrauch gegen den hereingerollten
@@ -18,10 +20,11 @@
  * `invoice-data.ts:702` höhere §45b-Rechnung an die Pflegekasse.
  *
  * ── Wo die Rechnung liegt ────────────────────────────────────────────────
- * NICHT hier. `evaluate45bHalfYear` in `lib/45b-halfyear-math.ts` ist die
- * gemeinsame Funktion, auf die ein kommender Produktions-Fix aufsetzen KANN —
- * dann zieht sie vorher nach `shared/domain/budget/` um (siehe Lebensdauer-
- * Absatz dort); sie setzt
+ * NICHT hier. `evaluate45bHalfYear` in `shared/domain/budget/halfyear-45b.ts`
+ * ist die gemeinsame Funktion; ihr Kern `computeCarryoverPhantom` speist
+ * inzwischen auch die Übertrags-Anlage in der Produktion. Dry-Run und
+ * Schreibpfad rechnen damit nachweislich dasselbe — vorher war dieses Skript
+ * die einzige Stelle mit der richtigen Formel. Sie setzt
  * ausschließlich exportierte Produktionsteile zusammen
  * (`shared/domain/budget/anchor-45b.ts`). Dieses Skript beschafft nur Daten und
  * formatiert. Frühere Fassungen rechneten selbst — daraus entstanden zehn
@@ -52,7 +55,7 @@ import {
   evaluate45bHalfYear, splitShortfall,
   carryoverTargetYear,
   type AllocRow, type CarryoverKeying, type SettingRow, type SplitRow, type TxRow,
-} from "./lib/45b-halfyear-math";
+} from "@shared/domain/budget/halfyear-45b";
 
 const BT = "entlastungsbetrag_45b";
 
@@ -74,7 +77,7 @@ interface Row {
 async function lauf(keying: CarryoverKeying, asOfIso: string): Promise<Row[]> {
 
   // Kandidaten über das FENSTER, nicht über `year` — siehe
-  // `carryoverTargetYear` in lib/45b-halfyear-math.ts. Auf Prod tragen 26
+  // `carryoverTargetYear` in shared/domain/budget/halfyear-45b.ts. Auf Prod tragen 26
   // Zeilen die Legacy-Konvention `year = sourceYear`; eine `year`-basierte
   // Auswertung bildete dort gar keine Paare mehr.
   const carryovers = await db.select({

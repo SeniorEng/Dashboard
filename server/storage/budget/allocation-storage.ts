@@ -13,7 +13,8 @@ import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth, addDays 
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 import { resolve45bAnchor, initialBalanceMonthKeys, pickEffective45bSettingRow, effective45bSettingsWindow, shiftStartToSettings, clampEndToSettings } from "@shared/domain/budget/anchor-45b";
-import { expiry45bFloorYearFor, carryoverExpiresAtFor } from "@shared/domain/budget/expiry-45b";
+import { expiry45bFloorDateFor, carryoverExpiresAtFor } from "@shared/domain/budget/expiry-45b";
+import { computeCarryoverPhantom, carryoverTargetYear, type AllocRow } from "@shared/domain/budget/halfyear-45b";
 // Re-Export: Bestands-Aufrufer (summary-queries) importieren die Funktion
 // weiterhin von hier. Die Definition liegt jetzt in der SSoT.
 export { pickEffective45bSettingRow };
@@ -783,6 +784,14 @@ async function calculateAllocated45b(
 
   let horizonYear = curYear;
   let horizonMonth = curMonth;
+  // Der Horizont als VOLLER Stichtag — nicht nur Jahr+Monat.
+  //
+  // Der Verfalls-Boden vergleicht ab jetzt gegen die Frist selbst (30.06.),
+  // nicht mehr gegen ihren Monat (`expiry45bFloorDateFor`). Dafür braucht er
+  // den Tag. Er wird exakt nach derselben Regel gesetzt wie `horizonYear/Month`
+  // direkt darunter — capped auf heute, außer im `projectFuture`-Modus — damit
+  // Boden und Enumerations-Grenze nicht auf verschiedene Stichtage sehen.
+  let horizonIso = todayISO();
   if (opts.asOfDate) {
     const asOf = parseLocalDate(opts.asOfDate);
     const asOfYear = asOf.getFullYear();
@@ -795,9 +804,18 @@ async function calculateAllocated45b(
       // nicht für noch nicht angefallene Monate vorzuziehen.
       horizonYear = asOfYear;
       horizonMonth = asOfMonth;
+      horizonIso = opts.asOfDate;
     } else if (asOfYear < curYear || (asOfYear === curYear && asOfMonth < curMonth)) {
       horizonYear = asOfYear;
       horizonMonth = asOfMonth;
+      horizonIso = opts.asOfDate;
+    } else if (opts.asOfDate < horizonIso) {
+      // Gleicher Monat wie heute, aber ein FRÜHERER Tag. Die Monats-Fassung
+      // oben lässt diesen Fall bewusst durch (sie sieht keinen Unterschied);
+      // für den tag-genauen Boden ist er sehr wohl einer — im Juni liegen der
+      // 29. und der 30. auf verschiedenen Seiten der Frist. Capping nach oben
+      // bleibt: ein asOf NACH heute wird ohne `projectFuture` nicht vorgezogen.
+      horizonIso = opts.asOfDate;
     }
   }
 
@@ -816,12 +834,24 @@ async function calculateAllocated45b(
   // Frist-SSoT (`shared/domain/budget/expiry-45b.ts`) statt des nackten
   // Ausdrucks `horizonMonth <= 6 ? …`. Dieselbe Konstante speist das
   // Übertrags-Fenster in `carryoverWindowFor` — Boden und Frist können damit
-  // nicht mehr gegeneinander laufen. Verhalten unverändert.
-  const expiryFloorAnchorYear = expiry45bFloorYearFor(horizonYear, horizonMonth);
+  // nicht mehr gegeneinander laufen.
+  //
+  // TAG-GENAU statt monatsgenau: `expiry45bFloorDateFor` liefert den Boden als
+  // fertigen Stichtag und vergleicht den Horizont gegen die Frist SELBST, nicht
+  // gegen ihren Monat. Das ERSETZT die Kette „Jahr holen → `allocStartMonth = 1`
+  // → weiter unten `${allocStartYear}-01-01` zusammenbauen": der Boden war damit
+  // an zwei Stellen halb kodiert, Jahr in der SSoT, Monat/Tag hier. Bei den
+  // heutigen Konstanten (Frist = letzter Tag des Monats) ist das Ergebnis
+  // identisch — die Kopplungs-Grenze N1 aus dem Gate-2 ist damit aber
+  // geschlossen, und der Boden hat nur noch EINE Quelle.
+  const expiryFloorDate = expiry45bFloorDateFor(horizonIso);
+  const [expiryFloorAnchorYear, expiryFloorAnchorMonth] = expiryFloorDate.split("-").map(Number);
   if (opts.year == null) {
-    if (expiryFloorAnchorYear > allocStartYear) {
+    const bodenLiegtHoeher = expiryFloorAnchorYear > allocStartYear
+      || (expiryFloorAnchorYear === allocStartYear && expiryFloorAnchorMonth > allocStartMonth);
+    if (bodenLiegtHoeher) {
       allocStartYear = expiryFloorAnchorYear;
-      allocStartMonth = 1;
+      allocStartMonth = expiryFloorAnchorMonth;
     }
   }
 
@@ -916,6 +946,15 @@ async function calculateAllocated45b(
   // Reset-Glieds. Wer diesen Boden ueber den Abrechnungsmonat hebt (etwa auf
   // `enumStart`), bricht jene Stelle als harten 400er mitten in einer
   // GoBD-Korrektur.
+  //
+  // NICHT einfach `expiryFloorDate` einsetzen, so naheliegend das aussieht:
+  // der Verfalls-Boden ist nur EINER der Shifts, die `allocStart` bilden (Anker,
+  // Übertrag, Settings-Fenster kommen dazu und liegen regelmäßig HÖHER). Wer
+  // hier den Verfalls-Boden direkt nähme, senkte die Grenze auf den 01.01. des
+  // Boden-Jahres ab, während `Allocated` weiter ab dem höheren `allocStart`
+  // zählt — der Verbrauch der dazwischen liegenden Monate bliebe abgezogen,
+  // ohne dass sein Anspruch zählt. Genau die Asymmetrie, die Task #1927
+  // geschlossen hat, nur mit umgekehrtem Vorzeichen.
   const accrualFloorDate = `${allocStartYear}-${String(allocStartMonth).padStart(2, "0")}-01`;
 
   if (opts.year != null) {
@@ -1472,6 +1511,36 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
       && !existingCarryoverWindows.has(targetWindow);
   });
 
+  /**
+   * In welches Jahr rollte diese Übertragszeile? Über das FENSTER
+   * (`valid_from`), NICHT über die Spalte `year`.
+   *
+   * ── ERSETZT die `year`-Zuordnung (`a.year === year`) ─────────────────────
+   * `year` trägt zwei Konventionen nebeneinander: der Auto-Pfad schreibt das
+   * ZIELjahr, der Wizard-Pfad vor #601 das QUELLjahr, und der #601-Backfill
+   * normalisiert die Spalte nicht. Auf Prod sind 26 Zeilen betroffen. Für die
+   * trägt die `year`-Zuordnung den Übertrag dem FALSCHEN Jahr als Zufluss zu —
+   * ein Jahr zu früh — und lässt ihn dort Verbrauch absorbieren, den er nie
+   * decken konnte.
+   *
+   * `valid_from` trägt dagegen immer den 01.01. des Zieljahres, unabhängig von
+   * der Konvention. Es ist derselbe drift-sichere Schlüssel, den die Dedup-SSoT
+   * (`shared/domain/budget-carryover-dedup.ts`) benennt und den das Messwerkzeug
+   * als `--keying=window` fährt.
+   *
+   * Die Wahl war bis zur Expositionsmessung eine OFFENE fachliche Frage und ist
+   * jetzt entschieden: unter `year` weist die Messung 7 Kunden-Jahre mit
+   * Phantom-Übertrag aus, unter `window` keinen einzigen.
+   *
+   * NICHT mitgeändert: die Dedup-Sets (`buildCarryoverDedupSets`) und damit
+   * `yearsToProcess`. Die beantworten eine andere Frage — „existiert für dieses
+   * Zieljahr schon eine Zeile" — und prüfen bereits BEIDE Schlüssel per ODER.
+   * Sie sind damit ohnehin die konservativere Seite; sie hier mitzudrehen wäre
+   * ein zweiter Eingriff mit Doppelanlage-Risiko.
+   */
+  const zieljahrVon = (a: { year: number; validFrom: string }): number =>
+    carryoverTargetYear({ ...a, month: null, amountCents: 0, source: "carryover", expiresAt: null } as AllocRow, "window");
+
   const linkedIdsByYear = new Map<number, number[]>();
   const allLinkedIdsSet = new Set<number>();
   for (const year of yearsToProcess) {
@@ -1479,7 +1548,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
       .filter(a => a.year === year && a.source !== "carryover")
       .map(a => a.id);
     const carryoverIds = carryoverAllocations
-      .filter(a => a.year === year)
+      .filter(a => zieljahrVon(a) === year)
       .map(a => a.id);
     const ids = [...specialIds, ...carryoverIds];
     linkedIdsByYear.set(year, ids);
@@ -1487,83 +1556,151 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   }
   const allLinkedIds = Array.from(allLinkedIdsSet);
 
-  const linkedConsumptionByAlloc = new Map<number, number>();
-  const linkedReversalByAlloc = new Map<number, number>();
-  if (allLinkedIds.length > 0) {
-    const linkedRows = await d.select({
-      allocationId: budgetTransactions.allocationId,
-      transactionType: budgetTransactions.transactionType,
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off', 'reversal')`,
-      inArray(budgetTransactions.allocationId, allLinkedIds)
-    )).groupBy(budgetTransactions.allocationId, budgetTransactions.transactionType);
+  /**
+   * Frist des Übertrags, der IN `jahr` hereinrollte.
+   *
+   * DETERMINISTISCHES MINIMUM über die gesetzten Fristen, nicht `.find`: die
+   * Query liefert ohne `orderBy` keine garantierte Reihenfolge, und
+   * Doppel-Überträge sind real (Task #102). Mit `.find` kippte derselbe
+   * Datenstand je nach Zeilenreihenfolge. Das Minimum ist zugleich die
+   * konservative Wahl — es lässt am wenigsten Verbrauch absorbieren.
+   *
+   * Identisch zu `fristFuer` in `shared/domain/budget/halfyear-45b.ts`; die
+   * Fallback-Frist kommt aus derselben Fenster-SSoT.
+   */
+  const fristFuerJahr = (jahr: number): string => {
+    const fristen = carryoverAllocations
+      .filter(a => zieljahrVon(a) === jahr && a.expiresAt)
+      .map(a => a.expiresAt!)
+      .sort();
+    return fristen[0] ?? carryoverWindowFor(jahr - 1).expiresAt;
+  };
 
-    for (const row of linkedRows) {
-      if (row.allocationId == null) continue;
-      const total = Number(row.total ?? 0);
-      if (row.transactionType === "reversal") {
-        linkedReversalByAlloc.set(row.allocationId, (linkedReversalByAlloc.get(row.allocationId) ?? 0) + total);
-      } else {
-        linkedConsumptionByAlloc.set(row.allocationId, (linkedConsumptionByAlloc.get(row.allocationId) ?? 0) + total);
+  /**
+   * Verbrauchs-Summen über dieselbe Zeilenmenge, einmal ohne und einmal MIT
+   * Frist-Grenze.
+   *
+   * EINE Funktion für beide Läufe, nicht zwei Query-Blöcke: die beiden Summen
+   * gehen unmittelbar gegeneinander (`min(carryIn, bisFrist)` gegen
+   * `netConsumedJahr`). Liefe die eine über eine auch nur leicht andere
+   * Zeilenmenge als die andere, entstünde genau die Fenster-Asymmetrie, die im
+   * Vertrag der Formel als B4 dokumentiert ist.
+   *
+   * `write_off` ist in BEIDEN Läufen ausgeschlossen — das ist eine Änderung
+   * gegenüber vorher und gehört zur Korrektur, nicht nebenher dazu: der
+   * Verfalls-Write-Off ist kein Verbrauch gegen den eigenen Jahrestopf, sondern
+   * das Verfallen des hereingerollten Übertrags. Er liegt per
+   * `addDays(expiresAt, 1)` auf dem 01.07., fiele also ins Jahresfenster, aber
+   * nicht ins Fenster „bis Frist" — er hätte die Differenz der beiden Summen um
+   * exakt seinen Betrag verfälscht. Dass die alte Formel ihn mitzählte, war
+   * kein Zufall, sondern ihre Krücke: `netConsumed − totalCarryoverIn` kam über
+   * den mitgezählten Write-Off näherungsweise auf das richtige Ergebnis —
+   * aber nur, wenn `processExpiredCarryover` schon gelaufen war.
+   */
+  const verbrauchsSummen = async (bisFrist: boolean) => {
+    const linkedConsumption = new Map<number, number>();
+    const linkedReversal = new Map<number, number>();
+    const unlinkedConsumption = new Map<number, number>();
+    const unlinkedReversal = new Map<number, number>();
+
+    const linkedWhere = bisFrist
+      ? or(...yearsToProcess
+          .map(y => {
+            const ids = linkedIdsByYear.get(y) ?? [];
+            return ids.length > 0
+              ? and(
+                  inArray(budgetTransactions.allocationId, ids),
+                  lte(budgetTransactions.transactionDate, fristFuerJahr(y)),
+                )
+              : undefined;
+          })
+          .filter((p): p is NonNullable<typeof p> => p != null))
+      : (allLinkedIds.length > 0 ? inArray(budgetTransactions.allocationId, allLinkedIds) : undefined);
+
+    if (linkedWhere) {
+      const linkedRows = await d.select({
+        allocationId: budgetTransactions.allocationId,
+        transactionType: budgetTransactions.transactionType,
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+        sql`${budgetTransactions.transactionType} IN ('consumption', 'reversal')`,
+        linkedWhere,
+      )).groupBy(budgetTransactions.allocationId, budgetTransactions.transactionType);
+
+      for (const row of linkedRows) {
+        if (row.allocationId == null) continue;
+        const total = Number(row.total ?? 0);
+        const ziel = row.transactionType === "reversal" ? linkedReversal : linkedConsumption;
+        ziel.set(row.allocationId, (ziel.get(row.allocationId) ?? 0) + total);
       }
     }
-  }
 
-  const unlinkedConsumptionByYear = new Map<number, number>();
-  const unlinkedReversalByYear = new Map<number, number>();
-  if (yearsToProcess.length > 0) {
-    const firstYear = Math.min(...yearsToProcess);
-    const lastYear = Math.max(...yearsToProcess);
-    const unlinkedRows = await d.select({
-      year: sql<number>`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})::int`,
-      transactionType: budgetTransactions.transactionType,
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off', 'reversal')`,
-      isNull(budgetTransactions.allocationId),
-      gte(budgetTransactions.transactionDate, `${firstYear}-01-01`),
-      lte(budgetTransactions.transactionDate, `${lastYear}-12-31`)
-    )).groupBy(
-      sql`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})`,
-      budgetTransactions.transactionType
-    );
+    if (yearsToProcess.length > 0) {
+      const unlinkedWhere = bisFrist
+        ? or(...yearsToProcess.map(y => and(
+            gte(budgetTransactions.transactionDate, `${y}-01-01`),
+            lte(budgetTransactions.transactionDate, fristFuerJahr(y)),
+          )))
+        : and(
+            gte(budgetTransactions.transactionDate, `${Math.min(...yearsToProcess)}-01-01`),
+            lte(budgetTransactions.transactionDate, `${Math.max(...yearsToProcess)}-12-31`),
+          );
 
-    for (const row of unlinkedRows) {
-      const y = Number(row.year);
-      const total = Number(row.total ?? 0);
-      if (row.transactionType === "reversal") {
-        unlinkedReversalByYear.set(y, (unlinkedReversalByYear.get(y) ?? 0) + total);
-      } else {
-        unlinkedConsumptionByYear.set(y, (unlinkedConsumptionByYear.get(y) ?? 0) + total);
+      const unlinkedRows = await d.select({
+        year: sql<number>`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})::int`,
+        transactionType: budgetTransactions.transactionType,
+        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(and(
+        eq(budgetTransactions.customerId, customerId),
+        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+        sql`${budgetTransactions.transactionType} IN ('consumption', 'reversal')`,
+        isNull(budgetTransactions.allocationId),
+        unlinkedWhere,
+      )).groupBy(
+        sql`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})`,
+        budgetTransactions.transactionType,
+      );
+
+      for (const row of unlinkedRows) {
+        const y = Number(row.year);
+        const total = Number(row.total ?? 0);
+        const ziel = row.transactionType === "reversal" ? unlinkedReversal : unlinkedConsumption;
+        ziel.set(y, (ziel.get(y) ?? 0) + total);
       }
     }
-  }
+
+    return { linkedConsumption, linkedReversal, unlinkedConsumption, unlinkedReversal };
+  };
+
+  const [ganzesJahr, bisFrist] = await Promise.all([
+    verbrauchsSummen(false),
+    verbrauchsSummen(true),
+  ]);
+
+  /** Netto-Verbrauch eines Jahres aus einem der beiden Summen-Sätze. */
+  const nettoVerbrauch = (
+    summen: Awaited<ReturnType<typeof verbrauchsSummen>>,
+    jahr: number,
+  ): number => {
+    const ids = linkedIdsByYear.get(jahr) ?? [];
+    let verbraucht = summen.unlinkedConsumption.get(jahr) ?? 0;
+    let storniert = summen.unlinkedReversal.get(jahr) ?? 0;
+    for (const id of ids) {
+      verbraucht += summen.linkedConsumption.get(id) ?? 0;
+      storniert += summen.linkedReversal.get(id) ?? 0;
+    }
+    return Math.max(0, verbraucht - storniert);
+  };
 
   for (const year of yearsToProcess) {
     const targetYear = year + 1;
 
     const yearAllocatedCents = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year }, _tx, undefined, typeSettings);
 
-    const carryoverIntoThisYear = carryoverAllocations.filter(a => a.year === year);
+    const carryoverIntoThisYear = carryoverAllocations.filter(a => zieljahrVon(a) === year);
     const totalCarryoverIn = carryoverIntoThisYear.reduce((sum, a) => sum + a.amountCents, 0);
-
-    const linkedIds = linkedIdsByYear.get(year) ?? [];
-
-    let linkedConsumed = 0;
-    let linkedReversed = 0;
-    for (const id of linkedIds) {
-      linkedConsumed += linkedConsumptionByAlloc.get(id) ?? 0;
-      linkedReversed += linkedReversalByAlloc.get(id) ?? 0;
-    }
-
-    const totalConsumed = linkedConsumed + (unlinkedConsumptionByYear.get(year) ?? 0);
-    const totalReversed = linkedReversed + (unlinkedReversalByYear.get(year) ?? 0);
-    const netConsumed = Math.max(0, totalConsumed - totalReversed);
 
     // Task #1392 — KEIN Carryover-Chaining. Es rollt ausschließlich das im Jahr
     // `year` SELBST entstandene Restguthaben (`yearAllocatedCents` =
@@ -1574,12 +1711,47 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     // andernfalls überlebt ein Rest aus Quelljahr Y rechtswidrig über den
     // 30.06.(Y+1) hinaus (Chaining: Y → Übertrag in Y+1 → Übertrag in Y+2 …).
     //
-    // Verbrauch ist FIFO (hereingerollter Übertrag wird zuerst aufgezehrt, da er
-    // früher verfällt): nur Verbrauch ÜBER `totalCarryoverIn` hinaus belastet das
-    // eigene Jahresguthaben. So bleibt der Übertrag die Differenz aus dem
-    // EIGENEN Jahresanspruch minus dem darauf entfallenden Verbrauch.
-    const consumedAgainstOwnYear = Math.max(0, netConsumed - totalCarryoverIn);
-    const unused = Math.max(0, yearAllocatedCents - consumedAgainstOwnYear);
+    // ── HALBJAHRESSCHARF (ERSETZT die jahresscharfe Verrechnung) ──────────
+    //
+    // Vorher stand hier:
+    //
+    //     const consumedAgainstOwnYear = Math.max(0, netConsumed - totalCarryoverIn);
+    //     const unused = Math.max(0, yearAllocatedCents - consumedAgainstOwnYear);
+    //
+    // Das ließ den hereingerollten Übertrag Verbrauch absorbieren OHNE
+    // Datums-Unterscheidung — obwohl er mit Ablauf des 30.06. verfallen ist.
+    // Ein Verbrauch im August konnte damit von einem Guthaben aufgezehrt
+    // werden, das es seit sechs Wochen nicht mehr gab: der eigene Jahrestopf
+    // wurde zu wenig belastet, `unused` zu groß, ein zu hoher Übertrag
+    // PERSISTIERT — und über die Verfügbarkeit als höhere §45b-Forderung an die
+    // Pflegekasse ausgewiesen. Die Fehlerrichtung ist immer permissiv.
+    //
+    // Die Korrektur ist EIN Aufruf, keine zweite Formel: `computeCarryoverPhantom`
+    // (`shared/domain/budget/halfyear-45b.ts`) ist dieselbe Funktion, die der
+    // Dry-Run `server/scripts/fix-45b-halfyear-split-dryrun.ts` seit seiner
+    // Messung benutzt, verriegelt durch `tests/unit/45b-halfyear-contract.test.ts`.
+    // Sie war bis hierher die einzige Stelle im Repo mit der richtigen Formel,
+    // während der Schreibpfad daneben die falsche behielt — genau der
+    // Zweitbegriff-Zustand, den die Arbeitsregeln verbieten. Der Schreibpfad
+    // rechnet ab jetzt nachweislich dasselbe wie das Messwerkzeug.
+    //
+    // `persistedCarryoverOutCents: 0` — der Phantom-Betrag interessiert hier
+    // nicht: wir SCHREIBEN den Übertrag gerade erst, es gibt noch keinen
+    // persistierten, gegen den zu vergleichen wäre. Gebraucht wird allein
+    // `carryoverOutSollCents`.
+    //
+    // Die Zuordnung Übertrag→Jahr läuft über das FENSTER (`zieljahrVon`, oben
+    // begründet) statt über die Spalte `year`. Beides zusammen — Fenster-Keying
+    // UND Halbjahres-Split — ist das Modell, unter dem die Expositionsmessung
+    // keinen Phantom-Übertrag mehr findet.
+    const { carryoverOutSollCents } = computeCarryoverPhantom({
+      sourceYearAllocatedCents: yearAllocatedCents,
+      prevCarryInCents: totalCarryoverIn,
+      netConsumptionYearCents: nettoVerbrauch(ganzesJahr, year),
+      netConsumptionUntilDeadlineCents: nettoVerbrauch(bisFrist, year),
+      persistedCarryoverOutCents: 0,
+    });
+    const unused = carryoverOutSollCents;
 
     if (unused <= 0) continue;
 

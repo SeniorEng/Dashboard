@@ -17,7 +17,7 @@ import {
   computeCarryoverPhantom,
   computeShortfall,
   entitlementForYear,
-} from "../../server/scripts/lib/45b-halfyear-math";
+} from "@shared/domain/budget/halfyear-45b";
 
 const JAHR = 157200;   // 12 × 131 €
 const UEBERTRAG = 100000; // 1000 €
