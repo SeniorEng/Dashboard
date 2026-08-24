@@ -68,6 +68,19 @@ interface Row {
   gestelltCents: number;
   entwurfCents: number;
   nichtZugeordnetCents: number;
+  /**
+   * Die Eingaben, aus denen `shortfallCents` entsteht — damit die Zahl geprueft
+   * und nicht nachgebaut werden muss (siehe `HalfYearEvalResult`).
+   *
+   * `shortfall = max(0, claimed - available)`,
+   * `available = targetYearEntitlement + carryoverInSoll`,
+   * `carryoverInSoll = min(carryoverOutSoll, absorbedInTarget)`.
+   */
+  claimedCents: number;
+  targetYearEntitlementCents: number;
+  absorbedInTargetCents: number;
+  carryoverInSollCents: number;
+  availableCents: number;
 }
 
 /**
@@ -190,6 +203,11 @@ async function lauf(keying: CarryoverKeying, asOfIso: string): Promise<Row[]> {
       gestelltCents: split.gestellt,
       entwurfCents: split.entwurf,
       nichtZugeordnetCents: split.nichtZugeordnet,
+      claimedCents: r.claimedCents,
+      targetYearEntitlementCents: r.targetYearEntitlementCents,
+      absorbedInTargetCents: r.absorbedInTargetCents,
+      carryoverInSollCents: r.carryoverInSollCents,
+      availableCents: r.availableCents,
     });
   }
 
