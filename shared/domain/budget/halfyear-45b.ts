@@ -7,9 +7,10 @@
  * ausdrücklichen Alternative: entweder mit ihm gelöscht, oder VORHER nach
  * `shared/domain/budget/` umgezogen, sobald der Produktions-Fix sie importiert.
  *
- * Der zweite Weg ist eingetreten. `computeCarryoverPhantom` speist jetzt die
+ * Der zweite Weg ist eingetreten. `carryoverOutSollFor` speist jetzt die
  * Übertrags-Anlage in `server/storage/budget/allocation-storage.ts`; die Datei
- * ist damit Produktionscode. Ein Produktions-Import aus einem Verzeichnis, das
+ * ist damit Produktionscode. (`computeCarryoverPhantom` bleibt reine
+ * Mess-Sicht — die Produktion kennt keinen Phantom-Begriff.) Ein Produktions-Import aus einem Verzeichnis, das
  * laut One-off-Disziplin zu löschen ist, wäre genau der Zustand, den der
  * frühere Docblock verhindern wollte.
  *
@@ -29,13 +30,17 @@
  *    Sicht, für ein vergangenes Jahr also 0, sobald die Zieljahres-Zeile
  *    existiert. Ergebnis war ein stiller Null-Befund auf allen echten Daten.
  *
- * 2. `write_off` gehört in KEINE der beiden Verbrauchssummen. Der
- *    Verfalls-Write-Off liegt per `addDays(expiresAt, 1)` auf dem 01.07., fiel
- *    also in das Jahresfenster, aber nicht in das Fenster „bis Frist" — die
- *    Asymmetrie blähte den Phantom-Betrag um genau den Write-Off-Betrag auf
- *    (gemessen: 25 % zu viel). Fachlich ist er ohnehin kein Verbrauch gegen
- *    den eigenen Jahrestopf, sondern das Verfallen des Übertrags. Beide
- *    Eingaben unten sind deshalb `consumption − reversal`, ohne `write_off`.
+ * 2. `write_off` gehört in KEINE Verbrauchssumme. Fachlich ist er kein
+ *    Verbrauch gegen den eigenen Jahrestopf, sondern das Verfallen des
+ *    Übertrags; rechnerisch würde er doppelt decken, weil er denselben
+ *    ungenutzten Rest ausweist, den die Absorption unten schon abzieht. Alle
+ *    Summen sind `consumption − reversal`.
+ *
+ * 3. Die Absorption kommt aus dem LEDGER (`allocation_id`), nicht aus dem
+ *    Buchungs-DATUM. Die datumsbasierte Fassung stand hier bis zum Gate-2 des
+ *    Halbjahres-PR und war messbar falsch (Doppeldeckung gegen den
+ *    Write-Off). Die 30.06.-Frist ist deshalb nicht aufgegeben, sondern dort
+ *    durchgesetzt, wo sie hingehört: beim Buchen.
  */
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 
@@ -54,16 +59,35 @@ export interface HalfYearInput {
   prevCarryInCents: number;
   /** Netto-Verbrauch (consumption − reversal) im GANZEN Quelljahr. */
   netConsumptionYearCents: number;
-  /** Netto-Verbrauch (consumption − reversal) bis EINSCHLIESSLICH der Frist. */
-  netConsumptionUntilDeadlineCents: number;
+  /**
+   * Was der hereingerollte Übertrag laut LEDGER getragen hat: Netto-Verbrauch
+   * (`consumption − reversal`, ohne `write_off`) der Buchungen, die auf seine
+   * `allocation_id` zeigen.
+   *
+   * ── ERSETZT `netConsumptionUntilDeadlineCents` (datumsbasiert) ──────────
+   * Die frühere Fassung leitete die Absorption aus dem Buchungs-DATUM ab
+   * („alles bis zum 30.06."). Gemessen führte das zur Doppeldeckung: der
+   * Verfalls-`write_off` bestimmt den ungenutzten Rest über die VERLINKUNG
+   * (`amountCents − net(Verbrauch mit dieser allocation_id)`), und wo Datum und
+   * Verlinkung auseinanderliefen, galten dieselben Cent zweimal als gedeckt —
+   * mit dem Übertrag zu hoch als Ergebnis (permissive Richtung).
+   *
+   * Die 30.06.-Frist ist damit nicht aufgegeben, sondern an ihrer richtigen
+   * Stelle durchgesetzt: `computeFifoAvailability` nimmt eine Übertrags-
+   * Allocation nur in die FIFO-Kette auf, solange `expiresAt >= transactionDate`.
+   * Eine Buchung nach der Frist kann per Konstruktion nicht auf sie zeigen. Der
+   * Buchungssatz IST die Frist-Entscheidung; sie hinterher aus Daten neu
+   * abzuleiten war ein Zweitbegriff derselben Frage.
+   */
+  absorbedByCarryInCents: number;
   /** Tatsächlich persistierter Übertrag ins Folgejahr (aus der DB). */
   persistedCarryoverOutCents: number;
 }
 
 export interface HalfYearResult {
-  /** Vom Vorjahres-Übertrag rechtmäßig aufgezehrt (nur Verbrauch bis Frist). */
+  /** Vom Vorjahres-Übertrag rechtmäßig aufgezehrt. */
   absorbedCents: number;
-  /** Verbrauch, der den EIGENEN Jahrestopf belastet — halbjahresscharf. */
+  /** Verbrauch, der den EIGENEN Jahrestopf belastet. */
   consumedOwnSollCents: number;
   /** Übertrag, der ins Folgejahr hätte rollen dürfen. */
   carryoverOutSollCents: number;
@@ -71,23 +95,50 @@ export interface HalfYearResult {
   phantomCents: number;
 }
 
+export interface CarryoverOutInput {
+  sourceYearAllocatedCents: number;
+  netConsumptionYearCents: number;
+  absorbedByCarryInCents: number;
+}
+
 /**
- * Berechnet den korrekten Folgejahres-Übertrag und die Abweichung zum
- * tatsächlich persistierten.
+ * **Wie hoch ist der Übertrag ins Folgejahr?** — die eine Fassung.
  *
- * Kern der Korrektur gegenüber `allocation-storage.ts:1598`: dort gilt
- * `consumedAgainstOwnYear = max(0, netConsumed − totalCarryoverIn)` — der
- * Übertrag absorbiert Verbrauch unabhängig vom Datum. Hier absorbiert er nur,
- * was bis zu seiner Frist verbraucht wurde; alles danach belastet den eigenen
- * Jahrestopf, weil der Übertrag zu diesem Zeitpunkt bereits verfallen war.
+ * ZWEI Aufrufer, bewusst dieselbe Funktion: die Übertrags-Anlage
+ * (`ensureYearlyCarryover45b`) und das Mess-Werkzeug über
+ * `computeCarryoverPhantom` unten. Vorher rechneten beide Seiten dasselbe
+ * getrennt — der Schreibpfad jahresscharf, das Werkzeug halbjahresscharf — und
+ * genau diese Drift ist der Grund, warum ein Phantom-Betrag überhaupt
+ * entstehen konnte. Wer hier etwas ändert, bewegt Messung und Produktion
+ * zusammen; das ist der Punkt.
+ *
+ * `absorbedByCarryInCents` kommt aus dem Ledger (siehe dort), nicht aus einer
+ * Datumsregel.
+ */
+export function carryoverOutSollFor(i: CarryoverOutInput): number {
+  const absorbed = Math.max(0, Math.min(i.absorbedByCarryInCents, i.netConsumptionYearCents));
+  const consumedOwn = Math.max(0, i.netConsumptionYearCents - absorbed);
+  return Math.max(0, i.sourceYearAllocatedCents - consumedOwn);
+}
+
+/**
+ * Der korrekte Folgejahres-Übertrag UND die Abweichung zum tatsächlich
+ * persistierten. Reine Mess-Sicht — die Produktion braucht nur
+ * `carryoverOutSollFor` und ruft diese Funktion NICHT.
  */
 export function computeCarryoverPhantom(i: HalfYearInput): HalfYearResult {
-  const untilDeadline = Math.min(i.netConsumptionUntilDeadlineCents, i.netConsumptionYearCents);
-  const absorbedCents = Math.max(0, Math.min(i.prevCarryInCents, untilDeadline));
-  const consumedOwnSollCents = Math.max(0, i.netConsumptionYearCents - absorbedCents);
-  const carryoverOutSollCents = Math.max(0, i.sourceYearAllocatedCents - consumedOwnSollCents);
-  const phantomCents = Math.max(0, i.persistedCarryoverOutCents - carryoverOutSollCents);
-  return { absorbedCents, consumedOwnSollCents, carryoverOutSollCents, phantomCents };
+  const absorbedCents = Math.max(0, Math.min(i.prevCarryInCents, i.absorbedByCarryInCents, i.netConsumptionYearCents));
+  const carryoverOutSollCents = carryoverOutSollFor({
+    sourceYearAllocatedCents: i.sourceYearAllocatedCents,
+    netConsumptionYearCents: i.netConsumptionYearCents,
+    absorbedByCarryInCents: absorbedCents,
+  });
+  return {
+    absorbedCents,
+    consumedOwnSollCents: Math.max(0, i.netConsumptionYearCents - absorbedCents),
+    carryoverOutSollCents,
+    phantomCents: Math.max(0, i.persistedCarryoverOutCents - carryoverOutSollCents),
+  };
 }
 
 export interface ShortfallInput {
@@ -127,8 +178,20 @@ import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import type { CustomerBudgetTypeSetting } from "@shared/schema";
 import { BUDGET_ALLOCATION_SOURCES } from "@shared/schema/budget";
 
-export interface TxRow { date: string; type: "consumption" | "reversal" | "write_off"; amountCents: number }
-export interface AllocRow { year: number; month: number | null; amountCents: number; source: string; validFrom: string; expiresAt: string | null }
+export interface TxRow {
+  date: string;
+  type: "consumption" | "reversal" | "write_off";
+  amountCents: number;
+  /**
+   * Gegen welche Allocation wurde gebucht? `null` = das Monatsaufstockungs-Leg
+   * (die FIFO-Buchung schreibt genau EINE solche Zeile pro Vorgang).
+   *
+   * Trägt seit der Ledger-Umstellung die Absorptions-Frage: was der Übertrag
+   * getragen hat, steht hier und wird nicht mehr aus dem Datum abgeleitet.
+   */
+  allocationId: number | null;
+}
+export interface AllocRow { id: number; year: number; month: number | null; amountCents: number; source: string; validFrom: string; expiresAt: string | null }
 export interface SettingRow { validFrom: string; validTo: string | null; monthlyLimitCents: number | null; enabled: boolean }
 
 /**
@@ -152,6 +215,28 @@ export function netConsumptionFromRows(rows: ReadonlyArray<TxRow>, fromIso: stri
     if (r.type === "consumption") netto += Math.abs(r.amountCents);
     else if (r.type === "reversal") netto -= Math.abs(r.amountCents);
     // write_off: bewusst ignoriert (siehe Docblock)
+  }
+  return Math.max(0, netto);
+}
+
+/**
+ * Netto-Verbrauch, der auf eine bestimmte Allocation-Menge gebucht wurde —
+ * die LEDGER-Antwort auf „was hat dieser Übertrag getragen?".
+ *
+ * Kein Datumsfenster: die 30.06.-Frist steckt bereits in der Verlinkung, weil
+ * `computeFifoAvailability` eine Übertrags-Allocation nur aufnimmt, solange
+ * `expiresAt >= transactionDate` der Buchung. `write_off` bleibt draußen (es
+ * ist der Verfall, nicht der Verbrauch).
+ */
+export function netConsumptionForAllocations(
+  rows: ReadonlyArray<TxRow>,
+  allocationIds: ReadonlySet<number>,
+): number {
+  let netto = 0;
+  for (const r of rows) {
+    if (r.allocationId == null || !allocationIds.has(r.allocationId)) continue;
+    if (r.type === "consumption") netto += Math.abs(r.amountCents);
+    else if (r.type === "reversal") netto -= Math.abs(r.amountCents);
   }
   return Math.max(0, netto);
 }
@@ -363,12 +448,16 @@ export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
   const sourceYearEntitlementCents = entitlementForYear(
     i, i.sourceYear, anchor.anchorIso, { year: i.sourceYear, month: 12 },
   );
-  const prevFrist = fristFuer(i.sourceYear);
+  // Absorption aus dem LEDGER: was auf die Übertragszeilen des Quelljahres
+  // gebucht wurde. Ersetzt das frühere Datumsfenster `[01.01. … Frist]`.
   const ph = computeCarryoverPhantom({
     sourceYearAllocatedCents: sourceYearEntitlementCents,
     prevCarryInCents: carryoverIn(i.sourceYear),
     netConsumptionYearCents: netConsumptionFromRows(i.transactions, `${i.sourceYear}-01-01`, `${i.sourceYear}-12-31`),
-    netConsumptionUntilDeadlineCents: netConsumptionFromRows(i.transactions, `${i.sourceYear}-01-01`, prevFrist),
+    absorbedByCarryInCents: netConsumptionForAllocations(
+      i.transactions,
+      new Set(uebertragsZeilen(i.sourceYear).map(a => a.id)),
+    ),
     persistedCarryoverOutCents: carryoverIn(targetYear),
   });
 
@@ -380,10 +469,14 @@ export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
   const targetEntitlement = entitlementForYear(i, targetYear, anchor.anchorIso, endYm);
   const fensterEnde = minIso(`${targetYear}-12-31`, i.asOfIso);
   const claimed = netConsumptionFromRows(i.transactions, `${targetYear}-01-01`, fensterEnde);
-  const claimedBisFrist = netConsumptionFromRows(
-    i.transactions, `${targetYear}-01-01`, minIso(fristFuer(targetYear), fensterEnde),
+  // Auch hier Ledger statt Datum: was haben die Zieljahres-Übertragszeilen
+  // getragen? Gedeckelt auf den KORRIGIERTEN Übertrag — mehr als der hätte
+  // rollen dürfen, kann nicht absorbiert worden sein.
+  const absorbedInTarget = netConsumptionForAllocations(
+    i.transactions,
+    new Set(uebertragsZeilen(targetYear).map(a => a.id)),
   );
-  const absorbed = Math.min(ph.carryoverOutSollCents, claimedBisFrist);
+  const absorbed = Math.min(ph.carryoverOutSollCents, absorbedInTarget);
   const sf = computeShortfall({
     claimedCents: claimed,
     targetYearAllocatedCents: targetEntitlement,

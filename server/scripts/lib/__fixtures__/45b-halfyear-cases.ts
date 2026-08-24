@@ -41,9 +41,9 @@ export interface CaseInput {
   /** §45b-Settings mit ihrem Gültigkeitsfenster — VOLLE Historie, keine Scheibe. */
   settings: Array<{ validFrom: string; validTo: string | null; monthlyLimitCents: number | null; enabled: boolean }>;
   /** Alle nicht-gelöschten Allocations des Kunden. */
-  allocations: Array<{ year: number; month: number | null; amountCents: number; source: string; validFrom: string; expiresAt: string | null }>;
+  allocations: Array<{ id: number; year: number; month: number | null; amountCents: number; source: string; validFrom: string; expiresAt: string | null }>;
   /** Alle §45b-Transaktionen des Kunden. */
-  transactions: Array<{ date: string; type: "consumption" | "reversal" | "write_off"; amountCents: number }>;
+  transactions: Array<{ date: string; type: "consumption" | "reversal" | "write_off"; amountCents: number; allocationId: number | null }>;
 }
 
 export interface CaseExpectation {
@@ -88,12 +88,12 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: VOLL,
       allocations: [
-        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
-        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 1, year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 2, year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
       transactions: [
-        { date: "2025-09-15", type: "consumption", amountCents: -80000 },
-        { date: "2026-03-01", type: "consumption", amountCents: -200000 },
+        { date: "2025-09-15", type: "consumption", amountCents: -80000, allocationId: null },
+        { date: "2026-03-01", type: "consumption", amountCents: -200000, allocationId: 2 },
       ],
     },
     expected: {
@@ -120,12 +120,12 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: VOLL,
       allocations: [
-        { year: 2024, month: null, amountCents: 100000, source: "carryover", validFrom: "2024-01-01", expiresAt: "2024-06-30" },
-        { year: 2025, month: null, amountCents: 157200, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 1, year: 2024, month: null, amountCents: 100000, source: "carryover", validFrom: "2024-01-01", expiresAt: "2024-06-30" },
+        { id: 2, year: 2025, month: null, amountCents: 157200, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
       ],
       transactions: [
-        { date: "2024-09-15", type: "consumption", amountCents: -80000 },
-        { date: "2025-03-01", type: "consumption", amountCents: -100000 },
+        { date: "2024-09-15", type: "consumption", amountCents: -80000, allocationId: null },
+        { date: "2025-03-01", type: "consumption", amountCents: -100000, allocationId: 2 },
       ],
     },
     expected: {
@@ -148,10 +148,10 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: [{ validFrom: "2025-05-01", validTo: null, monthlyLimitCents: null, enabled: true }],
       allocations: [
-        { year: 2025, month: null, amountCents: 50000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
-        { year: 2026, month: null, amountCents: 104800, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 1, year: 2025, month: null, amountCents: 50000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 2, year: 2026, month: null, amountCents: 104800, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
-      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -50000 }],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -50000, allocationId: null }],
     },
     expected: {
       sourceYearEntitlementCents: 104800,   // 8 × 13100
@@ -173,11 +173,11 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: VOLL,
       allocations: [
-        { year: 2025, month: 3, amountCents: 200000, source: "initial_balance", validFrom: "2025-03-01", expiresAt: null },
-        { year: 2025, month: null, amountCents: 50000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
-        { year: 2026, month: null, amountCents: 334100, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 1, year: 2025, month: 3, amountCents: 200000, source: "initial_balance", validFrom: "2025-03-01", expiresAt: null },
+        { id: 2, year: 2025, month: null, amountCents: 50000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 3, year: 2026, month: null, amountCents: 334100, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
-      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -60000 }],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -60000, allocationId: null }],
     },
     expected: {
       sourceYearEntitlementCents: 344100,   // 11 × 13100 + 200000
@@ -199,10 +199,10 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: null,
       settings: VOLL,
       allocations: [
-        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
-        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 1, year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 2, year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
-      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000 }],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000, allocationId: null }],
     },
     expected: {
       sourceYearEntitlementCents: 157200,
@@ -226,12 +226,12 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: VOLL,
       allocations: [
-        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
-        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 1, year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 2, year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
       transactions: [
-        { date: "2025-09-15", type: "consumption", amountCents: -80000 },
-        { date: "2026-07-15", type: "consumption", amountCents: -200000 },
+        { date: "2025-09-15", type: "consumption", amountCents: -80000, allocationId: null },
+        { date: "2026-07-15", type: "consumption", amountCents: -200000, allocationId: null },
       ],
     },
     expected: {
@@ -284,7 +284,7 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: null,
       settings: VOLL,
       allocations: [
-        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 1, year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
       ],
       transactions: [],
     },
@@ -310,7 +310,7 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: [{ validFrom: SETTINGS_VALID_FROM_EPOCH, validTo: "2023-12-31", monthlyLimitCents: null, enabled: true }],
       allocations: [
-        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 1, year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
       transactions: [],
     },
@@ -339,13 +339,13 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       settings: VOLL,
       allocations: [
         // year = 2024 statt 2025, Fenster aber unveraendert das Jahr 2025:
-        { year: 2024, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 1, year: 2024, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
         // year = 2025 statt 2026, Fenster unveraendert 2026:
-        { year: 2025, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 2, year: 2025, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
       transactions: [
-        { date: "2025-09-15", type: "consumption", amountCents: -80000 },
-        { date: "2026-03-01", type: "consumption", amountCents: -200000 },
+        { date: "2025-09-15", type: "consumption", amountCents: -80000, allocationId: null },
+        { date: "2026-03-01", type: "consumption", amountCents: -200000, allocationId: 2 },
       ],
     },
     // identisch zu C1
@@ -371,11 +371,11 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: VOLL,
       allocations: [
-        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
-        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
-        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 1, year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 2, year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 3, year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
-      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000 }],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000, allocationId: null }],
     },
     expected: {
       sourceYearEntitlementCents: 157200,
@@ -402,12 +402,12 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: VOLL,
       allocations: [
-        { year: 2025, month: null, amountCents: 50000, source: "manual_adjustment", validFrom: "2025-04-01", expiresAt: null },
-        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 1, year: 2025, month: null, amountCents: 50000, source: "manual_adjustment", validFrom: "2025-04-01", expiresAt: null },
+        { id: 2, year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
         // 157200 + 50000 - 80000 = 127200 — der korrekte Roll.
-        { year: 2026, month: null, amountCents: 127200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 3, year: 2026, month: null, amountCents: 127200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
-      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000 }],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000, allocationId: null }],
     },
     expected: {
       sourceYearEntitlementCents: 207200,   // 12 x 13100 + 50000
@@ -434,11 +434,11 @@ export const HALFYEAR_CASES: HalfYearCase[] = [
       pgStartIso: "2020-01-01",
       settings: VOLL,
       allocations: [
-        { year: 2025, month: 6, amountCents: 13100, source: "zurueckgezogene_altlast_quelle", validFrom: "2025-06-01", expiresAt: null },
-        { year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
-        { year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
+        { id: 1, year: 2025, month: 6, amountCents: 13100, source: "zurueckgezogene_altlast_quelle", validFrom: "2025-06-01", expiresAt: null },
+        { id: 2, year: 2025, month: null, amountCents: 100000, source: "carryover", validFrom: "2025-01-01", expiresAt: "2025-06-30" },
+        { id: 3, year: 2026, month: null, amountCents: 157200, source: "carryover", validFrom: "2026-01-01", expiresAt: "2026-06-30" },
       ],
-      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000 }],
+      transactions: [{ date: "2025-09-15", type: "consumption", amountCents: -80000, allocationId: null }],
     },
     // Identisch zu C1: die Altlast-Zeile darf NICHTS aendern.
     expected: {

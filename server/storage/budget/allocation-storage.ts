@@ -14,7 +14,7 @@ import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToS
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 import { resolve45bAnchor, initialBalanceMonthKeys, pickEffective45bSettingRow, effective45bSettingsWindow, shiftStartToSettings, clampEndToSettings } from "@shared/domain/budget/anchor-45b";
 import { expiry45bFloorDateFor, carryoverExpiresAtFor } from "@shared/domain/budget/expiry-45b";
-import { computeCarryoverPhantom, carryoverTargetYear, type AllocRow } from "@shared/domain/budget/halfyear-45b";
+import { carryoverOutSollFor, carryoverTargetYear, type AllocRow } from "@shared/domain/budget/halfyear-45b";
 // Re-Export: Bestands-Aufrufer (summary-queries) importieren die Funktion
 // weiterhin von hier. Die Definition liegt jetzt in der SSoT.
 export { pickEffective45bSettingRow };
@@ -1532,6 +1532,22 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
    * jetzt entschieden: unter `year` weist die Messung 7 Kunden-Jahre mit
    * Phantom-Übertrag aus, unter `window` keinen einzigen.
    *
+   * ── EHRLICHE EINORDNUNG: hier wirkt sie (noch) nicht ────────────────────
+   * Gemessen ist die Umstellung im SCHREIBPFAD verhaltensneutral, seit die
+   * Absorption aus dem Ledger kommt. Eine falsch zugeordnete Übertragszeile
+   * bringt ihren verlinkten Verbrauch in `netConsumed` UND in `absorbed` ein,
+   * in gleicher Höhe — beides hebt sich auf, solange nicht mehr auf sie
+   * gebucht wurde als ihr Betrag hergibt. Ein Test, der hier einen Unterschied
+   * behauptet, wäre falsch; es gibt deshalb keinen.
+   *
+   * Sie bleibt trotzdem, aus zwei Gründen: sie ist die inhaltlich richtige
+   * Zuordnung (das Fenster sagt, in welches Jahr die Zeile rollte, `year` sagt
+   * je nach Konvention etwas anderes), und sie bringt den Schreibpfad auf
+   * dasselbe Modell wie das MESSWERKZEUG, wo sie sehr wohl wirkt — dort
+   * trennt sie Zufluss von persistiertem Abfluss und ist der Grund für die
+   * 7-gegen-0-Differenz. Zwei Modelle nebeneinander wären genau die Drift,
+   * die diesen Cluster ausgelöst hat.
+   *
    * NICHT mitgeändert: die Dedup-Sets (`buildCarryoverDedupSets`) und damit
    * `yearsToProcess`. Die beantworten eine andere Frage — „existiert für dieses
    * Zieljahr schon eine Zeile" — und prüfen bereits BEIDE Schlüssel per ODER.
@@ -1557,139 +1573,73 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   const allLinkedIds = Array.from(allLinkedIdsSet);
 
   /**
-   * Frist des Übertrags, der IN `jahr` hereinrollte.
+   * Verbrauchs-Summen: je Allocation (verlinkt) und je Jahr (NULL-Leg).
    *
-   * DETERMINISTISCHES MINIMUM über die gesetzten Fristen, nicht `.find`: die
-   * Query liefert ohne `orderBy` keine garantierte Reihenfolge, und
-   * Doppel-Überträge sind real (Task #102). Mit `.find` kippte derselbe
-   * Datenstand je nach Zeilenreihenfolge. Das Minimum ist zugleich die
-   * konservative Wahl — es lässt am wenigsten Verbrauch absorbieren.
-   *
-   * Identisch zu `fristFuer` in `shared/domain/budget/halfyear-45b.ts`; die
-   * Fallback-Frist kommt aus derselben Fenster-SSoT.
+   * ── `write_off` ist AUSGESCHLOSSEN ────────────────────────────────────
+   * Er ist kein Verbrauch gegen den eigenen Jahrestopf, sondern das Verfallen
+   * des hereingerollten Übertrags. Vorher zählte er mit, und das war keine
+   * Nachlässigkeit, sondern die Krücke der alten Formel: `netConsumed −
+   * totalCarryoverIn` kam über den mitgezählten Write-Off aufs richtige
+   * Ergebnis — aber nur, solange `processExpiredCarryover` bereits gelaufen
+   * war. Mit der ledger-basierten Absorption unten wird die Krücke nicht mehr
+   * gebraucht und wäre eine Doppelzählung.
    */
-  const fristFuerJahr = (jahr: number): string => {
-    const fristen = carryoverAllocations
-      .filter(a => zieljahrVon(a) === jahr && a.expiresAt)
-      .map(a => a.expiresAt!)
-      .sort();
-    return fristen[0] ?? carryoverWindowFor(jahr - 1).expiresAt;
-  };
+  const linkedConsumption = new Map<number, number>();
+  const linkedReversal = new Map<number, number>();
+  const unlinkedConsumption = new Map<number, number>();
+  const unlinkedReversal = new Map<number, number>();
 
-  /**
-   * Verbrauchs-Summen über dieselbe Zeilenmenge, einmal ohne und einmal MIT
-   * Frist-Grenze.
-   *
-   * EINE Funktion für beide Läufe, nicht zwei Query-Blöcke: die beiden Summen
-   * gehen unmittelbar gegeneinander (`min(carryIn, bisFrist)` gegen
-   * `netConsumedJahr`). Liefe die eine über eine auch nur leicht andere
-   * Zeilenmenge als die andere, entstünde genau die Fenster-Asymmetrie, die im
-   * Vertrag der Formel als B4 dokumentiert ist.
-   *
-   * `write_off` ist in BEIDEN Läufen ausgeschlossen — das ist eine Änderung
-   * gegenüber vorher und gehört zur Korrektur, nicht nebenher dazu: der
-   * Verfalls-Write-Off ist kein Verbrauch gegen den eigenen Jahrestopf, sondern
-   * das Verfallen des hereingerollten Übertrags. Er liegt per
-   * `addDays(expiresAt, 1)` auf dem 01.07., fiele also ins Jahresfenster, aber
-   * nicht ins Fenster „bis Frist" — er hätte die Differenz der beiden Summen um
-   * exakt seinen Betrag verfälscht. Dass die alte Formel ihn mitzählte, war
-   * kein Zufall, sondern ihre Krücke: `netConsumed − totalCarryoverIn` kam über
-   * den mitgezählten Write-Off näherungsweise auf das richtige Ergebnis —
-   * aber nur, wenn `processExpiredCarryover` schon gelaufen war.
-   */
-  const verbrauchsSummen = async (bisFrist: boolean) => {
-    const linkedConsumption = new Map<number, number>();
-    const linkedReversal = new Map<number, number>();
-    const unlinkedConsumption = new Map<number, number>();
-    const unlinkedReversal = new Map<number, number>();
+  if (allLinkedIds.length > 0) {
+    const linkedRows = await d.select({
+      allocationId: budgetTransactions.allocationId,
+      transactionType: budgetTransactions.transactionType,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    }).from(budgetTransactions).where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+      sql`${budgetTransactions.transactionType} IN ('consumption', 'reversal')`,
+      inArray(budgetTransactions.allocationId, allLinkedIds),
+    )).groupBy(budgetTransactions.allocationId, budgetTransactions.transactionType);
 
-    const linkedWhere = bisFrist
-      ? or(...yearsToProcess
-          .map(y => {
-            const ids = linkedIdsByYear.get(y) ?? [];
-            return ids.length > 0
-              ? and(
-                  inArray(budgetTransactions.allocationId, ids),
-                  lte(budgetTransactions.transactionDate, fristFuerJahr(y)),
-                )
-              : undefined;
-          })
-          .filter((p): p is NonNullable<typeof p> => p != null))
-      : (allLinkedIds.length > 0 ? inArray(budgetTransactions.allocationId, allLinkedIds) : undefined);
-
-    if (linkedWhere) {
-      const linkedRows = await d.select({
-        allocationId: budgetTransactions.allocationId,
-        transactionType: budgetTransactions.transactionType,
-        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-      }).from(budgetTransactions).where(and(
-        eq(budgetTransactions.customerId, customerId),
-        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-        sql`${budgetTransactions.transactionType} IN ('consumption', 'reversal')`,
-        linkedWhere,
-      )).groupBy(budgetTransactions.allocationId, budgetTransactions.transactionType);
-
-      for (const row of linkedRows) {
-        if (row.allocationId == null) continue;
-        const total = Number(row.total ?? 0);
-        const ziel = row.transactionType === "reversal" ? linkedReversal : linkedConsumption;
-        ziel.set(row.allocationId, (ziel.get(row.allocationId) ?? 0) + total);
-      }
+    for (const row of linkedRows) {
+      if (row.allocationId == null) continue;
+      const total = Number(row.total ?? 0);
+      const ziel = row.transactionType === "reversal" ? linkedReversal : linkedConsumption;
+      ziel.set(row.allocationId, (ziel.get(row.allocationId) ?? 0) + total);
     }
+  }
 
-    if (yearsToProcess.length > 0) {
-      const unlinkedWhere = bisFrist
-        ? or(...yearsToProcess.map(y => and(
-            gte(budgetTransactions.transactionDate, `${y}-01-01`),
-            lte(budgetTransactions.transactionDate, fristFuerJahr(y)),
-          )))
-        : and(
-            gte(budgetTransactions.transactionDate, `${Math.min(...yearsToProcess)}-01-01`),
-            lte(budgetTransactions.transactionDate, `${Math.max(...yearsToProcess)}-12-31`),
-          );
+  if (yearsToProcess.length > 0) {
+    const unlinkedRows = await d.select({
+      year: sql<number>`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})::int`,
+      transactionType: budgetTransactions.transactionType,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    }).from(budgetTransactions).where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+      sql`${budgetTransactions.transactionType} IN ('consumption', 'reversal')`,
+      isNull(budgetTransactions.allocationId),
+      gte(budgetTransactions.transactionDate, `${Math.min(...yearsToProcess)}-01-01`),
+      lte(budgetTransactions.transactionDate, `${Math.max(...yearsToProcess)}-12-31`),
+    )).groupBy(
+      sql`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})`,
+      budgetTransactions.transactionType,
+    );
 
-      const unlinkedRows = await d.select({
-        year: sql<number>`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})::int`,
-        transactionType: budgetTransactions.transactionType,
-        total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-      }).from(budgetTransactions).where(and(
-        eq(budgetTransactions.customerId, customerId),
-        eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-        sql`${budgetTransactions.transactionType} IN ('consumption', 'reversal')`,
-        isNull(budgetTransactions.allocationId),
-        unlinkedWhere,
-      )).groupBy(
-        sql`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})`,
-        budgetTransactions.transactionType,
-      );
-
-      for (const row of unlinkedRows) {
-        const y = Number(row.year);
-        const total = Number(row.total ?? 0);
-        const ziel = row.transactionType === "reversal" ? unlinkedReversal : unlinkedConsumption;
-        ziel.set(y, (ziel.get(y) ?? 0) + total);
-      }
+    for (const row of unlinkedRows) {
+      const y = Number(row.year);
+      const total = Number(row.total ?? 0);
+      const ziel = row.transactionType === "reversal" ? unlinkedReversal : unlinkedConsumption;
+      ziel.set(y, (ziel.get(y) ?? 0) + total);
     }
+  }
 
-    return { linkedConsumption, linkedReversal, unlinkedConsumption, unlinkedReversal };
-  };
-
-  const [ganzesJahr, bisFrist] = await Promise.all([
-    verbrauchsSummen(false),
-    verbrauchsSummen(true),
-  ]);
-
-  /** Netto-Verbrauch eines Jahres aus einem der beiden Summen-Sätze. */
-  const nettoVerbrauch = (
-    summen: Awaited<ReturnType<typeof verbrauchsSummen>>,
-    jahr: number,
-  ): number => {
-    const ids = linkedIdsByYear.get(jahr) ?? [];
-    let verbraucht = summen.unlinkedConsumption.get(jahr) ?? 0;
-    let storniert = summen.unlinkedReversal.get(jahr) ?? 0;
+  /** Netto (`consumption − reversal`) über eine Menge von Allocation-IDs. */
+  const nettoUeberIds = (ids: number[]): number => {
+    let verbraucht = 0, storniert = 0;
     for (const id of ids) {
-      verbraucht += summen.linkedConsumption.get(id) ?? 0;
-      storniert += summen.linkedReversal.get(id) ?? 0;
+      verbraucht += linkedConsumption.get(id) ?? 0;
+      storniert += linkedReversal.get(id) ?? 0;
     }
     return Math.max(0, verbraucht - storniert);
   };
@@ -1711,47 +1661,50 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     // andernfalls überlebt ein Rest aus Quelljahr Y rechtswidrig über den
     // 30.06.(Y+1) hinaus (Chaining: Y → Übertrag in Y+1 → Übertrag in Y+2 …).
     //
-    // ── HALBJAHRESSCHARF (ERSETZT die jahresscharfe Verrechnung) ──────────
+    // ── ABSORPTION AUS DEM LEDGER (ERSETZT `netConsumed − totalCarryoverIn`) ──
     //
     // Vorher stand hier:
     //
     //     const consumedAgainstOwnYear = Math.max(0, netConsumed - totalCarryoverIn);
-    //     const unused = Math.max(0, yearAllocatedCents - consumedAgainstOwnYear);
     //
-    // Das ließ den hereingerollten Übertrag Verbrauch absorbieren OHNE
-    // Datums-Unterscheidung — obwohl er mit Ablauf des 30.06. verfallen ist.
-    // Ein Verbrauch im August konnte damit von einem Guthaben aufgezehrt
-    // werden, das es seit sechs Wochen nicht mehr gab: der eigene Jahrestopf
-    // wurde zu wenig belastet, `unused` zu groß, ein zu hoher Übertrag
-    // PERSISTIERT — und über die Verfügbarkeit als höhere §45b-Forderung an die
-    // Pflegekasse ausgewiesen. Die Fehlerrichtung ist immer permissiv.
+    // Das ließ den hereingerollten Übertrag Verbrauch in Höhe seines vollen
+    // Betrags absorbieren — unabhängig davon, ob er ihn laut Buchung getragen
+    // hat. Solange `processExpiredCarryover` schon gelaufen war, glich der
+    // mitgezählte Write-Off das aus; VOR dem Verfall (und `syncCarryoverAndExpiry`
+    // rief die Anlage bis zu diesem PR zuerst) fehlte der Ausgleich und der
+    // eigene Jahrestopf wurde zu wenig belastet → Übertrag zu groß →
+    // Verfügbarkeit zu hoch → höhere §45b-Forderung an die Pflegekasse.
     //
-    // Die Korrektur ist EIN Aufruf, keine zweite Formel: `computeCarryoverPhantom`
-    // (`shared/domain/budget/halfyear-45b.ts`) ist dieselbe Funktion, die der
-    // Dry-Run `server/scripts/fix-45b-halfyear-split-dryrun.ts` seit seiner
-    // Messung benutzt, verriegelt durch `tests/unit/45b-halfyear-contract.test.ts`.
-    // Sie war bis hierher die einzige Stelle im Repo mit der richtigen Formel,
-    // während der Schreibpfad daneben die falsche behielt — genau der
-    // Zweitbegriff-Zustand, den die Arbeitsregeln verbieten. Der Schreibpfad
-    // rechnet ab jetzt nachweislich dasselbe wie das Messwerkzeug.
+    // Was ihn ERSETZT: der Betrag, den der Übertrag laut LEDGER getragen hat —
+    // die Summe der Buchungen mit seiner `allocation_id`.
     //
-    // `persistedCarryoverOutCents: 0` — der Phantom-Betrag interessiert hier
-    // nicht: wir SCHREIBEN den Übertrag gerade erst, es gibt noch keinen
-    // persistierten, gegen den zu vergleichen wäre. Gebraucht wird allein
-    // `carryoverOutSollCents`.
+    // WARUM das die 30.06.-Frist bereits respektiert und hier keine
+    // Datumsregel nötig ist: `computeFifoAvailability` nimmt eine Übertrags-
+    // Allocation nur in die FIFO-Kette auf, solange `expiresAt >= transactionDate`
+    // der Buchung. Eine Buchung nach der Frist kann per Konstruktion nicht
+    // gegen ihn verlinkt werden. Die Frist ist also beim BUCHEN durchgesetzt und
+    // im Buchungssatz festgehalten; sie hier aus Daten neu abzuleiten wäre ein
+    // Zweitbegriff derselben Frage — und der verliert gegen den Ledger. Genau
+    // daran ist die datumsbasierte Fassung dieses PR gescheitert (Gate-2 B1):
+    // sie hat Verbrauch als absorbiert gerechnet, den der Write-Off gleichzeitig
+    // als verfallen auswies, und dieselben Cent doppelt gedeckt.
+    //
+    // `Math.min` gegen `totalCarryoverIn`: mehr als sein eigener Betrag kann ein
+    // Übertrag nicht tragen, auch wenn Fehlbuchungen mehr auf ihn zeigen.
     //
     // Die Zuordnung Übertrag→Jahr läuft über das FENSTER (`zieljahrVon`, oben
-    // begründet) statt über die Spalte `year`. Beides zusammen — Fenster-Keying
-    // UND Halbjahres-Split — ist das Modell, unter dem die Expositionsmessung
-    // keinen Phantom-Übertrag mehr findet.
-    const { carryoverOutSollCents } = computeCarryoverPhantom({
+    // begründet) statt über die Spalte `year`.
+    const netConsumed = nettoUeberIds(linkedIdsByYear.get(year) ?? [])
+      + Math.max(0, (unlinkedConsumption.get(year) ?? 0) - (unlinkedReversal.get(year) ?? 0));
+    const absorbedByCarryIn = Math.min(
+      totalCarryoverIn,
+      nettoUeberIds(carryoverIntoThisYear.map(a => a.id)),
+    );
+    const unused = carryoverOutSollFor({
       sourceYearAllocatedCents: yearAllocatedCents,
-      prevCarryInCents: totalCarryoverIn,
-      netConsumptionYearCents: nettoVerbrauch(ganzesJahr, year),
-      netConsumptionUntilDeadlineCents: nettoVerbrauch(bisFrist, year),
-      persistedCarryoverOutCents: 0,
+      netConsumptionYearCents: netConsumed,
+      absorbedByCarryInCents: absorbedByCarryIn,
     });
-    const unused = carryoverOutSollCents;
 
     if (unused <= 0) continue;
 
@@ -1892,7 +1845,32 @@ export async function processExpiredCarryover(customerId: number, _tx?: DbClient
 }
 
 export async function syncCarryoverAndExpiry(customerId: number, _tx?: DbClient): Promise<void> {
-  await ensureYearlyCarryover45b(customerId, _tx);
+  // ── REIHENFOLGE: erst Verfall, dann Anlage (ERSETZT die umgekehrte) ──────
+  //
+  // Vorher lief die Anlage zuerst. Das war die Ursachen-Hälfte des
+  // §45b-Übertragsdefekts, die keine Formel behebt: `ensureYearlyCarryover45b`
+  // las den Verbrauchsstand des Quelljahres, BEVOR der hereingerollte Übertrag
+  // seinen Verfalls-`write_off` bekommen hatte. Die alte, betrags-basierte
+  // Verrechnung (`netConsumed − totalCarryoverIn`) hing genau an diesem
+  // Write-Off, um auf das richtige Ergebnis zu kommen — fehlte er, wurde der
+  // eigene Jahrestopf zu wenig belastet und ein zu hoher Übertrag persistiert.
+  //
+  // Fachlich ist diese Reihenfolge ohnehin die richtige: ein Übertrag, dessen
+  // Frist abgelaufen ist, gehört abgeschlossen, bevor der nächste entsteht.
+  // Zwischen den beiden Schritten sieht ein Leser sonst kurzzeitig einen
+  // neuen Übertrag neben einem alten, der längst tot ist.
+  //
+  // Der Roll selbst liest den Verbrauch inzwischen aus der Verlinkung und
+  // braucht den Write-Off nicht mehr (siehe `ensureYearlyCarryover45b`). Die
+  // Reihenfolge bleibt trotzdem so — sie ist die zweite, unabhängige Lage
+  // gegen dieselbe Fehlerklasse, und sie kostet nichts.
+  //
+  // EINE Folge, die zu kennen ist: ein in DIESEM Lauf neu angelegter Übertrag,
+  // dessen Frist schon vorbei ist (Roll eines weit zurückliegenden Jahres),
+  // bekommt seinen Write-Off erst beim NÄCHSTEN Sync statt sofort. Auf die
+  // Verfügbarkeit wirkt das nicht — `carryoverCounted` verlangt
+  // `expiresAt >= Stichtag` und zählt so eine Zeile ohnehin nicht.
   await processExpiredCarryover(customerId, _tx);
+  await ensureYearlyCarryover45b(customerId, _tx);
 }
 

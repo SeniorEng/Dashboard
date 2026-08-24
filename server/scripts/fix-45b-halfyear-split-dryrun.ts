@@ -95,7 +95,7 @@ async function lauf(keying: CarryoverKeying, asOfIso: string): Promise<Row[]> {
     // Kandidatenbildung im SELBEN Modell wie die Bewertung — sonst bewertet
     // der Lauf Jahre, die er gar nicht als Kandidat gebildet hat.
     const targetYear = carryoverTargetYear(
-      { ...c, month: null, amountCents: 0, source: "carryover", expiresAt: null } as AllocRow,
+      { ...c, id: 0, month: null, amountCents: 0, source: "carryover", expiresAt: null } as AllocRow,
       keying,
     );
     kandidaten.set(`${c.customerId}|${targetYear}`, { customerId: c.customerId, targetYear });
@@ -135,6 +135,9 @@ async function lauf(keying: CarryoverKeying, asOfIso: string): Promise<Row[]> {
         date: t.transactionDate,
         type: t.transactionType as TxRow["type"],
         amountCents: t.amountCents,
+        // Seit der Ledger-Umstellung PFLICHT: die Absorption des Uebertrags
+        // wird aus der Verlinkung gelesen, nicht mehr aus dem Datum.
+        allocationId: t.allocationId,
       })),
       carryoverKeying: keying,
     });
