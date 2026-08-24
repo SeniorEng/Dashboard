@@ -19,7 +19,7 @@ import {
 } from "../../server/scripts/lib/__fixtures__/45b-halfyear-cases";
 import {
   evaluate45bHalfYear, splitShortfall, netConsumptionFromRows,
-} from "../../server/scripts/lib/45b-halfyear-math";
+} from "@shared/domain/budget/halfyear-45b";
 
 /**
  * KEIN pauschales Einfrieren mehr.

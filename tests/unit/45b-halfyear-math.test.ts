@@ -7,7 +7,19 @@
  * jede Datenbank aufgefallen. Die betroffenen Fälle stehen unten namentlich
  * als Regression (B2, B3).
  *
- * Gehört zum Einmal-Werkzeug und wird mit ihm gelöscht (One-off-Disziplin).
+ * ── Nicht mehr Einmal-Werkzeug ──────────────────────────────────────────
+ * Die Formel ist mit dem Halbjahres-PR Produktionscode geworden
+ * (`shared/domain/budget/halfyear-45b.ts`, Aufrufer: Übertrags-Anlage UND
+ * Dry-Run). Diese Datei bleibt damit bestehen, auch wenn das Werkzeug
+ * irgendwann gelöscht wird.
+ *
+ * ── Absorption kommt aus dem LEDGER, nicht aus dem Datum ────────────────
+ * `absorbedByCarryInCents` ist der Betrag, den der Übertrag laut Verlinkung
+ * (`allocation_id`) getragen hat. Die frühere Fassung leitete ihn aus dem
+ * Buchungs-Datum ab; das deckte dieselben Cent doppelt, weil der
+ * Verfalls-Write-Off den ungenutzten Rest über die Verlinkung bestimmt.
+ * Die 30.06.-Frist wirkt weiterhin — nur eben beim Buchen, wo
+ * `computeFifoAvailability` sie durchsetzt.
  *
  * Alle Beträge in Cent. 131 € Monatsanspruch = 13100 ct, Jahresanspruch
  * 12 × 13100 = 157200 ct — die im Repo übliche §45b-Größenordnung.
@@ -17,20 +29,21 @@ import {
   computeCarryoverPhantom,
   computeShortfall,
   entitlementForYear,
-} from "../../server/scripts/lib/45b-halfyear-math";
+} from "@shared/domain/budget/halfyear-45b";
 
 const JAHR = 157200;   // 12 × 131 €
 const UEBERTRAG = 100000; // 1000 €
 
 describe("computeCarryoverPhantom — Golden-Cases", () => {
-  it("Fall A: Verbrauch VOR der Frist — Übertrag wird rechtmäßig aufgezehrt, kein Phantom", () => {
-    // 800 € im H1 verbraucht, Übertrag 1000 € deckt das.
+  it("Fall A: Verbrauch GEGEN den Übertrag gebucht — rechtmäßig aufgezehrt, kein Phantom", () => {
+    // 800 € gegen die Übertragszeile gebucht (die FIFO-Buchung tut das nur,
+    // solange die Frist läuft), Übertrag 1000 € deckt das.
     // consumedOwn = 0 → Übertrag raus = voller Jahresanspruch.
     const r = computeCarryoverPhantom({
       sourceYearAllocatedCents: JAHR,
       prevCarryInCents: UEBERTRAG,
       netConsumptionYearCents: 80000,
-      netConsumptionUntilDeadlineCents: 80000,
+      absorbedByCarryInCents: 80000,
       persistedCarryoverOutCents: JAHR,
     });
     expect(r.absorbedCents).toBe(80000);
@@ -39,15 +52,16 @@ describe("computeCarryoverPhantom — Golden-Cases", () => {
     expect(r.phantomCents).toBe(0);
   });
 
-  it("Fall B (der Bug): Verbrauch NACH der Frist darf den verfallenen Übertrag nicht aufzehren", () => {
-    // 800 € am 15.09. verbraucht — der Übertrag war am 30.06. bereits weg.
+  it("Fall B (der Bug): Verbrauch NICHT gegen den Übertrag gebucht darf ihn nicht aufzehren", () => {
+    // 800 € am 15.09. verbraucht — die FIFO-Buchung konnte sie nicht gegen den
+    // Übertrag verlinken, weil der am 30.06. bereits verfallen war.
     // Korrekt: die 800 € belasten den eigenen Topf → Übertrag raus = 157200 − 80000.
     // Der Schreibpfad rollte stattdessen den vollen Jahresanspruch weiter.
     const r = computeCarryoverPhantom({
       sourceYearAllocatedCents: JAHR,
       prevCarryInCents: UEBERTRAG,
       netConsumptionYearCents: 80000,
-      netConsumptionUntilDeadlineCents: 0,
+      absorbedByCarryInCents: 0,
       persistedCarryoverOutCents: JAHR,
     });
     expect(r.absorbedCents).toBe(0);
@@ -68,7 +82,7 @@ describe("computeCarryoverPhantom — Golden-Cases", () => {
       sourceYearAllocatedCents: JAHR,
       prevCarryInCents: UEBERTRAG,
       netConsumptionYearCents: 80000,           // OHNE die 200 € Write-Off
-      netConsumptionUntilDeadlineCents: 0,
+      absorbedByCarryInCents: 0,
       persistedCarryoverOutCents: JAHR,
     });
     expect(r.phantomCents).toBe(80000);
@@ -82,7 +96,7 @@ describe("computeCarryoverPhantom — Golden-Cases", () => {
       sourceYearAllocatedCents: JAHR,
       prevCarryInCents: UEBERTRAG,
       netConsumptionYearCents: 80000,
-      netConsumptionUntilDeadlineCents: 30000,
+      absorbedByCarryInCents: 30000,
       persistedCarryoverOutCents: JAHR,
     });
     expect(r.absorbedCents).toBe(30000);
@@ -96,7 +110,7 @@ describe("computeCarryoverPhantom — Golden-Cases", () => {
       sourceYearAllocatedCents: JAHR,
       prevCarryInCents: UEBERTRAG,
       netConsumptionYearCents: 150000,
-      netConsumptionUntilDeadlineCents: 150000,
+      absorbedByCarryInCents: 150000,
       persistedCarryoverOutCents: JAHR,
     });
     expect(r.absorbedCents).toBe(UEBERTRAG);       // nicht 150000
@@ -109,7 +123,7 @@ describe("computeCarryoverPhantom — Golden-Cases", () => {
       sourceYearAllocatedCents: JAHR,
       prevCarryInCents: UEBERTRAG,
       netConsumptionYearCents: 80000,
-      netConsumptionUntilDeadlineCents: 0,
+      absorbedByCarryInCents: 0,
       persistedCarryoverOutCents: 77200,   // schon der korrekte Wert
     });
     expect(r.phantomCents).toBe(0);
@@ -120,20 +134,20 @@ describe("computeCarryoverPhantom — Golden-Cases", () => {
       sourceYearAllocatedCents: JAHR,
       prevCarryInCents: UEBERTRAG,
       netConsumptionYearCents: 0,
-      netConsumptionUntilDeadlineCents: 0,
+      absorbedByCarryInCents: 0,
       persistedCarryoverOutCents: 10000,
     });
     expect(r.carryoverOutSollCents).toBe(JAHR);
     expect(r.phantomCents).toBe(0);   // Unterdeckung ist ein anderer Befund
   });
 
-  it("Fenster-Eingabe wird geklammert: 'bis Frist' kann nie über der Jahressumme liegen", () => {
+  it("Absorptions-Eingabe wird geklammert: sie kann nie über der Jahressumme liegen", () => {
     // Schutz gegen inkonsistente Eingaben aus dem Aufrufer.
     const r = computeCarryoverPhantom({
       sourceYearAllocatedCents: JAHR,
       prevCarryInCents: UEBERTRAG,
       netConsumptionYearCents: 30000,
-      netConsumptionUntilDeadlineCents: 80000,   // widersprüchlich
+      absorbedByCarryInCents: 80000,   // widersprüchlich
       persistedCarryoverOutCents: JAHR,
     });
     expect(r.absorbedCents).toBe(30000);
