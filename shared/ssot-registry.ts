@@ -613,9 +613,18 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     //   - `invoice-45b-reduction.ts` (Kürzungs-Startwert)
     // Genau dieses Muster — Kopien, die niemand zählt — ist der Grund für den
     // Registry-Eintrag: die Allow-List gehört gepflegt, nicht im Wächter hart.
+    // Welle 3 (Halbjahres-Split): der Boden ist tag-genau geworden
+    // (`expiry45bFloorDateFor` ERSETZT `expiry45bFloorYearFor`, das entfernt
+    // ist), und die Höhe des Folgejahres-Übertrags hat mit
+    // `computeCarryoverPhantom` erstmals eine kanonische Antwort. Sie hat zwei
+    // Aufrufer — die Übertrags-Anlage (`ensureYearlyCarryover45b`) und das
+    // Mess-Werkzeug (`fix-45b-halfyear-split-dryrun.ts`); vorher hatte nur das
+    // Werkzeug die richtige Formel, der Schreibpfad daneben eine falsche.
     canonical: [
       { symbol: "carryoverExpiresAtFor", module: "shared/domain/budget/expiry-45b.ts" },
-      { symbol: "expiry45bFloorYearFor", module: "shared/domain/budget/expiry-45b.ts" },
+      { symbol: "expiry45bFloorDateFor", module: "shared/domain/budget/expiry-45b.ts" },
+      { symbol: "computeCarryoverPhantom", module: "shared/domain/budget/halfyear-45b.ts" },
+      { symbol: "carryoverTargetYear", module: "shared/domain/budget/halfyear-45b.ts" },
     ],
     ownedLiterals: ["CARRYOVER_45B_EXPIRY_MONTH", "CARRYOVER_45B_EXPIRY_DAY"],
     guards: [

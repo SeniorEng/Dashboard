@@ -33,7 +33,7 @@
  *   tsx server/scripts/verify-45b-consistency.ts --all     # alle §45b-Kunden
  */
 import { and, asc, eq, isNull } from "drizzle-orm";
-import { CARRYOVER_45B_EXPIRY_MONTH, expiry45bFloorYearFor } from "@shared/domain/budget/expiry-45b";
+import { CARRYOVER_45B_EXPIRY_MONTH, expiry45bFloorDateFor } from "@shared/domain/budget/expiry-45b";
 import { db } from "../lib/db";
 import {
   customers,
@@ -98,7 +98,8 @@ async function main() {
   const showAll = process.argv.includes("--all");
   const today = todayISO();
   const { year: curYear, month: curMonth } = currentYearAndMonth();
-  const expiryFloorYear = expiry45bFloorYearFor(curYear, curMonth);
+  // Boden aus der EINEN (tag-genauen) Quelle; dieser Report braucht nur das Jahr.
+  const expiryFloorYear = Number(expiry45bFloorDateFor(today).slice(0, 4));
 
   console.log(`\n=== §45b-Verfall & Cap · Read-only-Verifikationsreport (Task #959) ===`);
   console.log(`Stichtag: ${today} · Fenster-Boden-Jahr: ${expiryFloorYear} · Modus: ${showAll ? "ALLE §45b-Kunden" : "nur Drift"}\n`);

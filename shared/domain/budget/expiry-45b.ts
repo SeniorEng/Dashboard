@@ -46,7 +46,7 @@ export function carryoverExpiresAtFor(targetYear: number): string {
 }
 
 /**
- * Verfalls-BODEN zum Horizont: das früheste Jahr, dessen Mittel zum Stichtag
+ * Verfalls-BODEN zum Horizont als DATUM: der früheste Stichtag, ab dem Mittel
  * noch beitragen.
  *
  * Im ersten Halbjahr trägt das Vorjahr noch bei — sein Übertrag lebt bis zum
@@ -54,32 +54,20 @@ export function carryoverExpiresAtFor(targetYear: number): string {
  * Deshalb hängt der Boden am selben Monat wie die Frist oben und wird hier aus
  * derselben Konstante abgeleitet, statt die `6` ein zweites Mal hinzuschreiben.
  *
- * `horizonMonth` ist 1-basiert.
+ * ── ERSETZT `expiry45bFloorYearFor` (monatsgenau, entfernt) ─────────────
+ * Die frühere Fassung gab ein JAHR zurück und verglich `horizonMonth <= 6`.
+ * Sie trug damit die im Gate-2 als N1 benannte Kopplungs-GRENZE: gekoppelt war
+ * allein die MONATS-Achse, `CARRYOVER_45B_EXPIRY_DAY` ging nicht ein. Bei einer
+ * Frist zum 15.06. läge der Übertrag ab dem 16.06. tot, sie gäbe für Juni aber
+ * weiter `Y-1` zurück.
  *
- * ── NUR NOCH FÜR MONATS-GENAUE AUFRUFER ─────────────────────────────────
- * Diese Funktion trägt die im Gate-2 (Fund N1) benannte Kopplungs-GRENZE:
- * gekoppelt ist allein die MONATS-Achse, `CARRYOVER_45B_EXPIRY_DAY` geht nicht
- * ein. Bei einer Frist zum 15.06. läge der Übertrag ab dem 16.06. tot, sie gäbe
- * für Juni aber weiter `Y-1` zurück.
+ * Sie ist ERSATZLOS ENTFERNT statt daneben stehen zu bleiben. Ihr einziger
+ * verbliebener Aufrufer (`server/scripts/verify-45b-consistency.ts`) braucht
+ * nur das Jahr und schneidet es aus diesem Datum. Zwei exportierte Böden
+ * nebeneinander — einer mit bekannter Lücke — wären genau das „kommt
+ * zusätzlich hinzu", das die Arbeitsregeln verbieten.
  *
- * Der Lesepfad benutzt sie deshalb NICHT mehr — er nimmt
- * `expiry45bFloorDateFor` (unten), das den Tag mit auswertet. Hier bleibt sie
- * für Aufrufer, die von Haus aus nur Jahr+Monat haben
- * (`server/scripts/verify-45b-consistency.ts`).
- */
-export function expiry45bFloorYearFor(horizonYear: number, horizonMonth: number): number {
-  return horizonMonth <= CARRYOVER_45B_EXPIRY_MONTH ? horizonYear - 1 : horizonYear;
-}
-
-/**
- * Verfalls-BODEN als DATUM — dasselbe wie oben, aber TAG-genau und als
- * fertiger ISO-Stichtag statt als Jahr, das der Aufrufer erst zu einem Datum
- * zusammensetzt.
- *
- * ERSETZT im Lesepfad (`calculateAllocated45b`) die Kette
- * „Jahr aus `expiry45bFloorYearFor` → `allocStartMonth = 1` → String-Bau
- * `${allocStartYear}-01-01`". Zwei Gründe, warum das eine Verbesserung ist und
- * nicht nur eine Umformung:
+ * Zwei Gründe, warum das eine Verbesserung ist und nicht nur eine Umformung:
  *
  *  1. **Der Tag zählt jetzt wirklich.** Verglichen wird der volle Horizont
  *     gegen `carryoverExpiresAtFor(Jahr)` — also gegen die Frist selbst, nicht
