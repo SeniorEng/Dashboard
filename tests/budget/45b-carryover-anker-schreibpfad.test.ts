@@ -8,6 +8,7 @@ import { createTestCustomer, cleanupCustomer } from "../test-utils";
 import {
   syncCarryoverAndExpiry, calculateAllocatedCents,
 } from "../../server/storage/budget/allocation-storage";
+import { resolve45bAnchor } from "@shared/domain/budget/anchor-45b";
 
 /**
  * §45b-Übertrags-Anlage: der Anker kommt aus DERSELBEN Kette wie der Lesepfad.
@@ -139,15 +140,50 @@ describe("§45b-Übertrags-Anlage — Anker aus der Lesepfad-SSoT", () => {
     const id = await kunde();
     try {
       await settingsPhase(id, `${quellJahr}-01-01`, null);
+      // BEWUSST der Stufe-4-Aufbau (nur ein SOFT-GELÖSCHTER Startwert), nicht
+      // ein aktiver: nur so wandert der Anker zwischen den Läufen wirklich.
+      // Mit einem aktiven Startwert dominierte Stufe 2 in JEDEM Lauf, die
+      // behauptete Drift träte gar nicht auf und der Test bewiese nichts.
       await db.insert(budgetAllocations).values({
         customerId: id, budgetType: "entlastungsbetrag_45b",
         year: quellJahr, month: 1, amountCents: 100_00, source: "initial_balance",
-        validFrom: `${quellJahr}-01-01`, expiresAt: null, notes: "AN-3 Anker",
+        validFrom: `${quellJahr}-01-01`, expiresAt: null,
+        deletedAt: new Date(), notes: "AN-3 Anker (soft-geloescht)",
       });
 
+      const ankerJetzt = async () => {
+        const aktive = await db.select().from(budgetAllocations).where(and(
+          eq(budgetAllocations.customerId, id),
+          eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+          isNull(budgetAllocations.deletedAt),
+        ));
+        return resolve45bAnchor({
+          pgStartIso: null,
+          s45bEnabled: true,
+          activeAllocations: aktive,
+          deletedInitialBalanceValidFroms: [`${quellJahr}-01-01`],
+          fallbackYear: curYear,
+          floorPgAnchor: (iso: string) => iso,
+        });
+      };
+
+      const vorher = await ankerJetzt();
       await syncCarryoverAndExpiry(id);
       const nachErstem = await uebertragsZeilen(id);
       expect(nachErstem.length, "Vorbedingung: der erste Sync muss überhaupt rollen").toBeGreaterThan(0);
+
+      // Die Drift ist real und wird hier BELEGT, nicht behauptet: vor dem Sync
+      // trägt Stufe 4 den Anker, danach die frisch angelegte Übertragszeile
+      // (Stufe 3) — ein anderer Zweig derselben Kette, mit anderem Datum.
+      const nachher = await ankerJetzt();
+      expect(
+        { via: vorher.kind === "anchor" ? vorher.via : vorher.kind },
+        "Vorbedingung: vor dem Sync muss Stufe 4 ankern",
+      ).toEqual({ via: "deleted_initial_balance" });
+      expect(
+        { via: nachher.kind === "anchor" ? nachher.via : nachher.kind },
+        "Vorbedingung: nach dem Sync muss Stufe 3 ankern — sonst misst der Test keine Drift",
+      ).toEqual({ via: "carryover" });
 
       await syncCarryoverAndExpiry(id);
       await syncCarryoverAndExpiry(id);
