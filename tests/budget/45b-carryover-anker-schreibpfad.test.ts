@@ -57,6 +57,21 @@ async function settingsPhase(customerId: number, validFrom: string, validTo: str
   });
 }
 
+/** Alle aktiven Übertragszeilen als vergleichbarer Fingerabdruck. */
+async function uebertragsZeilen(
+  customerId: number,
+): Promise<Array<{ year: number; validFrom: string; expiresAt: string | null; amountCents: number }>> {
+  const rows = await db.select().from(budgetAllocations).where(and(
+    eq(budgetAllocations.customerId, customerId),
+    eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+    eq(budgetAllocations.source, "carryover"),
+    isNull(budgetAllocations.deletedAt),
+  ));
+  return rows
+    .map(a => ({ year: a.year, validFrom: a.validFrom, expiresAt: a.expiresAt, amountCents: a.amountCents }))
+    .sort((a, b) => a.validFrom.localeCompare(b.validFrom) || a.amountCents - b.amountCents);
+}
+
 async function gerollterUebertrag(customerId: number): Promise<number> {
   const rows = await db.select().from(budgetAllocations).where(and(
     eq(budgetAllocations.customerId, customerId),
@@ -96,6 +111,49 @@ describe("§45b-Übertrags-Anlage — Anker aus der Lesepfad-SSoT", () => {
         await gerollterUebertrag(id),
         "Der über Stufe 4 verankerte Anspruch muss in den Folgejahres-Übertrag kondensieren",
       ).toBe(anspruch);
+
+      // Stufe 4 liefert nur ein DATUM, keinen Betrag. Der gelöschte Startwert
+      // darf nicht durch die Hintertür zurückkommen: der Roll ist reine
+      // Monatsaufstockung (12 × 131 €), die 100,00 € stecken NICHT darin.
+      // `sumInitialBalancesForYear` läuft über `existingAllocations`, und die
+      // sind `deleted_at IS NULL`-gefiltert — dieser Test hält das fest.
+      expect(
+        await gerollterUebertrag(id),
+        "Ein soft-gelöschter Startwert darf über den Anker nicht wiederbelebt werden",
+      ).toBe(12 * 131_00);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("AN-3 – Idempotenz: ein zweiter Sync legt nichts nach und verschiebt nichts", async () => {
+    // `ensureYearlyCarryover45b` SCHREIBT, und es läuft als Seiteneffekt aus
+    // Lese- und Buchungspfaden — also oft. Die Anker-Konsolidierung bewegt,
+    // WELCHE Jahre gerollt werden; eine Verschiebung zwischen zwei Aufrufen
+    // wäre damit ein Doppel-Übertrag statt einer Korrektur.
+    //
+    // Der Fall ist nicht theoretisch: nach dem ersten Sync existiert eine
+    // Übertragszeile, und die ist in `resolve45bAnchor` selbst eine
+    // Anker-Quelle (Stufe 3). Der Anker des zweiten Aufrufs kann dadurch ein
+    // anderer sein als der des ersten.
+    const id = await kunde();
+    try {
+      await settingsPhase(id, `${quellJahr}-01-01`, null);
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        year: quellJahr, month: 1, amountCents: 100_00, source: "initial_balance",
+        validFrom: `${quellJahr}-01-01`, expiresAt: null, notes: "AN-3 Anker",
+      });
+
+      await syncCarryoverAndExpiry(id);
+      const nachErstem = await uebertragsZeilen(id);
+      expect(nachErstem.length, "Vorbedingung: der erste Sync muss überhaupt rollen").toBeGreaterThan(0);
+
+      await syncCarryoverAndExpiry(id);
+      await syncCarryoverAndExpiry(id);
+
+      expect(await uebertragsZeilen(id), "Wiederholter Sync darf weder anlegen noch verschieben")
+        .toEqual(nachErstem);
     } finally {
       await cleanupCustomer(id);
     }
