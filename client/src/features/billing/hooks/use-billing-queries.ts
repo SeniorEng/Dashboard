@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import type { CustomerAmounts } from "@shared/api/billing";
 import { api, unwrapResult } from "@/lib/api";
 import type {
   BillingCustomerItem,
@@ -248,4 +249,86 @@ export function useDeliveryHistory(expandedInvoiceId: number | null) {
     },
     enabled: !!expandedInvoiceId,
   });
+}
+
+/**
+ * IST/PLAN-Beträge für eine MENGE von Kunden — geladen, wenn eine Gruppe
+ * geöffnet wird.
+ *
+ * Warum nicht mehr in der Liste: die beiden Zahlen kosteten SERVERSEITIG pro
+ * Kunde einen vollen `buildInvoiceDraft` (grob 15–25 DB-Runden). Bei 111
+ * Kunden lief das bei jedem Öffnen des Tabs, bevor die Liste erschien.
+ * Gemessen (Gate-1 zu 6hJRF6h8) war das der Engpass — nicht die
+ * Pipeline-Aggregation, die daneben 45 ms braucht.
+ *
+ * BATCH statt pro Zeile: ein Aufruf je Gruppe. Ein Endpunkt pro Zeile hätte
+ * die Rundenzahl nur verlagert und N HTTP-Requests daraus gemacht.
+ *
+ * `enabled` erst beim Öffnen — sonst wäre der alte Zustand wieder da, nur
+ * asynchron. Der Serveraufwand bliebe derselbe.
+ */
+/** Server-Deckel aus `GET /billing/customer-amounts` — hier gespiegelt. */
+const AMOUNTS_CHUNK = 100;
+
+export function useCustomerAmounts(
+  selectedYear: number,
+  selectedMonth: number,
+  customerIds: number[],
+  enabled: boolean,
+  dateFrom = "",
+  dateTo = "",
+) {
+  // Stabile Reihenfolge: dieselbe Menge darf keinen zweiten Cache-Eintrag
+  // erzeugen, nur weil die IDs anders sortiert ankamen.
+  const sortiert = [...customerIds].sort((a, b) => a - b);
+
+  // CHUNKEN. Der Server deckelt bei 100 IDs — eine Gruppe kann groesser sein
+  // (der Realstand nennt 111 Kunden im Monat, und "Dokumentation ausstehend"
+  // haelt davon zeitweise den Grossteil). Ungechunkt bekaeme der Client einen
+  // 400, den er nirgends anzeigt: Kopf dauerhaft "—", Zeilen dauerhaft "?".
+  // Gefunden im Gate-2 zu #129.
+  const chunks: number[][] = [];
+  for (let i = 0; i < sortiert.length; i += AMOUNTS_CHUNK) {
+    chunks.push(sortiert.slice(i, i + AMOUNTS_CHUNK));
+  }
+
+  const ergebnisse = useQueries({
+    queries: chunks.map((chunk) => {
+      const idsKey = chunk.join(",");
+      return {
+        queryKey: ["billing", "customer-amounts", selectedYear, selectedMonth, idsKey, dateFrom, dateTo],
+        queryFn: async ({ signal }: { signal: AbortSignal }) => {
+          const params = new URLSearchParams();
+          params.set("year", selectedYear.toString());
+          params.set("month", selectedMonth.toString());
+          params.set("customerIds", idsKey);
+          if (dateFrom) params.set("dateFrom", dateFrom);
+          if (dateTo) params.set("dateTo", dateTo);
+          const result = await api.get<Record<string, CustomerAmounts>>(
+            `/billing/customer-amounts?${params.toString()}`,
+            signal,
+          );
+          return unwrapResult(result);
+        },
+        enabled: enabled && idsKey.length > 0,
+        // Ein Batch kostet bis zu ~2.000 DB-Runden. Mit dem 30-s-Default und
+        // `refetchOnWindowFocus` liefe er bei JEDEM Fensterwechsel erneut —
+        // genau das Verhalten, das dieser Vorgang beseitigt. Die Zahlen
+        // aendern sich nur durch Mutationen, und die invalidieren ueber das
+        // `["billing"]`-Praefix ohnehin.
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
+      };
+    }),
+  });
+
+  const daten = ergebnisse.every((r) => r.data === undefined)
+    ? undefined
+    : Object.assign({}, ...ergebnisse.map((r) => r.data ?? {})) as Record<string, CustomerAmounts>;
+
+  return {
+    data: daten,
+    isLoading: ergebnisse.some((r) => r.isLoading),
+    isError: ergebnisse.some((r) => r.isError),
+  };
 }

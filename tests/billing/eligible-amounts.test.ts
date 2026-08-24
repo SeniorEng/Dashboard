@@ -104,10 +104,31 @@ async function createSelbstzahler(tag: string): Promise<number> {
   return id;
 }
 
+/**
+ * Zeile aus der LISTE — plus die Betraege aus dem BATCH-Endpunkt.
+ *
+ * 6hJRF6h8: `/eligible-customers` liefert die beiden Betraege nicht mehr; sie
+ * kosteten dort pro Kunde einen vollen `buildInvoiceDraft` und blockierten den
+ * ersten Load. Der Client holt sie beim Oeffnen einer Gruppe ueber
+ * `/billing/customer-amounts` — und dieser Helfer tut dasselbe, damit die
+ * fachlichen Zusicherungen unten UNVERAENDERT bleiben. Was hier geprueft wird,
+ * ist die RECHNUNG, nicht der Transportweg.
+ */
 async function eligibleRowFor(customerId: number): Promise<any> {
   const res = await apiGet<any[]>(`/api/billing/eligible-customers?month=${BILLING_MONTH}&year=${BILLING_YEAR}`);
   if (res.status !== 200) throw new Error(`eligible-customers failed: ${res.status} ${JSON.stringify(res.data)}`);
-  return res.data.find((c) => c.id === customerId);
+  const zeile = res.data.find((c) => c.id === customerId);
+  if (!zeile) return zeile;
+  const betraege = await amountsFor([customerId]);
+  return { ...zeile, ...(betraege[String(customerId)] ?? {}) };
+}
+
+async function amountsFor(customerIds: number[]): Promise<Record<string, any>> {
+  const res = await apiGet<Record<string, any>>(
+    `/api/billing/customer-amounts?month=${BILLING_MONTH}&year=${BILLING_YEAR}&customerIds=${customerIds.join(",")}`,
+  );
+  if (res.status !== 200) throw new Error(`customer-amounts failed: ${res.status} ${JSON.stringify(res.data)}`);
+  return res.data;
 }
 
 async function previewTotalCents(customerId: number): Promise<number> {
@@ -162,6 +183,46 @@ afterAll(async () => {
 });
 
 describe("Task #1905 — IST/PLAN-Beträge je Kunde in der Rechnungsliste", () => {
+  it("6hJRF6h8 — die LISTE liefert die Beträge nicht mehr (kein Draft pro Kunde)", async () => {
+    // Die tragende Zusage des Umbaus: der Listen-Endpunkt rechnet keine
+    // Rechnungs-Entwürfe mehr. Gemessen wird sie am Ergebnis — ein Kunde MIT
+    // abrechenbarer Arbeit muss in der Liste `null` tragen, obwohl der
+    // Batch-Endpunkt für denselben Kunden eine Zahl > 0 liefert.
+    //
+    // Nur „ist null" zu prüfen wäre zu wenig: das wäre auch dann grün, wenn es
+    // für den Kunden schlicht nichts zu rechnen gibt.
+    const res = await apiGet<any[]>(`/api/billing/eligible-customers?month=${BILLING_MONTH}&year=${BILLING_YEAR}`);
+    expect(res.status).toBe(200);
+    const zeile = res.data.find((c) => c.id === readyId);
+    expect(zeile, "Vorbedingung: der Kunde muss in der Liste stehen").toBeDefined();
+    expect(
+      zeile.actualAmountCents,
+      "Die Liste darf den IST-Betrag nicht mehr rechnen — er kostet pro Kunde " +
+        "einen vollen buildInvoiceDraft und blockierte den ersten Load.",
+    ).toBeNull();
+    expect(zeile.plannedAmountCents).toBeNull();
+
+    const betraege = await amountsFor([readyId]);
+    expect(
+      betraege[String(readyId)]?.actualAmountCents,
+      "Gegenprobe: derselbe Kunde HAT einen Betrag — der Test misst also die " +
+        "Verlagerung, nicht einen Kunden ohne Arbeit.",
+    ).toBeGreaterThan(0);
+  });
+
+  it("6hJRF6h8 — der Batch-Endpunkt deckelt die Menge und verlangt IDs", async () => {
+    // Ohne Deckel waere der alte Zustand ueber einen Query-Parameter wieder
+    // herstellbar: ein Aufruf mit allen Kunden des Monats.
+    const ohne = await apiGet<any>(`/api/billing/customer-amounts?month=${BILLING_MONTH}&year=${BILLING_YEAR}`);
+    expect(ohne.status).toBe(400);
+
+    const zuViele = Array.from({ length: 101 }, (_, i) => i + 1).join(",");
+    const gross = await apiGet<any>(
+      `/api/billing/customer-amounts?month=${BILLING_MONTH}&year=${BILLING_YEAR}&customerIds=${zuViele}`,
+    );
+    expect(gross.status).toBe(400);
+  });
+
   it("Bereit zum Abrechnen: IST == Vorschau-/Erstellungsbetrag (> 0), PLAN == 0", async () => {
     const row = await eligibleRowFor(readyId);
     expect(row).toBeDefined();
