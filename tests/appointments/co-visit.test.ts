@@ -3,6 +3,7 @@ import {
   apiGet,
   apiPost,
   apiPatch,
+  apiPatchAs,
   apiDelete,
   apiGetAs,
   loginAs,
@@ -15,9 +16,9 @@ import {
   getFutureDate,
 } from "../test-utils";
 import { validSignatureDataUrl } from "../helpers/valid-signature";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
-import { budgetTransactions } from "@shared/schema";
+import { budgetTransactions, employeeMonthClosings } from "@shared/schema";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 
 /**
@@ -41,7 +42,10 @@ import { createConsumptionTransaction } from "../../server/storage/budget/consum
  *
  * Wer einen Test ergänzt, nimmt einen FREIEN Slot — nicht einen freien Tag.
  * (`getPastWeekday`-Termine liegen in der Vergangenheit und kollidieren mit
- * keinem der obigen.)
+ * keinem der obigen. Untereinander schon: sie alle liegen auf 10:00 und
+ * unterscheiden sich NUR im Tages-Offset. Belegt: 40 · 43 · 46 · 49 · 52
+ * (CV-4.4 bis CV-4.8). Abstand mindestens 3 Tage, sonst kann die
+ * Wochenend-Rückrollung zwei Offsets auf denselben Werktag legen.)
  *
  * Task #1613 — Zwei-Kräfte-Einsatz (Co-Visit).
  *
@@ -536,6 +540,66 @@ describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
     // Versiegelter Partner bleibt bestehen und unverändert.
     expect(b.status).toBe(200);
     expect(b.data.status).toBe("completed");
+  });
+
+  it("CV-4.8 – Absage: Partner-Leg in abgeschlossenem Monat blockt den ganzen Vorgang (409), beide Legs bleiben stehen", async () => {
+    // GEGENPROBE ZUM GATE-2-RIEGEL DIESES PRs.
+    //
+    // Die Eignungsregel der Kaskade lässt `canCancelAppointment` bewusst aus:
+    // die Policy fragt unter anderem nach der ZUWEISUNG, und ein Partner-Leg
+    // gehört per Konstruktion einem ANDEREN Mitarbeiter — die volle Policy
+    // würde die Kaskade im Normalfall verhindern. Der Monatsabschluss fällt
+    // NICHT unter diese Begründung und steht deshalb einzeln in der Kaskade.
+    // Ohne ihn könnte empA durch Absage SEINES Legs ein Leg von empB in einem
+    // für empB ABGESCHLOSSENEN Monat absagen und dessen Budget zurückbuchen.
+    //
+    // Der Test handelt als empA, NICHT als Standard-Testnutzer: der Riegel
+    // hängt an `!user.isSuperAdmin` und wäre unter dem Superadmin blind — der
+    // Test liefe grün, ohne irgendetwas zu messen.
+    const { legA, legB, date } = await createPastCoVisit(52);
+
+    const [jahr, monat] = date.split("-").map(Number);
+
+    // NUR empBs Monat schließen. Wäre auch empAs Monat zu, blockte schon
+    // `canEditAppointment` im PATCH-Vorfeld mit 403 und der Test käme an der
+    // Kaskade nie an. Wer geschlossen hat, ist für den Riegel unerheblich.
+    await db.insert(employeeMonthClosings).values({
+      userId: empB!.id,
+      year: jahr,
+      month: monat,
+      closedByUserId: empB!.id,
+    });
+
+    try {
+      const authA = await loginAs(empA!.email, empA!.password);
+      const patch = await apiPatchAs<any>(authA, `/api/appointments/${legA.id}`, { status: "cancelled" });
+
+      expect(patch.status, `erwartet 409, bekam ${patch.status}: ${JSON.stringify(patch.data)}`).toBe(409);
+      expect((patch.data as any)?.code).toBe("APPOINTMENT_CO_VISIT_LOCKED");
+
+      // BEIDE Legs unverändert — inklusive Rollback des PRIMÄREN Legs. Nur den
+      // Statuscode zu prüfen verfehlte genau den Fall, den #1615 verhindern
+      // soll: legA bereits abgesagt, Fehler erst danach geworfen, ein halber
+      // Einsatz mit 409-Quittung. Die Transaktion muss das primäre Leg
+      // mitnehmen.
+      const [a, b] = await Promise.all([
+        apiGet<any>(`/api/appointments/${legA.id}`),
+        apiGet<any>(`/api/appointments/${legB.id}`),
+      ]);
+      expect(a.data.status, "primäres Leg muss mit zurückgerollt werden — sonst halber Einsatz").toBe("scheduled");
+      expect(b.data.status, "Partner-Leg im abgeschlossenen Monat darf nicht angetastet werden").toBe("scheduled");
+    } finally {
+      // Der Abschluss ist eine Fixture DIESES Tests: empB ist eine modulweite
+      // Kraft, deren Termine die übrigen Tests derselben Datei anfassen. Bliebe
+      // die Zeile stehen, schlüge sie als Fremd-409 in Nachbartests durch.
+      await db.delete(employeeMonthClosings).where(
+        and(
+          eq(employeeMonthClosings.userId, empB!.id),
+          eq(employeeMonthClosings.year, jahr),
+          eq(employeeMonthClosings.month, monat),
+        ),
+      );
+    }
   });
 });
 

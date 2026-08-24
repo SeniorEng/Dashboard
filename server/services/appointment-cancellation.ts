@@ -328,7 +328,26 @@ export async function cancelAppointments(
           // PATCH-Pfad; ohne diese Zeilen traege die Konsolidierung es in ALLE
           // Aufrufer (Serien-Bulk, Serie beenden).
           const pDaten = await ladeEntscheidungsdaten(p.id, tx);
-          if (pDaten?.policyAppt.isMonthClosed && !user.isSuperAdmin) {
+          // FAIL-CLOSED, nicht `?.`-durchfallen (Gate-3 zu #128): laesst sich
+          // die Entscheidungsgrundlage des Partners nicht laden, ist der
+          // Monatsabschluss UNBEKANNT — nicht "nicht geschlossen". Ein
+          // optionaler Zugriff haette den Riegel in genau der Lage
+          // uebersprungen, in der er nicht mehr pruefbar ist, und danach
+          // Lock-Pruefung und Rueckabwicklung auf einem Termin gefahren, dessen
+          // Zeile die Transaktion nicht mehr sieht (soft-geloescht im Fenster
+          // zwischen Partner-Query und diesem Laden). Abbrechen ist hier auch
+          // die konsistente Antwort: jede andere Partner-Ablehnung in dieser
+          // Schleife bricht ebenfalls den ganzen Vorgang ab, statt einen halben
+          // Einsatz zu hinterlassen.
+          if (!pDaten) {
+            throw new AppError(
+              409,
+              "APPOINTMENT_CO_VISIT_LOCKED",
+              `Zwei-Kraefte-Einsatz — der Termin der zweiten Kraft (#${p.id}) hat sich waehrend des `
+                + "Vorgangs veraendert und konnte nicht geprueft werden. Bitte erneut versuchen.",
+            );
+          }
+          if (pDaten.policyAppt.isMonthClosed && !user.isSuperAdmin) {
             throw new AppError(
               409,
               "APPOINTMENT_CO_VISIT_LOCKED",
