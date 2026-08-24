@@ -1,0 +1,132 @@
+import { describe, it, expect } from "vitest";
+import { and, eq, isNull } from "drizzle-orm";
+import { db } from "../../server/lib/db";
+import {
+  budgetAllocations, customerBudgetTypeSettings, customerCareLevelHistory,
+} from "@shared/schema";
+import { createTestCustomer, cleanupCustomer } from "../test-utils";
+import {
+  syncCarryoverAndExpiry, calculateAllocatedCents,
+} from "../../server/storage/budget/allocation-storage";
+
+/**
+ * §45b-Übertrags-Anlage: der Anker kommt aus DERSELBEN Kette wie der Lesepfad.
+ *
+ * ── Der Defekt ───────────────────────────────────────────────────────────
+ * `ensureYearlyCarryover45b` trug die Anker-Frage („ab wann läuft der
+ * Anspruch?") ein zweites Mal, inline, und wich vom Lesepfad ab. Alle
+ * Abweichungen zogen in dieselbe Richtung: der Schreibpfad ankerte SPÄTER,
+ * rollte deshalb Jahre nicht, die der Lesepfad zählt — und ohne Übertrag bleibt
+ * die Monatsaufstockung des Quelljahres im Topf stehen, statt zum 30.06. zu
+ * verfallen. Verfügbarkeit zu hoch, in der permissiven Richtung.
+ *
+ * ── Was hier gemessen wird ───────────────────────────────────────────────
+ * Die zwei Abweichungen, die den Roll NACHWEISLICH bewegen. Die dritte (das
+ * `todayISO()`-Gate) ist entfernt, aber für den Roll nicht isoliert messbar —
+ * dazu steht die Begründung im PR, nicht ein Test, der etwas anderes behauptet.
+ *
+ * Beide Fälle prüfen dasselbe: nach dem Sync existiert ein Übertrag ins
+ * Folgejahr, und sein Betrag ist der Jahresanspruch des Quelljahres. Der
+ * Anspruch wird aus der Produktion gelesen (`calculateAllocatedCents({ year })`),
+ * nicht im Test nachgerechnet.
+ */
+
+const curYear = new Date().getFullYear();
+const quellJahr = curYear - 1;
+
+async function kunde(): Promise<number> {
+  const c = await createTestCustomer({
+    pflegegrad: 3,
+    billingType: "pflegekasse_gesetzlich",
+    acceptsPrivatePayment: false,
+  });
+  const id = c.id as number;
+  // Ohne Pflegegrad-Historie: der PG-Anker wird auf den 01.01. des LAUFENDEN
+  // Jahres gebodet und könnte deshalb nie ein Quelljahr freigeben — er würde
+  // beide Fälle unbeobachtbar machen.
+  await db.delete(customerCareLevelHistory).where(eq(customerCareLevelHistory.customerId, id));
+  return id;
+}
+
+async function settingsPhase(customerId: number, validFrom: string, validTo: string | null): Promise<void> {
+  await db.insert(customerBudgetTypeSettings).values({
+    customerId, budgetType: "entlastungsbetrag_45b",
+    enabled: true, priority: 1,
+    monthlyLimitCents: null, yearlyLimitCents: null,
+    validFrom, validTo,
+  });
+}
+
+async function gerollterUebertrag(customerId: number): Promise<number> {
+  const rows = await db.select().from(budgetAllocations).where(and(
+    eq(budgetAllocations.customerId, customerId),
+    eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+    eq(budgetAllocations.source, "carryover"),
+    eq(budgetAllocations.validFrom, `${curYear}-01-01`),
+    isNull(budgetAllocations.deletedAt),
+  ));
+  return rows.reduce((s, a) => s + a.amountCents, 0);
+}
+
+describe("§45b-Übertrags-Anlage — Anker aus der Lesepfad-SSoT", () => {
+  it("AN-1 – Stufe 4: ein SOFT-GELÖSCHTER Startwert ankert auch den Schreibpfad", async () => {
+    // Task #1262: ein gelöschter Startwert bleibt Beleg dafür, dass §45b
+    // eingerichtet war. Der Lesepfad kennt diese Stufe, die inline-Kette des
+    // Schreibpfads kannte sie nicht — der Kunde fiel dort auf den
+    // `${curYear}-01-01`-Fallback und hatte damit gar kein Quelljahr mehr.
+    // Gemessen betrifft das 5 Kunden auf Prod.
+    const id = await kunde();
+    try {
+      await settingsPhase(id, `${quellJahr}-01-01`, null);
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        year: quellJahr, month: 1, amountCents: 100_00, source: "initial_balance",
+        validFrom: `${quellJahr}-01-01`, expiresAt: null,
+        deletedAt: new Date(),           // ← soft-gelöscht: NUR Stufe 4 trägt
+        notes: "AN-1 soft-geloeschter Startwert",
+      });
+
+      const anspruch = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { year: quellJahr });
+      expect(anspruch, "Vorbedingung: ohne Quelljahres-Anspruch misst der Test nichts")
+        .toBeGreaterThan(0);
+
+      await syncCarryoverAndExpiry(id);
+
+      expect(
+        await gerollterUebertrag(id),
+        "Der über Stufe 4 verankerte Anspruch muss in den Folgejahres-Übertrag kondensieren",
+      ).toBe(anspruch);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("AN-2 – Settings-Fenster: die FRÜHESTE Phase zählt, nicht die heute aktive", async () => {
+    // Die alte Kette nahm `validFrom` der HEUTE wirksamen Zeile. Bei einer
+    // Append-only-Transition ist das die letzte Phase — und alle Jahre davor
+    // fielen aus der Rolle. Der Lesepfad nimmt die früheste über ALLE Phasen.
+    const id = await kunde();
+    try {
+      await settingsPhase(id, `${quellJahr}-01-01`, `${quellJahr}-12-31`);
+      await settingsPhase(id, `${curYear}-01-01`, null);   // heute wirksam
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        year: quellJahr, month: 1, amountCents: 100_00, source: "initial_balance",
+        validFrom: `${quellJahr}-01-01`, expiresAt: null,
+        notes: "AN-2 Anker",
+      });
+
+      const anspruch = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { year: quellJahr });
+      expect(anspruch).toBeGreaterThan(0);
+
+      await syncCarryoverAndExpiry(id);
+
+      expect(
+        await gerollterUebertrag(id),
+        "Ein Phasenwechsel zum Jahreswechsel darf das Quelljahr nicht aus der Rolle werfen",
+      ).toBe(anspruch);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+});
