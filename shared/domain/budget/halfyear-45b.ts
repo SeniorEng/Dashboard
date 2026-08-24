@@ -274,6 +274,31 @@ export interface HalfYearEvalResult {
   carryoverOutSollCents: number;
   phantomCents: number;
   shortfallCents: number;
+
+  // ── Zwischenwerte: der Fehlbetrag muss PRUEFBAR sein ────────────────────
+  //
+  // `shortfallCents` allein ist eine Behauptung. Aus ihm kann eine Kuerzung
+  // eines noch nicht gestellten Rechnungsentwurfs folgen — und beim ersten
+  // echten Fall (Kunde 54, 211,95 EUR) liess sich die Zahl aus den Rohdaten
+  // NICHT nachvollziehen: die Nachrechnung kam auf 429,90 EUR, also den
+  // doppelten Betrag, und die Differenz blieb unerklaert. Nachbauen ist kein
+  // Pruefen; wer nachbaut, kann denselben Fehler ein zweites Mal machen.
+  //
+  // Diese fuenf Felder sind die Eingaben der Formel
+  // (`shortfall = max(0, claimed - available)`,
+  //  `available = targetYearEntitlement + carryoverInSoll`). Sie werden hier
+  // nur DURCHGEREICHT — die Rechnung selbst bleibt unveraendert.
+
+  /** Netto-Verbrauch des ZIELjahres bis zum Stichtag (ohne `write_off`). */
+  claimedCents: number;
+  /** Eigener Anspruch des Zieljahres, auf denselben Stichtag gekappt. */
+  targetYearEntitlementCents: number;
+  /** Was der Uebertrag laut Ledger im Zieljahr getragen hat — vor dem Deckel. */
+  absorbedInTargetCents: number;
+  /** Angerechneter Uebertrag = `min(carryoverOutSoll, absorbedInTarget)`. */
+  carryoverInSollCents: number;
+  /** `targetYearEntitlement + carryoverInSoll`. */
+  availableCents: number;
 }
 
 function ymOf(iso: string): { year: number; month: number } {
@@ -391,7 +416,11 @@ export function carryoverTargetYear(a: AllocRow, modus: CarryoverKeying): number
  *    Verbrauch nach dem 30.06. kann ihn nicht mehr aufzehren.
  */
 export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
-  const leer = { sourceYearEntitlementCents: 0, carryoverOutSollCents: 0, phantomCents: 0, shortfallCents: 0 };
+  const leer = {
+    sourceYearEntitlementCents: 0, carryoverOutSollCents: 0, phantomCents: 0, shortfallCents: 0,
+    claimedCents: 0, targetYearEntitlementCents: 0, absorbedInTargetCents: 0,
+    carryoverInSollCents: 0, availableCents: 0,
+  };
   const s45bEnabled = i.settings.some(s => s.enabled);
 
   const anchor = resolve45bAnchor({
@@ -489,6 +518,11 @@ export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
     carryoverOutSollCents: ph.carryoverOutSollCents,
     phantomCents: ph.phantomCents,
     shortfallCents: sf.shortfallCents,
+    claimedCents: claimed,
+    targetYearEntitlementCents: targetEntitlement,
+    absorbedInTargetCents: absorbedInTarget,
+    carryoverInSollCents: absorbed,
+    availableCents: sf.availableCents,
   };
 }
 
