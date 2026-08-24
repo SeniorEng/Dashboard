@@ -54,6 +54,26 @@ const ALLOWED = [
   "shared/api/openapi.ts",
   "server/routes/billing.ts",
   "client/src/features/billing/components/pending-invoices-card.tsx",
+  // 6hJRF6h8 — die Betrags-Berechnung ist aus `/billing/eligible-customers`
+  // herausgeloest, weil sie dort pro Kunde einen vollen `buildInvoiceDraft`
+  // kostete und den ersten Load blockierte. Der PLAN-Wert wechselt damit die
+  // Datei, NICHT die Rolle: beide Neuzugaenge sind reine Lese-/Anzeige-Wege.
+  //
+  //  * der Service RECHNET den Wert (wie vorher der Endpunkt) und gibt ihn
+  //    zurueck — er schreibt nichts, kein Insert/Update, keine Rechnung.
+  //  * der Query-Hook HOLT ihn und reicht ihn an die Karte.
+  //
+  // Die Zusage aus dem Kopfkommentar bleibt damit unveraendert: an die
+  // Erstellung geht ausschliesslich `c.id` bzw. `customerIds`, nie das
+  // Kunden-Item selbst.
+  //
+  // Der Query-Hook stand hier zunaechst ebenfalls — nur, weil er die
+  // Response-Form inline zweitdefinierte. Der Typ liegt jetzt in
+  // `shared/api/billing.ts` (ohnehin ALLOWED), der Hook nennt das Feld nicht
+  // mehr, und der blinde Fleck des Waechters bleibt auf DIESE eine Karte
+  // begrenzt statt auf alle Billing-Read-Hooks zu wachsen.
+  // (Gate-2 zu #129.)
+  "server/services/billing-customer-amounts.ts",
 ];
 
 /**

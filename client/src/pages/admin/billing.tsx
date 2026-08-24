@@ -572,6 +572,10 @@ export default function AdminBilling() {
             </Button>
           </div>
 
+          {/* 6hJRF6h8 — `dateFrom`/`dateTo` sind dieselbe Zeitraum-Angabe wie
+              bei `useEligibleCustomers` oben (heute NO_DATE = ganzer Monat).
+              Der Betrags-Batch MUSS denselben Scope haben, sonst zeigte er
+              Zahlen fuer eine andere Menge Termine als die Liste. */}
           <PendingInvoicesCard
             customers={customers}
             isLoading={customersLoading}
@@ -580,6 +584,10 @@ export default function AdminBilling() {
             selection={pendingSelection}
             onCreateSelected={handleCreateSelectedPending}
             createSelectedPending={generateAllMutation.isPending && generateAllSelection !== null}
+            selectedYear={selectedYear}
+            selectedMonth={selectedMonth}
+            dateFrom={NO_DATE}
+            dateTo={NO_DATE}
           />
 
           <InvoiceList
