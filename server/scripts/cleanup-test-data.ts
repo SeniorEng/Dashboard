@@ -23,6 +23,7 @@
 
 import { sql } from "drizzle-orm";
 import { db, pool } from "../lib/db";
+import { assertDevDatabase, assertDevWriteTargetOrThrow } from "../lib/dev-db-guard";
 import {
   DOCUMENT_TYPE_WHITELIST,
   customerIsolationMatchSql,
@@ -77,23 +78,28 @@ async function safetyChecks(apply: boolean): Promise<void> {
   if (process.env.NODE_ENV === "production") {
     throw new Error("ABBRUCH: NODE_ENV=production. Dieses Skript darf nie auf Produktion laufen.");
   }
-  // Hostname-Check, nicht Substring-Check: parse die URL und prüfe Host
-  // gegen Deny-Pattern (prod, production). DATABASE_URL kann eine valide URL
-  // sein oder ein Postgres-Connection-String.
-  const url = process.env.DATABASE_URL || "";
-  let host = "";
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    // Fallback: postgres://user:pass@host:port/db ohne valides URL-Schema
-    const m = url.match(/@([^:/?#]+)/);
-    host = (m ? m[1] : "").toLowerCase();
+  // ERSETZT die frueher hier nachgebaute Host-Pruefung durch die SSoT
+  // (server/lib/dev-db-guard.ts). Die lokale Kopie war an drei Stellen
+  // SCHWAECHER: reine `@host`-Regex als Fallback, `if (host && ...)` liess
+  // einen NICHT ermittelbaren Host durch (fail-open), und PROD_DATABASE_URL
+  // kannte sie nicht.
+  assertDevDatabase();
+
+  // Schreibende Laeufe verlangen die POSITIVE Ziel-Pruefung.
+  //
+  // `assertDevDatabase()` allein ist ein NEGATIVES Praedikat ("sieht nicht nach
+  // Prod aus") und reicht fuer einen Trockenlauf. Fuer den Schreibpfad reicht
+  // es NICHT: "nicht Prod" ist auch fuer eine unbekannte oder falsch
+  // konfigurierte DB wahr — dasselbe NULL-Loch, wegen dem #118 die positive
+  // Pruefung eingefuehrt hat.
+  //
+  // Sie erteilt zugleich die Freigabe fuer die Laufzeit-Schreibsperre (#117);
+  // ohne sie braeche der Lauf beim ersten Schreibzugriff ab.
+  if (apply) {
+    const ziel = await assertDevWriteTargetOrThrow();
+    console.log(`Dev-Ziel bestaetigt: ${ziel}`);
   }
-  // Hard-Stop bei Hostname-Match auf prod-Pattern (auch im Trockenlauf)
-  if (host && /(^|[.-])prod([.-]|$)|production/.test(host)) {
-    throw new Error(`ABBRUCH: DB-Host '${host}' sieht nach Produktion aus. Dieses Skript darf nie auf Produktion laufen.`);
-  }
-  log(`Sicherheits-Checks ok. DB-Host: ${host || "(unbekannt)"}, Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN"}`);
+  log(`Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN"}`);
 }
 
 async function listWhitelistEntities(): Promise<void> {

@@ -27,7 +27,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { users } from "@shared/schema";
 import { freigabeErteilen } from "../../lib/prod-write-lock";
-import { dbNameOf } from "@shared/ephemeral-db-target";
+import { dbHostOf, dbNameOf, istLoopback } from "@shared/ephemeral-db-target";
 
 export interface ProdWriteArgs {
   apply: boolean;
@@ -61,14 +61,14 @@ export function parseProdWriteArgs(argv: string[] = process.argv): ProdWriteArgs
   };
 }
 
-/** Host-Teil einer Postgres-URL, klein geschrieben. `null`, wenn unlesbar. */
-export function dbHostOf(url: string): string | null {
-  try {
-    return new URL(url).hostname.toLowerCase() || null;
-  } catch {
-    return null;
-  }
-}
+// `dbHostOf` kommt jetzt aus `@shared/ephemeral-db-target` — EINE Fassung
+// fuer beide Seiten. Re-Export, damit alle bisherigen Importeure unveraendert
+// weiterlaufen.
+// `dbHostOf` und `istLoopback` kommen aus `@shared/ephemeral-db-target` —
+// EINE Fassung fuer alle Seiten. Re-Export, damit bisherige Importeure
+// unveraendert weiterlaufen.
+export { dbHostOf, istLoopback };
+
 
 /**
  * Liest den Datenbanknamen aus der TATSÄCHLICHEN Verbindung.
@@ -84,6 +84,7 @@ export async function currentDatabaseName(): Promise<string> {
   const erste = rows[0] as { db?: unknown } | undefined;
   return String(erste?.db ?? "");
 }
+
 
 /**
  * Fail-closed: wirft, wenn `--apply` gegen irgendetwas anderes als die
@@ -126,11 +127,7 @@ export async function assertApplyTargetIsProdPrimaryOrThrow(confirmTarget: strin
   if (/cc_test_/.test(url)) {
     throw new Error("ABBRUCH: DATABASE_URL zeigt auf eine Wegwerf-/Test-DB (cc_test_). --apply verweigert.");
   }
-  // Klammern abstreifen: `new URL("postgres://…@[::1]/db").hostname` liefert
-  // `"[::1]"` MIT eckigen Klammern. Ein Muster, das `::1` am Anfang erwartet,
-  // greift dann nicht — und ausgerechnet der Loopback rutschte durch.
-  const hostNackt = host.replace(/^\[|\]$/g, "");
-  if (/^(localhost|127\.|::1|::ffff:127\.|0\.0\.0\.0)/.test(hostNackt)) {
+  if (istLoopback(host)) {
     throw new Error(`ABBRUCH: DB-Host '${host}' ist lokal. --apply verweigert.`);
   }
   if (/replica|readonly|read-only|([.-]ro[.-])/.test(host)) {

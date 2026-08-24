@@ -88,6 +88,11 @@ aktive DB-Verbindungen (z.B. der laufende Dev-Server) erkannt werden.
    kann den Server in einen Shutdown/Neustart treiben.)
 2. Reseed ausführen:
    ```bash
+   # PFLICHT für jeden scharfen Lauf (seit W4): das Ziel muss BENANNT werden.
+   # Der Datenbankname wird an der OFFENEN Verbindung geprüft, nicht aus der
+   # URL gelesen — "sieht nicht nach Prod aus" ist kein Nachweis.
+   export DEV_WRITE_CONFIRM_TARGET="<host>/<datenbank>"
+
    npm run db:reseed-dev -- --apply            # fragt zur Bestätigung "RESEED" ab
    npm run db:reseed-dev -- --apply --yes       # ohne interaktive Rückfrage
    npm run db:reseed-dev -- --apply --no-backup # ohne Pre-Reseed-Backup

@@ -428,8 +428,9 @@ export function evaluate45bHalfYear(i: HalfYearEvalInput): HalfYearEvalResult {
    *
    * DETERMINISTISCHES MINIMUM ueber die Nicht-NULL-Fristen, nicht `.find`.
    * Die Query liefert ohne `orderBy` keine garantierte Reihenfolge, und
-   * Doppel-Uebertraege sind real (siehe `scripts/cleanup-duplicate-carryovers.ts`,
-   * Task #102). Mit `.find` kippte derselbe Datenstand je nach Zeilenreihenfolge
+   * Doppel-Uebertraege sind real (Task #101/#102; Altbestand zurueckgebaut,
+   * Protokoll `docs/corrections/2026-08-23_duplikate-45b-carryover-startwert.md`).
+   * Mit `.find` kippte derselbe Datenstand je nach Zeilenreihenfolge
    * zwischen 800 EUR Phantom und 0 EUR.
    *
    * Warum das MINIMUM: mehrere Zeilen bedeuten mehrere Fristen; die frueheste

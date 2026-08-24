@@ -509,9 +509,10 @@ export async function calculateAllocatedCents(
  *
  *   5. Addiere alle persistierten `carryover`-Einträge — aber nur dann, wenn
  *      für das **Quelljahr** (carryover.year - 1) **kein** manueller Startwert
- *      existiert. Sonst Doppelzählung (Task #101). Das Cleanup-Skript
- *      `server/scripts/cleanup-duplicate-carryovers.ts` räumt obsolet
- *      gewordene Carryovers zusätzlich auf (Task #102).
+ *      existiert. Sonst Doppelzählung (Task #101). Der Altbestand obsolet
+ *      gewordener Carryovers ist einmalig zurückgebaut worden; das Skript ist
+ *      nach Anwendung entfernt, Protokoll:
+ *      `docs/corrections/2026-08-23_duplikate-45b-carryover-startwert.md`.
  *
  * ## Warum virtuell statt gespeichert?
  *

@@ -89,14 +89,18 @@ import { generateInvoiceCore } from "../services/invoice-calc";
 import { persistInvoicePdf } from "../services/invoice-pdf-orchestrator";
 import { assertProdWriteAllowedOrThrow, parseProdWriteArgs } from "./lib/prod-write-gate";
 
-interface Args {
-  apply: boolean;
+/**
+ * Die gemeinsamen Flags kommen aus der SSoT, nicht aus einer Zweitliste.
+ *
+ * Vorher zaehlte dieses Interface sie noch einmal auf. Eine solche Kopie
+ * driftet lautlos: `--target` fehlte hier bereits, und in reconcile-km-drift
+ * war es `confirmTarget`, das zwar dastand, aber nie zugewiesen wurde (B1,
+ * Gate-2 zu #120) — das Gate brach dort bei JEDEM `--apply` ab. Abgeleitet
+ * kann die Liste nicht mehr auseinanderlaufen.
+ */
+type Args = ReturnType<typeof parseProdWriteArgs> & {
   invoiceNumbers: string[];
-  userId: number | undefined;
-  reason: string | undefined;
-  /** `--confirm-target=<host>/<datenbank>` — vom Ziel-Gate geprueft. */
-  confirmTarget?: string;
-}
+};
 
 /** Der historische Bug: Prozent-Rate roh durch 10000 → 100× zu niedrig. */
 function buggyVatCents(netCents: number): number {
@@ -135,12 +139,14 @@ function parseArgs(): Args {
   // `.split("=")[1]` am ERSTEN `=` ab — eine Begruendung mit `=>` landete
   // verstuemmelt im GoBD-Audit-Log (PR #119).
   const gemeinsam = parseProdWriteArgs(process.argv);
+  // SPREAD statt Feld-fuer-Feld: die feldweise Form ist genau der Weg, auf
+  // dem `confirmTarget` in reconcile-km-drift verlorenging (B1, Gate-2 zu
+  // #120) — deklariert, nie zugewiesen, das Gate brach bei JEDEM --apply
+  // ab. Was man nicht aufzaehlt, kann man nicht vergessen.
   return {
+    ...gemeinsam,
     apply,
     invoiceNumbers,
-    userId: gemeinsam.userId,
-    reason: gemeinsam.reason,
-    confirmTarget: gemeinsam.confirmTarget,
   };
 }
 
@@ -356,12 +362,7 @@ async function main() {
     // Ziel, Superadmin und Begruendung in EINEM Aufruf — und die Freigabe
     // fuer die Laufzeit-Schreibsperre.
     const freigabe = await assertProdWriteAllowedOrThrow(
-      {
-        apply: args.apply,
-        userId: args.userId,
-        reason: args.reason,
-        confirmTarget: args.confirmTarget,
-      },
+      args,
       "Der Lauf storniert Selbstzahler-Rechnungen und stellt sie neu aus (GoBD).",
     );
     console.log(`Freigegeben durch: ${freigabe.displayName}`);

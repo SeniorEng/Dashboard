@@ -30,7 +30,12 @@
  * nimmt diesen Helfer statt einer vierten Formulierung.
  */
 import { assertDevWriteTargetOrThrow } from "../../lib/dev-db-guard";
-import { assertProdWriteAllowedOrThrow, type ProdWriteArgs } from "./prod-write-gate";
+import {
+  assertProdWriteAllowedOrThrow,
+  assertSuperadminOrThrow,
+  REASON_MIN_LAENGE,
+  type ProdWriteArgs,
+} from "./prod-write-gate";
 
 export type Zielklasse = "prod" | "dev";
 
@@ -53,7 +58,8 @@ const HINWEIS = [
   "  --target=prod   verlangt --confirm-target=<host>/<datenbank>, einen",
   "                  Superadmin (--user), eine Begruendung (--reason) und ein",
   "                  gesetztes PROD_DATABASE_URL.",
-  "  --target=dev    verlangt DEV_WRITE_CONFIRM_TARGET=<host>/<datenbank>.",
+  "  --target=dev    verlangt DEV_WRITE_CONFIRM_TARGET=<host>/<datenbank>,",
+  "                  einen Superadmin (--user) und eine Begruendung (--reason).",
   "",
   "  Die Klasse wird NICHT abgeleitet. Waere sie es, haenge die Sicherheitsstufe",
   "  an einem vergessenen Flag — wer es vergisst, bekaeme still die schwaechere",
@@ -97,7 +103,48 @@ export async function assertDualTargetOrThrow(
       );
     }
     const ziel = await assertDevWriteTargetOrThrow();
-    return { klasse: "dev", ziel };
+
+    // Audit-Attribution gilt auf BEIDEN Zweigen — hier ausdruecklich, weil
+    // `assertDevWriteTargetOrThrow` nur nach dem ZIEL fragt, nie nach dem
+    // Urheber.
+    //
+    // Ohne diesen Block tauschte ein Skript, das von handgeschriebenen
+    // `--user`/`--reason`-Pruefungen auf dieses Gate umstellt, ein Ziel-Loch
+    // gegen ein AUDIT-Loch. Gemessen an `reconcile-import-from-excel` im
+    // Gate-2 zu #125, und die Kette endet still:
+    //
+    //   --target=dev ohne --user
+    //     -> args.userId === undefined
+    //     -> rebook schreibt budget_transactions.created_by_user_id = NULL
+    //     -> auditService.log(undefined, …) verletzt audit_log.user_id NOT NULL
+    //     -> der Legacy-Pfad FAENGT den Fehler und meldet nur auf stderr
+    //     -> das Skript meldet Erfolg
+    //
+    // Nachgestellt: `auditService.log(undefined, …)` liefert `null`, die
+    // NOT-NULL-Verletzung steht nur im Log. Die Umbuchung ist dann gebucht und
+    // unauffindbar. Die Dev-DB ist laut CLAUDE.md eine Prod-KOPIE — dort ist
+    // eine spurlose Budget-Umbuchung kein harmloser Testfall.
+    //
+    // Der Superadmin-Check kommt mit: wer schreibt, muss auch hier existieren,
+    // aktiv und berechtigt sein. Das ist dieselbe Zusage wie auf dem
+    // Prod-Zweig, nur ohne dessen Ziel-Zeremonie.
+    if (args.userId === undefined) {
+      throw new Error(
+        "ABBRUCH: --target=dev erfordert --user=<superadmin-id> fuer die Audit-Attribution.\n" +
+          "  Ohne sie bleibt `created_by_user_id` leer und der Audit-Eintrag scheitert\n" +
+          "  STILL (audit_log.user_id ist NOT NULL, der Insert-Fehler wird gefangen).",
+      );
+    }
+    if (!args.reason || args.reason.trim().length < REASON_MIN_LAENGE) {
+      throw new Error(
+        `ABBRUCH: --target=dev erfordert --reason="…" (mindestens ${REASON_MIN_LAENGE} Zeichen).\n` +
+          "  Die Begruendung landet im Audit-Log und ist dort der einzige Hinweis,\n" +
+          "  WARUM die Zeilen veraendert wurden.",
+      );
+    }
+    const displayName = await assertSuperadminOrThrow(args.userId, zweck);
+
+    return { klasse: "dev", ziel, displayName };
   }
 
   throw new Error(HINWEIS);

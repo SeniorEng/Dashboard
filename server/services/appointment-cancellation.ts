@@ -1,10 +1,14 @@
 import { and, eq, isNull } from "drizzle-orm";
+import {
+  pruefeRechnungsSperre,
+  rechnungsSperreMeldung,
+  wickleBudgetZurueck,
+} from "./appointment-budget-unwind";
 import { db, type Tx } from "../lib/db";
 import { appointments } from "@shared/schema";
 import { appointmentsRepo } from "../repos";
 import { AppError } from "../lib/errors";
 import { storage } from "../storage";
-import { budgetStorage } from "../storage/budget-storage";
 import { auditService } from "./audit";
 import {
   canCancelAppointment,
@@ -157,6 +161,76 @@ export async function cancelAppointments(
 
   const cancelled: number[] = [];
 
+  /**
+   * Ein Termin: Rechnungspruefung → Rueckabwicklung → Status → Audit.
+   *
+   * Herausgezogen, damit das primaere Leg und die kaskadierten Co-Visit-Legs
+   * NACHWEISLICH denselben Weg nehmen. Zwei Kopien waeren genau der Zustand,
+   * aus dem der Defekt entstand — die Kaskade im PATCH-Pfad war so eine Kopie,
+   * nur ohne Rueckabwicklung.
+   *
+   * Liefert `false`, wenn uebersprungen wurde (Grund steht dann in
+   * `uebersprungen`).
+   */
+  const rueckabwickelnUndAbsagen = async (
+    tx: Tx,
+    id: number,
+    dokumentationVerworfen: boolean,
+    kaskadeVonLegId?: number,
+    kontext?: { customerId: number | null; coVisitGroupId: string | null },
+  ): Promise<boolean> => {
+    // GoBD: NICHT zurueckbuchen, solange eine aktive Rechnung den Verbrauch
+    // ausweist. Frage und Meldungstext kommen aus der Rueckabwicklungs-SSoT
+    // (`appointment-budget-unwind.ts`) — dieselben, die der Loesch-Pfad und das
+    // Serien-Verkuerzen benutzen.
+    //
+    // UEBERSPRINGEN statt werfen: diese Routine arbeitet Mengen ab, ein Abbruch
+    // wuerde die uebrigen Termine mitreissen. Der Loesch-Pfad wirft, weil es
+    // dort um genau einen Termin geht. Dieselbe Frage, bewusst verschiedene
+    // Antwort — deshalb sind Pruefung und Reaktion getrennt.
+    const sperre = await pruefeRechnungsSperre(id, tx);
+    if (sperre) {
+      uebersprungen.push({ id, grund: rechnungsSperreMeldung(sperre, "abgesagt") });
+      return false;
+    }
+
+    const { reversedTransactionIds, holdsReleased } = await wickleBudgetZurueck(id, opts.userId, tx);
+
+    await tx.update(appointments).set({ status: "cancelled" }).where(eq(appointments.id, id));
+
+    await auditService.log(
+      opts.userId,
+      "appointment_cancelled",
+      "appointment",
+      id,
+      {
+        reversedTransactionIds,
+        holdsReleased,
+        // Aus dem FRISCHEN Stand, nicht aus der Vor-Transaktions-Runde
+        // (`verwerfen`): wurde der Termin erst im Race-Fenster `documenting`
+        // und lief mit gesetztem Flag durch, stuende dort `false`, obwohl eine
+        // begonnene Dokumentation vernichtet wurde. Fuer die GoBD-Spur ist
+        // genau das die Frage.
+        documentationDiscarded: dokumentationVerworfen,
+        // Beim Zusammenfuehren der Kaskade verloren gegangen und hier
+        // zurueckgeholt: `customerId` ist im Audit-Service die durchgehende
+        // Konvention fuer Termin-Ereignisse, `coVisitGroupId` macht die
+        // Gruppe im Verlauf auffindbar. Kein Reader filtert heute darauf —
+        // aber eine Spur, die weniger sagt als die vorherige, ist ein
+        // Rueckschritt. (Gate-2 zu #128.)
+        customerId: kontext?.customerId ?? undefined,
+        coVisitGroupId: kontext?.coVisitGroupId ?? undefined,
+        // Nur bei kaskadierten Partner-Legs gesetzt — damit im Verlauf jedes
+        // Legs sichtbar ist, WARUM es abgesagt wurde (uebernommen aus dem
+        // PATCH-Pfad, der dafuer `appointment_updated` benutzte).
+        ...(kaskadeVonLegId != null ? { coVisitCascadeFromLegId: kaskadeVonLegId } : {}),
+      },
+      opts.ipAddress,
+      tx,
+    );
+    return true;
+  };
+
   const run = async (tx: Tx) => {
     for (const id of erlaubt) {
       // ── Race-sichere Re-Prüfung IN der Transaktion (Gate-2-Fund B3) ──────
@@ -207,38 +281,112 @@ export async function cancelAppointments(
         continue;
       }
 
-      const transaktionen = await budgetStorage.getTransactionsByAppointmentId(id);
-      for (const t of transaktionen) {
-        await budgetStorage.reverseBudgetTransaction(t.id, opts.userId, tx);
-      }
-      // Hinter demselben Feature-Gate wie im Delete-Pfad — sonst entstünde
-      // genau die Divergenz, die diese Routine beseitigt.
-      if (budgetStorage.hardHoldsEnabled()) {
-        await budgetStorage.releaseHolds(id, opts.userId, tx);
-      }
-
-      await tx.update(appointments).set({ status: "cancelled" }).where(eq(appointments.id, id));
-
-      await auditService.log(
-        opts.userId,
-        "appointment_cancelled",
-        "appointment",
-        id,
-        {
-          reversedTransactionIds: transaktionen.map((t: { id: number }) => t.id),
-          holdsReleased: budgetStorage.hardHoldsEnabled(),
-          // Aus dem FRISCHEN Stand, nicht aus der Vor-Transaktions-Runde
-          // (`verwerfen`): wurde der Termin erst im Race-Fenster `documenting`
-          // und lief mit gesetztem Flag durch, stünde dort `false`, obwohl eine
-          // begonnene Dokumentation vernichtet wurde. Für die GoBD-Spur ist
-          // genau das die Frage.
-          documentationDiscarded: discardsDocumentation(frisch.policyAppt),
-        },
-        opts.ipAddress,
-        tx,
-      );
-
+      const ok = await rueckabwickelnUndAbsagen(tx, id, discardsDocumentation(frisch.policyAppt), undefined,
+        { customerId: frisch.appt.customerId, coVisitGroupId: frisch.appt.coVisitGroupId });
+      if (!ok) continue;
       cancelled.push(id);
+
+      // ── Co-Visit-Kaskade (Task #1615) ────────────────────────────────────
+      //
+      // Ein Co-Visit ist EIN Besuch mit zwei Legs. Wird eins abgesagt, muss das
+      // andere mit — sonst bliebe ein Leg als `scheduled` stehen und, das ist
+      // der Punkt hier, MIT SEINER BUDGET-BUCHUNG.
+      //
+      // Die Kaskade gab es bisher nur im PATCH-Pfad
+      // (`server/routes/appointments.ts`), und dort als nacktes Status-Update:
+      // kein Storno der Buchungen, keine Hold-Freigabe, kein
+      // `appointment_cancelled`-Audit. Die kaskadierten Legs sind damit genau
+      // die Menge, die geleakt hat. Hier laufen sie durch DIESELBE
+      // Rueckabwicklung wie das primaere Leg.
+      //
+      // ZUR EIGNUNGSREGEL, weil sie bewusst ANDERS ist als beim primaeren Leg:
+      // hier entscheidet NUR der Status (`scheduled`) plus die Lock-Pruefung,
+      // nicht `canCancelAppointment`. Die volle Policy fragt unter anderem, ob
+      // der Handelnde dem Termin zugewiesen ist — bei einem Co-Visit gehoert
+      // das Partner-Leg per Konstruktion einem ANDEREN Mitarbeiter. Die volle
+      // Policy anzuwenden hiesse, die Kaskade im Normalfall zu verhindern und
+      // das Leg samt Buchung stehen zu lassen. Uebernommen aus dem PATCH-Pfad,
+      // nicht neu erfunden.
+      const gruppe = frisch.appt.coVisitGroupId;
+      if (gruppe != null) {
+        const partner = await storage.getCoVisitPartnerAppointments(gruppe, id, tx);
+        for (const p of partner) {
+          // Partner mit eigenem Ausgang (completed/no_show/bereits cancelled)
+          // bleiben bestehen — eine Absage ist nur aus `scheduled` gueltig.
+          // Das ist KEIN halber Einsatz: ein abgeschlossenes Leg ist ein
+          // echtes Ergebnis, kein liegengebliebener Rest.
+          if (p.status !== "scheduled") continue;
+
+          // GATE-2-FUND (Monatsabschluss): die Eignungsregel hier laesst
+          // `canCancelAppointment` bewusst aus, WEIL die Policy nach der
+          // Zuweisung fragt und ein Partner-Leg per Konstruktion einem anderen
+          // Mitarbeiter gehoert. Die Policy prueft daneben aber auch
+          // `isMonthClosed && !isSuperAdmin` — und DIE faellt nicht unter diese
+          // Begruendung. Ohne sie koennte ein Mitarbeiter durch Absage SEINES
+          // Legs ein Partner-Leg in einem fuer den Partner ABGESCHLOSSENEN
+          // Monat absagen und zurueckbuchen. Vorher betraf das nur den
+          // PATCH-Pfad; ohne diese Zeilen traege die Konsolidierung es in ALLE
+          // Aufrufer (Serien-Bulk, Serie beenden).
+          const pDaten = await ladeEntscheidungsdaten(p.id, tx);
+          // FAIL-CLOSED, nicht `?.`-durchfallen (Gate-3 zu #128): laesst sich
+          // die Entscheidungsgrundlage des Partners nicht laden, ist der
+          // Monatsabschluss UNBEKANNT — nicht "nicht geschlossen". Ein
+          // optionaler Zugriff haette den Riegel in genau der Lage
+          // uebersprungen, in der er nicht mehr pruefbar ist, und danach
+          // Lock-Pruefung und Rueckabwicklung auf einem Termin gefahren, dessen
+          // Zeile die Transaktion nicht mehr sieht (soft-geloescht im Fenster
+          // zwischen Partner-Query und diesem Laden). Abbrechen ist hier auch
+          // die konsistente Antwort: jede andere Partner-Ablehnung in dieser
+          // Schleife bricht ebenfalls den ganzen Vorgang ab, statt einen halben
+          // Einsatz zu hinterlassen.
+          if (!pDaten) {
+            throw new AppError(
+              409,
+              "APPOINTMENT_CO_VISIT_LOCKED",
+              `Zwei-Kraefte-Einsatz — der Termin der zweiten Kraft (#${p.id}) hat sich waehrend des `
+                + "Vorgangs veraendert und konnte nicht geprueft werden. Bitte erneut versuchen.",
+            );
+          }
+          if (pDaten.policyAppt.isMonthClosed && !user.isSuperAdmin) {
+            throw new AppError(
+              409,
+              "APPOINTMENT_CO_VISIT_LOCKED",
+              `Zwei-Kraefte-Einsatz — der Termin der zweiten Kraft (#${p.id}) liegt in einem `
+                + "abgeschlossenen Monat. Absagen ist dort nur durch die Geschaeftsfuehrung moeglich.",
+            );
+          }
+
+          // GATE-2-FUND (halber Einsatz): kann der Partner NICHT mit, bricht
+          // der ganze Vorgang ab — statt das primaere Leg abzusagen und den
+          // Partner mit seiner Buchung stehen zu lassen.
+          //
+          // Genau diesen Zustand sollte #1615 verhindern, und der Loesch-Pfad
+          // lehnt in derselben Lage bereits ab (`APPOINTMENT_CO_VISIT_LOCKED`).
+          // Die Absage tat es nicht — sie meldete 200, waehrend ein halber
+          // Einsatz zurueckblieb. Die Rechnungspruefung aus diesem PR haette
+          // einen NEUEN Weg dorthin eroeffnet: Partner abgerechnet -> steht.
+          if (await storage.lockAndCheckAppointmentLocked(p.id, tx)) {
+            throw new AppError(
+              409,
+              "APPOINTMENT_CO_VISIT_LOCKED",
+              `Zwei-Kraefte-Einsatz — der Termin der zweiten Kraft (#${p.id}) liegt auf einem `
+                + "unterschriebenen Leistungsnachweis und bliebe stehen. Es entstuende ein halber Einsatz.",
+            );
+          }
+          const partnerSperre = await pruefeRechnungsSperre(p.id, tx);
+          if (partnerSperre) {
+            throw new AppError(
+              409,
+              "APPOINTMENT_CO_VISIT_LOCKED",
+              `Zwei-Kraefte-Einsatz — ${rechnungsSperreMeldung(partnerSperre, "der Einsatz abgesagt")}`,
+            );
+          }
+
+          const partnerOk = await rueckabwickelnUndAbsagen(tx, p.id, false, id,
+            { customerId: p.customerId ?? null, coVisitGroupId: gruppe });
+          if (partnerOk) cancelled.push(p.id);
+        }
+      }
     }
   };
 

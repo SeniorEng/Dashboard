@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { cancelAppointments, CancelDiscardsDocumentationError } from "../services/appointment-cancellation";
+import { pruefeRechnungsSperre, wickleBudgetZurueck } from "../services/appointment-budget-unwind";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler, sendBadRequest, sendNotFound, sendForbidden } from "../lib/errors";
@@ -762,6 +763,15 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
     if (/Leistungsnachweis/.test(grund)) {
       return res.status(409).json({ code: "APPOINTMENT_LOCKED", message: grund });
     }
+    // Dieselbe Vereinheitlichung wie oben fuer die LN-Sperre (Gate-2-Fund S3),
+    // jetzt fuer die RECHNUNGS-Sperre: der Loesch-Pfad antwortet dafuer seit
+    // jeher 409/APPOINTMENT_INVOICED, der PATCH-Pfad ebenfalls 409. Nur dieser
+    // Zweig meldete 400 — der Client kann darauf nicht verzweigen, obwohl es
+    // dieselbe Ablehnung mit derselben Abhilfe ist (Rechnung stornieren bzw.
+    // Entwurf verwerfen). (Gate-2 zu #128.)
+    if (/Rechnung/.test(grund)) {
+      return res.status(409).json({ code: "APPOINTMENT_INVOICED", message: grund });
+    }
     return sendBadRequest(res, grund);
   }
 
@@ -949,7 +959,7 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
   );
 
   const deletableIds: number[] = [];
-  const skippedCount = { locked: 0, monthClosed: 0, completed: 0 };
+  const skippedCount = { locked: 0, monthClosed: 0, completed: 0, abgerechnet: 0 };
 
   for (const apt of futureAppointments) {
     if (apt.status === "completed") {
@@ -993,8 +1003,36 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
         safeIds.push(aptId);
       }
     }
-    deletedCount = safeIds.length;
-    await seriesStorage.bulkDeleteSeriesAppointments(safeIds, tx);
+    // ── Budget-Rueckabwicklung VOR dem Soft-Delete ────────────────────────
+    //
+    // Bis hierhin war dieser Pfad ein nacktes
+    // `UPDATE appointments SET deleted_at = now()`: der Termin verschwand, seine
+    // Budget-Buchung und seine Holds blieben. Verbrauchtes Budget fuer eine
+    // Leistung, die nie erbracht wird — dasselbe Leck wie auf dem Absage-Pfad,
+    // nur mit haerterer Folge, weil hier geloescht statt abgesagt wird.
+    //
+    // Ueber DIESELBE Rueckabwicklungs-SSoT wie Loeschen und Absagen
+    // (`appointment-budget-unwind.ts`), nicht als vierte Kopie der Kette.
+    //
+    // Die Rechnungspruefung gehoert dazu: zurueckbuchen, waehrend eine aktive
+    // Rechnung den Verbrauch ausweist, laesst Rechnung und Budget
+    // auseinanderlaufen. Betroffene Termine werden UEBERSPRUNGEN statt den
+    // ganzen Verkuerzungs-Lauf abzubrechen — wie beim Bulk-Absagen, wo
+    // Teilerfolg der Normalfall ist. Sie zaehlen als eigener Skip-Grund, damit
+    // der Aufrufer sie nicht mit "erfolgreich geloescht" verwechselt.
+    const zuLoeschen: number[] = [];
+    for (const aptId of safeIds) {
+      const sperre = await pruefeRechnungsSperre(aptId, tx);
+      if (sperre) {
+        skippedCount.abgerechnet++;
+        continue;
+      }
+      await wickleBudgetZurueck(aptId, user.id, tx);
+      zuLoeschen.push(aptId);
+    }
+
+    deletedCount = zuLoeschen.length;
+    await seriesStorage.bulkDeleteSeriesAppointments(zuLoeschen, tx);
     await seriesStorage.updateSeries(id, { endDate: newEndDate }, tx);
   });
 

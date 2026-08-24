@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   dbHostOf,
+  istLoopback,
   parseProdWriteArgs,
   assertApplyTargetIsProdPrimaryOrThrow,
   assertProdWriteAllowedOrThrow,
@@ -300,5 +301,59 @@ describe("assertProdWriteAllowedOrThrow — das komponierte Gate", () => {
         "Zweck",
       ),
     ).rejects.toThrow();
+  });
+});
+
+/**
+ * Loopback-Erkennung — Schreibweise vs. Adresse.
+ *
+ * ERSETZT das Praefix-Muster `/^(localhost|127\.|::1|::ffff:127\.|0\.0\.0\.0)/`.
+ * Das prueft die Schreibweise, nicht die Adresse: `getaddrinfo` loest
+ * `0177.0.0.1` (oktal), `2130706433` (dezimal) und `0x7f000001` (hex) alle auf
+ * 127.0.0.1 auf, und der `::ffff:127.`-Arm war ueberhaupt toter Code, weil
+ * WHATWG die Form zu `[::ffff:7f00:1]` normalisiert. Alle vier passierten den
+ * Screen. Gemessen im Gate-2-Review von PR #121.
+ */
+describe("istLoopback — kanonisiert statt Muster zu raten", () => {
+  it.each([
+    ["localhost", "der Name"],
+    ["dev.localhost", "RFC-6761-Subdomain"],
+    ["127.0.0.1", "dotted quad"],
+    ["127.1", "inet_aton-Kurzform"],
+    ["0177.0.0.1", "oktal — passierte den alten Screen"],
+    ["2130706433", "dezimal — passierte den alten Screen"],
+    ["0x7f000001", "hex — passierte den alten Screen"],
+    ["0.0.0.0", "alle Interfaces"],
+    ["[::1]", "IPv6-Loopback, geklammert"],
+    ["[0:0:0:0:0:0:0:1]", "IPv6-Loopback, ausgeschrieben"],
+    ["[::ffff:127.0.0.1]", "IPv4-mapped — passierte den alten Screen"],
+    ["[::ffff:7f00:1]", "IPv4-mapped, WHATWG-normalisiert (der tote Arm)"],
+    // Gate-2 zu #122: `postgres` ist kein special scheme, WHATWG laesst den
+    // Trailing Dot stehen — er kam an ALLEN Formen vorbei.
+    ["localhost.", "Trailing-Dot-FQDN"],
+    ["LOCALHOST.", "Trailing Dot plus Grossschreibung"],
+    ["127.0.0.1.", "Trailing Dot auf der dotted quad"],
+    ["2130706433.", "Trailing Dot auf der Zahlform"],
+    ["::", "IPv6-unspecified — Pendant zu 0.0.0.0"],
+    ["[::]", "dasselbe, geklammert"],
+  ])("%s ist lokal (%s)", (host) => {
+    expect(istLoopback(host)).toBe(true);
+  });
+
+  it.each([
+    ["helium", "die Replit-Wegwerf-Default-DB"],
+    ["db.prod.example", "Prod-Form"],
+    ["ep-x.eu-central-1.aws.neon.tech", "Neon-Prod-Form"],
+    ["128.0.0.1", "direkt neben 127/8"],
+    ["1270.0.0.1", "sieht aus wie 127, ist es nicht"],
+    ["127.0.0.1.evil.com", "Loopback als Praefix eines Namens"],
+    ["0x7f000001.evil.com", "Zahlform als Praefix eines Namens"],
+    ["localhosts", "Praefix-Falle"],
+    ["[2001:db8::1]", "regulaeres IPv6"],
+    ["[::ffff:8.8.8.8]", "IPv4-mapped, aber nicht Loopback"],
+    ["db.prod.example.", "Trailing Dot macht einen Prod-Host nicht lokal"],
+    ["[::ffff:0:127.0.0.1]", "SIIT-translated, kein Loopback"],
+  ])("%s ist NICHT lokal (%s)", (host) => {
+    expect(istLoopback(host)).toBe(false);
   });
 });
