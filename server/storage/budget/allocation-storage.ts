@@ -1439,53 +1439,107 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
       isNull(budgetAllocations.deletedAt)
     ));
 
-  let eligibilityStartYear = curYear;
+  // ── ANKER: DIESELBE KETTE WIE DER LESEPFAD (ERSETZT die zweite Fassung) ──
+  //
+  // Hier stand eine eigene, inline ausgeschriebene Anker-Kette. Sie beantwortete
+  // dieselbe fachliche Frage wie `calculateAllocated45b` — „ab wann läuft der
+  // Anspruch?" — und wich in DREI Punkten ab. `shared/domain/budget/anchor-45b.ts`
+  // hat diese Abweichungen seit der Extraktion im eigenen Docblock benannt und
+  // als offenen Task markiert; das ist er.
+  //
+  // Alle drei Abweichungen zogen in dieselbe Richtung: der Schreibpfad ankerte
+  // SPÄTER als der Lesepfad, rollte deshalb Jahre nicht, die der Lesepfad sehr
+  // wohl zählt — und ohne Übertrag bleibt die Monatsaufstockung des Quelljahres
+  // im Topf stehen, statt zum 30.06. zu verfallen. Genau der Zustand, den die
+  // Gate-1-Messung als „keine Kondensation" ausgewiesen hat.
+  //
+  //  1. `todayISO()`-GATE (die `todayISO()`-vs-`asOf`-Falle aus CLAUDE.md).
+  //     Die Aktivierung wurde gegen `readBudgetTypeSettings(forDate: heute)`
+  //     geprüft. Ein §45b-Fenster, das im Quelljahr galt und inzwischen
+  //     geschlossen ist, führte dazu, dass für dieses Jahr GAR KEIN Übertrag
+  //     entsteht — dauerhaft, nicht nur einmal. Der Lesepfad prüft
+  //     datumsunabhängig über ALLE Phasen; das tut dieser Pfad ab jetzt auch.
+  //     `typeSettings` bleibt unverändert, was es war: es speist die
+  //     ANSPRUCHS-Rechnung (`calculateAllocatedCents` unten), und dort ist der
+  //     Stichtag richtig. Getrennt wird die AKTIVIERUNGS-Frage, nicht die
+  //     Betrags-Frage.
+  //
+  //  2. STUFE 4 fehlte — der soft-gelöschte Startwert (Task #1262). Ein
+  //     gelöschter Startwert bleibt Beleg dafür, dass §45b eingerichtet war.
+  //     Gemessen betrifft das 5 Kunden auf Prod, die im Lesepfad über Stufe 4
+  //     ankern und im Schreibpfad ankerlos blieben.
+  //
+  //  3. SETTINGS-FENSTER: es wurde `validFrom` der HEUTE aktiven Zeile genommen.
+  //     Das ist üblicherweise die letzte Phase — alle Jahre vor einem
+  //     Phasenwechsel fielen aus der Rolle. Der Lesepfad nimmt die FRÜHESTE
+  //     `validFrom` über alle Phasen (`effective45bSettingsWindow`) und schiebt
+  //     damit; dasselbe hier, über dieselben Funktionen.
+  //
+  // Die Datenbeschaffung bleibt hier, die Reihenfolge samt Begründungen steht
+  // in der SSoT. Ein dritter Ort für diese Frage entsteht nicht mehr.
+  const all45bSettings = await d.select()
+    .from(customerBudgetTypeSettings)
+    .where(and(
+      eq(customerBudgetTypeSettings.customerId, customerId),
+      eq(customerBudgetTypeSettings.budgetType, "entlastungsbetrag_45b"),
+    ))
+    .orderBy(asc(customerBudgetTypeSettings.validFrom));
 
-  // Task #1204 — §45b-Anker zur Laufzeit aus der Pflegegrad-Historie, auf das
-  // laufende Jahr gebodet (Onboarding-Baseline, Task #860). Identisch zu
-  // `calculateAllocated45b`, sonst driften Summe und Carryover-Anlage.
-  let budgetStartDate: string | null = null;
-  // Task #724 — Eligibility-Gate wie in `calculateAllocated45b`: der Auto-Anker
-  // aus der Pflegegrad-Historie darf nur greifen, wenn §45b aktiviert ist, sonst
-  // legte ein nie eingerichteter Topf einen Phantom-Anker an.
-  const s45bEnabledCarry = !!typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-  const pgStartCarry = await getEarliestCareLevelStart(customerId, d);
-  if (pgStartCarry && s45bEnabledCarry) {
-    budgetStartDate = floorAutoAnchor45bToCurrentYear(pgStartCarry, curYear);
-  }
-  if (!budgetStartDate) {
-    const ibEntries = allAllocations.filter(a => a.source === "initial_balance" && a.validFrom);
-    if (ibEntries.length > 0) {
-      budgetStartDate = ibEntries.reduce((min, a) => a.validFrom < min.validFrom ? a : min).validFrom;
-    }
-  }
-  if (!budgetStartDate) {
-    const otherEntries = allAllocations.filter(a =>
-      (a.source === "carryover") && a.validFrom
-    );
-    if (otherEntries.length > 0) {
-      budgetStartDate = otherEntries.reduce((min, a) => a.validFrom < min.validFrom ? a : min).validFrom;
-    }
-  }
-  if (!budgetStartDate) {
-    if (!s45bEnabledCarry) return [];
-    // Task #856 — Auto-Fallback identisch zu `calculateAllocated45b`: ohne
-    // Pflegegrad-Historie (pgStartCarry == null) und ohne Allokation ankern wir
-    // auf den 1.1. des laufenden Jahres. Kein automatischer Vorjahres-Übertrag
-    // für nie eingerichtete Kunden (sonst driften Summe und Carryover-Anlage UND
-    // der Auto-Pfad materialisiert 12 × 131 € ohne fachliche Grundlage).
-    budgetStartDate = `${curYear}-01-01`;
-  }
-  eligibilityStartYear = parseLocalDate(budgetStartDate).getFullYear();
+  const anchorBaseCarry = {
+    pgStartIso: (await getEarliestCareLevelStart(customerId, d)) ?? null,
+    s45bEnabled: all45bSettings.some(s => s.enabled),
+    activeAllocations: allAllocations,
+    fallbackYear: curYear,
+    floorPgAnchor: (iso: string) => floorAutoAnchor45bToCurrentYear(iso, curYear),
+  };
 
-  const s45bSetting = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-  if (s45bSetting?.validFrom) {
-    const vfYear = parseLocalDate(s45bSetting.validFrom).getFullYear();
-    if (vfYear > eligibilityStartYear) eligibilityStartYear = vfYear;
+  let anchorCarry = resolve45bAnchor({ ...anchorBaseCarry, deletedInitialBalanceValidFroms: [] });
+  // Stufe 4 nur nachladen, wenn die Stufen 1–3 nichts geliefert haben — dieselbe
+  // Sparsamkeit wie im Lesepfad.
+  if (anchorCarry.kind === "ineligible" || anchorCarry.via === "jahresanfang") {
+    const deletedInitialBalances = await budgetAllocationsRepo.selectFrom(d)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+        eq(budgetAllocations.source, "initial_balance"),
+        isNotNull(budgetAllocations.deletedAt),
+      ));
+    anchorCarry = resolve45bAnchor({
+      ...anchorBaseCarry,
+      deletedInitialBalanceValidFroms: deletedInitialBalances
+        .map(a => a.validFrom)
+        .filter((v): v is string => !!v),
+    });
   }
+
+  // Kein Anspruch → kein Übertrag. ERSETZT das frühere `if (!s45bEnabledCarry)
+  // return []`, das nur im Fallback-Zweig griff und die Eligibility damit an
+  // einer anderen Stelle entschied als der Lesepfad.
+  if (anchorCarry.kind === "ineligible") return [];
+
+  // Fenster über ALLE Phasen, nicht über die heute aktive Zeile — und über
+  // dieselben Helfer wie der Lesepfad, damit Anfang UND Ende gleich wandern.
+  const carryWindow = effective45bSettingsWindow(all45bSettings, null);
+  const ankerDatum = parseLocalDate(anchorCarry.anchorIso);
+  const startYm = shiftStartToSettings(
+    { year: ankerDatum.getFullYear(), month: ankerDatum.getMonth() + 1 },
+    carryWindow.validFrom,
+  );
+  // NEU gegenüber der Inline-Kette, und deshalb ausdrücklich benannt: der
+  // Schreibpfad hatte bisher GAR KEINE `validTo`-Kappung (er lief stur bis
+  // `curYear`). Ein geschlossenes Einrichtungs-Fenster begrenzt die Rolle ab
+  // jetzt auch nach hinten — dieselbe Klammer, die der Lesepfad längst hat.
+  //
+  // Die Richtung ist die restriktive: `clampEndToSettings` zieht nur nach
+  // VORNE, nie nach hinten. Ein Jahr NACH dem Fensterende wird nicht mehr
+  // gerollt. Fachlich richtig (nach der Einrichtung gibt es keinen Anspruch,
+  // der kondensieren könnte), aber es ist eine Verhaltensänderung und keine
+  // reine Konsolidierung. Liegt der Anker hinter dem Fensterende, bleibt die
+  // Schleife unten leer — gewollt.
+  const endYm = clampEndToSettings({ year: curYear, month: 12 }, carryWindow.validTo);
 
   const years: number[] = [];
-  for (let y = eligibilityStartYear; y <= curYear; y++) {
+  for (let y = startYm.year; y <= endYm.year; y++) {
     years.push(y);
   }
 

@@ -12,19 +12,16 @@ import { lastDayOfMonth } from "../../utils/datetime";
  * beziehen, ohne die Reihenfolge erneut zu kodieren — genau die Divergenz, an
  * der eine frühere Fassung des Diagnose-Skripts scheiterte.
  *
- * ── ACHTUNG: eine zweite Kette existiert weiterhin ───────────────────────
- * `ensureYearlyCarryover45b` (`server/storage/budget/allocation-storage.ts`)
- * trägt dieselbe Anker-Frage ein zweites Mal — auf dem SCHREIBpfad, und mit
- * drei Abweichungen: es prüft `enabled` gegen `readBudgetTypeSettings(…,
- * forDate: todayISO())` statt datumsunabhängig (die `todayISO()`-vs-`asOf`-Falle
- * aus CLAUDE.md: ein §45b-Fenster, das im Quelljahr galt und heute abgelaufen
- * ist, führt dort dazu, dass für dieses Jahr GAR KEIN Übertrag angelegt wird),
- * es kennt Stufe 4 (soft-gelöschte `initial_balance`) nicht, und es nimmt
- * `validFrom` der heute-aktiven Zeile statt der frühesten über alle Phasen.
+ * ── Beide Pfade rufen diese Kette ────────────────────────────────────────
+ * Lesepfad (`calculateAllocated45b`) und SCHREIBpfad
+ * (`ensureYearlyCarryover45b`), beide in
+ * `server/storage/budget/allocation-storage.ts`. Der Schreibpfad trug die Frage
+ * bis zur Anker-Konsolidierung ein zweites Mal, inline, mit drei Abweichungen
+ * (`todayISO()`-Gate auf der Aktivierung, fehlende Stufe 4, `validFrom` der
+ * heute-aktiven statt der frühesten Phase). Diese zweite Kette ist ENTFERNT.
  *
- * Diese Extraktion räumt das NICHT mit auf — sie ist bewusst verhaltensneutral
- * (per differenziellem Fuzz gegen den alten Inline-Code belegt). Der Schreibpfad
- * ist ein eigener Task; wer ihn anfasst, zieht ihn auf DIESE Funktion.
+ * Eine dritte Kopie darf nicht entstehen — deshalb der Registry-Eintrag
+ * `budget-anchor` in `shared/ssot-registry.ts`.
  *
  * Rein und DB-frei: alle Zeilen kommen als Parameter herein, damit die Kette
  * ohne Datenbank testbar ist.
