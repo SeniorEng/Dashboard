@@ -9,17 +9,29 @@ import {
   syncCarryoverAndExpiry, calculateAllocatedCents,
 } from "../../server/storage/budget/allocation-storage";
 import { resolve45bAnchor } from "@shared/domain/budget/anchor-45b";
+import { readUnifiedBudgetAvailability } from "../../server/storage/budget/unified-reader";
+import { budgetTransactions } from "@shared/schema";
 
 /**
  * §45b-Übertrags-Anlage: der Anker kommt aus DERSELBEN Kette wie der Lesepfad.
  *
  * ── Der Defekt ───────────────────────────────────────────────────────────
  * `ensureYearlyCarryover45b` trug die Anker-Frage („ab wann läuft der
- * Anspruch?") ein zweites Mal, inline, und wich vom Lesepfad ab. Alle
- * Abweichungen zogen in dieselbe Richtung: der Schreibpfad ankerte SPÄTER,
- * rollte deshalb Jahre nicht, die der Lesepfad zählt — und ohne Übertrag bleibt
- * die Monatsaufstockung des Quelljahres im Topf stehen, statt zum 30.06. zu
- * verfallen. Verfügbarkeit zu hoch, in der permissiven Richtung.
+ * Anspruch?") ein zweites Mal, inline, und wich vom Lesepfad ab. Der
+ * Schreibpfad ankerte SPÄTER und rollte deshalb Jahre nicht, die der Lesepfad
+ * zählt.
+ *
+ * ── Was das NICHT ist: ein Verfügbarkeits-Fehler ─────────────────────────
+ * Eine frühere Fassung dieses Kommentars behauptete „ohne Übertrag bleibt die
+ * Monatsaufstockung stehen → Verfügbarkeit zu hoch". GEMESSEN ist das falsch,
+ * und AN-4 unten hält es fest: ohne materialisierten Übertrag kappt der
+ * Verfalls-Boden (`expiry45bFloorDateFor`) den Topf auf GENAU dasselbe Fenster,
+ * das der Übertrag abbildet. Beide Wege sind per Konstruktion gleich groß.
+ *
+ * Der Fix ist trotzdem richtig, nur aus zwei anderen Gründen: der Verfall wird
+ * als `write_off` im Ledger SICHTBAR (GoBD-Nachvollziehbarkeit statt stiller
+ * Kappung), und Lese- wie Schreibpfad beantworten die Anker-Frage nicht mehr
+ * verschieden.
  *
  * ── Was hier gemessen wird ───────────────────────────────────────────────
  * Die zwei Abweichungen, die den Roll NACHWEISLICH bewegen. Die dritte (das
@@ -190,6 +202,124 @@ describe("§45b-Übertrags-Anlage — Anker aus der Lesepfad-SSoT", () => {
 
       expect(await uebertragsZeilen(id), "Wiederholter Sync darf weder anlegen noch verschieben")
         .toEqual(nachErstem);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("AN-4 – der Roll ist verfuegbarkeits-NEUTRAL (die Korrektur ist Sichtbarkeit, kein Geld)", async () => {
+    // GEGEN DIE EIGENE BEGRÜNDUNG GEMESSEN (Gate-2-Fund S1).
+    //
+    // Der PR hatte behauptet, ein fehlender Übertrag lasse die Verfügbarkeit zu
+    // hoch stehen. Das ist falsch, und dieser Test hält das Gegenteil fest:
+    // ohne materialisierten Übertrag kappt der Verfalls-Boden den Topf auf
+    // dasselbe Fenster (H1: Vorjahr + laufendes Jahr, ab Juli nur laufendes);
+    // mit Übertrag ersetzt dessen Betrag die Aufstockung des Quelljahres.
+    //
+    // Der Test steht hier, damit der nächste PR im Cluster nicht wieder mit
+    // einem Kassen-Risiko argumentiert, das an dieser Stelle nicht existiert —
+    // und damit auffällt, falls die Anker-Erweiterung doch einmal Geld bewegt.
+    const id = await kunde();
+    try {
+      await settingsPhase(id, `${quellJahr}-01-01`, null);
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        year: quellJahr, month: 1, amountCents: 100_00, source: "initial_balance",
+        validFrom: `${quellJahr}-01-01`, expiresAt: null,
+        deletedAt: new Date(), notes: "AN-4 Stufe-4-Anker",
+      });
+      await db.insert(budgetTransactions).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        transactionDate: `${quellJahr}-05-15`, transactionType: "consumption",
+        amountCents: -400_00, allocationId: null, notes: "AN-4 Verbrauch",
+      });
+
+      // Stichtage beiderseits der Frist — dort, wo ein Unterschied auftreten
+      // müsste, wenn die Behauptung stimmte.
+      const tage = [`${curYear}-02-15`, `${curYear}-06-30`, `${curYear}-07-01`];
+      const avail = async () => {
+        const out: number[] = [];
+        for (const t of tage) {
+          out.push((await readUnifiedBudgetAvailability(id, t)).pots.entlastungsbetrag_45b.availableCents);
+        }
+        return out;
+      };
+
+      const vorher = await avail();
+      await syncCarryoverAndExpiry(id);
+      const nachher = await avail();
+
+      expect(
+        (await uebertragsZeilen(id)).length,
+        "Vorbedingung: der Sync muss überhaupt rollen, sonst misst der Test nichts",
+      ).toBeGreaterThan(0);
+      expect(nachher, "Der Roll darf die Verfügbarkeit an keinem Stichtag bewegen").toEqual(vorher);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("AN-5 – Mehrjahres-Anker: je Quelljahr genau EINE Zeile, ueber drei Laeufe stabil", async () => {
+    // Alle übrigen Tests fahren EIN Quelljahr. Bei den auf Prod gemessenen
+    // Stufe-4-Kunden ist der Mehrjahres-Fall der wahrscheinliche: der Anker
+    // reicht mehrere Jahre zurück, die Schleife legt mehrere Zeilen an — und
+    // erst dann kann sich zeigen, ob Dedup und Anker-Drift zusammen tragen.
+    const id = await kunde();
+    const ankerJahr = curYear - 3;
+    try {
+      await settingsPhase(id, `${ankerJahr}-01-01`, null);
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        year: ankerJahr, month: 1, amountCents: 100_00, source: "initial_balance",
+        validFrom: `${ankerJahr}-01-01`, expiresAt: null,
+        deletedAt: new Date(), notes: "AN-5 Stufe-4-Anker",
+      });
+
+      await syncCarryoverAndExpiry(id);
+      const nachErstem = await uebertragsZeilen(id);
+
+      // Ein Zieljahr je Quelljahr, keine Dubletten.
+      const zieljahre = nachErstem.map(z => z.validFrom);
+      expect(new Set(zieljahre).size, "je Zieljahr höchstens EINE Übertragszeile")
+        .toBe(zieljahre.length);
+      expect(nachErstem.length, "mehrjähriger Anker muss mehrere Jahre rollen").toBeGreaterThan(1);
+
+      await syncCarryoverAndExpiry(id);
+      await syncCarryoverAndExpiry(id);
+
+      expect(await uebertragsZeilen(id), "auch mehrjährig: wiederholter Sync ändert nichts")
+        .toEqual(nachErstem);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("AN-6 – geschlossenes Einrichtungs-Fenster begrenzt die Rolle auch nach HINTEN", async () => {
+    // VERHALTENSÄNDERUNG, nicht nur Konsolidierung (Gate-2-Fund S3): die alte
+    // Inline-Kette hatte gar keine `validTo`-Kappung und lief stur bis
+    // `curYear`. Ein Jahr NACH dem Fensterende wurde gerollt, obwohl es dort
+    // keinen Anspruch gibt, der kondensieren könnte.
+    //
+    // Die Richtung ist restriktiv — genau deshalb steht der Fall als Test da
+    // und nicht nur als Kommentar: eine Kappung, die niemand misst, kappt
+    // irgendwann zu viel.
+    const id = await kunde();
+    try {
+      // Fenster endet im Quelljahr; der Startwert liegt DANACH.
+      await settingsPhase(id, `${curYear - 3}-01-01`, `${curYear - 2}-12-31`);
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        year: quellJahr, month: 1, amountCents: 400_00, source: "initial_balance",
+        validFrom: `${quellJahr}-01-01`, expiresAt: null,
+        notes: "AN-6 Startwert nach Fensterende",
+      });
+
+      await syncCarryoverAndExpiry(id);
+
+      expect(
+        (await uebertragsZeilen(id)).filter(z => z.validFrom === `${curYear}-01-01`),
+        "Ein Jahr nach dem Einrichtungs-Fenster darf nicht mehr gerollt werden",
+      ).toEqual([]);
     } finally {
       await cleanupCustomer(id);
     }

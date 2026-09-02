@@ -1520,10 +1520,22 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   // Fenster über ALLE Phasen, nicht über die heute aktive Zeile — und über
   // dieselben Helfer wie der Lesepfad, damit Anfang UND Ende gleich wandern.
   const carryWindow = effective45bSettingsWindow(all45bSettings, null);
+  const ankerDatum = parseLocalDate(anchorCarry.anchorIso);
   const startYm = shiftStartToSettings(
-    { year: parseLocalDate(anchorCarry.anchorIso).getFullYear(), month: parseLocalDate(anchorCarry.anchorIso).getMonth() + 1 },
+    { year: ankerDatum.getFullYear(), month: ankerDatum.getMonth() + 1 },
     carryWindow.validFrom,
   );
+  // NEU gegenüber der Inline-Kette, und deshalb ausdrücklich benannt: der
+  // Schreibpfad hatte bisher GAR KEINE `validTo`-Kappung (er lief stur bis
+  // `curYear`). Ein geschlossenes Einrichtungs-Fenster begrenzt die Rolle ab
+  // jetzt auch nach hinten — dieselbe Klammer, die der Lesepfad längst hat.
+  //
+  // Die Richtung ist die restriktive: `clampEndToSettings` zieht nur nach
+  // VORNE, nie nach hinten. Ein Jahr NACH dem Fensterende wird nicht mehr
+  // gerollt. Fachlich richtig (nach der Einrichtung gibt es keinen Anspruch,
+  // der kondensieren könnte), aber es ist eine Verhaltensänderung und keine
+  // reine Konsolidierung. Liegt der Anker hinter dem Fensterende, bleibt die
+  // Schleife unten leer — gewollt.
   const endYm = clampEndToSettings({ year: curYear, month: 12 }, carryWindow.validTo);
 
   const years: number[] = [];

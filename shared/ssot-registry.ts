@@ -580,15 +580,20 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     //    Der Guard erzwingt die Abwesenheit der Spalte im Prod-Code.
     // 2. Die Ableitung selbst hat inzwischen sehr wohl kanonische Symbole.
     //    Sie lagen bis zur §45b-Uebertrags-Diagnose nur INTERN in
-    //    `calculateAllocated45b` und wurden dort dupliziert — die zweite
-    //    Kopie in `ensureYearlyCarryover45b` steht noch (eigener Produktions-
-    //    PR) und wich in drei Punkten ab. Ohne Registrierung bewacht nichts
-    //    eine dritte Kopie.
+    //    `calculateAllocated45b` und wurden dort dupliziert. Die zweite Kopie in
+    //    `ensureYearlyCarryover45b` ist mit der Anker-Konsolidierung ENTFERNT —
+    //    beide Pfade rufen jetzt `resolve45bAnchor`. Ohne Registrierung bewacht
+    //    nichts eine dritte Kopie.
+    //
+    //    Die Fenster-Helfer sind mit derselben Konsolidierung geteilte Lese-
+    //    UND Schreibpfad-Logik geworden und deshalb hier gelistet.
     canonical: [
       { symbol: "resolve45bAnchor", module: "shared/domain/budget/anchor-45b.ts" },
       { symbol: "initialBalanceMonthKeys", module: "shared/domain/budget/anchor-45b.ts" },
       { symbol: "pickEffective45bSettingRow", module: "shared/domain/budget/anchor-45b.ts" },
       { symbol: "effective45bSettingsWindow", module: "shared/domain/budget/anchor-45b.ts" },
+      { symbol: "shiftStartToSettings", module: "shared/domain/budget/anchor-45b.ts" },
+      { symbol: "clampEndToSettings", module: "shared/domain/budget/anchor-45b.ts" },
     ],
     ownedLiterals: [],
     guards: [
