@@ -32,6 +32,7 @@ import {
 } from "@shared/utils/month-close-cutoff";
 import { setupBudgetScenario } from "../helpers/budget-scenarios";
 import { snapToWeekday } from "../helpers/billing-month";
+import { isWeekend } from "@shared/utils/datetime";
 import { closeMonth } from "../../server/storage/time-tracking/month-closing";
 
 beforeAll(async () => {
@@ -46,52 +47,6 @@ interface MonthCtx {
   year: number;
   month: number;
 }
-
-/**
- * Kalenderlage EXPLIZIT gesetzt statt vom Lauftag geerbt.
- *
- * Der Integrationstest unten trifft pro Lauf genau EINE Kalenderlage — die des
- * heutigen Vormonats. Er kann deshalb nicht zeigen, dass die Datumswahl an
- * JEDEM Tag des Jahres trägt; genau daran lag der Defekt monatelang unentdeckt
- * und kippte erst, als der Kalender darauf zeigte.
- *
- * Dieser Block prüft die Wahl deshalb rein rechnerisch über alle 12 Monate
- * mehrerer Jahre — ohne DB, ohne Server, ohne Uhr. Er ist der eigentliche
- * Rückfall-Wächter; der Integrationstest bleibt der Nachweis, dass der Pfad
- * als Ganzes stimmt.
- */
-describe("Datumswahl für den geschlossenen Monat — jede Kalenderlage", () => {
-  it("liefert für JEDEN Monat 2024–2030 einen Werktag im selben Monat", () => {
-    const kaputt: string[] = [];
-    for (let jahr = 2024; jahr <= 2030; jahr++) {
-      for (let monat = 1; monat <= 12; monat++) {
-        const roh = `${jahr}-${String(monat).padStart(2, "0")}-15`;
-        const gewaehlt = snapToWeekday(roh);
-        if (!istWerktag(gewaehlt)) kaputt.push(`${gewaehlt} (aus ${roh}) ist Sa/So`);
-        if (gewaehlt.slice(0, 7) !== roh.slice(0, 7)) {
-          kaputt.push(`${gewaehlt} (aus ${roh}) fällt aus dem Monat`);
-        }
-      }
-    }
-    expect(kaputt, "Datumswahl bricht in mindestens einer Kalenderlage").toEqual([]);
-  });
-
-  it("der ROHE 15. wäre in mehreren Monaten ein Wochenendtag — die Gegenprobe", () => {
-    // Ohne diesen Fall wäre der Test oben eine leere Zusage: er kann nur dann
-    // etwas beweisen, wenn die zu korrigierende Lage überhaupt vorkommt.
-    const wochenendFuenfzehnte: string[] = [];
-    for (let jahr = 2024; jahr <= 2030; jahr++) {
-      for (let monat = 1; monat <= 12; monat++) {
-        const roh = `${jahr}-${String(monat).padStart(2, "0")}-15`;
-        if (!istWerktag(roh)) wochenendFuenfzehnte.push(roh);
-      }
-    }
-    expect(wochenendFuenfzehnte.length, "kein einziger Wochenend-15. — Fixture-Annahme prüfen")
-      .toBeGreaterThan(10);
-    // Der Tag, an dem es in CI kippte.
-    expect(wochenendFuenfzehnte).toContain("2026-08-15");
-  });
-});
 
 describe("Equality Monatsabschluss-Cutoff — Banner-API vs Domain-Funktion", () => {
   it("Cutoff-Endpoint liefert exakt computeMonthCloseCutoff()", async () => {
@@ -224,8 +179,12 @@ describe("Equality Monatsabschluss-Cutoff — Banner-API vs Domain-Funktion", ()
       // Wochenendtag heraus, prüfte der Test wieder die Wochenend-Regel statt
       // das Monatsabschluss-Enforcement — rot, ohne dass am Prüfgegenstand
       // etwas dran wäre. Genau so ist er im September 2026 in CI gekippt.
+      // `isWeekend` aus der Datetime-SSoT — DIESELBE Funktion, die
+      // `server/routes/appointments.ts` an die Policy reicht. Eine eigene
+      // Wochentags-Rechnung im Test waere ein Zweitbegriff und veraltete bei
+      // einer Regelaenderung still.
       expect(
-        istWerktag(dateInClosedMonth),
+        !isWeekend(dateInClosedMonth),
         `Vorbedingung: ${dateInClosedMonth} muss ein Werktag sein, sonst misst ` +
           "der Test die Wochenend-Regel statt MONTH_CLOSED",
       ).toBe(true);
@@ -264,12 +223,6 @@ describe("Equality Monatsabschluss-Cutoff — Banner-API vs Domain-Funktion", ()
     }
   }, 120_000);
 });
-
-/** Sa/So gegen die Regel aus `server/routes/appointments.ts`. */
-function istWerktag(iso: string): boolean {
-  const dow = new Date(`${iso}T12:00:00Z`).getUTCDay();
-  return dow !== 0 && dow !== 6;
-}
 
 function isoToEpochDays(iso: string): number {
   const ms = Date.UTC(

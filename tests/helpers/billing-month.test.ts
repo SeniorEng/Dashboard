@@ -5,7 +5,9 @@ import {
   billingReferenceMonth,
   countPastWeekdaysInMonth,
   pastWeekdayInBillingMonth,
+  snapToWeekday,
 } from "./billing-month";
+import { isWeekend } from "@shared/utils/datetime";
 
 /**
  * Nagelt die Invariante fest, wegen der es diesen Helfer gibt: An JEDEM
@@ -111,5 +113,82 @@ describe("pastWeekdayInBillingMonth — nie leer, nie in der Zukunft", () => {
       const iso = pastWeekdayInBillingMonth(now);
       expect(iso.slice(0, 7)).toBe(`${year}-${String(month).padStart(2, "0")}`);
     }
+  });
+});
+
+/**
+ * `snapToWeekday` — Eigenschaftstest neben dem Helfer, nicht beim Aufrufer.
+ *
+ * Der Helfer hatte bis hierher KEINEN eigenen Test, obwohl vier Fixtures ihn
+ * benutzen. Eine erste Fassung dieses Blocks lag in
+ * `tests/equality/month-close-cutoff.test.ts` — also bei genau EINEM Aufrufer
+ * und nur fuer dessen Aufrufform (`…-15`, vorwaerts). Hier erben ihn alle vier,
+ * und die beiden anderen Aufrufformen sind mit abgedeckt:
+ *   - `…-01` vorwaerts  (`tests/equality/45b-fifo-breakdown-consistency.test.ts`)
+ *   - `…-01` RUECKWAERTS (`tests/budget/date-drift-pre-check-vs-booking.test.ts`)
+ *
+ * Der Rueckwaerts-Fall ist der interessante: am Monatsersten kann er den Monat
+ * VERLASSEN. Das ist kein Fehler des Helfers — er verspricht Naehe, nicht
+ * Monatstreue —, aber es ist eine Eigenschaft, die ein Aufrufer kennen muss.
+ * Deshalb steht sie hier als Zusage und nicht als Ueberraschung.
+ *
+ * Bereich 1970-2100: nicht "viele Jahre" als Selbstzweck, sondern alle 14
+ * moeglichen Kalenderjahr-Layouts mehrfach. Der Block braucht weder DB noch
+ * Server noch Uhr.
+ */
+describe("snapToWeekday — jede Kalenderlage", () => {
+  const monate = function* () {
+    for (let jahr = 1970; jahr <= 2100; jahr++) {
+      for (let monat = 1; monat <= 12; monat++) yield { jahr, monat };
+    }
+  };
+
+  it("`…-15` vorwaerts: immer Werktag, immer derselbe Monat", () => {
+    const kaputt: string[] = [];
+    for (const { jahr, monat } of monate()) {
+      const roh = `${jahr}-${String(monat).padStart(2, "0")}-15`;
+      const g = snapToWeekday(roh);
+      if (isWeekend(g)) kaputt.push(`${g} (aus ${roh}) ist Sa/So`);
+      if (g.slice(0, 7) !== roh.slice(0, 7)) kaputt.push(`${g} (aus ${roh}) faellt aus dem Monat`);
+    }
+    expect(kaputt).toEqual([]);
+  });
+
+  it("`…-01` vorwaerts: immer Werktag, immer derselbe Monat", () => {
+    const kaputt: string[] = [];
+    for (const { jahr, monat } of monate()) {
+      const roh = `${jahr}-${String(monat).padStart(2, "0")}-01`;
+      const g = snapToWeekday(roh);
+      if (isWeekend(g)) kaputt.push(`${g} (aus ${roh}) ist Sa/So`);
+      if (g.slice(0, 7) !== roh.slice(0, 7)) kaputt.push(`${g} (aus ${roh}) faellt aus dem Monat`);
+    }
+    expect(kaputt).toEqual([]);
+  });
+
+  it("`…-01` rueckwaerts: immer Werktag — verlaesst aber bewusst den Monat", () => {
+    let verlaesstMonat = 0;
+    const kaputt: string[] = [];
+    for (const { jahr, monat } of monate()) {
+      const roh = `${jahr}-${String(monat).padStart(2, "0")}-01`;
+      const g = snapToWeekday(roh, "backward");
+      if (isWeekend(g)) kaputt.push(`${g} (aus ${roh}) ist Sa/So`);
+      if (g.slice(0, 7) !== roh.slice(0, 7)) verlaesstMonat++;
+    }
+    expect(kaputt, "rueckwaerts muss ebenfalls immer auf einem Werktag landen").toEqual([]);
+    // Die Zusage lautet Naehe, NICHT Monatstreue. Wer `backward` auf den
+    // Monatsersten anwendet und Monatstreue braucht, muss selbst klammern.
+    expect(verlaesstMonat, "erwartet: der Rueckwaerts-Fall verlaesst am Monatsersten den Monat")
+      .toBeGreaterThan(0);
+  });
+
+  it("Gegenprobe: rohe `…-15` sind ueberhaupt oft Sa/So — sonst waere alles oben leer", () => {
+    const wochenende: string[] = [];
+    for (const { jahr, monat } of monate()) {
+      const roh = `${jahr}-${String(monat).padStart(2, "0")}-15`;
+      if (isWeekend(roh)) wochenende.push(roh);
+    }
+    expect(wochenende.length).toBeGreaterThan(100);
+    // Der Tag, an dem `month-close-cutoff` in CI kippte (Ticket 6hQGx9WhX3hHHVXp).
+    expect(wochenende).toContain("2026-08-15");
   });
 });
