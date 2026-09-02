@@ -31,6 +31,8 @@ import {
   previousMonth,
 } from "@shared/utils/month-close-cutoff";
 import { setupBudgetScenario } from "../helpers/budget-scenarios";
+import { snapToWeekday } from "../helpers/billing-month";
+import { isWeekend } from "@shared/utils/datetime";
 import { closeMonth } from "../../server/storage/time-tracking/month-closing";
 
 beforeAll(async () => {
@@ -158,8 +160,38 @@ describe("Equality Monatsabschluss-Cutoff — Banner-API vs Domain-Funktion", ()
       await closeMonth(emp.id, year, month, auth.user.id);
       const empAuth = await loginAs(emp.email, emp.password);
 
-      // 4) Ein Datum innerhalb des geschlossenen Monats wählen.
-      const dateInClosedMonth = `${year}-${String(month).padStart(2, "0")}-15`;
+      // 4) Ein WERKTAG innerhalb des geschlossenen Monats.
+      //
+      // Vorher stand hier der harte 15. — und der ist in 4 von 12 Monaten ein
+      // Wochenendtag (2026: Feb, Mär, Aug, Nov). Die Termin-Anlage lehnt Sa/So
+      // mit 400 ab (`server/routes/appointments.ts`), also starb der Test an
+      // einer Produktregel statt an seinem Prüfgegenstand: 400 statt des
+      // erwarteten 403 MONTH_CLOSED. Gemessen am 02.09.2026 — Vormonat August,
+      // der 15.08.2026 war ein Samstag.
+      //
+      // `snapToWeekday` ist der bestehende Helfer für genau diesen Fall; sein
+      // Docblock nennt die hartkodierten `…-15` ausdrücklich. Er schiebt um
+      // höchstens zwei Tage und bleibt damit im selben Monat. KEIN neuer
+      // Helfer — die Frage war schon beantwortet, nur nicht hier angewandt.
+      const dateInClosedMonth = snapToWeekday(`${year}-${String(month).padStart(2, "0")}-15`);
+
+      // Die Kalenderlage ist Vorbedingung, nicht Nebensache: fiele hier doch ein
+      // Wochenendtag heraus, prüfte der Test wieder die Wochenend-Regel statt
+      // das Monatsabschluss-Enforcement — rot, ohne dass am Prüfgegenstand
+      // etwas dran wäre. Genau so ist er im September 2026 in CI gekippt.
+      // `isWeekend` aus der Datetime-SSoT — DIESELBE Funktion, die
+      // `server/routes/appointments.ts` an die Policy reicht. Eine eigene
+      // Wochentags-Rechnung im Test waere ein Zweitbegriff und veraltete bei
+      // einer Regelaenderung still.
+      expect(
+        !isWeekend(dateInClosedMonth),
+        `Vorbedingung: ${dateInClosedMonth} muss ein Werktag sein, sonst misst ` +
+          "der Test die Wochenend-Regel statt MONTH_CLOSED",
+      ).toBe(true);
+      expect(
+        dateInClosedMonth.slice(0, 7),
+        "Der Werktag muss im GESCHLOSSENEN Monat liegen",
+      ).toBe(`${year}-${String(month).padStart(2, "0")}`);
 
       // Service-Katalog laden, um eine gültige serviceId zu erhalten.
       const catalogRes = await apiGet<Array<{ id: number; code: string }>>(
