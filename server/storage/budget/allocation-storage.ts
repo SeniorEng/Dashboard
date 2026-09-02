@@ -709,7 +709,31 @@ async function calculateAllocated45b(
   const latestValidCarryoverYear = validCarryoverTargetYears.length > 0
     ? Math.max(...validCarryoverTargetYears)
     : null;
-  if (latestValidCarryoverYear != null && latestValidCarryoverYear > allocStartYear) {
+  // ── NICHT im `{year}`-Pool-Modus (P1, Ticket 6hQGvwCFvvMC7j6G) ──────────
+  //
+  // Der Shift gehoert zur AS-OF-Frage („was ist heute verfuegbar?"): ein
+  // Uebertrag kondensiert die Vorjahre, also duerfen sie nicht zusaetzlich
+  // aufgestockt werden. Im `{year}`-Modus wird aber etwas anderes gefragt —
+  // „wie hoch war der Anspruch des Jahres Y?" — und darauf hat eine
+  // Uebertragszeile fuer ein SPAETERES Jahr keine Antwort.
+  //
+  // Ungegatet zog eine `curYear`-Uebertragszeile `allocStart` auf den
+  // 01.01. des laufenden Jahres, womit die Monatsaufstockungen ALLER
+  // frueheren Jahre aus dem Pool fielen. Gemessen: Anspruch 2025 mit
+  // Startwert faellt von 154.100 auf 10.000 ct — nur der Startwert
+  // ueberlebt (`sumInitialBalancesForYear` laeuft getrennt). Der Uebertrag
+  // fuer das Quelljahr entstand dadurch gar nicht mehr.
+  //
+  // Auf Prod betrifft das 97 von 163 aktiven §45b-Kunden (59,5 %,
+  // Messung 02.09.2026) — die Anker-Erweiterung aus #132 war fuer sie
+  // stillschweigend wirkungslos.
+  //
+  // KEINE Doppelzaehlung durch das Abschalten: der `{year}`-Rueckgabezweig
+  // liefert `yearMonthlyTotal + sumInitialBalancesForYear` und addiert
+  // `carryoverTotal` gar nicht. Der Boden direkt darunter ist aus demselben
+  // Grund schon laenger mit `opts.year == null` gegatet — diese Klammer
+  // fehlte nur hier.
+  if (opts.year == null && latestValidCarryoverYear != null && latestValidCarryoverYear > allocStartYear) {
     allocStartYear = latestValidCarryoverYear;
     allocStartMonth = 1;
   }
@@ -1397,7 +1421,44 @@ async function calculateAllocated39_42a(
   return yearsWithoutIb * yearlyLimitCents + ibTotal;
 }
 
-async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+/** Eine Uebertragszeile, wie sie angelegt WUERDE. Reine Entscheidung, kein Schreiben. */
+export interface GeplanterUebertrag {
+  sourceYear: number;
+  targetYear: number;
+  amountCents: number;
+  validFrom: string;
+  expiresAt: string;
+  notes: string;
+}
+
+/**
+ * **Welche Uebertraege muessten fuer diesen Kunden entstehen?** — die
+ * Entscheidung, getrennt vom Schreiben.
+ *
+ * ── Warum getrennt ──────────────────────────────────────────────────────
+ * `ensureYearlyCarryover45b` laeuft als SEITENEFFEKT aus Lese- und
+ * Buchungspfaden (unified-reader, summary-queries, import-availability,
+ * consumption-engine). Ein Lesezugriff schreibt also Zeilen. Solange der
+ * Schreibpfad wenig fand, fiel das nicht auf; mit dem `{year}`-Fix oben
+ * entstehen fuer die betroffenen 97 Kunden auf einen Schlag mehrere Zeilen
+ * pro Jahr — ein Massen-Schreibvorgang, ausgeloest durch Lesen.
+ *
+ * Diese Funktion ist die Naht, an der das entkoppelt werden kann: sie
+ * ENTSCHEIDET, ohne zu schreiben. Zwei Aufrufer heute:
+ *  - `ensureYearlyCarryover45b` (plant und schreibt dann),
+ *  - `server/scripts/dryrun-45b-carryover-materialisierung.ts` (plant und
+ *    zaehlt nur) — die Auflage aus Ticket 6hQGvwCFvvMC7j6G.
+ *
+ * Der Dry-Run misst damit NICHT ein Modell des Fixes, sondern den Fix selbst.
+ * Ein zweiter Rechenweg haette genau die Drift erzeugt, aus der dieser Cluster
+ * entstanden ist.
+ *
+ * Die vollstaendige Entkopplung (Materialisierung als expliziter Job statt als
+ * Read-Nebeneffekt) ist ein eigener Umbau — er betrifft acht Aufrufer und
+ * aendert, WANN Zeilen erscheinen. Diese Naht ist seine Voraussetzung, nicht
+ * sein Ersatz.
+ */
+export async function planCarryoverRolls45b(customerId: number, _tx?: DbClient): Promise<GeplanterUebertrag[]> {
   const d = _tx ?? db;
   const { year: curYear } = currentYearAndMonth();
 
@@ -1543,7 +1604,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     years.push(y);
   }
 
-  const created: BudgetAllocation[] = [];
+  const geplant: GeplanterUebertrag[] = [];
 
   // Task #959 — Universelles Übertrags-Modell: Jahre MIT Startwert
   // (`initial_balance`) rollen ihr Restguthaben ebenfalls in den Folgejahres-
@@ -1763,19 +1824,41 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
 
     if (unused <= 0) continue;
 
-    const result = await d.insert(budgetAllocations).values({
-      customerId,
-      budgetType: "entlastungsbetrag_45b",
-      year: targetYear,
-      month: null,
+    geplant.push({
+      sourceYear: year,
+      targetYear,
       amountCents: unused,
-      source: "carryover",
       validFrom: `${targetYear}-01-01`,
       // Frist aus der SSoT — dieselbe Konstante wie `carryoverWindowFor` und der
       // Verfalls-Boden im Lesepfad. Diese dritte Kopie des Literals hat der
       // Rueckfall-Waechter gefunden (`tests/architecture/45b-null-leg-exclusion.test.ts`).
       expiresAt: carryoverExpiresAtFor(targetYear),
       notes: `Übertrag aus ${year}: ${formatEuroDE(unused)} (verfällt 30.06.${targetYear})`,
+    });
+  }
+
+  return geplant;
+}
+
+/**
+ * Legt die geplanten Uebertraege an. ENTSCHEIDUNG kommt aus
+ * `planCarryoverRolls45b` — hier steht nur noch das Schreiben.
+ */
+async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
+  const d = _tx ?? db;
+  const created: BudgetAllocation[] = [];
+
+  for (const p of await planCarryoverRolls45b(customerId, _tx)) {
+    const result = await d.insert(budgetAllocations).values({
+      customerId,
+      budgetType: "entlastungsbetrag_45b",
+      year: p.targetYear,
+      month: null,
+      amountCents: p.amountCents,
+      source: "carryover",
+      validFrom: p.validFrom,
+      expiresAt: p.expiresAt,
+      notes: p.notes,
     }).onConflictDoNothing().returning();
 
     if (result[0]) created.push(result[0]);
