@@ -14,5 +14,9 @@
   "1123977": {
     "active": true,
     "notes": "body-parser DoS bei invalidem limit-Wert (GHSA-v422-hmwv-36x6), low. Transitive; unsere Express-Bootstrap setzt limit nicht dynamisch aus Untrusted-Input. Nicht CI-blockierend (audit --level high)."
+  },
+  "1193685": {
+    "active": true,
+    "notes": "extract-zip arbitrary file write via symlink archive entries (GHSA-7pqw-9j4j-h8q3), HIGH. Schwester-Advisory zu 1139346, gleicher Pfad und gleiche Begruendung: einzige Instanz ist puppeteer-core>@puppeteer/browsers>extract-zip@2.0.1, die ausschliesslich beim CHROMIUM-DOWNLOAD entpackt. Unser Image bringt Chromium vorinstalliert mit (CHROMIUM_PATH, siehe CLAUDE.md + Dockerfile); der Download-Pfad laeuft weder im Build noch zur Laufzeit. Kein Angreifer-kontrolliertes Archiv erreicht den Code. KEIN Fix verfuegbar: der Advisory-Range ist <=2.0.1 und 2.0.1 IST latest; npm nennt als einzigen 'fix' einen Major-Downgrade auf puppeteer-core@19.8.3 — das waere ein Rueckschritt um fuenf Major-Versionen im PDF-Rendering-Pfad, also teurer als das Risiko. Erneut pruefen: 2026-11-13, zusammen mit 1139346 — Task 6hGcXpcc7cjQJWMG."
   }
 }
