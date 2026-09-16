@@ -1,6 +1,8 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { appointmentsRepo, monthlyServiceRecordsRepo } from "../repos";
+import { activeInvoiceForAppointmentExistsSqlRaw } from "../lib/appointment-invoiced";
+import { DEACTIVATION_OVERRIDE_MIN_LENGTH } from "@shared/domain/customer-deactivation";
 import {
   appointments,
   invoiceLineItems,
@@ -45,9 +47,19 @@ import {
  * ist:
  *
  *  A  HART — Leistungsnachweis `pending`/`employee_signed` ohne
- *     Kundenunterschrift. Das ist der Zustand der Bestandsfaelle: der
- *     Nachweis ist nicht abrechenbar und wird es nach der Deaktivierung
- *     auch nicht mehr, weil niemand mehr hingeht.
+ *     Kundenunterschrift. Das ist der Zustand der Bestandsfaelle.
+ *
+ *     Die Frage ist bewusst „hat der KUNDE unterschrieben?" und NICHT
+ *     „ist der Nachweis abrechenbar?". Die beiden fallen beim
+ *     SELBSTZAHLER auseinander: dort ist `employee_signed` laut
+ *     `isServiceRecordSignedForBilling` bereits abrechnungsfertig, und
+ *     der Guard blockiert trotzdem. Das ist Absicht, aber es ist eine
+ *     fachliche Weiche — waere die Frage die Abrechenbarkeit, muesste
+ *     hier `!isServiceRecordSignedForBilling(billingType, status)`
+ *     stehen, und die Blockade-Menge waere kleiner. Bis Alrik
+ *     entscheidet, wird mit der Unterschrift argumentiert und NICHT mit
+ *     der Abrechenbarkeit — eine falsche Begruendung im 409 fuellt das
+ *     Audit-Log mit Rechtfertigungen fuer einen Nicht-Zustand.
  *  B  WARNUNG — Nachweis `completed`, dessen Termine auf keiner aktiven
  *     Rechnung stehen. Im laufenden Monat der Normalzustand.
  *  C  WARNUNG — Rechnung im Entwurf. Im laufenden Monat ebenfalls
@@ -66,8 +78,11 @@ import {
  * Haken, weil der Vorgang im Gegensatz zur Dublette Geld betrifft.
  */
 
-/** Mindestlaenge der Begruendung, mit der Trigger A uebergangen wird. */
-export const DEACTIVATION_OVERRIDE_MIN_LENGTH = 10;
+/**
+ * Mindestlaenge der Begruendung, mit der Trigger A uebergangen wird.
+ * SSoT in `shared/`, weil der Client den Knopf an derselben Zahl sperrt.
+ */
+export { DEACTIVATION_OVERRIDE_MIN_LENGTH };
 
 export interface OpenServiceRecord {
   id: number;
@@ -131,10 +146,21 @@ export async function collectDeactivationBlockers(customerId: number): Promise<D
 
     // B — `completed`, aber mindestens ein Termin ohne aktive Rechnung.
     //
-    // `storniert_at IS NULL` ist hier wesentlich und nicht kosmetisch:
-    // eine stornierte Rechnung deckt den Termin NICHT ab (GoBD —
-    // Storno + Neuausstellung). Ohne die Bedingung waere ein Termin,
-    // dessen einzige Rechnung storniert wurde, faelschlich „abgerechnet".
+    // „Aktive Rechnung" kommt aus der SSoT
+    // `activeInvoiceForAppointmentExistsSqlRaw` und wird NICHT neu
+    // formuliert. Die erste Fassung schrieb `storniert_at IS NULL` von
+    // Hand — das haette GUTSCHRIFTEN als Abdeckung gewertet: an echten
+    // Daten gemessen tragen ALLE 114 Gutschriften `storniert_at = NULL`
+    // (`fix-45b-halfyear-split-dryrun.ts`). Ein Termin auf einer
+    // Gutschrift waere damit als abgerechnet durchgegangen und der
+    // offene Posten unsichtbar geblieben — derselbe Fehler, den #1892
+    // abgestellt hat.
+    //
+    // No-Show-Carve-out (#1536): ein No-Show mit unterdrueckter
+    // Ausfallrechnung erzeugt ABSICHTLICH kein Line-Item. Er ist nicht
+    // „unberechnet", sondern „nichts abzurechnen", und darf den
+    // Nachweis nicht dauerhaft als offenen Posten festhalten. Identisch
+    // zu `recordHasUnbilledAppointment` in `process-health.ts`.
     monthlyServiceRecordsRepo
       .selectColumnsFrom({
         id: monthlyServiceRecords.id,
@@ -152,12 +178,9 @@ export async function collectDeactivationBlockers(customerId: number): Promise<D
         monthlyServiceRecordsRepo.activeOnly(),
         appointmentsRepo.activeOnly(),
         eq(monthlyServiceRecords.status, "completed"),
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${invoiceLineItems} li
-          JOIN ${invoices} i ON i.id = li.invoice_id
-          WHERE li.appointment_id = ${appointments.id}
-            AND i.storniert_at IS NULL
-        )`,
+        sql`NOT (${appointments.status} = 'customer_no_show'
+                 AND ${appointments.noShowChargeSuppressed} = true)`,
+        sql`NOT ${activeInvoiceForAppointmentExistsSqlRaw("appointments.id")}`,
       )),
 
     // C — Rechnung im Entwurf.
@@ -185,21 +208,61 @@ export async function collectDeactivationBlockers(customerId: number): Promise<D
   return { unsignedRecords, uninvoicedRecords, draftInvoices };
 }
 
+export interface CustomerLifecycleFields {
+  status?: string | null;
+  inaktivAb?: string | null;
+}
+
 /**
  * Wird der Kunde durch DIESE Änderung deaktiviert?
  *
- * Nur der Übergang zaehlt. Ein bereits inaktiver Kunde, an dem etwas
- * anderes bearbeitet wird — oder dessen `inaktiv_ab` nur verschoben
- * wird — darf nicht bei jedem Speichern gegen den Guard laufen; sonst
- * wird der 409 zum Dauerzustand und die Begruendung zur Formalie, die
- * man wegklickt.
+ * ── Warum `status` UND `inaktiv_ab` ──────────────────────────────────
+ * Die Ticket-Vorgabe lautete „Ausloeser ist `inaktiv_ab`, NICHT
+ * `status`". Wortwoertlich umgesetzt fiel der Guard ins Leere, und das
+ * ist nachgemessen, nicht vermutet:
+ *
+ *  • Der Dialog „Kunden deaktivieren" schickt `{ status: "inaktiv",
+ *    deactivationReason, deactivationNote }` — KEIN `inaktivAb`
+ *    (`client/src/pages/admin/customer-detail.tsx`).
+ *  • `updateCustomer` leitet `inaktiv_ab` nicht aus `status` ab; die
+ *    Felder sind unabhaengig.
+ *  • Die Listen filtern auf `status`, nicht auf `inaktiv_ab`. Das
+ *    „Verschwinden aus den Standard-Listen", das diesen Guard
+ *    begruendet, haengt also an `status`.
+ *  • `inaktiv_ab` heisst in dieser App etwas ANDERES: bei
+ *    `status = 'aktiv'` traegt es das Vertragsende und erzeugt das
+ *    Badge „Auslaufend". Es ist ein Termin in der Zukunft, kein
+ *    Zustandswechsel.
+ *
+ * Gewacht wird deshalb ueber BEIDE Signale — wer den Zustandswechsel
+ * auf einem der Wege ausloest, laeuft gegen den Guard. Das ist eine
+ * Ausweitung gegenueber dem Ticket-Wortlaut und in seinem Sinne
+ * („bypass-safe"); die Weiche, ob `inaktiv_ab` allein genuegen soll,
+ * liegt bei Alrik.
+ *
+ * Nur der UEBERGANG zaehlt. Ein bereits inaktiver Kunde, an dem etwas
+ * anderes bearbeitet wird, darf nicht bei jedem Speichern gegen den
+ * Guard laufen — sonst wird der 409 zum Dauerzustand und die
+ * Begruendung zur Formalie, die man wegklickt.
  */
 export function isBecomingInactive(
-  previousInaktivAb: string | null | undefined,
-  nextInaktivAb: string | null | undefined,
+  previous: CustomerLifecycleFields,
+  next: CustomerLifecycleFields,
 ): boolean {
-  if (nextInaktivAb === undefined) return false;   // Feld nicht angefasst
-  return !previousInaktivAb && !!nextInaktivAb;
+  const statusWechsel =
+    next.status !== undefined
+    && next.status === "inaktiv"
+    && previous.status !== "inaktiv";
+
+  const endeGesetzt =
+    next.inaktivAb !== undefined
+    && !previous.inaktivAb
+    && !!next.inaktivAb
+    // Ein Vertragsende an einem bereits inaktiven Kunden ist kein
+    // neuer Zustandswechsel.
+    && previous.status !== "inaktiv";
+
+  return statusWechsel || endeGesetzt;
 }
 
 /** Traegt die Begruendung? */

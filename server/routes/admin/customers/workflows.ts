@@ -27,6 +27,7 @@ import { requireSuperAdmin } from "../../../middleware/auth";
 import { db } from "../../../lib/db";
 import { appointmentsRepo, monthlyServiceRecordsRepo, customersRepo, prospectsRepo, tasksRepo } from "../../../repos";
 import { softDeleteCustomerWithCascade } from "../../../services/customer-deletion-service";
+import { collectDeactivationBlockers, isHardBlocked } from "../../../services/customer-deactivation-guard";
 import { eq, and, sql, isNull, gte, lte, ne, inArray } from "drizzle-orm";
 
 const router = Router();
@@ -472,6 +473,35 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     }
   }
 
+  // Trigger A des Deaktivierungs-Guards (Ticket 6hWcjpm3Q4V95Xwp).
+  //
+  // Die beiden Gates unten fragen „gibt es fuer den Monat einen
+  // Leistungsnachweis / eine aktive Rechnung". Sie fragen NICHT, ob der
+  // KUNDE unterschrieben hat — ein Nachweis im Status `employee_signed`
+  // erfuellt „Nachweis existiert" und passierte bisher unbemerkt. Genau
+  // dieser Zustand liegt bei den Bestandsfaellen 93 und 89 vor.
+  //
+  // Eingehaengt in den BESTEHENDEN Superadmin-Override statt mit einem
+  // eigenen zweiten Mechanismus: ein zweiter Uebergehungs-Weg fuer
+  // dieselbe Klasse waere ein Zweitbegriff, und die Begruendungspflicht
+  // (>= 10 Zeichen) gibt es hier schon.
+  const deactivationBlockers = await collectDeactivationBlockers(id);
+
+  if (!overrideBillingGates) {
+    if (isHardBlocked(deactivationBlockers)) {
+      res.status(409).json({
+        error: "DEACTIVATION_BLOCKED",
+        code: "DEACTIVATION_BLOCKED",
+        message:
+          `Dieser Kunde hat ${deactivationBlockers.unsignedRecords.length} `
+          + `Leistungsnachweis${deactivationBlockers.unsignedRecords.length === 1 ? "" : "e"} `
+          + "ohne Kundenunterschrift. Bitte zuerst die Unterschriften einholen.",
+        details: deactivationBlockers,
+      });
+      return;
+    }
+  }
+
   if (!overrideBillingGates) {
     // Reguläre Pfad: LN- und Rechnungs-Gates sind harte Blocker.
     if (monthsWithoutServiceRecord.length > 0) {
@@ -489,6 +519,7 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     if (undocumented.length > 0) skippedGates.push("allDocumented");
     if (monthsWithoutServiceRecord.length > 0) skippedGates.push("allServiceRecords");
     if (monthsWithoutInvoice.length > 0) skippedGates.push("allInvoiced");
+    if (isHardBlocked(deactivationBlockers)) skippedGates.push("allCustomerSigned");
   }
 
   const trimmedOverrideReason = overrideReason?.trim() || null;

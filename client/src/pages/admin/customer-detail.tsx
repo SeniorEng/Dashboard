@@ -61,6 +61,7 @@ import { CustomerDocumentsSection } from "@/features/customers/components/admin/
 import { CustomerContactsTab } from "@/features/customers/components/admin/customer-contacts-tab";
 import { CustomerContractTab } from "@/features/customers/components/admin/customer-contract-tab";
 import { CustomerTimeline } from "@/features/customers/components/customer-timeline";
+import { DEACTIVATION_OVERRIDE_MIN_LENGTH } from "@shared/domain/customer-deactivation";
 
 
 interface CustomerListItem {
@@ -116,6 +117,14 @@ export default function AdminCustomerDetail() {
   const [hardDeleteConflict, setHardDeleteConflict] = useState<Array<{ key: string; label: string; count: number; met: boolean }> | null>(null);
   const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
   const [deactivationNote, setDeactivationNote] = useState<string>("");
+  // Ticket 6hWcjpm3Q4V95Xwp — Befund des Deaktivierungs-Guards. Gesetzt,
+  // sobald der Server mit 409/DEACTIVATION_BLOCKED antwortet; dann wird
+  // die Anmerkung zur PFLICHT-Begruendung und als
+  // `deactivationOverrideReason` mitgeschickt.
+  const [deactivationBlocked, setDeactivationBlocked] = useState<{
+    message: string;
+    unsignedCount: number;
+  } | null>(null);
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
   const [mergeNote, setMergeNote] = useState<string>("");
@@ -195,7 +204,7 @@ export default function AdminCustomerDetail() {
   };
 
   const updateStatus = useMutation({
-    mutationFn: async (payload: { status: string; deactivationReason?: string | null; deactivationNote?: string | null; inaktivAb?: string | null }) => {
+    mutationFn: async (payload: { status: string; deactivationReason?: string | null; deactivationNote?: string | null; inaktivAb?: string | null; deactivationOverrideReason?: string }) => {
       const result = await api.patch(`/admin/customers/${customerId}`, payload);
       return unwrapResult(result);
     },
@@ -212,6 +221,21 @@ export default function AdminCustomerDetail() {
       setDeactivationNote("");
     },
     onError: (err: Error) => {
+      // Der Guard antwortet mit 409 und nennt die offenen Posten. Der
+      // Dialog bleibt offen und verlangt eine Begruendung — ein reiner
+      // Toast waere eine Sackgasse: der Admin saehe nur „Fehler" und
+      // haette keinen Weg weiter.
+      const details = (err as Error & {
+        code?: string;
+        details?: { unsignedRecords?: unknown[] };
+      });
+      if (details.code === "DEACTIVATION_BLOCKED") {
+        setDeactivationBlocked({
+          message: err.message,
+          unsignedCount: details.details?.unsignedRecords?.length ?? 0,
+        });
+        return;
+      }
       toast({ title: "Fehler", description: err.message, variant: "destructive" });
     },
   });
@@ -671,6 +695,7 @@ export default function AdminCustomerDetail() {
             if (!open) {
               setShowDeactivateDialog(false);
               setDeactivationNote("");
+              setDeactivationBlocked(null);
             }
           }}>
             <DialogContent className="sm:max-w-md">
@@ -681,13 +706,28 @@ export default function AdminCustomerDetail() {
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-2">
+                {deactivationBlocked && (
+                  <div
+                    className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm"
+                    data-testid="alert-deactivation-blocked"
+                  >
+                    <p className="font-medium">Offene Posten</p>
+                    <p className="mt-1 text-muted-foreground">{deactivationBlocked.message}</p>
+                  </div>
+                )}
                 <div className="space-y-2">
-                  <Label htmlFor="deactivation-note">Anmerkung (optional)</Label>
+                  <Label htmlFor="deactivation-note">
+                    {deactivationBlocked
+                      ? `Begründung (Pflicht, mind. ${DEACTIVATION_OVERRIDE_MIN_LENGTH} Zeichen)`
+                      : "Anmerkung (optional)"}
+                  </Label>
                   <Textarea
                     id="deactivation-note"
                     value={deactivationNote}
                     onChange={(e) => setDeactivationNote(e.target.value)}
-                    placeholder="Optionale Anmerkung..."
+                    placeholder={deactivationBlocked
+                      ? "Warum wird trotz offener Posten deaktiviert?"
+                      : "Optionale Anmerkung..."}
                     maxLength={1000}
                     rows={3}
                     data-testid="textarea-deactivation-note"
@@ -709,16 +749,32 @@ export default function AdminCustomerDetail() {
                   variant="destructive"
                   onClick={() => {
                     updateStatus.mutate(
-                      { status: "inaktiv", deactivationReason: "kein_interesse" as DeactivationReason, deactivationNote: deactivationNote.trim() || null },
+                      {
+                        status: "inaktiv",
+                        deactivationReason: "kein_interesse" as DeactivationReason,
+                        deactivationNote: deactivationNote.trim() || null,
+                        // Nach einem 409 traegt dieselbe Anmerkung die
+                        // Begruendung — kein zweites Feld fuer dieselbe
+                        // Sache.
+                        ...(deactivationBlocked ? { deactivationOverrideReason: deactivationNote.trim() } : {}),
+                      },
                       {
                         onSuccess: () => {
                           setShowDeactivateDialog(false);
                           setDeactivationNote("");
+                          setDeactivationBlocked(null);
                         },
                       }
                     );
                   }}
-                  disabled={updateStatus.isPending}
+                  disabled={
+                    updateStatus.isPending
+                    // Nach einem 409 ist die Begruendung Pflicht — der
+                    // Knopf bleibt gesperrt, bis sie traegt. Sonst laeuft
+                    // der Admin in denselben 409 zurueck.
+                    || (!!deactivationBlocked
+                        && deactivationNote.trim().length < DEACTIVATION_OVERRIDE_MIN_LENGTH)
+                  }
                   data-testid="button-confirm-deactivation"
                 >
                   {updateStatus.isPending ? (

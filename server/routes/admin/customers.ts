@@ -929,14 +929,20 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
 
   // ── Deaktivierungs-Guard (Ticket 6hWcjpm3Q4V95Xwp) ──────────────────
   //
-  // Greift am UEBERGANG auf `inaktiv_ab` — nicht an `status`, und nicht
-  // bei jedem Speichern eines bereits inaktiven Kunden. Hart blockiert
-  // nur Trigger A (Leistungsnachweis ohne Kundenunterschrift); B und C
-  // fahren als Warnung in der Antwort mit, weil sie im laufenden Monat
-  // der Normalzustand sind — ein Riegel darauf traefe sieben von zehn
-  // Deaktivierungen.
+  // Greift am UEBERGANG in den inaktiven Zustand — ueber `status` ODER
+  // `inaktiv_ab`, siehe `isBecomingInactive`. Der Dialog „Kunden
+  // deaktivieren" schickt nur `status`; ein Guard allein auf
+  // `inaktiv_ab` lief im Produkt ins Leere.
+  //
+  // Hart blockiert nur Trigger A (Nachweis ohne Kundenunterschrift);
+  // B und C fahren als Hinweis in der 200er-Antwort mit, weil sie im
+  // laufenden Monat der Normalzustand sind — ein Riegel darauf traefe
+  // sieben von zehn Deaktivierungen.
   let deactivationFindings: DeactivationBlockers | null = null;
-  if (isBecomingInactive(existingCustomer.inaktivAb, validatedData.inaktivAb)) {
+  if (isBecomingInactive(
+    { status: existingCustomer.status, inaktivAb: existingCustomer.inaktivAb },
+    { status: validatedData.status, inaktivAb: validatedData.inaktivAb },
+  )) {
     deactivationFindings = await collectDeactivationBlockers(id);
 
     if (isHardBlocked(deactivationFindings) && !isValidOverrideReason(deactivationOverrideReason)) {
@@ -1015,6 +1021,14 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   
   birthdaysCache.invalidateAll();
   
+  // B/C sind als HINWEIS deklariert — dann muessen sie den Aufrufer
+  // auch erreichen. Vorher standen sie ausschliesslich im Audit-Log,
+  // und „gewarnt wird trotzdem" war eine Zusage ohne Empfaenger.
+  if (deactivationFindings && hasAnyFinding(deactivationFindings)) {
+    res.json({ ...customer, deactivationFindings });
+    return;
+  }
+
   res.json(customer);
 }));
 

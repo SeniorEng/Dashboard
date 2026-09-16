@@ -54,13 +54,13 @@ async function terminUnterLn(customerId: number, employeeId: number, recordId: n
 
 async function rechnungAnlegen(
   customerId: number, status: string,
-  opts: { appointmentId?: number; storniert?: boolean } = {},
+  opts: { appointmentId?: number; storniert?: boolean; invoiceType?: string } = {},
 ): Promise<number> {
   const [i] = await db.insert(invoices).values({
     customerId,
     invoiceNumber: `TEST-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     billingType: "pflegekasse_gesetzlich",
-    invoiceType: "kasse",
+    invoiceType: opts.invoiceType ?? "kasse",
     billingMonth: MONAT,
     billingYear: JAHR,
     recipientName: "Testkasse",
@@ -109,25 +109,43 @@ async function kundeVollstaendigWeg(customerId: number, ...employeeIds: number[]
 }
 
 describe("Deaktivierungs-Guard — Uebergangs-Logik", () => {
-  it("DG-1 – nur der Uebergang null → Datum ist eine Deaktivierung", () => {
-    expect(isBecomingInactive(null, "2026-03-31"), "aktiv → inaktiv").toBe(true);
-    expect(isBecomingInactive(undefined, "2026-03-31")).toBe(true);
+  it("DG-1 – der STATUS-Wechsel ist eine Deaktivierung (der Weg des Produkts)", () => {
+    // Der Dialog „Kunden deaktivieren" schickt genau das und KEIN
+    // `inaktivAb`. Eine erste Fassung wachte allein ueber `inaktiv_ab`
+    // und lief damit im Produkt ins Leere.
+    expect(isBecomingInactive({ status: "aktiv" }, { status: "inaktiv" })).toBe(true);
+    expect(isBecomingInactive(
+      { status: "aktiv", inaktivAb: null },
+      { status: "inaktiv" },
+    ), "ohne jedes inaktivAb").toBe(true);
+  });
+
+  it("DG-1b – auch das erstmalige Setzen von `inaktiv_ab` zaehlt", () => {
+    expect(isBecomingInactive({ status: "aktiv", inaktivAb: null }, { inaktivAb: "2026-03-31" })).toBe(true);
   });
 
   it("DG-2 – ein bereits inaktiver Kunde laeuft NICHT erneut gegen den Guard", () => {
     // Sonst wird der 409 zum Dauerzustand bei jedem Speichern und die
     // Begruendung zur Formalie, die man wegklickt.
-    expect(isBecomingInactive("2026-01-31", "2026-03-31"), "nur verschoben").toBe(false);
-    expect(isBecomingInactive("2026-01-31", "2026-01-31"), "unveraendert").toBe(false);
+    expect(isBecomingInactive({ status: "inaktiv" }, { status: "inaktiv" }), "unveraendert").toBe(false);
+    expect(isBecomingInactive(
+      { status: "inaktiv", inaktivAb: "2026-01-31" },
+      { inaktivAb: "2026-03-31" },
+    ), "Enddatum am inaktiven Kunden verschoben").toBe(false);
+    expect(isBecomingInactive(
+      { status: "inaktiv", inaktivAb: null },
+      { inaktivAb: "2026-03-31" },
+    ), "Enddatum erstmals am bereits inaktiven Kunden").toBe(false);
   });
 
   it("DG-3 – das Feld nicht anzufassen ist keine Deaktivierung", () => {
-    expect(isBecomingInactive(null, undefined)).toBe(false);
-    expect(isBecomingInactive("2026-01-31", undefined)).toBe(false);
+    expect(isBecomingInactive({ status: "aktiv", inaktivAb: null }, {})).toBe(false);
+    expect(isBecomingInactive({ status: "aktiv", inaktivAb: "2026-01-31" }, {})).toBe(false);
   });
 
   it("DG-4 – Reaktivieren ist keine Deaktivierung", () => {
-    expect(isBecomingInactive("2026-01-31", null)).toBe(false);
+    expect(isBecomingInactive({ status: "inaktiv" }, { status: "aktiv" })).toBe(false);
+    expect(isBecomingInactive({ status: "aktiv", inaktivAb: "2026-01-31" }, { inaktivAb: null })).toBe(false);
   });
 
   it("DG-5 – die Begruendung braucht Substanz, nicht nur Zeichen", () => {
@@ -208,9 +226,12 @@ describe("Deaktivierungs-Guard — Erhebung der offenen Posten", () => {
     try {
       const lnId = await lnAnlegen(c.id as number, emp.id, "completed", { customerSigned: true });
       const apptId = await terminUnterLn(c.id as number, emp.id, lnId, 7);
-      await rechnungAnlegen(c.id as number, "gestellt", { appointmentId: apptId, storniert: true });
+      // „Storniert" ist laut `activeInvoiceSqlRaw` ein STATUS, nicht der
+      // Zeitstempel — die erste Fassung dieses Tests setzte nur
+      // `storniert_at` und pruefte damit an der kanonischen Regel vorbei.
+      await rechnungAnlegen(c.id as number, "storniert", { appointmentId: apptId, storniert: true });
       const b = await collectDeactivationBlockers(c.id as number);
-      expect(b.uninvoicedRecords.length, "storniert deckt nicht ab").toBe(1);
+      expect(b.uninvoicedRecords.length, "eine stornierte Rechnung deckt nicht ab").toBe(1);
     } finally {
       await kundeVollstaendigWeg(c.id as number, emp.id);
     }
@@ -244,6 +265,71 @@ describe("Deaktivierungs-Guard — Erhebung der offenen Posten", () => {
     }
   });
 
+  it("DG-20 – SELBSTZAHLER: `employee_signed` blockiert TROTZDEM", async () => {
+    // Haelt die aktuelle fachliche Wahl fest, damit sie sichtbar ist
+    // statt implizit: die Frage von Trigger A ist „hat der KUNDE
+    // unterschrieben?", NICHT „ist der Nachweis abrechenbar?".
+    //
+    // Beim Selbstzahler fallen die beiden auseinander — dort ist
+    // `employee_signed` laut `isServiceRecordSignedForBilling` bereits
+    // abrechnungsfertig. Der Guard blockiert ihn dennoch. Waere die
+    // Frage die Abrechenbarkeit, muesste dieser Test das Gegenteil
+    // erwarten; die Entscheidung liegt bei Alrik. Wer sie trifft, macht
+    // diesen Test rot und muss ihn bewusst aendern.
+    const c = await createTestCustomer({ billingType: "selbstzahler" });
+    const emp = await createTestEmployee({ nachnamePrefix: "DG20" });
+    try {
+      await lnAnlegen(c.id as number, emp.id, "employee_signed");
+      const b = await collectDeactivationBlockers(c.id as number);
+      expect(b.unsignedRecords.length, "Unterschrift fehlt — unabhaengig vom Zahler").toBe(1);
+      expect(isHardBlocked(b)).toBe(true);
+    } finally {
+      await kundeVollstaendigWeg(c.id as number, emp.id);
+    }
+  });
+
+  it("DG-21 – B: eine GUTSCHRIFT deckt den Termin NICHT ab", async () => {
+    // Der Fall, den eine handgeschriebene `storniert_at IS NULL`-Formel
+    // verfehlt: an echten Daten gemessen tragen ALLE 114 Gutschriften
+    // `storniert_at = NULL` und waeren als aktive Rechnung
+    // durchgegangen. Deshalb kommt „aktive Rechnung" jetzt aus
+    // `activeInvoiceForAppointmentExistsSqlRaw`.
+    const c = await createTestCustomer({ billingType: "pflegekasse_gesetzlich" });
+    const emp = await createTestEmployee({ nachnamePrefix: "DG21" });
+    try {
+      const lnId = await lnAnlegen(c.id as number, emp.id, "completed", { customerSigned: true });
+      const apptId = await terminUnterLn(c.id as number, emp.id, lnId, 12);
+      await rechnungAnlegen(c.id as number, "gestellt", {
+        appointmentId: apptId, invoiceType: "stornorechnung",
+      });
+      const b = await collectDeactivationBlockers(c.id as number);
+      expect(b.uninvoicedRecords.length, "eine Gutschrift ist keine Abrechnung").toBe(1);
+    } finally {
+      await kundeVollstaendigWeg(c.id as number, emp.id);
+    }
+  });
+
+  it("DG-22 – B: unterdrueckter No-Show ist nichts abzurechnen, kein offener Posten", async () => {
+    // Task #1536: ein No-Show mit unterdrueckter Ausfallrechnung erzeugt
+    // ABSICHTLICH kein Line-Item. Ohne Carve-out haenge der Nachweis
+    // dauerhaft als „nicht abgerechnet" fest — falsch-positiver Alarm,
+    // und die Prod-Messung 89/165 waere nach oben verzerrt.
+    const c = await createTestCustomer({ billingType: "pflegekasse_gesetzlich" });
+    const emp = await createTestEmployee({ nachnamePrefix: "DG22" });
+    try {
+      const lnId = await lnAnlegen(c.id as number, emp.id, "completed", { customerSigned: true });
+      const apptId = await terminUnterLn(c.id as number, emp.id, lnId, 13);
+      await db.update(appointments).set({
+        status: "customer_no_show", noShowChargeSuppressed: true,
+      }).where(eq(appointments.id, apptId));
+
+      const b = await collectDeactivationBlockers(c.id as number);
+      expect(b.uninvoicedRecords.length, "nichts abzurechnen ist nicht dasselbe wie unberechnet").toBe(0);
+    } finally {
+      await kundeVollstaendigWeg(c.id as number, emp.id);
+    }
+  });
+
   it("DG-13 – ein Kunde ohne offene Posten meldet nichts", async () => {
     const c = await createTestCustomer({ billingType: "pflegekasse_gesetzlich" });
     try {
@@ -266,17 +352,20 @@ describe("Deaktivierungs-Guard — am Endpunkt", () => {
     try {
       await lnAnlegen(c.id as number, emp.id, "employee_signed");
 
+      // GENAU die Nutzlast des Deaktivieren-Dialogs — kein `inaktivAb`.
       const res = await apiPatch<any>(`/api/admin/customers/${c.id}`, {
-        inaktivAb: `${JAHR}-03-31`,
+        status: "inaktiv",
+        deactivationReason: "kein_interesse",
+        deactivationNote: null,
       });
       expect(res.status, `Antwort war: ${JSON.stringify(res.data)}`).toBe(409);
       expect(res.data?.code).toBe("DEACTIVATION_BLOCKED");
       expect(res.data?.details?.unsignedRecords?.length).toBe(1);
 
       // Der Kunde ist NICHT deaktiviert worden.
-      const [nachher] = await db.select({ inaktivAb: customers.inaktivAb })
+      const [nachher] = await db.select({ status: customers.status })
         .from(customers).where(eq(customers.id, c.id as number));
-      expect(nachher.inaktivAb, "die Blockade muss auch wirken").toBeNull();
+      expect(nachher.status, "die Blockade muss auch wirken").toBe("aktiv");
     } finally {
       await kundeVollstaendigWeg(c.id as number, emp.id);
     }
@@ -289,14 +378,14 @@ describe("Deaktivierungs-Guard — am Endpunkt", () => {
       await lnAnlegen(c.id as number, emp.id, "employee_signed");
 
       const res = await apiPatch<any>(`/api/admin/customers/${c.id}`, {
-        inaktivAb: `${JAHR}-03-31`,
+        status: "inaktiv",
         deactivationOverrideReason: "Kunde verstorben, Angehoerige informiert",
       });
       expect(res.status, `Antwort war: ${JSON.stringify(res.data)}`).toBe(200);
 
-      const [nachher] = await db.select({ inaktivAb: customers.inaktivAb })
+      const [nachher] = await db.select({ status: customers.status })
         .from(customers).where(eq(customers.id, c.id as number));
-      expect(nachher.inaktivAb).toBe(`${JAHR}-03-31`);
+      expect(nachher.status).toBe("inaktiv");
     } finally {
       await kundeVollstaendigWeg(c.id as number, emp.id);
     }
@@ -308,7 +397,7 @@ describe("Deaktivierungs-Guard — am Endpunkt", () => {
     try {
       await lnAnlegen(c.id as number, emp.id, "pending");
       const res = await apiPatch<any>(`/api/admin/customers/${c.id}`, {
-        inaktivAb: `${JAHR}-03-31`,
+        status: "inaktiv",
         deactivationOverrideReason: "egal",
       });
       expect(res.status).toBe(409);
@@ -333,9 +422,12 @@ describe("Deaktivierungs-Guard — am Endpunkt", () => {
       expect(b.draftInvoices.length, "C liegt an").toBe(1);
 
       const res = await apiPatch<any>(`/api/admin/customers/${c.id}`, {
-        inaktivAb: `${JAHR}-03-31`,
+        status: "inaktiv",
       });
       expect(res.status, `Antwort war: ${JSON.stringify(res.data)}`).toBe(200);
+      expect(res.data?.deactivationFindings?.uninvoicedRecords?.length,
+        "B/C muessen den Aufrufer erreichen, nicht nur das Audit-Log").toBe(1);
+      expect(res.data?.deactivationFindings?.draftInvoices?.length).toBe(1);
     } finally {
       await kundeVollstaendigWeg(c.id as number, emp.id);
     }
@@ -345,7 +437,7 @@ describe("Deaktivierungs-Guard — am Endpunkt", () => {
     const c = await createTestCustomer({ billingType: "pflegekasse_gesetzlich" });
     try {
       const res = await apiPatch<any>(`/api/admin/customers/${c.id}`, {
-        inaktivAb: `${JAHR}-03-31`,
+        status: "inaktiv",
       });
       expect(res.status, `Antwort war: ${JSON.stringify(res.data)}`).toBe(200);
     } finally {
@@ -360,7 +452,7 @@ describe("Deaktivierungs-Guard — am Endpunkt", () => {
       // Erst sauber deaktivieren, DANN den offenen Posten anlegen — so
       // entsteht genau der Zustand der Bestandsfaelle.
       const erst = await apiPatch<any>(`/api/admin/customers/${c.id}`, {
-        inaktivAb: `${JAHR}-03-31`,
+        status: "inaktiv",
       });
       expect(erst.status).toBe(200);
       await lnAnlegen(c.id as number, emp.id, "employee_signed");
@@ -368,7 +460,7 @@ describe("Deaktivierungs-Guard — am Endpunkt", () => {
       const res = await apiPatch<any>(`/api/admin/customers/${c.id}`, {
         inaktivAb: `${JAHR}-04-30`,
       });
-      expect(res.status, "nur verschoben — kein neuer Uebergang").toBe(200);
+      expect(res.status, "Enddatum am bereits inaktiven Kunden — kein neuer Uebergang").toBe(200);
     } finally {
       await kundeVollstaendigWeg(c.id as number, emp.id);
     }
