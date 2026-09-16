@@ -46,19 +46,25 @@ import {
  * ist:
  *
  *  A  HART — Leistungsnachweis `pending`/`employee_signed` ohne
- *     Kundenunterschrift. Das ist der Zustand der Bestandsfaelle.
+ *     Kundenunterschrift, in JEDER Kundenklasse. Das ist der Zustand
+ *     der Bestandsfaelle.
  *
- *     Die Frage ist bewusst „hat der KUNDE unterschrieben?" und NICHT
- *     „ist der Nachweis abrechenbar?". Die beiden fallen beim
- *     SELBSTZAHLER auseinander: dort ist `employee_signed` laut
- *     `isServiceRecordSignedForBilling` bereits abrechnungsfertig, und
- *     der Guard blockiert trotzdem. Das ist Absicht, aber es ist eine
- *     fachliche Weiche — waere die Frage die Abrechenbarkeit, muesste
- *     hier `!isServiceRecordSignedForBilling(billingType, status)`
- *     stehen, und die Blockade-Menge waere kleiner. Bis Alrik
- *     entscheidet, wird mit der Unterschrift argumentiert und NICHT mit
- *     der Abrechenbarkeit — eine falsche Begruendung im 409 fuellt das
- *     Audit-Log mit Rechtfertigungen fuer einen Nicht-Zustand.
+ *     Die Frage ist „hat der KUNDE unterschrieben?" und NICHT „ist der
+ *     Nachweis abrechenbar?". Beim SELBSTZAHLER fallen die beiden
+ *     auseinander: dort ist `employee_signed` laut
+ *     `isServiceRecordSignedForBilling` bereits abrechnungsfertig — und
+ *     der Guard blockiert trotzdem.
+ *
+ *     ENTSCHIEDEN (Weiche W2, Alrik 16.09.2026): so bleibt es. Die
+ *     Kundenunterschrift ist nicht nur Kassen-Compliance, sondern auch
+ *     operatives Kunden-Review — der Kunde bestaetigt die erhaltene
+ *     Leistung, unabhaengig vom Zahlungsweg. Wer hier
+ *     `!isServiceRecordSignedForBilling(...)` einsetzt, verkuerzt die
+ *     Signatur auf die Abrechenbarkeit und verliert diese zweite
+ *     Funktion; es waere ausserdem ein Zweitbegriff. DG-20 haelt die
+ *     Entscheidung fest und wird rot, wenn sie jemand zurueckdreht.
+ *
+ *     `billingType` wird hier deshalb bewusst NICHT gelesen.
  *  B  WARNUNG — Nachweis `completed`, dessen Termine auf keiner aktiven
  *     Rechnung stehen. Im laufenden Monat der Normalzustand.
  *  C  WARNUNG — Rechnung im Entwurf. Im laufenden Monat ebenfalls
@@ -198,16 +204,15 @@ export async function collectDeactivationBlockers(customerId: number): Promise<D
 
 export interface CustomerLifecycleFields {
   status?: string | null;
-  inaktivAb?: string | null;
 }
 
 /**
  * Wird der Kunde durch DIESE Änderung deaktiviert?
  *
- * ── Warum `status` UND `inaktiv_ab` ──────────────────────────────────
- * Die Ticket-Vorgabe lautete „Ausloeser ist `inaktiv_ab`, NICHT
- * `status`". Wortwoertlich umgesetzt fiel der Guard ins Leere, und das
- * ist nachgemessen, nicht vermutet:
+ * ── Warum `status` und NICHT `inaktiv_ab` ────────────────────────────
+ * Die Ticket-Vorgabe lautete umgekehrt: „Ausloeser ist `inaktiv_ab`,
+ * NICHT `status`". Wortwoertlich umgesetzt fiel der Guard ins Leere, und
+ * das ist nachgemessen, nicht vermutet:
  *
  *  • Der Dialog „Kunden deaktivieren" schickt `{ status: "inaktiv",
  *    deactivationReason, deactivationNote }` — KEIN `inaktivAb`
@@ -222,11 +227,14 @@ export interface CustomerLifecycleFields {
  *    Badge „Auslaufend". Es ist ein Termin in der Zukunft, kein
  *    Zustandswechsel.
  *
- * Gewacht wird deshalb ueber BEIDE Signale — wer den Zustandswechsel
- * auf einem der Wege ausloest, laeuft gegen den Guard. Das ist eine
- * Ausweitung gegenueber dem Ticket-Wortlaut und in seinem Sinne
- * („bypass-safe"); die Weiche, ob `inaktiv_ab` allein genuegen soll,
- * liegt bei Alrik.
+ * Gewacht wird deshalb ueber `status`, und NUR darueber (Weiche W3,
+ * Alrik 16.09.2026). Eine Zwischenfassung pruefte zusaetzlich das
+ * erstmalige Setzen von `inaktiv_ab` — das war inkonsistent: dieselbe
+ * Spalte wird von `PATCH /customers/:id/contract` ungeguardet
+ * geschrieben, und ein Vertragsende IST kein Zustandswechsel. Zwei
+ * Antworten auf dieselbe fachliche Frage. Der Vertrags-Pfad bleibt
+ * bewusst ungeguardet; ihn strukturell zu haerten ist ein eigenes
+ * Ticket.
  *
  * Nur der UEBERGANG zaehlt. Ein bereits inaktiver Kunde, an dem etwas
  * anderes bearbeitet wird, darf nicht bei jedem Speichern gegen den
@@ -237,20 +245,9 @@ export function isBecomingInactive(
   previous: CustomerLifecycleFields,
   next: CustomerLifecycleFields,
 ): boolean {
-  const statusWechsel =
-    next.status !== undefined
+  return next.status !== undefined
     && next.status === "inaktiv"
     && previous.status !== "inaktiv";
-
-  const endeGesetzt =
-    next.inaktivAb !== undefined
-    && !previous.inaktivAb
-    && !!next.inaktivAb
-    // Ein Vertragsende an einem bereits inaktiven Kunden ist kein
-    // neuer Zustandswechsel.
-    && previous.status !== "inaktiv";
-
-  return statusWechsel || endeGesetzt;
 }
 
 /** Traegt die Begruendung? */

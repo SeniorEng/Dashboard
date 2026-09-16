@@ -120,32 +120,29 @@ describe("Deaktivierungs-Guard — Uebergangs-Logik", () => {
     ), "ohne jedes inaktivAb").toBe(true);
   });
 
-  it("DG-1b – auch das erstmalige Setzen von `inaktiv_ab` zaehlt", () => {
-    expect(isBecomingInactive({ status: "aktiv", inaktivAb: null }, { inaktivAb: "2026-03-31" })).toBe(true);
+  it("DG-1b – `inaktiv_ab` allein ist KEINE Deaktivierung (Weiche W3)", () => {
+    // Eine Zwischenfassung wachte auch darueber. Das war inkonsistent:
+    // `PATCH /customers/:id/contract` schreibt dieselbe Spalte
+    // ungeguardet, und ein Vertragsende ist kein Zustandswechsel —
+    // zwei Antworten auf dieselbe fachliche Frage. Der Vertrags-Pfad
+    // bleibt bewusst offen, ihn zu haerten ist ein eigenes Ticket.
+    expect(isBecomingInactive({ status: "aktiv" }, { inaktivAb: "2026-03-31" } as never)).toBe(false);
+    expect(isBecomingInactive({ status: "aktiv" }, {})).toBe(false);
   });
 
   it("DG-2 – ein bereits inaktiver Kunde laeuft NICHT erneut gegen den Guard", () => {
     // Sonst wird der 409 zum Dauerzustand bei jedem Speichern und die
     // Begruendung zur Formalie, die man wegklickt.
     expect(isBecomingInactive({ status: "inaktiv" }, { status: "inaktiv" }), "unveraendert").toBe(false);
-    expect(isBecomingInactive(
-      { status: "inaktiv", inaktivAb: "2026-01-31" },
-      { inaktivAb: "2026-03-31" },
-    ), "Enddatum am inaktiven Kunden verschoben").toBe(false);
-    expect(isBecomingInactive(
-      { status: "inaktiv", inaktivAb: null },
-      { inaktivAb: "2026-03-31" },
-    ), "Enddatum erstmals am bereits inaktiven Kunden").toBe(false);
   });
 
-  it("DG-3 – das Feld nicht anzufassen ist keine Deaktivierung", () => {
-    expect(isBecomingInactive({ status: "aktiv", inaktivAb: null }, {})).toBe(false);
-    expect(isBecomingInactive({ status: "aktiv", inaktivAb: "2026-01-31" }, {})).toBe(false);
+  it("DG-3 – den Status nicht anzufassen ist keine Deaktivierung", () => {
+    expect(isBecomingInactive({ status: "aktiv" }, {})).toBe(false);
+    expect(isBecomingInactive({ status: "aktiv" }, { status: "aktiv" })).toBe(false);
   });
 
   it("DG-4 – Reaktivieren ist keine Deaktivierung", () => {
     expect(isBecomingInactive({ status: "inaktiv" }, { status: "aktiv" })).toBe(false);
-    expect(isBecomingInactive({ status: "aktiv", inaktivAb: "2026-01-31" }, { inaktivAb: null })).toBe(false);
   });
 
   it("DG-5 – die Begruendung braucht Substanz, nicht nur Zeichen", () => {
@@ -265,17 +262,19 @@ describe("Deaktivierungs-Guard — Erhebung der offenen Posten", () => {
     }
   });
 
-  it("DG-20 – SELBSTZAHLER: `employee_signed` blockiert TROTZDEM", async () => {
-    // Haelt die aktuelle fachliche Wahl fest, damit sie sichtbar ist
-    // statt implizit: die Frage von Trigger A ist „hat der KUNDE
-    // unterschrieben?", NICHT „ist der Nachweis abrechenbar?".
+  it("DG-20 – SELBSTZAHLER: `employee_signed` blockiert TROTZDEM (Weiche W2)", async () => {
+    // ENTSCHIEDEN (Alrik, 16.09.2026). Die Frage von Trigger A ist „hat
+    // der KUNDE unterschrieben?", NICHT „ist der Nachweis abrechenbar?".
     //
     // Beim Selbstzahler fallen die beiden auseinander — dort ist
     // `employee_signed` laut `isServiceRecordSignedForBilling` bereits
-    // abrechnungsfertig. Der Guard blockiert ihn dennoch. Waere die
-    // Frage die Abrechenbarkeit, muesste dieser Test das Gegenteil
-    // erwarten; die Entscheidung liegt bei Alrik. Wer sie trifft, macht
-    // diesen Test rot und muss ihn bewusst aendern.
+    // abrechnungsfertig. Der Guard blockiert ihn dennoch, weil die
+    // Kundenunterschrift nicht nur Kassen-Compliance ist, sondern auch
+    // operatives Kunden-Review: der Kunde bestaetigt die erhaltene
+    // Leistung, unabhaengig vom Zahlungsweg.
+    //
+    // Wer die Signatur auf die Abrechenbarkeit verkuerzt, macht diesen
+    // Test rot — und muss die Entscheidung dann bewusst zurueckdrehen.
     const c = await createTestCustomer({ billingType: "selbstzahler" });
     const emp = await createTestEmployee({ nachnamePrefix: "DG20" });
     try {
@@ -458,9 +457,9 @@ describe("Deaktivierungs-Guard — am Endpunkt", () => {
       await lnAnlegen(c.id as number, emp.id, "employee_signed");
 
       const res = await apiPatch<any>(`/api/admin/customers/${c.id}`, {
-        inaktivAb: `${JAHR}-04-30`,
+        status: "inaktiv",
       });
-      expect(res.status, "Enddatum am bereits inaktiven Kunden — kein neuer Uebergang").toBe(200);
+      expect(res.status, "schon inaktiv — kein neuer Uebergang, kein zweiter 409").toBe(200);
     } finally {
       await kundeVollstaendigWeg(c.id as number, emp.id);
     }

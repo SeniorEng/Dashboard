@@ -929,10 +929,11 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
 
   // ── Deaktivierungs-Guard (Ticket 6hWcjpm3Q4V95Xwp) ──────────────────
   //
-  // Greift am UEBERGANG in den inaktiven Zustand — ueber `status` ODER
-  // `inaktiv_ab`, siehe `isBecomingInactive`. Der Dialog „Kunden
-  // deaktivieren" schickt nur `status`; ein Guard allein auf
-  // `inaktiv_ab` lief im Produkt ins Leere.
+  // Greift am UEBERGANG nach `status = 'inaktiv'` — und nur daran
+  // (Weiche W3, Alrik 16.09.2026). Der Dialog „Kunden deaktivieren"
+  // schickt genau das; ein Guard auf `inaktiv_ab` lief im Produkt ins
+  // Leere, und ein Guard auf BEIDES war inkonsistent, weil der
+  // Vertrags-Pfad dieselbe Spalte ungeguardet schreibt.
   //
   // Hart blockiert nur Trigger A (Nachweis ohne Kundenunterschrift);
   // B und C fahren als Hinweis in der 200er-Antwort mit, weil sie im
@@ -940,8 +941,8 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   // sieben von zehn Deaktivierungen.
   let deactivationFindings: DeactivationBlockers | null = null;
   if (isBecomingInactive(
-    { status: existingCustomer.status, inaktivAb: existingCustomer.inaktivAb },
-    { status: validatedData.status, inaktivAb: validatedData.inaktivAb },
+    { status: existingCustomer.status },
+    { status: validatedData.status },
   )) {
     deactivationFindings = await collectDeactivationBlockers(id);
 
@@ -994,7 +995,6 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
       "customer",
       id,
       {
-        inaktivAb: validatedData.inaktivAb,
         hardBlocked: isHardBlocked(deactivationFindings),
         overrideReason: isHardBlocked(deactivationFindings)
           ? (deactivationOverrideReason ?? "").trim()
