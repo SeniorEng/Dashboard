@@ -27,6 +27,7 @@ import { requireSuperAdmin } from "../../../middleware/auth";
 import { db } from "../../../lib/db";
 import { appointmentsRepo, monthlyServiceRecordsRepo, customersRepo, prospectsRepo, tasksRepo } from "../../../repos";
 import { softDeleteCustomerWithCascade } from "../../../services/customer-deletion-service";
+import { collectDeactivationBlockers, isHardBlocked } from "../../../services/customer-deactivation-guard";
 import { eq, and, sql, isNull, gte, lte, ne, inArray } from "drizzle-orm";
 
 const router = Router();
@@ -254,6 +255,21 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
 
   const contractEndReached = contractEnd <= today;
 
+  // Ticket 6hWcjpm3Q4V95Xwp — Trigger A als Readiness-Check.
+  //
+  // MUSS hier stehen, nicht nur im Schreibpfad. Diese Datei schreibt die
+  // Invariante zwei Absaetze weiter unten selbst aus: „SSoT, deckungsgleich
+  // mit der Readiness oben — sonst zeigte die Oberflaeche ‚alles
+  // dokumentiert‘ und der Schreibpfad blockte trotzdem." Genau das war der
+  // Fall, als der Guard nur im Schreibpfad hing: die Oberflaeche meldete
+  // „Alle Bedingungen erfuellt", der Klick lief in einen 409, und weil die
+  // Override-Schaltflaeche nur im NICHT-bereit-Zweig gerendert wird, hatte
+  // auch der Superadmin keinen Ausweg. Bei einem SELBSTZAHLER war das
+  // dauerhaft: dort ist `employee_signed` abrechnungsfertig, also lagen
+  // alle vier alten Checks gruen.
+  const deactivationBlockers = await collectDeactivationBlockers(id);
+  const allCustomerSigned = !isHardBlocked(deactivationBlockers);
+
   const checks = [
     {
       key: "contractEndReached",
@@ -297,6 +313,20 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
       detail: allInvoiced
         ? `${invoiceChecks.length} Monat(e) abgerechnet`
         : `${invoiceChecks.filter(c => !c.hasInvoice).length} Monat(e) ohne Rechnung`,
+    },
+    {
+      key: "allCustomerSigned",
+      // Uebergehbar, aus demselben Grund wie `allDocumented`: ist die
+      // Kundin verstorben oder die Mitarbeiterin ausgeschieden, ist die
+      // Unterschrift nie nachzuholen. Ein Riegel ohne Ausweg blockiert
+      // die Deaktivierung dauerhaft — genau der Zustand, den der
+      // Kommentar an `allDocumented` als Fehler benennt.
+      overridable: true,
+      label: "Leistungsnachweise vom Kunden unterschrieben",
+      met: allCustomerSigned,
+      detail: allCustomerSigned
+        ? "Alle Leistungsnachweise tragen die Kundenunterschrift"
+        : `${deactivationBlockers.unsignedRecords.length} Leistungsnachweis(e) ohne Kundenunterschrift`,
     },
   ];
 
@@ -472,6 +502,35 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     }
   }
 
+  // Trigger A des Deaktivierungs-Guards (Ticket 6hWcjpm3Q4V95Xwp).
+  //
+  // Die beiden Gates unten fragen „gibt es fuer den Monat einen
+  // Leistungsnachweis / eine aktive Rechnung". Sie fragen NICHT, ob der
+  // KUNDE unterschrieben hat — ein Nachweis im Status `employee_signed`
+  // erfuellt „Nachweis existiert" und passierte bisher unbemerkt. Genau
+  // dieser Zustand liegt bei den Bestandsfaellen 93 und 89 vor.
+  //
+  // Eingehaengt in den BESTEHENDEN Superadmin-Override statt mit einem
+  // eigenen zweiten Mechanismus: ein zweiter Uebergehungs-Weg fuer
+  // dieselbe Klasse waere ein Zweitbegriff, und die Begruendungspflicht
+  // (>= 10 Zeichen) gibt es hier schon.
+  const deactivationBlockers = await collectDeactivationBlockers(id);
+
+  if (!overrideBillingGates) {
+    if (isHardBlocked(deactivationBlockers)) {
+      res.status(409).json({
+        error: "DEACTIVATION_BLOCKED",
+        code: "DEACTIVATION_BLOCKED",
+        message:
+          `Dieser Kunde hat ${deactivationBlockers.unsignedRecords.length} `
+          + `Leistungsnachweis${deactivationBlockers.unsignedRecords.length === 1 ? "" : "e"} `
+          + "ohne Kundenunterschrift. Bitte zuerst die Unterschriften einholen.",
+        details: deactivationBlockers,
+      });
+      return;
+    }
+  }
+
   if (!overrideBillingGates) {
     // Reguläre Pfad: LN- und Rechnungs-Gates sind harte Blocker.
     if (monthsWithoutServiceRecord.length > 0) {
@@ -489,6 +548,7 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     if (undocumented.length > 0) skippedGates.push("allDocumented");
     if (monthsWithoutServiceRecord.length > 0) skippedGates.push("allServiceRecords");
     if (monthsWithoutInvoice.length > 0) skippedGates.push("allInvoiced");
+    if (isHardBlocked(deactivationBlockers)) skippedGates.push("allCustomerSigned");
   }
 
   const trimmedOverrideReason = overrideReason?.trim() || null;
@@ -544,6 +604,11 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
         undocumentedAppointmentIds: undocumented.map(a => a.id),
         monthsWithoutServiceRecord,
         monthsWithoutInvoice,
+        // Dieselbe Regel fuer Trigger A: `skippedGates` nennt nur, DASS
+        // uebergangen wurde. Welche Nachweise ohne Kundenunterschrift
+        // stehenblieben, steht nur hier — und genau diese Information
+        // fehlte bei den Bestandsfaellen 93 und 89.
+        unsignedServiceRecords: deactivationBlockers.unsignedRecords,
         overrideReason: trimmedOverrideReason,
       } : {}),
     }, req.ip, tx);

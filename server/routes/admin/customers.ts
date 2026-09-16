@@ -38,6 +38,16 @@ import budgetsRouter from "./customers/budgets";
 import detailsRouter from "./customers/details";
 import contractsRouter from "./customers/contracts";
 import workflowsRouter from "./customers/workflows";
+import {
+  DEACTIVATION_OVERRIDE_MIN_LENGTH,
+  type DeactivationBlockers,
+  collectDeactivationBlockers,
+  describeBlockers,
+  hasAnyFinding,
+  isBecomingInactive,
+  isHardBlocked,
+  isValidOverrideReason,
+} from "../../services/customer-deactivation-guard";
 
 const router = Router();
 
@@ -867,6 +877,12 @@ const updateCustomerSchema = z.object({
   deactivationReason: z.string().nullable().optional(),
   deactivationNote: z.string().max(1000, "Maximal 1000 Zeichen erlaubt").nullable().optional(),
   skipDuplicateCheck: z.boolean().optional(),
+  // Ticket 6hWcjpm3Q4V95Xwp — Begruendung, mit der ein HARTER
+  // Deaktivierungs-Blocker (Leistungsnachweis ohne Kundenunterschrift)
+  // uebergangen wird. Dasselbe Muster wie `skipDuplicateCheck`, nur
+  // dass hier eine Begruendung verlangt wird und nicht bloss ein Haken:
+  // der Vorgang betrifft Geld, und der Grund gehoert ins Audit-Log.
+  deactivationOverrideReason: z.string().optional(),
 });
 
 router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
@@ -874,7 +890,7 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   if (id === null) return;
 
   const parsed = updateCustomerSchema.parse(req.body);
-  const { skipDuplicateCheck, ...validatedData } = parsed;
+  const { skipDuplicateCheck, deactivationOverrideReason, ...validatedData } = parsed;
 
   if (validatedData.geburtsdatum !== undefined) {
     const geburtsdatumError = validateGeburtsdatum(validatedData.geburtsdatum);
@@ -911,6 +927,40 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
     }
   }
 
+  // ── Deaktivierungs-Guard (Ticket 6hWcjpm3Q4V95Xwp) ──────────────────
+  //
+  // Greift am UEBERGANG nach `status = 'inaktiv'` — und nur daran
+  // (Weiche W3, Alrik 16.09.2026). Der Dialog „Kunden deaktivieren"
+  // schickt genau das; ein Guard auf `inaktiv_ab` lief im Produkt ins
+  // Leere, und ein Guard auf BEIDES war inkonsistent, weil der
+  // Vertrags-Pfad dieselbe Spalte ungeguardet schreibt.
+  //
+  // Hart blockiert nur Trigger A (Nachweis ohne Kundenunterschrift);
+  // B und C fahren als Hinweis in der 200er-Antwort mit, weil sie im
+  // laufenden Monat der Normalzustand sind — ein Riegel darauf traefe
+  // sieben von zehn Deaktivierungen.
+  let deactivationFindings: DeactivationBlockers | null = null;
+  if (isBecomingInactive(
+    { status: existingCustomer.status },
+    { status: validatedData.status },
+  )) {
+    deactivationFindings = await collectDeactivationBlockers(id);
+
+    if (isHardBlocked(deactivationFindings) && !isValidOverrideReason(deactivationOverrideReason)) {
+      res.status(409).json({
+        error: "DEACTIVATION_BLOCKED",
+        code: "DEACTIVATION_BLOCKED",
+        message:
+          `Dieser Kunde hat offene Posten: ${describeBlockers(deactivationFindings)}. `
+          + "Ein Leistungsnachweis ohne Kundenunterschrift ist nach der Deaktivierung "
+          + "nicht mehr abrechenbar. Zum Fortfahren eine Begründung angeben "
+          + `(mindestens ${DEACTIVATION_OVERRIDE_MIN_LENGTH} Zeichen, "deactivationOverrideReason").`,
+        details: deactivationFindings,
+      });
+      return;
+    }
+  }
+
   const changedFields: string[] = [];
   const oldValues: Record<string, unknown> = {};
   const newValues: Record<string, unknown> = {};
@@ -934,6 +984,29 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
     await auditService.customerUpdated(req.user!.id, id, { changedFields, oldValues, newValues }, req.ip);
   }
 
+  // Die Kenntnisnahme wird protokolliert, nicht nur die Aenderung: ein
+  // `customer_updated` mit `inaktivAb` verraet nicht, WAS beim
+  // Deaktivieren offen war. Genau diese Information fehlte bei den
+  // Bestandsfaellen 93 und 89.
+  if (deactivationFindings && hasAnyFinding(deactivationFindings)) {
+    await auditService.log(
+      req.user!.id,
+      "customer_deactivated_with_open_items",
+      "customer",
+      id,
+      {
+        hardBlocked: isHardBlocked(deactivationFindings),
+        overrideReason: isHardBlocked(deactivationFindings)
+          ? (deactivationOverrideReason ?? "").trim()
+          : null,
+        unsignedRecords: deactivationFindings.unsignedRecords,
+        uninvoicedRecordCount: deactivationFindings.uninvoicedRecords.length,
+        draftInvoiceCount: deactivationFindings.draftInvoices.length,
+      },
+      req.ip,
+    );
+  }
+
   const addressChanged = changedFields.some(f => ["strasse", "nr", "plz", "stadt"].includes(f));
   if (addressChanged) {
     geocodeCustomer(id).catch(err => console.error("[geocoding] Background geocoding failed:", err));
@@ -948,6 +1021,14 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   
   birthdaysCache.invalidateAll();
   
+  // B/C sind als HINWEIS deklariert — dann muessen sie den Aufrufer
+  // auch erreichen. Vorher standen sie ausschliesslich im Audit-Log,
+  // und „gewarnt wird trotzdem" war eine Zusage ohne Empfaenger.
+  if (deactivationFindings && hasAnyFinding(deactivationFindings)) {
+    res.json({ ...customer, deactivationFindings });
+    return;
+  }
+
   res.json(customer);
 }));
 

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { SectionCard } from "@/components/patterns/section-card";
-import { Loader2, Clock, UserCheck, FileText, Wallet, ShieldCheck, Pencil, UserPlus, Undo2, Trash2, CalendarCheck, ArrowRightLeft, Phone, Mail, StickyNote, RefreshCw } from "lucide-react";
+import { Loader2, Clock, UserCheck, FileText, Wallet, ShieldCheck, Pencil, UserPlus, Undo2, Trash2, CalendarCheck, ArrowRightLeft, Phone, Mail, StickyNote, RefreshCw, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
 
 interface TimelineEntry {
@@ -32,6 +32,9 @@ const ACTION_CONFIG: Record<string, { label: string; icon: typeof Clock; color: 
   customer_care_level_changed: { label: "Pflegegrad geändert", icon: ShieldCheck, color: "text-purple-600" },
   customer_contract_updated: { label: "Vertrag aktualisiert", icon: FileText, color: "text-amber-600" },
   customer_anonymized: { label: "Kundendaten anonymisiert", icon: Trash2, color: "text-red-600" },
+  // Ticket 6hWcjpm3Q4V95Xwp — ohne Eintrag zeigt der Fallback dem Admin den
+  // rohen Schluessel in der Kundentimeline.
+  customer_deactivated_with_open_items: { label: "Deaktiviert trotz offener Posten", icon: AlertTriangle, color: "text-red-600" },
   prospect_converted: { label: "Aus Interessent konvertiert", icon: ArrowRightLeft, color: "text-teal-600" },
   budget_manual_adjustment: { label: "Budget manuell angepasst", icon: Wallet, color: "text-indigo-600" },
   budget_reversal: { label: "Buchung storniert", icon: Undo2, color: "text-orange-600" },

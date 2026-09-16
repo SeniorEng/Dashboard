@@ -26,6 +26,7 @@ export const AUDIT_ACTIONS = [
   "appointment_decouple_blocked",
   "employee_anonymized",
   "customer_updated",
+  "customer_deactivated_with_open_items",
   "customer_care_level_changed",
   "customer_contract_updated",
   "invoice_created",
