@@ -8,6 +8,8 @@ import {
 } from "@shared/schema";
 import { log } from "../lib/log";
 import {
+  DAILY_SCHEDULER_SLOTS,
+  type DailySchedulerSlot,
   computeMonthCloseCutoff,
   daysUntilCutoff,
   isCutoffDay,
@@ -464,31 +466,40 @@ export async function getMonthCloseBanner(userId: number): Promise<{
  * Schreibvorgang die Marke des anderen ueberschreibt, war die Bedingung des
  * jeweils anderen Slots danach wieder wahr.
  *
- * Wirksam wird das in Stunde 23, wo beide Bedingungen gleichzeitig gelten:
- * laeuft der Poll dort ein zweites Mal — also nach einem Neustart in diesem
- * Fenster (Deploy, OOM, Host-Reboot) —, dann hat der Auto-Close die
- * Reminder-Marke ueberschrieben und die Reminder-Welle fuehrt ihre Abfragen
- * erneut aus. Ein Doppelversand wird davon nicht ausgeloest, weil die Sperre
- * im Audit-Log sitzt (`reminderAlreadySent`).
+ * WIE WIRKSAM das auf dem heutigen Stand ist: LATENT, nicht wirksam. Das ist
+ * durchgerechnet und korrigiert eine frühere, zu großzügige Fassung dieses
+ * Absatzes, die „Neustart in Stunde 23" als Auslöser nannte. Ein Neustart
+ * loescht die Marke SELBST — sie ist prozess-lokal. Vor und nach dem Fix
+ * verhaelt sich dieser Fall identisch.
  *
- * Genau das ist der Grund, es trotzdem zu richten: eine Entprellung, die nur
- * durch eine nachgelagerte Sperre nicht auffaellt, ist keine. Wer den naechsten
- * Slot einhaengt — insbesondere einen, der sich die Stunde mit dem Reminder
- * teilt —, erbt einen stillen Stunden-Takt.
+ * Die verbleibende Differenz braucht ZWEI Polls mit `berlinHour() === 23` am
+ * selben Berliner Datum INNERHALB eines Prozesses. Bei `POLL_INTERVAL_MS = 1h`
+ * und `setInterval` ist das nicht erreichbar: der Timer feuert spaet, nie
+ * frueh, und der naechste Tick nach einem 23:xx-Poll liegt in Stunde 0 des
+ * Folgetags. Erreichbar nur ueber einen Rueckwaerts-Sprung der Wanduhr
+ * (NTP-Korrektur, VM-Resume).
  *
- * Die Schluessel sind typisierte Konstanten, damit zwei Slots sich nicht
- * versehentlich denselben teilen koennen.
+ * Gerichtet wird es deshalb als Vorsorge, nicht als Reparatur eines laufenden
+ * Schadens: eine Entprellung, deren Korrektheit an der Taktrate des Timers
+ * haengt statt an ihrer eigenen Struktur, ist keine. Wer den naechsten Slot
+ * einhaengt — insbesondere einen, der sich die Stunde mit dem Reminder teilt —,
+ * erbt einen echten Stunden-Takt.
+ *
+ * Die Schluessel liegen in `DAILY_SCHEDULER_SLOTS`
+ * (`shared/utils/month-close-cutoff.ts` — dort, weil dieses Modul beim Import
+ * eine `DATABASE_URL` verlangt und eine Konstante dahinter nicht als Einheit
+ * pruefbar waere). Das Buendeln allein macht sie NICHT
+ * eindeutig — `{ reminder: "reminder", autoClose: "reminder" }` typprueft
+ * anstandslos, und die Folge waere schwerer als der Ausgangsfehler: der
+ * Auto-Close laese die Marke des Reminders, uebersprange sich selbst, und der
+ * Monat wuerde wegen `isCutoffDay` (strikte Tagesgleichheit) NIE geschlossen —
+ * still, ohne Log. Die Eindeutigkeit der WERTE ist deshalb als Test
+ * abgesichert (`tests/unit/scheduler-daily-debounce.test.ts`), nicht als
+ * Zusage im Kommentar. Darum ist die Konstante exportiert.
  */
-const DAILY_SLOTS = {
-  reminder: "reminder",
-  autoClose: "auto-close",
-} as const;
+const lastRunPerSlot = new Map<DailySchedulerSlot, string>();
 
-type DailySlot = (typeof DAILY_SLOTS)[keyof typeof DAILY_SLOTS];
-
-const lastRunPerSlot = new Map<DailySlot, string>();
-
-function alreadyRanToday(slot: DailySlot, today: string): boolean {
+function alreadyRanToday(slot: DailySchedulerSlot, today: string): boolean {
   return lastRunPerSlot.get(slot) === today;
 }
 
@@ -497,20 +508,20 @@ async function runDaily(): Promise<void> {
   const hour = berlinHour();
 
   // Reminders fire once per day (>= 8:00 Berlin)
-  if (hour >= 8 && !alreadyRanToday(DAILY_SLOTS.reminder, today)) {
+  if (hour >= 8 && !alreadyRanToday(DAILY_SCHEDULER_SLOTS.reminder, today)) {
     try {
       await sendMonthCloseReminders(today);
-      lastRunPerSlot.set(DAILY_SLOTS.reminder, today);
+      lastRunPerSlot.set(DAILY_SCHEDULER_SLOTS.reminder, today);
     } catch (err) {
       console.error("[month-close] Reminder-Fehler:", err);
     }
   }
 
   // Auto-close fires at >= 23:00 Berlin on the cutoff day
-  if (hour >= 23 && !alreadyRanToday(DAILY_SLOTS.autoClose, today)) {
+  if (hour >= 23 && !alreadyRanToday(DAILY_SCHEDULER_SLOTS.autoClose, today)) {
     try {
       await autoCloseMonthForCutoff(today);
-      lastRunPerSlot.set(DAILY_SLOTS.autoClose, today);
+      lastRunPerSlot.set(DAILY_SCHEDULER_SLOTS.autoClose, today);
     } catch (err) {
       console.error("[month-close] Auto-Close-Fehler:", err);
     }
