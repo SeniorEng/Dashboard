@@ -255,6 +255,21 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
 
   const contractEndReached = contractEnd <= today;
 
+  // Ticket 6hWcjpm3Q4V95Xwp — Trigger A als Readiness-Check.
+  //
+  // MUSS hier stehen, nicht nur im Schreibpfad. Diese Datei schreibt die
+  // Invariante zwei Absaetze weiter unten selbst aus: „SSoT, deckungsgleich
+  // mit der Readiness oben — sonst zeigte die Oberflaeche ‚alles
+  // dokumentiert‘ und der Schreibpfad blockte trotzdem." Genau das war der
+  // Fall, als der Guard nur im Schreibpfad hing: die Oberflaeche meldete
+  // „Alle Bedingungen erfuellt", der Klick lief in einen 409, und weil die
+  // Override-Schaltflaeche nur im NICHT-bereit-Zweig gerendert wird, hatte
+  // auch der Superadmin keinen Ausweg. Bei einem SELBSTZAHLER war das
+  // dauerhaft: dort ist `employee_signed` abrechnungsfertig, also lagen
+  // alle vier alten Checks gruen.
+  const deactivationBlockers = await collectDeactivationBlockers(id);
+  const allCustomerSigned = !isHardBlocked(deactivationBlockers);
+
   const checks = [
     {
       key: "contractEndReached",
@@ -298,6 +313,20 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
       detail: allInvoiced
         ? `${invoiceChecks.length} Monat(e) abgerechnet`
         : `${invoiceChecks.filter(c => !c.hasInvoice).length} Monat(e) ohne Rechnung`,
+    },
+    {
+      key: "allCustomerSigned",
+      // Uebergehbar, aus demselben Grund wie `allDocumented`: ist die
+      // Kundin verstorben oder die Mitarbeiterin ausgeschieden, ist die
+      // Unterschrift nie nachzuholen. Ein Riegel ohne Ausweg blockiert
+      // die Deaktivierung dauerhaft — genau der Zustand, den der
+      // Kommentar an `allDocumented` als Fehler benennt.
+      overridable: true,
+      label: "Leistungsnachweise vom Kunden unterschrieben",
+      met: allCustomerSigned,
+      detail: allCustomerSigned
+        ? "Alle Leistungsnachweise tragen die Kundenunterschrift"
+        : `${deactivationBlockers.unsignedRecords.length} Leistungsnachweis(e) ohne Kundenunterschrift`,
     },
   ];
 
@@ -575,6 +604,11 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
         undocumentedAppointmentIds: undocumented.map(a => a.id),
         monthsWithoutServiceRecord,
         monthsWithoutInvoice,
+        // Dieselbe Regel fuer Trigger A: `skippedGates` nennt nur, DASS
+        // uebergangen wurde. Welche Nachweise ohne Kundenunterschrift
+        // stehenblieben, steht nur hier — und genau diese Information
+        // fehlte bei den Bestandsfaellen 93 und 89.
+        unsignedServiceRecords: deactivationBlockers.unsignedRecords,
         overrideReason: trimmedOverrideReason,
       } : {}),
     }, req.ip, tx);

@@ -202,3 +202,33 @@ export async function hasActiveInvoiceForAppointments(
   const rows = await findActiveInvoicesForAppointments(appointmentIds, client);
   return rows.length > 0;
 }
+
+/**
+ * Roh-SQL: „haengt an DIESEM Leistungsnachweis mindestens ein Termin, der
+ * nicht abgerechnet ist?"
+ *
+ * Hierher gezogen aus `server/storage/statistics/process-health.ts`, wo sie
+ * datei-privat lag. Der Deaktivierungs-Guard (Ticket 6hWcjpm3Q4V95Xwp)
+ * stellt dieselbe Frage; die Komposition ein zweites Mal hinzuschreiben
+ * hiesse, dass eine Aenderung an #1536 nur eine Haelfte trifft. Der innere
+ * Teil („aktive Rechnung") kam schon vorher aus der SSoT — die Klammer
+ * darum nicht.
+ *
+ * Task #1536 — Ausnahme „nichts abzurechnen": Ein No-Show-Termin mit
+ * unterdrueckter Privatrechnung (`no_show_charge_suppressed = true`)
+ * erzeugt ABSICHTLICH kein Line-Item. Er ist damit nicht „unberechnet",
+ * sondern „nichts abzurechnen", und darf den Nachweis nicht dauerhaft
+ * als offenen Posten festhalten (falsch-positiver Alarm).
+ *
+ * @param msrIdRef SQL-Ausdruck, der die `monthly_service_records`-ID
+ *   liefert — z. B. eine gebundene Drizzle-Spalte oder `sql.raw("msr.id")`.
+ */
+export function recordHasUnbilledAppointmentSqlRaw(msrIdRef: SQL): SQL {
+  return sql`EXISTS (
+    SELECT 1 FROM service_record_appointments sra
+    JOIN appointments a ON a.id = sra.appointment_id AND a.deleted_at IS NULL
+    WHERE sra.service_record_id = ${msrIdRef}
+      AND NOT (a.status = 'customer_no_show' AND a.no_show_charge_suppressed = true)
+      AND NOT ${activeInvoiceForAppointmentExistsSqlRaw("sra.appointment_id")}
+  )`;
+}

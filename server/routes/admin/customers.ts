@@ -990,7 +990,7 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   if (deactivationFindings && hasAnyFinding(deactivationFindings)) {
     await auditService.log(
       req.user!.id,
-      "customer_deactivated_with_unsigned_ln",
+      "customer_deactivated_with_open_items",
       "customer",
       id,
       {

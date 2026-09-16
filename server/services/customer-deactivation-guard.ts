@@ -1,11 +1,10 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { appointmentsRepo, monthlyServiceRecordsRepo } from "../repos";
-import { activeInvoiceForAppointmentExistsSqlRaw } from "../lib/appointment-invoiced";
+import { recordHasUnbilledAppointmentSqlRaw } from "../lib/appointment-invoiced";
 import { DEACTIVATION_OVERRIDE_MIN_LENGTH } from "@shared/domain/customer-deactivation";
 import {
   appointments,
-  invoiceLineItems,
   invoices,
   monthlyServiceRecords,
   serviceRecordAppointments,
@@ -72,7 +71,7 @@ import {
  * ── Was „hart" heisst ────────────────────────────────────────────────
  * A blockiert mit 409 und nennt die betroffenen Nachweise. Fortfahren
  * geht nur mit einer ausdruecklichen Begruendung (>= 10 Zeichen), die
- * im Audit-Log landet (`customer_deactivated_with_unsigned_ln`). Das
+ * im Audit-Log landet (`customer_deactivated_with_open_items`). Das
  * ist dasselbe Muster wie `skipDuplicateCheck` beim Dublettencheck —
  * nur dass hier eine Begruendung verlangt wird und nicht bloss ein
  * Haken, weil der Vorgang im Gegensatz zur Dublette Geld betrifft.
@@ -127,7 +126,7 @@ export function hasAnyFinding(b: DeactivationBlockers): boolean {
  * Meldung und die tatsaechliche Blockade auseinanderlaufen.
  */
 export async function collectDeactivationBlockers(customerId: number): Promise<DeactivationBlockers> {
-  const [unsignedRecords, uninvoicedRows, draftInvoices] = await Promise.all([
+  const [unsignedRecords, uninvoicedRecords, draftInvoices] = await Promise.all([
     // A — `pending`/`employee_signed` ohne Kundenunterschrift.
     monthlyServiceRecordsRepo
       .selectColumnsFrom({
@@ -146,21 +145,19 @@ export async function collectDeactivationBlockers(customerId: number): Promise<D
 
     // B — `completed`, aber mindestens ein Termin ohne aktive Rechnung.
     //
-    // „Aktive Rechnung" kommt aus der SSoT
-    // `activeInvoiceForAppointmentExistsSqlRaw` und wird NICHT neu
-    // formuliert. Die erste Fassung schrieb `storniert_at IS NULL` von
-    // Hand — das haette GUTSCHRIFTEN als Abdeckung gewertet: an echten
-    // Daten gemessen tragen ALLE 114 Gutschriften `storniert_at = NULL`
-    // (`fix-45b-halfyear-split-dryrun.ts`). Ein Termin auf einer
-    // Gutschrift waere damit als abgerechnet durchgegangen und der
-    // offene Posten unsichtbar geblieben — derselbe Fehler, den #1892
-    // abgestellt hat.
+    // Die GANZE Frage kommt aus `recordHasUnbilledAppointmentSqlRaw` und
+    // wird hier nicht neu formuliert — auch nicht die Klammer um das
+    // Rechnungs-Praedikat. Zwei Fassungen bedeuteten, dass eine Aenderung
+    // an #1536 nur eine Haelfte trifft; dieselbe Funktion bedient
+    // `process-health.ts`.
     //
-    // No-Show-Carve-out (#1536): ein No-Show mit unterdrueckter
-    // Ausfallrechnung erzeugt ABSICHTLICH kein Line-Item. Er ist nicht
-    // „unberechnet", sondern „nichts abzurechnen", und darf den
-    // Nachweis nicht dauerhaft als offenen Posten festhalten. Identisch
-    // zu `recordHasUnbilledAppointment` in `process-health.ts`.
+    // Was die erste Fassung falsch machte: sie schrieb
+    // `storniert_at IS NULL` von Hand und haette damit GUTSCHRIFTEN als
+    // Abdeckung gewertet — an echten Daten gemessen tragen ALLE 114
+    // Gutschriften `storniert_at = NULL`. Ein Termin auf einer
+    // Gutschrift waere als abgerechnet durchgegangen und der offene
+    // Posten unsichtbar geblieben; derselbe Fehler, den #1892 abgestellt
+    // hat. Und der No-Show-Carve-out (#1536) fehlte ganz.
     monthlyServiceRecordsRepo
       .selectColumnsFrom({
         id: monthlyServiceRecords.id,
@@ -168,20 +165,13 @@ export async function collectDeactivationBlockers(customerId: number): Promise<D
         month: monthlyServiceRecords.month,
         status: monthlyServiceRecords.status,
       })
-      .innerJoin(
-        serviceRecordAppointments,
-        eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id),
-      )
-      .innerJoin(appointments, eq(appointments.id, serviceRecordAppointments.appointmentId))
       .where(and(
         eq(monthlyServiceRecords.customerId, customerId),
         monthlyServiceRecordsRepo.activeOnly(),
-        appointmentsRepo.activeOnly(),
         eq(monthlyServiceRecords.status, "completed"),
-        sql`NOT (${appointments.status} = 'customer_no_show'
-                 AND ${appointments.noShowChargeSuppressed} = true)`,
-        sql`NOT ${activeInvoiceForAppointmentExistsSqlRaw("appointments.id")}`,
-      )),
+        recordHasUnbilledAppointmentSqlRaw(sql`${monthlyServiceRecords.id}`),
+      ))
+      .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month),
 
     // C — Rechnung im Entwurf.
     db
@@ -198,13 +188,11 @@ export async function collectDeactivationBlockers(customerId: number): Promise<D
       )),
   ]);
 
-  // B liefert eine Zeile je unabgerechnetem TERMIN; gemeldet wird der
-  // NACHWEIS. Ohne diesen Schritt zaehlte ein Nachweis mit acht offenen
-  // Terminen achtfach — dieselbe Einheiten-Falle wie in der
-  // Nach-Cutoff-Erinnerung.
-  const uninvoicedRecords = [...new Map(uninvoicedRows.map(r => [r.id, r])).values()]
-    .sort((a, b) => a.year - b.year || a.month - b.month);
-
+  // Kein Dedup mehr noetig: `recordHasUnbilledAppointmentSqlRaw` ist ein
+  // EXISTS am Nachweis und liefert je Nachweis genau eine Zeile. Die
+  // erste Fassung jointe die Termine hinein und musste hinterher
+  // zusammenfassen — ein Nachweis mit acht offenen Terminen zaehlte
+  // sonst achtfach (DG-11 haelt das fest).
   return { unsignedRecords, uninvoicedRecords, draftInvoices };
 }
 

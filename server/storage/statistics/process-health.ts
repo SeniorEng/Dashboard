@@ -10,6 +10,7 @@ import { billingPeriodFilter, buildKpi, dateFilter, getHealthThresholds, num, pe
 // aber nicht (Count≠Liste). Kein Lohn-/Stunden-/km-Pfad — rein kundenseitig.
 import { notErstberatungSqlRaw } from "../../lib/appointment-signed";
 import { activeInvoiceForAppointmentExistsSqlRaw } from "../../lib/appointment-invoiced";
+import { recordHasUnbilledAppointmentSqlRaw } from "../../lib/appointment-invoiced";
 
 /**
  * Task #1530 — Termin-genaues „noch abzurechnen"-Prädikat für einen
@@ -50,13 +51,7 @@ import { activeInvoiceForAppointmentExistsSqlRaw } from "../../lib/appointment-i
  * wie abgerechnete Termine behandelt.
  */
 function recordHasUnbilledAppointment(msrIdCol: SQL): SQL {
-  return sql`EXISTS (
-    SELECT 1 FROM service_record_appointments sra
-    JOIN appointments a ON a.id = sra.appointment_id AND a.deleted_at IS NULL
-    WHERE sra.service_record_id = ${msrIdCol}
-      AND NOT (a.status = 'customer_no_show' AND a.no_show_charge_suppressed = true)
-      AND NOT ${activeInvoiceForAppointmentExistsSqlRaw("sra.appointment_id")}
-  )`;
+  return recordHasUnbilledAppointmentSqlRaw(msrIdCol);
 }
 
 interface PeriodCounts {
