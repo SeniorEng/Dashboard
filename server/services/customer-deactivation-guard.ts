@@ -27,12 +27,20 @@ import {
  * Deaktivieren — er verlangt, dass die offenen Posten zur Kenntnis
  * genommen werden, und schreibt diese Kenntnisnahme ins Audit-Log.
  *
- * ── Der Ausloeser ist `inaktiv_ab`, NICHT `status` ───────────────────
- * Ausdrueckliche Ticket-Vorgabe. `status` ist ein Anzeige-Attribut, das
- * an mehreren Stellen gesetzt wird; die Tatsache „ab wann ist dieser
- * Kunde nicht mehr in Betreuung" haengt an `inaktiv_ab`. Ein Guard auf
- * `status` waere an dem Pfad vorbeigelaufen, der die beiden
- * Bestandsfaelle erzeugt hat.
+ * ── Der Ausloeser ist `status`, NICHT `inaktiv_ab` ───────────────────
+ * Die Ticket-Vorgabe lautete umgekehrt und ist gemessen widerlegt;
+ * Weiche W3 (Alrik, 16.09.2026) hat sie gedreht. Begruendung und
+ * Messung stehen bei `isBecomingInactive` weiter unten — kurz: der
+ * Deaktivieren-Dialog schickt nur `status`, die Listen filtern auf
+ * `status`, und `inaktiv_ab` bedeutet in dieser App „Vertrag laeuft
+ * aus" bei `status = 'aktiv'`.
+ *
+ * Dieser Absatz stand hier bis 17.09.2026 mit der GEGENTEILIGEN Aussage
+ * und widersprach damit der Funktion 200 Zeilen weiter unten. Das ist
+ * nicht bloss unsauber: die Mehrdeutigkeit von „inaktiv" hat beim
+ * Protokollieren der Trigger-A-Messung zu einer falsch
+ * verallgemeinerten Zahl gefuehrt
+ * (`docs/corrections/2026-09-16_trigger-a-umfang-messung.md`).
  *
  * ── Drei Trigger, ZWEI Haerten ───────────────────────────────────────
  * Gemessen wurde vor dem Bau (Prod, read-only): von 165 aktiven Kunden
