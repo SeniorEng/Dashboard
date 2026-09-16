@@ -13,6 +13,7 @@ export const NOTIFICATION_TYPES = [
   "birthday_reminder",
   "month_close_reminder",
   "month_close_missing_signature",
+  "open_items_reminder",
   "invoice_pdf_persist_failed",
 ] as const;
 export type NotificationType = typeof NOTIFICATION_TYPES[number];

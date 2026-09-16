@@ -95,6 +95,11 @@ exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) 
   "server/services/month-close-scheduler.ts": [
     "appointmentsRepo",
   ],
+  "server/services/open-items-reminder.ts": [
+    "appointmentsRepo",
+    "customersRepo",
+    "monthlyServiceRecordsRepo",
+  ],
   "server/services/test-data-cleanup.ts": [
     "appointmentsRepo",
     "customersRepo",

@@ -456,27 +456,68 @@ export async function getMonthCloseBanner(userId: number): Promise<{
   };
 }
 
-let lastDailyRunDate: string | null = null;
+/**
+ * Tages-Entprellung je Slot — EINE Marke pro Aufgabe, nicht eine geteilte.
+ *
+ * Vorher stand hier eine einzige Variable, die alle Slots beschrieben:
+ * `lastDailyRunDate = today + "-reminder"` bzw. `+ "-autoclose"`. Da jeder
+ * Schreibvorgang die Marke des anderen ueberschreibt, war die Bedingung des
+ * jeweils anderen Slots ab dem naechsten Poll wieder wahr — die Aufgaben
+ * liefen stuendlich statt taeglich. Aufgefallen ist es erst beim Einhaengen
+ * des dritten Slots, weil `reminder` und `openitems` dieselbe Stunde teilen
+ * und sich dadurch gegenseitig im Stundentakt neu ausloesten.
+ *
+ * Folgenlos blieb das bisher nur, weil die Doppel-Versand-Sperre im
+ * Audit-Log sitzt (`reminderAlreadySent`) — die Abfragen liefen trotzdem
+ * jede Stunde. Eine Entprellung, die nur durch eine nachgelagerte Sperre
+ * nicht auffaellt, ist keine.
+ */
+const lastRunPerSlot = new Map<string, string>();
+
+function alreadyRanToday(slot: string, today: string): boolean {
+  return lastRunPerSlot.get(slot) === today;
+}
 
 async function runDaily(): Promise<void> {
   const today = todayBerlinIso();
   const hour = berlinHour();
 
   // Reminders fire once per day (>= 8:00 Berlin)
-  if (hour >= 8 && lastDailyRunDate !== today + "-reminder") {
+  if (hour >= 8 && !alreadyRanToday("reminder", today)) {
     try {
       await sendMonthCloseReminders(today);
-      lastDailyRunDate = today + "-reminder";
+      lastRunPerSlot.set("reminder", today);
     } catch (err) {
       console.error("[month-close] Reminder-Fehler:", err);
     }
   }
 
+  // Ticket 6hVwwxG9cxWGphfp — MA-Erinnerung an offene Vorgaenge des
+  // VORMONATS, am 15. (Abrechnungsschluss 8. + 7 Tage Nachfrist).
+  //
+  // Haengt hier mit drin, weil dieser Scheduler bereits stuendlich laeuft
+  // und dieselbe Tages-Entprellung hat — ein zweiter Timer waere ein
+  // Zweitbegriff derselben Mechanik. Der STICHTAG steckt in
+  // `sendOpenItemsReminders` selbst, nicht in dieser Bedingung: wer ihn
+  // hier pruefte, verloere ihn beim naechsten Umbau des Schedulers.
+  if (hour >= 8 && !alreadyRanToday("openitems", today)) {
+    try {
+      const { sendOpenItemsReminders } = await import("./open-items-reminder");
+      const r = await sendOpenItemsReminders(today);
+      if (!r.skipped && r.notified > 0) {
+        log(`Offene-Vorgaenge-Erinnerung ${r.month}/${r.year}: ${r.notified} Mitarbeiter, ${r.items} Vorgaenge`, "month-close");
+      }
+      lastRunPerSlot.set("openitems", today);
+    } catch (err) {
+      console.error("[month-close] Offene-Vorgaenge-Erinnerung fehlgeschlagen:", err);
+    }
+  }
+
   // Auto-close fires at >= 23:00 Berlin on the cutoff day
-  if (hour >= 23 && lastDailyRunDate !== today + "-autoclose") {
+  if (hour >= 23 && !alreadyRanToday("autoclose", today)) {
     try {
       await autoCloseMonthForCutoff(today);
-      lastDailyRunDate = today + "-autoclose";
+      lastRunPerSlot.set("autoclose", today);
     } catch (err) {
       console.error("[month-close] Auto-Close-Fehler:", err);
     }
