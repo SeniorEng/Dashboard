@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
   appointments,
@@ -6,74 +6,99 @@ import {
   customers,
   monthlyServiceRecords,
   serviceRecordAppointments,
-  users,
 } from "@shared/schema";
-import { appointmentsRepo, customersRepo, monthlyServiceRecordsRepo } from "../repos";
+import { appointmentsRepo } from "../repos";
+import { monthClosingResponsibilityCoalesce } from "../storage/appointment-helpers";
+import { getAdminMonthClosingReadiness } from "../storage/time-tracking/month-closing";
+import { monthDateRange } from "../storage/time-tracking/shared";
 import { createNotification } from "../storage/notifications";
 import { auditService } from "./audit";
-import { isPflegekasseBillingType } from "@shared/domain/billing-eligibility";
+import { isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
 
 /**
- * Ticket 6hVwwxG9cxWGphfp — Monats-Erinnerung an den MITARBEITER.
+ * Ticket 6hVwwxG9cxWGphfp — Nach-Cutoff-Erinnerung an den Mitarbeiter.
  *
  * ── Die Regel ────────────────────────────────────────────────────────
- * Bis zum 15. des Folgemonats (Abrechnungsschluss 8. + 7 Tage Nachfrist)
- * soll für den Vormonat ALLES abgeschlossen sein: dokumentiert, in einen
- * Leistungsnachweis gelegt, beidseitig unterschrieben. Was bis dahin
- * offen ist, ist Rückstand — und Doku nachzuziehen wird mit der Zeit
- * schwerer, nicht leichter.
+ * Am 15. des Folgemonats soll für den Vormonat alles abgeschlossen sein:
+ * dokumentiert, in einen Leistungsnachweis gelegt, unterschrieben. Was
+ * bis dahin offen ist, ist Rückstand — und Doku nachzuziehen wird mit
+ * der Zeit schwerer, nicht leichter.
  *
- * Zielgruppe ist der MITARBEITER, nicht der Admin: er ist der einzige,
- * der dokumentieren und Unterschriften einholen kann.
+ * ── Was das hier ERSETZT ─────────────────────────────────────────────
+ * Die erste Fassung dieses Dienstes stellte eine EIGENE SQL neben die
+ * bestehende Monatsabschluss-Readiness und definierte „offener Vorgang"
+ * ein zweites Mal. Das war in drei Punkten falsch — und zwar genau in
+ * den drei Punkten, die die vorhandene SSoT bereits richtig hat:
  *
- * ── Vier Trigger-Zustände ────────────────────────────────────────────
- * Alles, was nicht `LN.status = 'completed'` ist:
+ *  • ATTRIBUTION — sie ordnete über `assigned_employee_id` zu. Bei einer
+ *    VERTRETUNG (zugewiesen an A, geleistet von B) hätte A eine
+ *    Erinnerung für Arbeit bekommen, die er nicht dokumentieren kann,
+ *    und B — der einzige, der den Nachweis unterschreiben darf — keine.
+ *    Richtig ist `COALESCE(performed_by, assigned, primary)`
+ *    (`monthClosingResponsibilityCoalesce`), dieselbe Zuordnung, die
+ *    Banner, Reminder, Auto-Close und Admin-Abschluss benutzen.
+ *  • ERSTBERATUNG — sie filterte den Carve-out nicht. Erstberatungs-
+ *    Termine hängen am Prospect (`customer_id = NULL`) und können
+ *    deshalb NIE in einem Leistungsnachweis landen; sie wären Monat für
+ *    Monat als offener Vorgang gemeldet worden, ohne dass der
+ *    Mitarbeiter irgendetwas hätte tun können, das die Meldung
+ *    wegräumt. Genau der Fehlalarm, den CLAUDE.md verbietet.
+ *  • GELÖSCHTE NACHWEISE — ihr `NOT EXISTS` sah nur die Junction-Zeile,
+ *    nicht den Zustand des Nachweises. Ein Termin, dessen einziger
+ *    Nachweis soft-gelöscht wurde (so arbeitet der Reconcile-Lauf, der
+ *    Termine bewusst zur Neu-Dokumentation ausweist), galt als „hat
+ *    einen Nachweis" und verschwand aus BEIDEN Zweigen.
  *
- *  F1  Termin `completed`, aber in KEINEM Leistungsnachweis
- *      → Mitarbeiter über `appointments.assigned_employee_id`
- *  F2  LN vorhanden, Dokumentation unvollständig (`status = 'pending'`)
- *  F3  LN `pending`, weder Mitarbeiter noch Kunde signiert
- *  F4  LN `employee_signed`, Kundenunterschrift fehlt (nur Pflegekasse —
- *      Selbstzahler brauchen sie nicht, siehe
- *      `isServiceRecordSignedForBilling`)
- *      → F2/F3/F4 jeweils über `monthly_service_records.employee_id`
+ * Die Basis-Erhebung ist deshalb jetzt `getAdminMonthClosingReadiness`
+ * — dieselbe Definition, aus der der bestehende `month_close_reminder`
+ * seine Zahl zieht (Task #1172 hat sie ausdrücklich konsolidiert). Die
+ * beiden Erinnerungen können damit nicht mehr auseinanderlaufen.
  *
- * ── Warum die Zählung DEDUPLIZIERT sein MUSS ─────────────────────────
- * F2, F3 und F4 greifen auf dieselbe Tabelle und überlappen: ein
- * `pending`-LN ohne beide Signaturen erfüllt F2 UND F3. Würde der Text
- * die Einzelsummen addieren, stünde dort eine Zahl, die es nicht gibt —
- * ein Leistungsnachweis doppelt gezählt. Die Vorgangs-Menge ist deshalb
- * eine MENGE von Identitäten (`appointment:<id>` bzw. `sr:<id>`), nicht
- * eine Summe von Zählern.
+ * ── Was ERGÄNZT wird und warum ───────────────────────────────────────
+ * Eine Lücke hat die Readiness-SSoT für DIESE Frage: ihr Prädikat
+ * `completedButUnsignedSqlRaw` akzeptiert einen Nachweis im Status
+ * `employee_signed` als „unterschrieben". Für den Monatsabschluss ist
+ * das richtig — der Mitarbeiter hat seinen Teil getan. Für die
+ * Abrechnung ist es das nicht: bei einer Pflegekasse fehlt dann noch
+ * die KUNDENUNTERSCHRIFT, und einholen kann sie nur der Mitarbeiter.
  *
- * ── ZEIT-SCOPE: ausschliesslich der Vormonat ─────────────────────────
- * Bewusst eng. Ein LN aus Juni taucht im September-Batch NICHT auf —
- * die Erinnerung soll den frischen Rückstand treiben, nicht eine
+ * Dieser Zweig fragt die Kassen-Regel NICHT selbst ab, sondern ruft
+ * `isServiceRecordSignedForBilling` — dieselbe Funktion, die auch der
+ * Rechnungsentwurf benutzt. Beim Selbstzahler ist ein `employee_signed`
+ * damit fertig und taucht hier nicht auf.
+ *
+ * ── Eine Einheit: Termine ────────────────────────────────────────────
+ * Alle drei Quellen zählen TERMINE und werden über die Termin-ID
+ * vereinigt. Die erste Fassung mischte Termine mit Nachweisen in einer
+ * Zahl — „7 Vorgänge" war dann keine Arbeitsmengen-Aussage mehr, weil
+ * ein Nachweis mit acht Terminen genauso viel zählte wie ein einzelner
+ * Termin.
+ *
+ * ── Zeit-Scope: ausschliesslich der Vormonat ─────────────────────────
+ * Bewusst eng. Ein Nachweis aus Juni taucht im September-Batch NICHT
+ * auf — die Erinnerung soll den frischen Rückstand treiben, nicht eine
  * wachsende Altlast wiederholen. Der Altbestand wird getrennt
- * abgearbeitet; neue Fälle dieser Klasse verhindert der
- * Deaktivierungs-Guard (Ticket 6hWcjpm3Q4V95Xwp).
- *
- * Das ist eine fachliche Entscheidung, keine technische Vereinfachung —
- * wer den Scope weitet, ändert damit die Bedeutung der Zahl im Text.
+ * abgearbeitet; neue Fälle verhindert der Deaktivierungs-Guard
+ * (6hWcjpm3Q4V95Xwp).
  *
  * ── Idempotenz ───────────────────────────────────────────────────────
- * Eine Notification pro Mitarbeiter und Vormonat, erzwungen über einen
- * `open_items_reminder_sent`-Eintrag im Audit-Log (dasselbe Muster wie
- * `month_close_reminder_sent`). Das Batch läuft täglich und prüft das
- * Datum selbst; ein zweiter Lauf am selben Tag — oder ein Neustart —
- * darf nicht doppelt benachrichtigen.
+ * Eine Benachrichtigung pro Mitarbeiter und Vormonat, erzwungen über
+ * `open_items_reminder_sent` im Audit-Log — dasselbe Muster wie
+ * `month_close_reminder_sent`. Nicht über einen Zähler im Prozess: der
+ * Scheduler startet bei jedem Deploy neu.
  */
 
-/** Tag im Folgemonat, an dem erinnert wird (Abrechnungsschluss 8. + 7). */
+/** Frühester Tag im Folgemonat, an dem erinnert wird. */
 export const OPEN_ITEMS_REMINDER_DAY = 15;
 
 export interface OpenItemsForEmployee {
   employeeId: number;
-  /** Deduplizierte Vorgänge — das ist die Zahl im Notification-Text. */
+  /** Deduplizierte Termine — das ist die Zahl im Benachrichtigungstext. */
   count: number;
-  /** Nur für Diagnose/Tests; der Text nennt sie NICHT (Weiche C: simpel). */
-  appointmentsWithoutRecord: number;
-  serviceRecords: number;
+  /** Aufschlüsselung, nur für Diagnose und Tests. Der Text nennt sie NICHT. */
+  notDocumented: number;
+  unsigned: number;
+  awaitingCustomerSignature: number;
 }
 
 /** `{year, month}` des Vormonats zu einem ISO-Tag. */
@@ -83,85 +108,101 @@ export function previousMonthOf(iso: string): { year: number; month: number } {
 }
 
 /**
+ * Termine des Monats unter einem Nachweis, der noch auf die
+ * KUNDENUNTERSCHRIFT wartet — die Ergänzung zur Readiness-SSoT.
+ *
+ * Die Kassen-Regel wird in TS mit `isServiceRecordSignedForBilling`
+ * entschieden und NICHT in SQL nachgebaut. Eine zweite Fassung dieser
+ * Regel wäre genau der Zweitbegriff, den die erste Fassung hier hatte;
+ * das Monatsvolumen ist klein genug, dass Filtern in TS nichts kostet.
+ */
+async function appointmentsAwaitingCustomerSignature(
+  year: number,
+  month: number,
+): Promise<Array<{ appointmentId: number; employeeId: number }>> {
+  const { startDate, endDate } = monthDateRange(year, month);
+
+  const rows = await appointmentsRepo
+    .selectColumnsFrom({
+      appointmentId: appointments.id,
+      employeeId: monthClosingResponsibilityCoalesce().as("employee_id"),
+      recordStatus: monthlyServiceRecords.status,
+      customerSignedAt: monthlyServiceRecords.customerSignedAt,
+      billingType: customers.billingType,
+    })
+    .innerJoin(customers, eq(customers.id, appointments.customerId))
+    .innerJoin(
+      serviceRecordAppointments,
+      eq(serviceRecordAppointments.appointmentId, appointments.id),
+    )
+    .innerJoin(
+      monthlyServiceRecords,
+      eq(monthlyServiceRecords.id, serviceRecordAppointments.serviceRecordId),
+    )
+    .where(and(
+      appointmentsRepo.activeOnly(),
+      sql`${monthlyServiceRecords.deletedAt} IS NULL`,
+      sql`${customers.deletedAt} IS NULL`,
+      gte(appointments.date, startDate),
+      lte(appointments.date, endDate),
+    ));
+
+  return rows
+    .filter(r =>
+      !isServiceRecordSignedForBilling(r.billingType, r.recordStatus)
+      && r.customerSignedAt == null
+      && r.employeeId != null)
+    .map(r => ({ appointmentId: r.appointmentId, employeeId: Number(r.employeeId) }));
+}
+
+/**
  * Offene Vorgänge des Monats, je Mitarbeiter — die reine Erhebung.
  *
- * Getrennt vom Versand, damit der Verify-Lauf und die Tests dieselbe
- * Zahl sehen wie das Batch. Ein zweiter Ableitungspfad wäre genau die
- * Drift, an der die Baseline dieses Tickets schon einmal vorbeigelaufen
- * ist (Admin-Modell vs. MA-Modell).
+ * Getrennt vom Versand, damit Verify-Läufe und Tests dieselbe Zahl sehen
+ * wie das Batch. Ein zweiter Ableitungspfad wäre genau die Drift, an der
+ * die Baseline dieses Tickets schon einmal vorbeigelaufen ist.
  */
 export async function collectOpenItems(
   year: number,
   month: number,
 ): Promise<OpenItemsForEmployee[]> {
-  const proMitarbeiter = new Map<number, Set<string>>();
-  const merke = (employeeId: number | null, key: string): void => {
-    if (employeeId == null) return;
-    const menge = proMitarbeiter.get(employeeId) ?? new Set<string>();
-    menge.add(key);
-    proMitarbeiter.set(employeeId, menge);
-  };
+  // `getAdminMonthClosingReadiness` liefert bereits NUR aktive
+  // Nicht-Admins — der frühere handgeschriebene `isActive`-Filter im
+  // Versand ist damit ersetzt.
+  const readiness = await getAdminMonthClosingReadiness(year, month);
+  const wartend = await appointmentsAwaitingCustomerSignature(year, month);
 
-  // ── F1: dokumentierter Termin ohne jeden Leistungsnachweis ──────────
-  const ohneNachweis = await appointmentsRepo
-    .selectColumnsFrom({ id: appointments.id, employeeId: appointments.assignedEmployeeId })
-    .where(and(
-      appointmentsRepo.activeOnly(),
-      eq(appointments.status, "completed"),
-      sql`EXTRACT(YEAR FROM ${appointments.date})::int = ${year}`,
-      sql`EXTRACT(MONTH FROM ${appointments.date})::int = ${month}`,
-      sql`${appointments.assignedEmployeeId} IS NOT NULL`,
-      sql`NOT EXISTS (
-        SELECT 1 FROM ${serviceRecordAppointments} sra
-        WHERE sra.appointment_id = ${appointments.id}
-      )`,
-    ));
-  for (const a of ohneNachweis) merke(a.employeeId, `appointment:${a.id}`);
-
-  // ── F2/F3/F4: Leistungsnachweise, die nicht `completed` sind ────────
-  //
-  // EINE Query statt dreier: die drei Fälle sind Teilmengen derselben
-  // Zeilen und überlappen. Wer sie einzeln holt und addiert, zählt
-  // doppelt — siehe Docblock.
-  const offeneNachweise = await monthlyServiceRecordsRepo
-    .selectColumnsFrom({
-      id: monthlyServiceRecords.id,
-      employeeId: monthlyServiceRecords.employeeId,
-      status: monthlyServiceRecords.status,
-      customerSignedAt: monthlyServiceRecords.customerSignedAt,
-      billingType: customers.billingType,
-    })
-    .innerJoin(customers, eq(customers.id, monthlyServiceRecords.customerId))
-    .where(and(
-      monthlyServiceRecordsRepo.activeOnly(),
-      customersRepo.activeOnly(),
-      sql`${monthlyServiceRecords.employeeId} IS NOT NULL`,
-      eq(monthlyServiceRecords.year, year),
-      eq(monthlyServiceRecords.month, month),
-    ));
-
-  for (const r of offeneNachweise) {
-    // F2 + F3 — `pending` deckt beide ab: ein pending-LN ist per
-    // Definition weder fertig dokumentiert noch signiert.
-    const offeneDoku = r.status === "pending";
-    // F4 — nur Pflegekasse. Bei Selbstzahlern genügt die
-    // Mitarbeiter-Unterschrift, ihr LN ist bereits abrechenbar.
-    const fehlendeKundensignatur =
-      r.status === "employee_signed"
-      && r.customerSignedAt == null
-      && isPflegekasseBillingType(r.billingType);
-
-    if (offeneDoku || fehlendeKundensignatur) merke(r.employeeId, `sr:${r.id}`);
+  const wartendJeMitarbeiter = new Map<number, number[]>();
+  for (const w of wartend) {
+    const liste = wartendJeMitarbeiter.get(w.employeeId) ?? [];
+    liste.push(w.appointmentId);
+    wartendJeMitarbeiter.set(w.employeeId, liste);
   }
 
-  return [...proMitarbeiter.entries()]
-    .map(([employeeId, menge]) => ({
-      employeeId,
+  const ergebnis: OpenItemsForEmployee[] = [];
+
+  for (const emp of readiness) {
+    const wartendIds = wartendJeMitarbeiter.get(emp.userId) ?? [];
+
+    // Vereinigung über die TERMIN-ID: dieselbe Einheit in allen drei
+    // Quellen, und ein Termin, der in zweien auftaucht, zählt einmal.
+    const menge = new Set<number>();
+    for (const a of emp.openAppointments) menge.add(a.id);
+    for (const a of emp.unsignedAppointments) menge.add(a.id);
+    for (const id of wartendIds) menge.add(id);
+
+    if (menge.size === 0) continue;
+
+    ergebnis.push({
+      employeeId: emp.userId,
       count: menge.size,
-      appointmentsWithoutRecord: [...menge].filter(k => k.startsWith("appointment:")).length,
-      serviceRecords: [...menge].filter(k => k.startsWith("sr:")).length,
-    }))
-    .sort((a, b) => b.count - a.count || a.employeeId - b.employeeId);
+      notDocumented: emp.openAppointments.length,
+      unsigned: emp.unsignedAppointments.length,
+      awaitingCustomerSignature: wartendIds.length,
+    });
+  }
+
+  return ergebnis.sort((a, b) => b.count - a.count || a.employeeId - b.employeeId);
 }
 
 /** Wurde für diesen Mitarbeiter und Monat schon erinnert? */
@@ -193,17 +234,25 @@ export interface ReminderResult {
 }
 
 /**
- * Versendet die Erinnerungen, wenn `today` der Stichtag ist.
+ * Versendet die Erinnerungen, wenn `today` am oder nach dem Stichtag liegt.
  *
  * Der Datums-Check steckt HIER und nicht im Aufrufer: das Batch läuft
  * täglich, und wer den Stichtag im Scheduler prüft, hat ihn beim
  * nächsten Umbau des Schedulers verloren.
+ *
+ * `>=` und nicht `===`: bei strikter Gleichheit fiele die Erinnerung für
+ * einen ganzen Monat ERSATZLOS aus, wenn die App am 15. durchgehend
+ * unten ist (Deploy-Fenster, Host-Reboot, DB-Ausfall) — still, ohne
+ * Log. Die Doppel-Sperre sitzt ohnehin im Audit-Log je Mitarbeiter und
+ * Monat, `>=` ist also gefahrlos und heilt sich selbst. Dass dabei ein
+ * Mitarbeiter, dessen Rückstand erst am 20. entsteht, noch erreicht
+ * wird, ist gewollt: es ist derselbe Rückstand.
  */
 export async function sendOpenItemsReminders(todayIso: string): Promise<ReminderResult> {
   const { year, month } = previousMonthOf(todayIso);
   const tag = Number(todayIso.slice(8, 10));
 
-  if (tag !== OPEN_ITEMS_REMINDER_DAY) {
+  if (tag < OPEN_ITEMS_REMINDER_DAY) {
     return { skipped: true, year, month, notified: 0, items: 0 };
   }
 
@@ -215,17 +264,6 @@ export async function sendOpenItemsReminders(todayIso: string): Promise<Reminder
   for (const e of offen) {
     if (await bereitsErinnert(e.employeeId, year, month)) continue;
 
-    // Ein ausgeschiedener Mitarbeiter kann nichts mehr nachholen — die
-    // Erinnerung liefe ins Leere. (Beim Kunden löst der
-    // Deaktivierungs-Guard dasselbe Problem strukturell; für den
-    // Mitarbeiter gibt es kein Gegenstück, deshalb hier der Filter.)
-    const [u] = await db
-      .select({ id: users.id, isActive: users.isActive })
-      .from(users)
-      .where(eq(users.id, e.employeeId))
-      .limit(1);
-    if (!u || !u.isActive) continue;
-
     const monatsName = `${MONATSNAMEN[month - 1]} ${year}`;
     try {
       await createNotification({
@@ -233,7 +271,7 @@ export async function sendOpenItemsReminders(todayIso: string): Promise<Reminder
         type: "open_items_reminder",
         title: `Offene Vorgänge: ${monatsName}`,
         // Weiche C — bewusst OHNE Aufschlüsselung nach Fällen. Die Zahl
-        // ist die DEDUPLIZIERTE Vorgangs-Menge.
+        // ist die deduplizierte Termin-Menge.
         message:
           `Für ${monatsName} hast du ${e.count} noch nicht abgeschlossene `
           + `${e.count === 1 ? "Vorgang" : "Vorgänge"}. `
@@ -256,8 +294,9 @@ export async function sendOpenItemsReminders(todayIso: string): Promise<Reminder
       {
         year, month,
         count: e.count,
-        appointmentsWithoutRecord: e.appointmentsWithoutRecord,
-        serviceRecords: e.serviceRecords,
+        notDocumented: e.notDocumented,
+        unsigned: e.unsigned,
+        awaitingCustomerSignature: e.awaitingCustomerSignature,
       },
     );
 

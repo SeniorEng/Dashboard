@@ -472,9 +472,17 @@ export async function getMonthCloseBanner(userId: number): Promise<{
  * jede Stunde. Eine Entprellung, die nur durch eine nachgelagerte Sperre
  * nicht auffaellt, ist keine.
  */
-const lastRunPerSlot = new Map<string, string>();
+const DAILY_SLOTS = {
+  reminder: "reminder",
+  openItems: "open-items",
+  autoClose: "auto-close",
+} as const;
 
-function alreadyRanToday(slot: string, today: string): boolean {
+type DailySlot = (typeof DAILY_SLOTS)[keyof typeof DAILY_SLOTS];
+
+const lastRunPerSlot = new Map<DailySlot, string>();
+
+function alreadyRanToday(slot: DailySlot, today: string): boolean {
   return lastRunPerSlot.get(slot) === today;
 }
 
@@ -483,10 +491,10 @@ async function runDaily(): Promise<void> {
   const hour = berlinHour();
 
   // Reminders fire once per day (>= 8:00 Berlin)
-  if (hour >= 8 && !alreadyRanToday("reminder", today)) {
+  if (hour >= 8 && !alreadyRanToday(DAILY_SLOTS.reminder, today)) {
     try {
       await sendMonthCloseReminders(today);
-      lastRunPerSlot.set("reminder", today);
+      lastRunPerSlot.set(DAILY_SLOTS.reminder, today);
     } catch (err) {
       console.error("[month-close] Reminder-Fehler:", err);
     }
@@ -500,24 +508,24 @@ async function runDaily(): Promise<void> {
   // Zweitbegriff derselben Mechanik. Der STICHTAG steckt in
   // `sendOpenItemsReminders` selbst, nicht in dieser Bedingung: wer ihn
   // hier pruefte, verloere ihn beim naechsten Umbau des Schedulers.
-  if (hour >= 8 && !alreadyRanToday("openitems", today)) {
+  if (hour >= 8 && !alreadyRanToday(DAILY_SLOTS.openItems, today)) {
     try {
       const { sendOpenItemsReminders } = await import("./open-items-reminder");
       const r = await sendOpenItemsReminders(today);
       if (!r.skipped && r.notified > 0) {
         log(`Offene-Vorgaenge-Erinnerung ${r.month}/${r.year}: ${r.notified} Mitarbeiter, ${r.items} Vorgaenge`, "month-close");
       }
-      lastRunPerSlot.set("openitems", today);
+      lastRunPerSlot.set(DAILY_SLOTS.openItems, today);
     } catch (err) {
       console.error("[month-close] Offene-Vorgaenge-Erinnerung fehlgeschlagen:", err);
     }
   }
 
   // Auto-close fires at >= 23:00 Berlin on the cutoff day
-  if (hour >= 23 && !alreadyRanToday("autoclose", today)) {
+  if (hour >= 23 && !alreadyRanToday(DAILY_SLOTS.autoClose, today)) {
     try {
       await autoCloseMonthForCutoff(today);
-      lastRunPerSlot.set("autoclose", today);
+      lastRunPerSlot.set(DAILY_SLOTS.autoClose, today);
     } catch (err) {
       console.error("[month-close] Auto-Close-Fehler:", err);
     }

@@ -5,14 +5,13 @@ import {
 } from "../../server/services/open-items-reminder";
 
 /**
- * Reine Einheiten der MA-Erinnerung (Ticket 6hVwwxG9cxWGphfp) — ohne DB.
+ * Reine Einheiten der Nach-Cutoff-Erinnerung (6hVwwxG9cxWGphfp) — ohne DB.
  *
- * Der Stichtag und die Vormonats-Ableitung sind die beiden Stellen, an
- * denen ein Off-by-one den ganzen Versand verschiebt: einen Tag daneben
- * und das Batch feuert nie (es läuft täglich und prüft auf Gleichheit),
- * einen Monat daneben und es erinnert an den falschen Zeitraum.
+ * Die Vormonats-Ableitung ist die Stelle, an der ein Off-by-one den
+ * ganzen Versand verschiebt: einen Monat daneben und die Erinnerung
+ * nennt den falschen Zeitraum.
  */
-describe("MA-Erinnerung — Vormonats-Ableitung", () => {
+describe("Nach-Cutoff-Erinnerung — Vormonats-Ableitung", () => {
   it("rechnet innerhalb des Jahres einen Monat zurück", () => {
     expect(previousMonthOf("2026-09-15")).toEqual({ year: 2026, month: 8 });
     expect(previousMonthOf("2026-03-15")).toEqual({ year: 2026, month: 2 });
@@ -40,10 +39,14 @@ describe("MA-Erinnerung — Vormonats-Ableitung", () => {
     expect(kaputt).toEqual([]);
   });
 
-  it("der Stichtag ist der 15. — Abrechnungsschluss 8. plus 7 Tage Nachfrist", () => {
-    // Als Test und nicht nur als Konstante, weil die Zahl aus einer
-    // fachlichen Rechnung stammt: verschiebt sich der Abrechnungsschluss,
-    // muss sie mitwandern.
+  it("der Stichtag ist der 15. — ein fester fachlicher Tag, keine Ableitung", () => {
+    // Bewusst NICHT als „Abrechnungsschluss + 7" begruendet: der
+    // Abrechnungsschluss ist nicht immer der 8., `computeMonthCloseCutoff`
+    // rollt ihn auf Wochenende/Feiertag zurueck. Faellt der 8. auf einen
+    // Sonntag, waere „+7" der 13. — der Dienst feuert trotzdem am 15.
+    // Eine zweite, hartkodierte Fassung eines Datums, das schon eine
+    // kanonische Funktion hat, waere genau der Zweitbegriff, den dieser
+    // Dienst an anderer Stelle gerade beseitigt hat.
     expect(OPEN_ITEMS_REMINDER_DAY).toBe(15);
   });
 });
