@@ -456,27 +456,61 @@ export async function getMonthCloseBanner(userId: number): Promise<{
   };
 }
 
-let lastDailyRunDate: string | null = null;
+/**
+ * Tages-Entprellung je Slot — EINE Marke pro Aufgabe, nicht eine geteilte.
+ *
+ * Vorher stand hier eine einzige Variable, die BEIDE Slots beschrieben:
+ * `lastDailyRunDate = today + "-reminder"` bzw. `+ "-autoclose"`. Da jeder
+ * Schreibvorgang die Marke des anderen ueberschreibt, war die Bedingung des
+ * jeweils anderen Slots danach wieder wahr.
+ *
+ * Wirksam wird das in Stunde 23, wo beide Bedingungen gleichzeitig gelten:
+ * laeuft der Poll dort ein zweites Mal — also nach einem Neustart in diesem
+ * Fenster (Deploy, OOM, Host-Reboot) —, dann hat der Auto-Close die
+ * Reminder-Marke ueberschrieben und die Reminder-Welle fuehrt ihre Abfragen
+ * erneut aus. Ein Doppelversand wird davon nicht ausgeloest, weil die Sperre
+ * im Audit-Log sitzt (`reminderAlreadySent`).
+ *
+ * Genau das ist der Grund, es trotzdem zu richten: eine Entprellung, die nur
+ * durch eine nachgelagerte Sperre nicht auffaellt, ist keine. Wer den naechsten
+ * Slot einhaengt — insbesondere einen, der sich die Stunde mit dem Reminder
+ * teilt —, erbt einen stillen Stunden-Takt.
+ *
+ * Die Schluessel sind typisierte Konstanten, damit zwei Slots sich nicht
+ * versehentlich denselben teilen koennen.
+ */
+const DAILY_SLOTS = {
+  reminder: "reminder",
+  autoClose: "auto-close",
+} as const;
+
+type DailySlot = (typeof DAILY_SLOTS)[keyof typeof DAILY_SLOTS];
+
+const lastRunPerSlot = new Map<DailySlot, string>();
+
+function alreadyRanToday(slot: DailySlot, today: string): boolean {
+  return lastRunPerSlot.get(slot) === today;
+}
 
 async function runDaily(): Promise<void> {
   const today = todayBerlinIso();
   const hour = berlinHour();
 
   // Reminders fire once per day (>= 8:00 Berlin)
-  if (hour >= 8 && lastDailyRunDate !== today + "-reminder") {
+  if (hour >= 8 && !alreadyRanToday(DAILY_SLOTS.reminder, today)) {
     try {
       await sendMonthCloseReminders(today);
-      lastDailyRunDate = today + "-reminder";
+      lastRunPerSlot.set(DAILY_SLOTS.reminder, today);
     } catch (err) {
       console.error("[month-close] Reminder-Fehler:", err);
     }
   }
 
   // Auto-close fires at >= 23:00 Berlin on the cutoff day
-  if (hour >= 23 && lastDailyRunDate !== today + "-autoclose") {
+  if (hour >= 23 && !alreadyRanToday(DAILY_SLOTS.autoClose, today)) {
     try {
       await autoCloseMonthForCutoff(today);
-      lastDailyRunDate = today + "-autoclose";
+      lastRunPerSlot.set(DAILY_SLOTS.autoClose, today);
     } catch (err) {
       console.error("[month-close] Auto-Close-Fehler:", err);
     }
