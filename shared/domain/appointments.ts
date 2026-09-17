@@ -169,6 +169,32 @@ export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = PERSISTED_APPOINTMENT_
   (s) => !(FINAL_APPOINTMENT_STATUSES as readonly AppointmentStatus[]).includes(s),
 );
 
+/**
+ * Ticket 6hWgVqw2C8442hcG — Status, die zum POTENZIAL eines Monats zählen:
+ * alles, was bereits geleistet ist ODER noch geleistet werden kann.
+ *
+ * Beantwortet Alriks erste Zielfrage — *„wie viel abrechenbaren Umsatz mache
+ * ich potentiell diesen Monat (inkl. geplante Termine)?"* — und ist bewusst
+ * ABGELEITET statt aufgezählt: `completed` (das Ist) plus
+ * `UNDOCUMENTED_STATUSES` (was noch offen ist). Damit ist es exakt das
+ * Komplement von „abgesagt" und „Kunde nicht angetroffen" — den beiden
+ * persistierten Status, aus denen kein Umsatz mehr wird.
+ *
+ * Eine von Hand gepflegte Liste wäre hier ein dritter Statusbegriff neben
+ * `FINAL_APPOINTMENT_STATUSES` und `UNDOCUMENTED_STATUSES` gewesen und würde
+ * beim nächsten neuen Status still auseinanderdriften.
+ *
+ * NICHT zu verwechseln mit der Kaskaden-Stufe „noch geplant" (oberer Block der
+ * Umsatz-Kachel): die meint NUR die offenen Termine. Das Potenzial enthält
+ * beides. Deshalb heißt die Spalte in der Kosten-Tabelle „Potenzial" und nicht
+ * „Geplant" — zwei Namen für dieselbe Frage sind genau das, wogegen dieses
+ * Ticket antritt.
+ */
+export const POTENTIAL_APPOINTMENT_STATUSES: AppointmentStatus[] = [
+  "completed",
+  ...UNDOCUMENTED_STATUSES,
+];
+
 
 export const PFLEGEGRAD_OPTIONS = [1, 2, 3, 4, 5] as const;
 

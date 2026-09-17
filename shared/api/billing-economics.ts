@@ -70,6 +70,27 @@ export interface BillingEconomicsRow {
   revenueRateCents: number;
   /** Anzeige-Satz pro Einheit: an Mitarbeiter:innen ausgezahlter Kostensatz. */
   costRateCents: number;
+  /**
+   * POTENZIAL des ganzen Monats — Ticket 6hWgVqw2C8442hcG, Alriks erste
+   * Zielfrage: „wie viel abrechenbaren Umsatz mache ich potentiell diesen
+   * Monat (inkl. geplante Termine)?"
+   *
+   * Dieselbe Erlös-/Kostenformel wie die Ist-Spalten, nur ein anderer
+   * Status-Filter (`POTENTIAL_APPOINTMENT_STATUSES` = geleistet ODER noch
+   * offen). Eine zweite Formel wäre ein Zweitbegriff der Frage „was ist diese
+   * Leistung wert?".
+   *
+   * `null` heißt „diese Frage ist für diese Zeile nicht gestellt", NICHT
+   * „0 €":
+   *  - **km**: geplante km kennt das System nicht. Anfahrt und Kunden-km
+   *    entstehen erst bei der Dokumentation — eine Zahl dafür wäre geschätzt.
+   *  - **Overhead**: Büro/Vertrieb/Urlaub werden nicht je Monat geplant.
+   *
+   * Das Ist ist im Potenzial ENTHALTEN (`completed` zählt mit), nicht daneben:
+   * die Differenz ist das, was noch kommen kann.
+   */
+  potentialRevenueCents: number | null;
+  potentialCostCents: number | null;
 }
 
 /** Eine Zeile der „Nach Mitarbeiter"-Tabelle inkl. aufklappbarem Leistungs-Drill. */

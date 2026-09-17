@@ -32,7 +32,7 @@
  */
 import { insuranceValidAtSqlRaw } from "../../lib/insurance-period";
 import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
 import {
@@ -47,6 +47,7 @@ import type {
 } from "@shared/statistics";
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 import { documentedSqlRaw } from "../../lib/appointment-signed";
+import { POTENTIAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
 import type {
   BillingEconomicsResponse,
   BillingEconomicsRow,
@@ -225,6 +226,20 @@ export async function readBillingEconomics(
 
   const rates = await resolveRates();
 
+  // Der Status-Filter ist der EINZIGE Unterschied zwischen der Ist- und der
+  // Potenzial-Messung. Er wird deshalb hier gebunden und in dieselben zwei
+  // Abfragen eingesetzt, statt sie zu duplizieren: die Frage „was ist diese
+  // Leistung wert?" hat eine Formel, und zwei Kopien davon wuerden beim
+  // naechsten Preis-Detail auseinanderdriften (Ticket 6hWgVqw2C8442hcG).
+  const istFilter = documentedSqlRaw("a");
+  // `sql.join` statt `= ANY(${liste})`: das `sql`-Template expandiert ein Array
+  // als TUPEL, nicht als Array-Literal — `ANY((...))` scheitert dann mit 42809.
+  // Die Liste kommt weiter aus der SSoT, nur die Einsetzung ist explizit.
+  const potenzialFilter = sql`(a.status IN (${sql.join(
+    POTENTIAL_APPOINTMENT_STATUSES.map((st) => sql`${st}`),
+    sql`, `,
+  )}))`;
+
   // --- 1) HW/AB-Minuten + rollenbasierte Kosten je Mitarbeiter (appt-Ebene). ---
   // Task #1503: Kosten je Termin über `wageFor` (Rolle des leistenden
   // Mitarbeiters × kanonische Kategorie-Leistung × Termin-Datum), pro Termin
@@ -236,7 +251,7 @@ export async function readBillingEconomics(
   // HW- UND AB-Minuten jeweils der richtigen Kategorie bei. Kosten pro Leistung
   // gerundet (`ROUND(min/60 × Lohnsatz)`), dann je Mitarbeiter × Kategorie
   // summiert (Spiegel des per-Zeile-Rundens in der Lohn-Aufschlüsselung).
-  const minutesRes = await db.execute(sql`
+  const minutenUndKosten = (statusFilter: SQL) => db.execute(sql`
     WITH svc AS (
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
@@ -246,7 +261,7 @@ export async function readBillingEconomics(
       FROM appointments a
       JOIN appointment_services asvc ON asvc.appointment_id = a.id
       JOIN services s ON s.id = asvc.service_id
-      WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')}
+      WHERE a.deleted_at IS NULL AND ${statusFilter}
         AND s.unit_type = 'hours'
         AND s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
         AND a.appointment_type <> 'Erstberatung'
@@ -268,9 +283,10 @@ export async function readBillingEconomics(
     WHERE employee_id IS NOT NULL
     GROUP BY employee_id
   `);
+  const minutesRes = await minutenUndKosten(istFilter);
 
   // --- 2) HW/AB-Erlös je Mitarbeiter (Kunden-Preis ODER Katalog, wie SSoT). ----
-  const revenueRes = await db.execute(sql`
+  const erloes = (statusFilter: SQL) => db.execute(sql`
     WITH appt_rev AS (
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
@@ -290,7 +306,7 @@ export async function readBillingEconomics(
       FROM appointments a
       JOIN appointment_services asvc ON asvc.appointment_id = a.id
       JOIN services s ON s.id = asvc.service_id
-      WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')} AND s.unit_type = 'hours'
+      WHERE a.deleted_at IS NULL AND ${statusFilter} AND s.unit_type = 'hours'
         AND s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
         AND a.appointment_type <> 'Erstberatung'
         ${dApptFilter} ${empApptFilter} ${insApptFilter}
@@ -303,6 +319,11 @@ export async function readBillingEconomics(
     WHERE employee_id IS NOT NULL
     GROUP BY employee_id
   `);
+  const revenueRes = await erloes(istFilter);
+
+  // Dieselben zwei Abfragen ein zweites Mal — nur der Status-Filter ist weiter.
+  const potenzialMinutenRes = await minutenUndKosten(potenzialFilter);
+  const potenzialErloesRes = await erloes(potenzialFilter);
 
   // --- 3) Termin-km (Anfahrt + Kunden-km) + rollenbasierte km-Kosten je MA. ----
   // km je Termin auf 2 NK quantisiert (km-SSoT) × `wageFor`-km-Lohnsatz, pro
@@ -432,6 +453,51 @@ export async function readBillingEconomics(
     e.hwRevenueCents += num(row.hw_rev);
     e.abRevenueCents += num(row.ab_rev);
   }
+  // Potenzial je Mitarbeiter x Kategorie. Eigene Struktur statt `EmpAgg`: das
+  // Potenzial fliesst NICHT in `buildEconomics` — es ist keine Groesse der
+  // Wirtschaftlichkeits-Rechnung, sondern eine Vergleichsspalte daneben. Es in
+  // den Aggregator zu legen wuerde die Headline-KPIs stillschweigend auf
+  // geplante Termine ausweiten.
+  const potenzialProMa = new Map<number, {
+    hwRevenueCents: number; abRevenueCents: number;
+    hwCostCents: number; abCostCents: number;
+  }>();
+  const potenzial = (id: number) => {
+    let p = potenzialProMa.get(id);
+    if (!p) {
+      p = { hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0 };
+      potenzialProMa.set(id, p);
+    }
+    return p;
+  };
+  for (const row of potenzialMinutenRes.rows as Rows) {
+    const id = num(row.employee_id);
+    if (!id) continue;
+    const p = potenzial(id);
+    p.hwCostCents += num(row.hw_cost);
+    p.abCostCents += num(row.ab_cost);
+  }
+  for (const row of potenzialErloesRes.rows as Rows) {
+    const id = num(row.employee_id);
+    if (!id) continue;
+    const p = potenzial(id);
+    p.hwRevenueCents += num(row.hw_rev);
+    p.abRevenueCents += num(row.ab_rev);
+  }
+
+  // Wer NUR geplante Arbeit hat, steht bisher in keinem Aggregat — seine
+  // Ist-Zahlen sind alle 0. Ohne diese Zeile fehlte er in `byEmployee`, sein
+  // Potenzial steckte aber in der Gesamtsumme: Σ(Drilldown) < Gesamt, und zwar
+  // genau in dem Monat, in dem man am ehesten hinsieht (laufender Monat, viel
+  // geplant, wenig dokumentiert).
+  //
+  // Folge, bewusst in Kauf genommen: die Mitarbeiter-Tabelle zeigt solche
+  // Personen jetzt mit einer Ist-Zeile aus lauter Nullen. Das ist die richtige
+  // Information — „diese Person hat diesen Monat geplante Arbeit im Wert von X
+  // und bisher nichts davon dokumentiert" —, aber es ist eine sichtbare
+  // Aenderung an einer Tabelle, die es vorher schon gab.
+  for (const id of potenzialProMa.keys()) ensure(id);
+
   for (const row of kmRes.rows as Rows) {
     const id = num(row.employee_id);
     if (!id) continue;
@@ -520,6 +586,10 @@ export async function readBillingEconomics(
     revenueCents: number,
     costCents: number,
     group: BillingEconomicsRowGroup = "leistung",
+    // `null` heisst „fuer diese Zeile ist die Frage nicht gestellt" — km und
+    // Overhead werden nicht geplant. Bewusst NICHT 0: eine 0 laese sich als
+    // Messung („nichts geplant"), und die Karte zeigt sie dann als Strich.
+    potential: { revenueCents: number; costCents: number } | null = null,
   ): BillingEconomicsRow => {
     // `kosten_ohne_umsatz` ist keine Beschreibung, sondern eine Zusage: die
     // Karte zeigt für diese Zeilen in Umsatz/Marge/% einen Gedankenstrich und
@@ -566,6 +636,8 @@ export async function readBillingEconomics(
       marginPercent: marginPercent(revenueCents, marginCents),
       revenueRateCents: effectiveRateCents(unit, quantity, revenueCents),
       costRateCents: effectiveRateCents(unit, quantity, costCents),
+      potentialRevenueCents: potential?.revenueCents ?? null,
+      potentialCostCents: potential?.costCents ?? null,
     };
   };
 
@@ -573,6 +645,8 @@ export async function readBillingEconomics(
     econ: EconomicsBreakdown,
     hwRevenueCents: number,
     abRevenueCents: number,
+    pot: { hwRevenueCents: number; abRevenueCents: number;
+           hwCostCents: number; abCostCents: number },
   ): BillingEconomicsRow[] => {
     // ── km: berechenbar vs. nicht berechenbar ───────────────────────────────
     // Ticket 6hWgVqw2C8442hcG. Alriks Satz dazu: „Nur für Termine bekomme ich
@@ -607,6 +681,8 @@ export async function readBillingEconomics(
         econ.personnel.hauswirtschaft.minutes,
         hwRevenueCents,
         econ.personnel.hauswirtschaft.costCents,
+        "leistung",
+        { revenueCents: pot.hwRevenueCents, costCents: pot.hwCostCents },
       ),
       buildRow(
         "alltagsbegleitung",
@@ -615,6 +691,8 @@ export async function readBillingEconomics(
         econ.personnel.alltagsbegleitung.minutes,
         abRevenueCents,
         econ.personnel.alltagsbegleitung.costCents,
+        "leistung",
+        { revenueCents: pot.abRevenueCents, costCents: pot.abCostCents },
       ),
       buildRow(
         "kilometer",
@@ -688,7 +766,18 @@ export async function readBillingEconomics(
     }
   }
   const totalEcon = buildEconomics(inputFor(totalAgg));
-  const byService = buildServiceRows(totalEcon, totalAgg.hwRevenueCents, totalAgg.abRevenueCents);
+  // Potenzial-Summe ueber alle Mitarbeiter — dieselbe Zerlegung wie `totalAgg`,
+  // damit Gesamt-Sicht und Drilldown auf derselben Menge stehen.
+  const potenzialGesamt = { hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0 };
+  for (const p of potenzialProMa.values()) {
+    potenzialGesamt.hwRevenueCents += p.hwRevenueCents;
+    potenzialGesamt.abRevenueCents += p.abRevenueCents;
+    potenzialGesamt.hwCostCents += p.hwCostCents;
+    potenzialGesamt.abCostCents += p.abCostCents;
+  }
+  const byService = buildServiceRows(
+    totalEcon, totalAgg.hwRevenueCents, totalAgg.abRevenueCents, potenzialGesamt,
+  );
 
   // --- Mitarbeiter-Namen für die „Nach Mitarbeiter"-Zeilen. -------------------
   const empIds = Array.from(byEmp.keys());
@@ -716,7 +805,11 @@ export async function readBillingEconomics(
         costCents: econ.result.totalCostCents,
         marginCents: econ.result.marginCents,
         marginPercent: econ.result.marginPercent,
-        services: buildServiceRows(econ, agg.hwRevenueCents, agg.abRevenueCents),
+        services: buildServiceRows(
+          econ, agg.hwRevenueCents, agg.abRevenueCents,
+          potenzialProMa.get(id)
+            ?? { hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0 },
+        ),
       };
     })
     .sort((a, b) => b.revenueCents - a.revenueCents);

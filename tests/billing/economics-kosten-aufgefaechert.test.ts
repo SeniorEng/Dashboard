@@ -22,7 +22,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { readBillingEconomics } from "../../server/storage/billing/economics-reader";
-import { uniqueId } from "../test-utils";
+import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
 
 /**
  * Eigenes Jahr/Monat-Fenster. Der Reader liest alles im Abrechnungsmonat, also
@@ -39,6 +39,9 @@ const BUERO_MIN = 90;
 const VERTRIEB_MIN = 45;
 
 let userId = 0;
+let customerId = 0;
+/** Minuten je Termin — ein dokumentierter und ein geplanter, gleiche Dauer. */
+const TERMIN_MIN = 60;
 
 async function insertTimeEntry(opts: {
   entryType: string;
@@ -69,6 +72,39 @@ beforeAll(async () => {
 
   await insertTimeEntry({ entryType: "bueroarbeit", minutes: BUERO_MIN, km: 0 });
   await insertTimeEntry({ entryType: "vertrieb", minutes: VERTRIEB_MIN, km: TE_KM });
+
+  // Zwei Hauswirtschafts-Termine im selben Monat: einer dokumentiert (das Ist),
+  // einer geplant. Ohne den zweiten waeren die Potenzial-Zusagen trivial gruen —
+  // Potenzial und Ist waeren schlicht gleich.
+  const kunde = await createTestCustomer({ vorname: "KASK", nachname: `Pot_${tag}` });
+  customerId = kunde.id as number;
+  const svc = await db.execute(sql`
+    SELECT id FROM services WHERE code = 'hauswirtschaft' LIMIT 1
+  `);
+  const serviceId = Number((svc.rows[0] as Record<string, unknown>).id);
+
+  const termin = async (status: string, tag2: string) => {
+    const r = await db.execute(sql`
+      INSERT INTO appointments (
+        customer_id, created_by_user_id, assigned_employee_id, performed_by_employee_id,
+        appointment_type, date, scheduled_start, scheduled_end, duration_promised,
+        status, travel_origin_type, travel_kilometers, travel_minutes, customer_kilometers
+      ) VALUES (
+        ${customerId}, ${userId}, ${userId}, ${status === "completed" ? userId : null},
+        'Kundentermin', ${`${YEAR}-${String(MONTH).padStart(2, "0")}-${tag2}`},
+        '09:00', '10:00', ${TERMIN_MIN}, ${status}, 'home', 0, 0, 0
+      ) RETURNING id
+    `);
+    const apptId = Number((r.rows[0] as Record<string, unknown>).id);
+    await db.execute(sql`
+      INSERT INTO appointment_services
+        (appointment_id, service_id, planned_duration_minutes, actual_duration_minutes)
+      VALUES (${apptId}, ${serviceId}, ${TERMIN_MIN},
+        ${status === "completed" ? TERMIN_MIN : null})
+    `);
+  };
+  await termin("completed", "10");
+  await termin("scheduled", "20");
 });
 
 afterAll(async () => {
@@ -77,6 +113,7 @@ afterAll(async () => {
   if (userId) {
     await db.execute(sql`DELETE FROM employee_time_entries WHERE user_id = ${userId}`);
   }
+  if (customerId) await cleanupCustomer(customerId); // entfernt Termine (FK-Cascade)
   if (userId) await db.execute(sql`DELETE FROM users WHERE id = ${userId}`);
 });
 
@@ -247,6 +284,72 @@ describe("Umsatz-Kachel, unterer Block — Kosten aufgefächert", () => {
         r.key !== "overhead_vertrieb",
     );
     expect(unbenutzt.reduce((s, r) => s + r.costCents, 0)).toBe(0);
+  });
+
+  it("PO-1 – Potenzial gibt es NUR, wo geplant wird", async () => {
+    // `null` heisst „die Frage ist fuer diese Zeile nicht gestellt". Geplante km
+    // kennt das System nicht (Anfahrt entsteht bei der Dokumentation), Overhead
+    // wird nicht je Monat geplant. Eine 0 behauptete „nichts geplant".
+    const e = await read();
+    for (const r of e.byService) {
+      const erwartetNull = r.key !== "hauswirtschaft" && r.key !== "alltagsbegleitung";
+      if (erwartetNull) {
+        expect(r.potentialRevenueCents, `Zeile ${r.key} traegt ein Potenzial`).toBeNull();
+        expect(r.potentialCostCents, `Zeile ${r.key} traegt Potenzial-Kosten`).toBeNull();
+      } else {
+        expect(r.potentialRevenueCents, `Zeile ${r.key} ohne Potenzial`).not.toBeNull();
+        expect(r.potentialCostCents, `Zeile ${r.key} ohne Potenzial-Kosten`).not.toBeNull();
+      }
+    }
+  });
+
+  it("PO-2 – das Ist ist IM Potenzial enthalten, nicht daneben", async () => {
+    // Die Zusage der Darstellung: „Potenzial (ganzer Monat)" neben „Ist
+    // (dokumentiert)". Waere das Ist nicht enthalten, waeren die zwei Spalten
+    // nicht vergleichbar und die Differenz bedeutungslos.
+    //
+    // Der Filter ist `POTENTIAL_APPOINTMENT_STATUSES` = `completed` plus die
+    // offenen — `completed` ist also per Konstruktion dabei. Hier wird die
+    // FOLGE geprueft, damit eine spaetere Aenderung am Filter auffaellt.
+    const e = await read();
+    for (const r of e.byService) {
+      if (r.potentialRevenueCents === null) continue;
+      expect(
+        r.potentialRevenueCents,
+        `Zeile ${r.key}: Potenzial kleiner als das bereits Geleistete`,
+      ).toBeGreaterThanOrEqual(r.revenueCents);
+      expect(r.potentialCostCents!).toBeGreaterThanOrEqual(r.costCents);
+    }
+  });
+
+  it("PO-4 – der GEPLANTE Termin hebt das Potenzial ueber das Ist", async () => {
+    // Die eigentliche Aussage der Spalte. Zwei gleich lange HW-Termine, einer
+    // dokumentiert, einer geplant ⇒ das Potenzial ist doppelt so gross wie das
+    // Ist. Waere der Status-Filter versehentlich derselbe, stuende hier 1:1.
+    const e = await read();
+    const hw = e.byService.find((r) => r.key === "hauswirtschaft")!;
+    expect(hw.revenueCents, "der dokumentierte Termin fehlt").toBeGreaterThan(0);
+    expect(
+      hw.potentialRevenueCents,
+      "der geplante Termin zaehlt nicht ins Potenzial",
+    ).toBe(hw.revenueCents * 2);
+    expect(hw.potentialCostCents).toBe(hw.costCents * 2);
+  });
+
+  it("PO-3 – Σ(Drilldown-Potenzial) === Gesamt-Potenzial", async () => {
+    // Faellt ein Mitarbeiter aus dem Drilldown, weil er NUR geplante Arbeit hat
+    // (keine Ist-Zeile), stimmt die Gesamtsumme nicht mehr mit der Summe der
+    // Zeilen darunter — und zwar genau im laufenden Monat, wo viel geplant und
+    // wenig dokumentiert ist.
+    const e = await read();
+    for (const key of ["hauswirtschaft", "alltagsbegleitung"]) {
+      const gesamt = e.byService.find((r) => r.key === key)!;
+      const summe = e.byEmployee.reduce((s, emp) => {
+        const row = emp.services.find((r) => r.key === key);
+        return s + (row?.potentialRevenueCents ?? 0);
+      }, 0);
+      expect(summe, `${key}: Drilldown-Summe weicht ab`).toBe(gesamt.potentialRevenueCents);
+    }
   });
 
   it("KO-8 – der Mitarbeiter-Drilldown hat dieselbe Form wie die Gesamt-Sicht", async () => {

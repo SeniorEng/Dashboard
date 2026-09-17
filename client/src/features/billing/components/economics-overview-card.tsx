@@ -119,6 +119,18 @@ function ServiceRow({ row }: { row: BillingEconomicsRow }) {
       <td className="py-2 px-3 text-right tabular-nums text-gray-700">
         {formatAmount(row.costCents)}
       </td>
+      {/* Potenzial. `null` heisst „fuer diese Zeile nicht gestellt" — km und
+          Overhead werden nicht geplant. Der Strich sagt das; eine 0 wuerde
+          „nichts geplant" behaupten. */}
+      <td
+        className="py-2 px-3 text-right tabular-nums text-gray-500"
+        data-testid={`text-econ-potential-revenue-${row.key}`}
+      >
+        {row.potentialRevenueCents === null ? "—" : formatAmount(row.potentialRevenueCents)}
+      </td>
+      <td className="py-2 px-3 text-right tabular-nums text-gray-500">
+        {row.potentialCostCents === null ? "—" : formatAmount(row.potentialCostCents)}
+      </td>
       <td
         className={`py-2 px-3 text-right tabular-nums ${row.marginCents < 0 && !ohneUmsatz ? "text-rose-700" : "text-gray-900"}`}
       >
@@ -158,9 +170,24 @@ function ServiceTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
+          <tr className="text-left text-xs text-gray-400">
+            <th />
+            <th />
+            {/* „Ist" und „Potenzial" als Gruppen ueber den Spalten, damit man
+                die vier Geld-Spalten nicht einzeln lesen muss. */}
+            <th colSpan={2} className="pt-1 pb-0.5 px-3 text-center font-medium uppercase tracking-wide">
+              Ist (dokumentiert)
+            </th>
+            <th colSpan={2} className="pt-1 pb-0.5 px-3 text-center font-medium uppercase tracking-wide">
+              Potenzial (ganzer Monat)
+            </th>
+            <th colSpan={2} />
+          </tr>
           <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
             <th className="py-2 pr-3 font-medium">Leistung</th>
             <th className="py-2 px-3 font-medium text-right">Menge</th>
+            <th className="py-2 px-3 font-medium text-right">Umsatz</th>
+            <th className="py-2 px-3 font-medium text-right">Lohnkosten</th>
             <th className="py-2 px-3 font-medium text-right">Umsatz</th>
             <th className="py-2 px-3 font-medium text-right">Lohnkosten</th>
             <th className="py-2 px-3 font-medium text-right">Marge</th>
@@ -180,7 +207,7 @@ function ServiceTable({
                   Zeiterfassungs-km — die Frage war damit nicht beantwortbar. */}
               <tr className="border-b border-gray-100">
                 <td
-                  colSpan={6}
+                  colSpan={8}
                   className="pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-400"
                 >
                   Kosten ohne Umsatz
@@ -199,6 +226,9 @@ function ServiceTable({
                 >
                   {formatAmount(ohneUmsatzCents)}
                 </td>
+                {/* Potenzial-Spalten: fuer Overhead nicht gestellt. */}
+                <td />
+                <td />
                 {/* Der Betrag MUSS auch in der Marge-Spalte stehen. Die
                     Einzelzeilen darüber zeigen dort „—", weil für sie keine
                     Marge gerechnet werden kann — wer die Spalte von oben nach
@@ -241,7 +271,7 @@ function ServiceTable({
               <td className="pt-2 px-3 text-right text-xs tabular-nums text-gray-400">
                 {formatAmount(summeCents)}
               </td>
-              <td colSpan={2} />
+              <td colSpan={4} />
             </tr>
           </tfoot>
         )}
