@@ -67,6 +67,24 @@ export interface BillingPipelineResponse {
     stageTotalCents: number;
     /** Σ über alle Side-Badges. */
     sideTotalCents: number;
+    /**
+     * €-Summe der abgesagten Termine. Steht in der Kachel NEBEN dem
+     * erwarteten Kontoeingang („abgesagt / nicht erbracht"), nicht darin —
+     * ein Abzug wäre falsch, weil diese € nie Teil der erwarteten Summe
+     * waren. Enthält NUR `cancelled`, nicht die auf Rechnungen gewanderten
+     * Termine (sonst Doppelzählung über die Hybrid-Kante).
+     */
+    cancelledCents: number;
+    /**
+     * Tatsaechlich eingegangene Zahlungen auf die Rechnungen dieses Monats —
+     * gebundene Qonto-Transaktionen + Zahlungsavis-Positionen.
+     *
+     * NICHT aus `status = 'bezahlt'` abgeleitet: der Status ist eine manuelle
+     * Markierung, die dem Zahlungseingang hinterherhaengt. Diese Zahl haengt
+     * an der Bank und erfasst auch Teilzahlungen. Skonto ist NICHT enthalten
+     * (Minderung der Forderung, kein Geldeingang).
+     */
+    receivedCents: number;
     /** Σ Stufen + Side-Badges (Gesamt-Umsatz-Sicht, Q1). */
     grandTotalCents: number;
     /**

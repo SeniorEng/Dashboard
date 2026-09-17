@@ -208,6 +208,28 @@ export async function readBillingPipeline(
     ? await qontoStorage.getClaimedInvoiceIds(db, invoices.map((i) => i.id))
     : new Set<number>();
 
+  // Kachel-Zeile „davon bereits eingegangen": die Summe der TATSAECHLICH
+  // eingegangenen Zahlungen.
+  //
+  // Bewusst NICHT aus `status = 'bezahlt'`. Der Status ist eine MANUELLE
+  // Markierung und haengt an einem Pflegeprozess — gemessen am 17.09.2026
+  // war die letzte Markierung vom 04.08., waehrend 275 Rechnungen ueber
+  // 36.378 EUR versendet waren. Eine Zeile auf dieser Grundlage zeigte
+  // dauerhaft 0 und behauptete damit „kein Geld gekommen", wo in Wahrheit
+  // „niemand hat das Haekchen gesetzt" gilt.
+  //
+  // `getInvoicePaymentTotals` summiert gebundene Qonto-Transaktionen UND
+  // Zahlungsavis-Positionen — echtes Geld, dieser Rechnung zugeordnet. Es
+  // erfasst ausserdem TEILZAHLUNGEN, die ein binaerer Status per
+  // Konstruktion nicht abbilden kann. Skonto bleibt dort bewusst getrennt
+  // (legitime Minderung der Forderung, aber kein Geldeingang) und zaehlt
+  // hier deshalb nicht mit.
+  const paymentTotals = invoices.length > 0
+    ? await qontoStorage.getInvoicePaymentTotals(invoices.map((i) => i.id))
+    : new Map<number, { paidCents: number; skontoCents: number }>();
+
+  let receivedCents = 0;
+
   for (const inv of invoices) {
     const cents = inv.netAmountCents ?? 0;
     const assignment = assignInvoiceStage({ status: parseInvoiceStatus(inv.status), invoiceType: inv.invoiceType });
@@ -218,6 +240,72 @@ export async function readBillingPipeline(
       grp.caseKeys.add(`inv-${inv.id}`);
       grp.itemCount += 1;
       grp.totalCents += cents;
+
+      // „davon bereits eingegangen" wird GENAU HIER summiert — im Zweig, der
+      // die Rechnung auch in die Kaskade stellt. Damit ist „davon" keine
+      // Behauptung, sondern eine Konstruktion: die Menge hinter dem Eingang
+      // ist per Bauart eine Teilmenge der Menge hinter der Schlagzeile.
+      //
+      // Das ERSETZT den vorherigen eigenen Lauf über `invoices` mit der
+      // handgeschriebenen Bedingung `invoiceType === "stornorechnung"`. Die
+      // war aus zwei Gründen falsch:
+      //   1. Sie war ein Zweitbegriff von `istForderungsdokument()` — die
+      //      Regel stünde ein zweites Mal im Code und driftete lautlos.
+      //   2. Sie übersah den anderen Fall: eine STORNIERTE ORIGINALrechnung
+      //      behält `invoiceType = 'rechnung'` und bekommt nur
+      //      `status = 'storniert'`. `assignInvoiceStage` schickt sie in den
+      //      Seitenzustand `storniert` — ihr Betrag steht also NICHT in der
+      //      Schlagzeile, ihre gebundene Zahlung wurde aber weitergezählt
+      //      (der Storno löst die Qonto-Bindung nicht). Ergebnis auf dem
+      //      Bildschirm: erwartet 0,00 €, davon eingegangen 500,00 €.
+      //
+      // Über den Stufen-Zweig zu gehen fängt beide Fälle ohne eigene Regel:
+      // was nicht in der Kaskade steht, kann auch kein „davon" sein.
+      //
+      // BASIS-ANGLEICHUNG (netto): die Kaskade rechnet durchgehend netto
+      // (`netAmountCents`, oben), eine Banküberweisung ist aber BRUTTO. Bei
+      // Selbstzahlern liegen 19 % USt dazwischen. Ungerechnet zeigte eine
+      // voll bezahlte Netto-1.000-€-Rechnung „davon eingegangen 1.190,00 €"
+      // — 119 % einer Summe, aus der nie 1.190 € erwartet wurden. Der
+      // Eingang wird deshalb im Verhältnis netto/brutto auf dieselbe Basis
+      // gebracht; bei USt-freien Rechnungen ist brutto === netto und der
+      // Faktor exakt 1. Teilzahlungen werden dabei anteilig zugeordnet —
+      // die übliche Annahme, und die einzige, die ohne Positionsbezug der
+      // Zahlung überhaupt möglich ist.
+      const paidGrossCents = paymentTotals.get(inv.id)?.paidCents ?? 0;
+      if (paidGrossCents > 0) {
+        const gross = inv.grossAmountCents ?? 0;
+        const nettoAnteil = gross > 0
+          ? Math.round((paidGrossCents * cents) / gross)
+          : paidGrossCents;
+        // DECKEL auf den Netto-Betrag DIESER Rechnung.
+        //
+        // Ohne ihn bräche „davon" ein zweites Mal, nur leiser: bei einer
+        // Überzahlung (600 € auf eine 500-€-Rechnung — kommt vor, siehe
+        // Fixture in `payment-bound-read-side.test.ts`) überstiege der
+        // Eingang den Betrag, der überhaupt erwartet wurde. Die Summe stiege
+        // dann wieder über die Schlagzeile.
+        //
+        // Der Deckel ist keine Kosmetik, sondern die Bedeutung des Wortes:
+        // von einer Forderung kann höchstens die Forderung eingegangen sein.
+        // Was darüber liegt, ist eine Überzahlung — eine eigene fachliche
+        // Tatsache, die eine andere Handlung auslöst (Rückerstattung oder
+        // Verrechnung) und deshalb nicht in diese Zeile gehört. Sie geht
+        // nicht verloren: die Rechnungsliste weist sie über
+        // `paidCents`/`openAmountCents` aus (#1822/#1897).
+        //
+        // Der Deckel fängt nebenbei auch `gross <= 0` ab (Rechnung, deren
+        // Positionen alle 0 Cent tragen — ein Kunden-Preis-Override auf 0 ist
+        // zulässig, #1291): min(irgendwas, 0) = 0.
+        //
+        // VORAUSSETZUNG, unter der „davon" hier gilt: keine Rechnung mit
+        // NEGATIVEM Netto steht auf einer Stufe. Heute trifft das zu —
+        // negative Beträge entstehen ausschliesslich auf `stornorechnung`
+        // (`invoice-storno.ts`), und die ist Seitenzustand. Käme je eine
+        // negative `nachberechnung` dazu, sänke die Schlagzeile, ohne dass
+        // der Eingang mitsänke.
+        receivedCents += Math.min(nettoAnteil, cents);
+      }
 
       // #1897 — Aging über den CLUSTER statt über die Stufe. ERSETZT die
       // frühere Bedingung `stage === "versendet" || stage === "avis_erhalten"`,
@@ -301,6 +389,8 @@ export async function readBillingPipeline(
     totals: {
       stageTotalCents: summary.stageTotalCents,
       sideTotalCents: summary.sideTotalCents,
+      cancelledCents: summary.cancelledCents,
+      receivedCents,
       grandTotalCents: summary.grandTotalCents,
       expectedRevenueTotalCents: summary.expectedRevenueTotalCents,
     },

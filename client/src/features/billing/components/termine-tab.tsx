@@ -8,6 +8,7 @@ import type {
   BillingTermineStage,
   BillingTermineEmployeeGroup,
 } from "@shared/api";
+import { PIPELINE_STAGE_LABELS } from "@shared/domain/billing-pipeline";
 import { formatDate } from "../utils";
 import type { BillingStatusFilter } from "./status-pipeline-card";
 
@@ -28,13 +29,47 @@ const STAGE_ORDER: BillingTermineStage[] = [
   "kunde_nicht_angetroffen",
 ];
 
+/**
+ * Beschriftungen aus der Pipeline-SSoT, nicht daneben neu erfunden.
+ *
+ * ERSETZT den lokalen Satz aus sechs frei gewählten Strings. Er beschrieb
+ * dieselben sechs Stufen wie `PIPELINE_STAGE_LABELS` unter anderen Namen —
+ * was nicht auffiel, solange beide Seiten „Dokumentiert" sagten. Mit der
+ * Umbenennung in der Kaskade (Ticket 6hWgVqw2C8442hcG) fiel es sofort
+ * auseinander: ein Klick auf „Nachweis zu erstellen" filterte auf einen Chip,
+ * der zwei Zentimeter tiefer „Dokumentiert" hieß. Zwei Namen für dieselbe
+ * fachliche Frage sind genau das, was die SSoT-Regel ausschließt.
+ *
+ * Offen bleibt der Zweitbegriff auf TYP-Ebene: diese Stufe heißt hier
+ * `nachgewiesen` und in der Pipeline `unterschrieben`. Das ist dieselbe Frage
+ * unter zwei Schlüsseln und gehört zusammengelegt — als Vertragsänderung,
+ * nicht nebenbei (FINDING im PR). Bis dahin ist wenigstens die ANZEIGE eine.
+ *
+ * `kunde_nicht_angetroffen` hat keinen Stufen-Partner (Seitenzustand) und
+ * behält deshalb seine eigene Beschriftung.
+ */
 const STAGE_LABELS: Record<BillingTermineStage, string> = {
-  offen: "Offen",
-  dokumentiert: "Dokumentiert",
-  nachgewiesen: "Leistungsnachweis",
-  rechnung_erstellt: "Rechnung erstellt",
-  versendet: "Versendet",
-  bezahlt: "Bezahlt",
+  offen: PIPELINE_STAGE_LABELS.offen,
+  dokumentiert: PIPELINE_STAGE_LABELS.dokumentiert,
+  // NICHT `PIPELINE_STAGE_LABELS.unterschrieben` („abrechnungsreif“).
+  //
+  // Die beiden Stufen sind NICHT dasselbe, und der Unterschied sitzt genau
+  // dort, wo die Beschriftung eine Handlung auslöst: `nachgewiesen` ist in
+  // dieser Liste zahler-typ-BLIND definiert (`termine-reader.ts` reicht
+  // `documentedAndSignedSqlRaw` als „direkte Unterschrift“ durch, und das
+  // Prädikat akzeptiert `msr.status = 'employee_signed'`). Ein
+  // Pflegekassen-Termin mit nur mitarbeiter-signiertem Nachweis landet hier
+  // also unter `nachgewiesen`, während die Geld-Sicht ihn — richtig, #1874 —
+  // unter „Leistungsnachweis fehlt“ führt.
+  //
+  // „abrechnungsreif“ schickte dann jemanden zum Abrechnen, wo die
+  // Kundenunterschrift fehlt. Diese Beschriftung sagt deshalb nur, was
+  // gesichert ist: der Nachweis liegt vor. Die eigentliche Auflösung ist die
+  // Zusammenlegung der beiden Stufen-Typen (FINDING [P2] im PR).
+  nachgewiesen: "Nachweis liegt vor",
+  rechnung_erstellt: PIPELINE_STAGE_LABELS.rechnung_erstellt,
+  versendet: PIPELINE_STAGE_LABELS.versendet,
+  bezahlt: PIPELINE_STAGE_LABELS.bezahlt,
   kunde_nicht_angetroffen: "Kunde nicht angetroffen",
 };
 
