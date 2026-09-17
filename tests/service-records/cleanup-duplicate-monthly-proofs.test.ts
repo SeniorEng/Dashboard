@@ -126,6 +126,10 @@ describe("cleanupDuplicateMonthlyProofs — historische Duplikate bereinigen", (
         month: MONTH,
         recordType: "monthly",
         status: "completed",
+        // „Versiegelt" heisst unterschrieben — ohne die Zeitstempel waere es
+        // nur ein Status, der das behauptet (Invariante, Ticket 6hWgf8W5hRq8W99G).
+        employeeSignedAt: new Date(),
+        customerSignedAt: new Date(),
       })
       .returning({ id: monthlyServiceRecords.id });
     sealedId = sealed.id;
@@ -231,9 +235,16 @@ describe("mergeDuplicateGroup — Race-sichere Re-Verifikation unter Lock", () =
   let superadminId: number;
 
   async function insertMonthly(status: "pending" | "completed"): Promise<number> {
+    // Signatur-Zeitstempel NUR bei `completed` — `pending` ist per Definition
+    // unsigniert, und die Invariante verlangt sie auch nur dort.
+    const signiert = status === "completed" ? new Date() : null;
     const [row] = await db
       .insert(monthlyServiceRecords)
-      .values({ customerId, employeeId, year: YEAR, month: MONTH, recordType: "monthly", status })
+      .values({
+        customerId, employeeId, year: YEAR, month: MONTH, recordType: "monthly", status,
+        employeeSignedAt: signiert,
+        customerSignedAt: signiert,
+      })
       .returning({ id: monthlyServiceRecords.id });
     return row.id;
   }

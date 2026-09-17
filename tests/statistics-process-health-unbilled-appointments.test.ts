@@ -58,10 +58,21 @@ async function insertSuppressedNoShowAppointment(customerId: number, day: number
   return Number((r.rows[0] as { id: number }).id);
 }
 
+/**
+ * Fertig unterschriebener Nachweis. Die Zeitstempel gehoeren dazu:
+ * `completed` heisst in dieser Domaene „der Kunde hat unterschrieben", und
+ * die DB haelt das seit Ticket 6hWgf8W5hRq8W99G als Invariante fest.
+ */
 async function insertCompletedRecord(customerId: number, appointmentIds: number[]): Promise<number> {
   const r = await db.execute(sql`
-    INSERT INTO monthly_service_records (customer_id, employee_id, year, month, record_type, status)
-    VALUES (${customerId}, ${employeeId}, ${YEAR}, ${MONTH}, 'monthly', 'completed')
+    INSERT INTO monthly_service_records (
+      customer_id, employee_id, year, month, record_type, status,
+      employee_signed_at, customer_signed_at
+    )
+    VALUES (
+      ${customerId}, ${employeeId}, ${YEAR}, ${MONTH}, 'monthly', 'completed',
+      NOW(), NOW()
+    )
     RETURNING id
   `);
   const recordId = Number((r.rows[0] as { id: number }).id);

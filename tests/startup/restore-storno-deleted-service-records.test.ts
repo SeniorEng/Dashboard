@@ -79,6 +79,10 @@ async function insertSoftDeletedRecord(
   deletedAt: Date,
   status: string = "completed",
 ): Promise<number> {
+  // Die Invariante (Ticket 6hWgf8W5hRq8W99G) gilt auch fuer soft-geloeschte
+  // Zeilen: ein Nachweis, der `completed` behauptet, braucht die Unterschrift —
+  // ob er geloescht ist oder nicht, aendert an der Behauptung nichts.
+  const signiert = status === "completed" ? new Date() : null;
   const [row] = await db.insert(monthlyServiceRecords).values({
     customerId: cId,
     employeeId: eId,
@@ -86,6 +90,8 @@ async function insertSoftDeletedRecord(
     month,
     recordType: "monthly",
     status,
+    employeeSignedAt: signiert,
+    customerSignedAt: signiert,
     deletedAt,
   } as any).returning({ id: monthlyServiceRecords.id });
   return row.id;
