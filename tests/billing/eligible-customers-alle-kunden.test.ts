@@ -70,11 +70,30 @@ async function insertAppointment(
   return apptId;
 }
 
-/** Vollständiger (kunden-)signierter LN (status 'completed') über die Termine. */
+/**
+ * Vollständiger (kunden-)signierter LN (status 'completed') über die Termine.
+ *
+ * Die Zeitstempel sind PFLICHT und nicht Kosmetik: `status = 'completed'`
+ * bedeutet in dieser Domäne „der Kunde hat unterschrieben", und seit Ticket
+ * 6hWgf8W5hRq8W99G hält die Datenbank das als Invariante fest
+ * (`monthly_service_records_completed_requires_signature_check`).
+ *
+ * Diese Fixture schrieb vorher `completed` OHNE jeden Zeitstempel — sie
+ * versprach im Kommentar einen signierten Nachweis und legte einen
+ * unsignierten an. Damit modellierte sie einen Zustand, den der legitime
+ * Weg (`signServiceRecord`, setzt Status und Zeitstempel atomar) gar nicht
+ * erzeugen kann; entstanden ist er in Prod nur über den Altdaten-Import.
+ */
 async function insertCompletedRecord(customerId: number, appointmentIds: number[]): Promise<number> {
   const r = await db.execute(sql`
-    INSERT INTO monthly_service_records (customer_id, employee_id, year, month, record_type, status)
-    VALUES (${customerId}, ${employeeId}, ${YEAR}, ${MONTH}, 'monthly', 'completed')
+    INSERT INTO monthly_service_records (
+      customer_id, employee_id, year, month, record_type, status,
+      employee_signed_at, customer_signed_at
+    )
+    VALUES (
+      ${customerId}, ${employeeId}, ${YEAR}, ${MONTH}, 'monthly', 'completed',
+      NOW(), NOW()
+    )
     RETURNING id
   `);
   const recordId = Number((r.rows[0] as { id: number }).id);

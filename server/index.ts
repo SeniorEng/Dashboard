@@ -353,6 +353,25 @@ async function runStartupTasks() {
       log(`Audit-Log-Immutability-Self-Check fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Ticket 6hWgf8W5hRq8W99G: Invariante `status = 'completed' =>
+    // customer_signed_at IS NOT NULL` auf den Leistungsnachweisen. Als
+    // NOT VALID angelegt — die 42 Bestandszeilen aus dem Altdaten-Import
+    // verletzen sie und bleiben unberuehrt (Weiche Alrik 17.09.2026,
+    // Protokoll in docs/corrections/). Neue Faelle sind damit strukturell
+    // ausgeschlossen, statt an der Sorgfalt der Aufrufer zu haengen.
+    const { ensureServiceRecordSignedInvariant, assertServiceRecordSignedInvariant } =
+      await import("./startup/ensure-service-record-signed-invariant");
+    try {
+      await ensureServiceRecordSignedInvariant();
+    } catch (err) {
+      log(`LN-Signatur-Invariante konnte nicht angelegt werden: ${err}`, "startup");
+    }
+    try {
+      await assertServiceRecordSignedInvariant();
+    } catch (err) {
+      log(`LN-Signatur-Invariante Self-Check fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #828: GoBD-technische Absicherung weiterer integritäts-/
     // historisierungskritischer Tabellen (budget_allocations no-resurrect/
     // no-delete, customer_budget_type_settings append-only, invoices/

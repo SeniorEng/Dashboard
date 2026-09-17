@@ -1429,6 +1429,26 @@ export async function createServiceRecordsForImported(userId: number): Promise<{
   let created = 0;
   const errors: { key: string; error: string }[] = [];
 
+  // Ticket 6hWgf8W5hRq8W99G — gemeinsame Kennung dieses Import-Laufs.
+  //
+  // Bis 17.09.2026 schrieb dieser Pfad GAR KEINEN Audit-Eintrag: weder hier
+  // noch in `storage.createServiceRecord` (reiner Insert). Der vorhandene
+  // Helfer `auditService.serviceRecordCreated` wurde nur von den zwei
+  // interaktiven Routen gerufen. Es entstanden dadurch 42 Nachweise in
+  // Massenanlage, ohne dass ein einziger Eintrag sie ausweist — die Herkunft
+  // liess sich nachtraeglich nur ueber Zeitstempel-Korrelation rekonstruieren.
+  //
+  // Variante C (Weiche Alrik): EIN Eintrag je Nachweis — damit „woher kommt
+  // dieser eine?" direkt beantwortet ist, was fuer GoBD je Beleg zaehlt —
+  // PLUS diese `batchId` im Metadata, damit „was gehoerte zu diesem Lauf?"
+  // ueber eine Abfrage geht statt ueber Zeitfenster-Raten.
+  //
+  // Die 42 bestehenden bekommen bewusst KEINEN nachtraeglichen Eintrag: ein
+  // nachtraeglich erzeugter Audit-Eintrag behauptet einen Vorgang, der so
+  // nicht stattgefunden hat. Die ehrliche Luecke ist GoBD-seitig besser und
+  // ist in docs/corrections/2026-09-17_… dokumentiert.
+  const batchId = `import-${new Date().toISOString()}`;
+
   for (const [key, group] of grouping) {
     try {
       const existing = await storage.getServiceRecordsForCustomer(group.customerId);
@@ -1451,6 +1471,29 @@ export async function createServiceRecordsForImported(userId: number): Promise<{
         .update(monthlyServiceRecords)
         .set({ status: "completed" })
         .where(eq(monthlyServiceRecords.id, sr.id));
+
+      // NACH dem Status-Update, damit der Eintrag den Zustand ausweist, in dem
+      // der Nachweis den Import verlaesst — und nicht den Zwischenstand
+      // `pending`, den `createServiceRecord` anlegt.
+      await auditService.serviceRecordCreated(
+        userId,
+        sr.id,
+        {
+          customerId: group.customerId,
+          year: group.year,
+          month: group.month,
+          appointmentCount: group.appointmentIds.length,
+          recordType: "monthly",
+          batchId,
+          source: "altdaten-import",
+          // Der Import setzt den Status hart, ohne Unterschrift. Das gehoert
+          // in die Spur: sonst liest sich `completed` spaeter wie „vom Kunden
+          // unterschrieben", und genau diese Verwechslung ist der Grund fuer
+          // die Invariante `completed => customer_signed_at IS NOT NULL`
+          // (NOT VALID, siehe ensure-service-record-signed-invariant.ts).
+          statusSetWithoutSignature: true,
+        },
+      );
 
       created++;
     } catch (err: unknown) {
