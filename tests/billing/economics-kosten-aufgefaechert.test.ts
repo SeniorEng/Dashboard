@@ -40,6 +40,10 @@ const VERTRIEB_MIN = 45;
 
 let userId = 0;
 let customerId = 0;
+/** Zweiter Mitarbeiter: hat NUR einen geplanten Termin, kein Ist. */
+let nurGeplantUserId = 0;
+/** Dritter Termin: geplant und NIEMANDEM zugewiesen. */
+const UNZUGEORDNET_MIN = 30;
 /** Minuten je Termin — ein dokumentierter und ein geplanter, gleiche Dauer. */
 const TERMIN_MIN = 60;
 
@@ -83,28 +87,51 @@ beforeAll(async () => {
   `);
   const serviceId = Number((svc.rows[0] as Record<string, unknown>).id);
 
-  const termin = async (status: string, tag2: string) => {
+  const terminFuer = async (
+    empId: number | null, status: string, tag2: string, minuten: number,
+  ) => {
     const r = await db.execute(sql`
       INSERT INTO appointments (
         customer_id, created_by_user_id, assigned_employee_id, performed_by_employee_id,
         appointment_type, date, scheduled_start, scheduled_end, duration_promised,
         status, travel_origin_type, travel_kilometers, travel_minutes, customer_kilometers
       ) VALUES (
-        ${customerId}, ${userId}, ${userId}, ${status === "completed" ? userId : null},
+        ${customerId}, ${userId}, ${empId},
+        ${status === "completed" ? empId : null},
         'Kundentermin', ${`${YEAR}-${String(MONTH).padStart(2, "0")}-${tag2}`},
-        '09:00', '10:00', ${TERMIN_MIN}, ${status}, 'home', 0, 0, 0
+        '09:00', '10:00', ${minuten}, ${status}, 'home', 0, 0, 0
       ) RETURNING id
     `);
     const apptId = Number((r.rows[0] as Record<string, unknown>).id);
     await db.execute(sql`
       INSERT INTO appointment_services
         (appointment_id, service_id, planned_duration_minutes, actual_duration_minutes)
-      VALUES (${apptId}, ${serviceId}, ${TERMIN_MIN},
-        ${status === "completed" ? TERMIN_MIN : null})
+      VALUES (${apptId}, ${serviceId}, ${minuten},
+        ${status === "completed" ? minuten : null})
     `);
   };
+  const termin = (status: string, tag2: string) =>
+    terminFuer(userId, status, tag2, TERMIN_MIN);
+
   await termin("completed", "10");
   await termin("scheduled", "20");
+
+  // Zweiter Mitarbeiter mit AUSSCHLIESSLICH geplanter Arbeit. Ohne ihn ist die
+  // Zeile `for (const id of potenzialProMa.keys()) ensure(id)` im Reader toter
+  // Code — und PO-3 belegte nicht, wofuer es zitiert wird.
+  const u2 = await db.execute(sql`
+    INSERT INTO users (email, password_hash, display_name, vorname, nachname, is_active)
+    VALUES (${`kask2-${tag}@example.com`}, 'x', ${`Nur Geplant ${tag}`},
+            'Nur', ${`Geplant-${tag}`}, true)
+    RETURNING id
+  `);
+  nurGeplantUserId = Number((u2.rows[0] as Record<string, unknown>).id);
+  await terminFuer(nurGeplantUserId, "scheduled", "21", TERMIN_MIN);
+
+  // Dritter Termin: geplant, aber NIEMANDEM zugewiesen. Faellt ohne den
+  // `mitUnzugeordneten`-Zweig lautlos aus dem Potenzial — waehrend der obere
+  // Block ihn unter „noch geplant" zaehlt.
+  await terminFuer(null, "scheduled", "22", UNZUGEORDNET_MIN);
 });
 
 afterAll(async () => {
@@ -115,6 +142,9 @@ afterAll(async () => {
   }
   if (customerId) await cleanupCustomer(customerId); // entfernt Termine (FK-Cascade)
   if (userId) await db.execute(sql`DELETE FROM users WHERE id = ${userId}`);
+  if (nurGeplantUserId) {
+    await db.execute(sql`DELETE FROM users WHERE id = ${nurGeplantUserId}`);
+  }
 });
 
 /**
@@ -129,6 +159,15 @@ afterAll(async () => {
  * Absolutwerte) — sie laufen aus Einheitlichkeit mit.
  */
 const read = () => readBillingEconomics(YEAR, MONTH, { employeeId: userId });
+
+/**
+ * OHNE Scope — nur fuer die zwei Zusagen, die ihn per Konstruktion nicht
+ * vertragen: ein zweiter Mitarbeiter und ein Termin ohne Zuordnung sind mit
+ * `employeeId`-Filter unsichtbar. Beide Tests pruefen Relationen (steht er
+ * drin? ist die Gesamtsumme groesser als die Drilldown-Summe?), keine
+ * Absolutwerte — fremde Daten im selben Fenster koennen sie nicht kippen.
+ */
+const readOhneScope = () => readBillingEconomics(YEAR, MONTH);
 
 describe("Umsatz-Kachel, unterer Block — Kosten aufgefächert", () => {
   it("KO-1 – die Zusage hält: Σ(Zeilen-Kosten) === Lohnkosten der Kopfzeile", async () => {
@@ -336,20 +375,46 @@ describe("Umsatz-Kachel, unterer Block — Kosten aufgefächert", () => {
     expect(hw.potentialCostCents).toBe(hw.costCents * 2);
   });
 
-  it("PO-3 – Σ(Drilldown-Potenzial) === Gesamt-Potenzial", async () => {
-    // Faellt ein Mitarbeiter aus dem Drilldown, weil er NUR geplante Arbeit hat
-    // (keine Ist-Zeile), stimmt die Gesamtsumme nicht mehr mit der Summe der
-    // Zeilen darunter — und zwar genau im laufenden Monat, wo viel geplant und
-    // wenig dokumentiert ist.
-    const e = await read();
-    for (const key of ["hauswirtschaft", "alltagsbegleitung"]) {
-      const gesamt = e.byService.find((r) => r.key === key)!;
-      const summe = e.byEmployee.reduce((s, emp) => {
-        const row = emp.services.find((r) => r.key === key);
-        return s + (row?.potentialRevenueCents ?? 0);
-      }, 0);
-      expect(summe, `${key}: Drilldown-Summe weicht ab`).toBe(gesamt.potentialRevenueCents);
-    }
+  it("PO-3 – wer NUR geplante Arbeit hat, steht trotzdem im Drilldown", async () => {
+    // Die Zusage, fuer die dieser Test zitiert wird. Sie braucht einen
+    // UNGESCOPETEN Read und einen zweiten Mitarbeiter: mit `employeeId`-Scope
+    // kann `byEmp` nur die eine Person enthalten, und die hat ein Ist — die
+    // Reader-Zeile `for (const id of potenzialProMa.keys()) ensure(id)` waere
+    // dann toter Code, und der Test belegte nichts.
+    const e = await readOhneScope();
+    const emp = e.byEmployee.find((x) => x.employeeId === nurGeplantUserId);
+    expect(emp, "Mitarbeiter mit nur geplanter Arbeit fehlt im Drilldown").toBeDefined();
+    expect(emp!.revenueCents, "er hat kein Ist").toBe(0);
+    const hw = emp!.services.find((r) => r.key === "hauswirtschaft")!;
+    expect(hw.potentialRevenueCents, "…aber ein Potenzial").toBeGreaterThan(0);
+  });
+
+  it("PO-5 – ein Termin OHNE Zuordnung zaehlt ins Gesamt-Potenzial", async () => {
+    // `assigned_employee_id` ist nullable, und bei einem geplanten Termin ist
+    // `performed_by_employee_id` per Definition leer. Ohne eigenen Zweig fiele
+    // der Termin aus dem Potenzial — waehrend der OBERE Block der Kachel ihn
+    // unter „noch geplant" zaehlt. Zwei Bloecke auf derselben Karte, die sich
+    // widersprechen, und die Spalte heisst „Potenzial (GANZER Monat)".
+    //
+    // Er kann keinem Drilldown zugeschlagen werden, also MUSS die Gesamtsumme
+    // groesser sein als die Summe der Mitarbeiter-Zeilen — genau um seinen
+    // Betrag.
+    const e = await readOhneScope();
+    const gesamt = e.byService.find((r) => r.key === "hauswirtschaft")!;
+    const summeDrilldown = e.byEmployee.reduce((s, emp) => {
+      const row = emp.services.find((r) => r.key === "hauswirtschaft");
+      return s + (row?.potentialRevenueCents ?? 0);
+    }, 0);
+
+    const unzugeordnet = gesamt.potentialRevenueCents! - summeDrilldown;
+    expect(
+      unzugeordnet,
+      "der unzugeordnete Termin fehlt im Gesamt-Potenzial",
+    ).toBeGreaterThan(0);
+    // 30 min gegen 60 min bei gleichem Preis ⇒ genau die Haelfte eines
+    // zugeordneten Termins.
+    const hwIst = e.byService.find((r) => r.key === "hauswirtschaft")!;
+    expect(unzugeordnet * 2).toBe(hwIst.revenueCents);
   });
 
   it("KO-8 – der Mitarbeiter-Drilldown hat dieselbe Form wie die Gesamt-Sicht", async () => {

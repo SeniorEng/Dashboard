@@ -180,9 +180,18 @@ export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = PERSISTED_APPOINTMENT_
  * Komplement von „abgesagt" und „Kunde nicht angetroffen" — den beiden
  * persistierten Status, aus denen kein Umsatz mehr wird.
  *
- * Eine von Hand gepflegte Liste wäre hier ein dritter Statusbegriff neben
- * `FINAL_APPOINTMENT_STATUSES` und `UNDOCUMENTED_STATUSES` gewesen und würde
- * beim nächsten neuen Status still auseinanderdriften.
+ * WIRKLICH konstruiert, nicht bloß so genannt: Die erste Fassung schrieb
+ * `["completed", ...UNDOCUMENTED_STATUSES]` und nannte das im Docblock „exakt
+ * das Komplement von cancelled und customer_no_show". Das war es formal NICHT
+ * — `completed` stand von Hand da, abgeleitet war nur der Rest. Konkreter
+ * Drift-Fall: käme ein vierter terminaler Status dazu (etwa
+ * „abgerechnet/archiviert"), verschwände er still aus dem Potenzial, während
+ * die Ist-Seite ihn über `documentedSqlRaw` womöglich weiter sähe — dann wäre
+ * `Potenzial < Ist` möglich, also genau die Zusage kaputt, die die
+ * Kosten-Tabelle gibt.
+ *
+ * Jetzt ist das Komplement gebildet, nicht behauptet: alles Persistierte außer
+ * den Status, aus denen kein Umsatz mehr wird.
  *
  * NICHT zu verwechseln mit der Kaskaden-Stufe „noch geplant" (oberer Block der
  * Umsatz-Kachel): die meint NUR die offenen Termine. Das Potenzial enthält
@@ -190,10 +199,15 @@ export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = PERSISTED_APPOINTMENT_
  * „Geplant" — zwei Namen für dieselbe Frage sind genau das, wogegen dieses
  * Ticket antritt.
  */
-export const POTENTIAL_APPOINTMENT_STATUSES: AppointmentStatus[] = [
-  "completed",
-  ...UNDOCUMENTED_STATUSES,
-];
+export const NO_REVENUE_STATUSES = [
+  "cancelled",
+  "customer_no_show",
+] as const satisfies readonly AppointmentStatus[];
+
+export const POTENTIAL_APPOINTMENT_STATUSES: AppointmentStatus[] =
+  PERSISTED_APPOINTMENT_STATUSES.filter(
+    (s) => !(NO_REVENUE_STATUSES as readonly AppointmentStatus[]).includes(s),
+  );
 
 
 export const PFLEGEGRAD_OPTIONS = [1, 2, 3, 4, 5] as const;

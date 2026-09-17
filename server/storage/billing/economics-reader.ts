@@ -251,7 +251,7 @@ export async function readBillingEconomics(
   // HW- UND AB-Minuten jeweils der richtigen Kategorie bei. Kosten pro Leistung
   // gerundet (`ROUND(min/60 × Lohnsatz)`), dann je Mitarbeiter × Kategorie
   // summiert (Spiegel des per-Zeile-Rundens in der Lohn-Aufschlüsselung).
-  const minutenUndKosten = (statusFilter: SQL) => db.execute(sql`
+  const minutenUndKosten = (statusFilter: SQL, mitUnzugeordneten = false) => db.execute(sql`
     WITH svc AS (
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
@@ -280,13 +280,13 @@ export async function readBillingEconomics(
       COALESCE(SUM(CASE WHEN category = 'hauswirtschaft' THEN cost_cents END), 0)::bigint AS hw_cost,
       COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN cost_cents END), 0)::bigint AS ab_cost
     FROM priced
-    WHERE employee_id IS NOT NULL
+    ${mitUnzugeordneten ? sql`` : sql`WHERE employee_id IS NOT NULL`}
     GROUP BY employee_id
   `);
   const minutesRes = await minutenUndKosten(istFilter);
 
   // --- 2) HW/AB-Erlös je Mitarbeiter (Kunden-Preis ODER Katalog, wie SSoT). ----
-  const erloes = (statusFilter: SQL) => db.execute(sql`
+  const erloes = (statusFilter: SQL, mitUnzugeordneten = false) => db.execute(sql`
     WITH appt_rev AS (
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
@@ -316,14 +316,24 @@ export async function readBillingEconomics(
       COALESCE(SUM(CASE WHEN cat = 'hauswirtschaft' THEN revenue_cents END), 0)::bigint AS hw_rev,
       COALESCE(SUM(CASE WHEN cat = 'alltagsbegleitung' THEN revenue_cents END), 0)::bigint AS ab_rev
     FROM appt_rev
-    WHERE employee_id IS NOT NULL
+    ${mitUnzugeordneten ? sql`` : sql`WHERE employee_id IS NOT NULL`}
     GROUP BY employee_id
   `);
   const revenueRes = await erloes(istFilter);
 
   // Dieselben zwei Abfragen ein zweites Mal — nur der Status-Filter ist weiter.
-  const potenzialMinutenRes = await minutenUndKosten(potenzialFilter);
-  const potenzialErloesRes = await erloes(potenzialFilter);
+  // MIT den unzugeordneten Terminen. `assigned_employee_id` ist nullable, und
+  // bei einem geplanten Termin ist `performed_by_employee_id` per Definition
+  // leer — ein noch niemandem zugewiesener Termin haette sonst `employee_id
+  // IS NULL` und fiele lautlos aus dem Potenzial.
+  //
+  // Das waere ein WIDERSPRUCH AUF DERSELBEN KARTE: der obere Block zaehlt ihn
+  // unter „noch geplant" (der Pipeline-Reader aggregiert pro Termin, ohne
+  // Mitarbeiter-Bezug), die Spalte hier heisst „Potenzial (GANZER Monat)" und
+  // liesse ihn weg. Die Ist-Seite ist davon nicht betroffen: ein
+  // dokumentierter Termin hat immer einen leistenden Mitarbeiter.
+  const potenzialMinutenRes = await minutenUndKosten(potenzialFilter, true);
+  const potenzialErloesRes = await erloes(potenzialFilter, true);
 
   // --- 3) Termin-km (Anfahrt + Kunden-km) + rollenbasierte km-Kosten je MA. ----
   // km je Termin auf 2 NK quantisiert (km-SSoT) × `wageFor`-km-Lohnsatz, pro
@@ -462,6 +472,11 @@ export async function readBillingEconomics(
     hwRevenueCents: number; abRevenueCents: number;
     hwCostCents: number; abCostCents: number;
   }>();
+  // Termine ohne Zuordnung: sie gehoeren ins Gesamt-Potenzial, koennen aber
+  // keinem Drilldown zugeschlagen werden. Eigener Topf statt stillem Verwerfen.
+  const potenzialOhneZuordnung = {
+    hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0,
+  };
   const potenzial = (id: number) => {
     let p = potenzialProMa.get(id);
     if (!p) {
@@ -472,15 +487,13 @@ export async function readBillingEconomics(
   };
   for (const row of potenzialMinutenRes.rows as Rows) {
     const id = num(row.employee_id);
-    if (!id) continue;
-    const p = potenzial(id);
+    const p = id ? potenzial(id) : potenzialOhneZuordnung;
     p.hwCostCents += num(row.hw_cost);
     p.abCostCents += num(row.ab_cost);
   }
   for (const row of potenzialErloesRes.rows as Rows) {
     const id = num(row.employee_id);
-    if (!id) continue;
-    const p = potenzial(id);
+    const p = id ? potenzial(id) : potenzialOhneZuordnung;
     p.hwRevenueCents += num(row.hw_rev);
     p.abRevenueCents += num(row.ab_rev);
   }
@@ -769,7 +782,7 @@ export async function readBillingEconomics(
   // Potenzial-Summe ueber alle Mitarbeiter — dieselbe Zerlegung wie `totalAgg`,
   // damit Gesamt-Sicht und Drilldown auf derselben Menge stehen.
   const potenzialGesamt = { hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0 };
-  for (const p of potenzialProMa.values()) {
+  for (const p of [...potenzialProMa.values(), potenzialOhneZuordnung]) {
     potenzialGesamt.hwRevenueCents += p.hwRevenueCents;
     potenzialGesamt.abRevenueCents += p.abRevenueCents;
     potenzialGesamt.hwCostCents += p.hwCostCents;

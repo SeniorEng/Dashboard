@@ -173,10 +173,16 @@ function ServiceTable({
           <tr className="text-left text-xs text-gray-400">
             <th />
             <th />
-            {/* „Ist" und „Potenzial" als Gruppen ueber den Spalten, damit man
-                die vier Geld-Spalten nicht einzeln lesen muss. */}
+            {/* „Ist" OHNE den Zusatz „(dokumentiert)".
+                Der stand hier zuerst und galt fuer sieben der zehn Zeilen
+                nicht: die Overhead-Zeilen und die Zeiterfassungs-km kommen aus
+                `employee_time_entries` und haben KEIN Dokumentations-Gate — ein
+                heute erfasster Urlaub fuer naechste Woche steht sofort drin.
+                Eine Gruppen-Ueberschrift gilt fuer alle Zeilen darunter oder
+                gar nicht; was nur fuer drei Zeilen stimmt, gehoert an die
+                Zeile, nicht ueber die Spalte. */}
             <th colSpan={2} className="pt-1 pb-0.5 px-3 text-center font-medium uppercase tracking-wide">
-              Ist (dokumentiert)
+              Ist
             </th>
             <th colSpan={2} className="pt-1 pb-0.5 px-3 text-center font-medium uppercase tracking-wide">
               Potenzial (ganzer Monat)
@@ -280,6 +286,24 @@ function ServiceTable({
   );
 }
 
+/**
+ * Marge-Farbe einer Mitarbeiter-Zeile.
+ *
+ * Eine Person mit NUR geplanter Arbeit steht seit den Potenzial-Spalten in
+ * dieser Tabelle — mit lauter Nullen. `marginHealthTextColor(0)` faerbte das
+ * ROT und behauptete damit ein Problem, wo schlicht noch nichts dokumentiert
+ * ist. Das ist dieselbe Fehlerklasse, die in der Kosten-Tabelle daneben schon
+ * abgeraeumt wurde („eine 0 laese sich wie eine Messung") — nur eine Tabelle
+ * weiter, und dort erst durch diesen PR entstanden.
+ *
+ * Ohne Umsatz UND ohne Kosten ist die Marge keine Aussage, sondern eine
+ * Leerstelle.
+ */
+function margeFarbe(emp: BillingEconomicsEmployeeRow): string {
+  const nichtsGemessen = emp.revenueCents === 0 && emp.costCents === 0;
+  return nichtsGemessen ? "text-gray-400" : marginHealthTextColor(emp.marginPercent);
+}
+
 function EmployeeTable({
   employees,
   sortKey,
@@ -371,7 +395,7 @@ function EmployeeTable({
                     {formatAmount(emp.marginCents)}
                   </td>
                   <td
-                    className={`py-2 pl-3 text-right tabular-nums font-medium ${marginHealthTextColor(emp.marginPercent)}`}
+                    className={`py-2 pl-3 text-right tabular-nums font-medium ${margeFarbe(emp)}`}
                     data-testid={`text-econ-employee-margin-${emp.employeeId}`}
                   >
                     {emp.marginPercent}%
