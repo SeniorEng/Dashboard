@@ -63,6 +63,26 @@ export function isCutoffDay(today: string, year: number, month: number): boolean
 }
 
 /**
+ * Ist der Abrechnungsmonat (year, month) am Tag `today` bereits abgeschlossen?
+ *
+ * Ticket 6hWgVqw2C8442hcG. ABGELEITET aus `daysUntilCutoff`, nicht als zweite
+ * Datumsrechnung: „abgeschlossen" heißt genau „der Cutoff liegt hinter uns".
+ * Eine eigene Vergleichslogik daneben wäre ein Zweitbegriff derselben Frage —
+ * und der Cutoff ist nicht der 8., sondern der 8. mit Rückverlegung über
+ * Wochenenden und Feiertage. Wer das nachbaut, baut es irgendwann anders nach.
+ *
+ * Der Cutoff-Tag SELBST zählt noch als offen: an ihm läuft der Abschluss erst.
+ * Deshalb `< 0` und nicht `<= 0`.
+ *
+ * `today` ist ein Parameter und kein `todayISO()` im Rumpf — die Frage hängt
+ * wirklich an der Wanduhr (anders als eine Stichtags-Frage), aber sie muss
+ * prüfbar bleiben, ohne die Zeit zu manipulieren.
+ */
+export function isMonthClosedAt(today: string, year: number, month: number): boolean {
+  return daysUntilCutoff(today, year, month) < 0;
+}
+
+/**
  * Liefert die Anzahl Tage zwischen heute und dem Cutoff (positiv = Cutoff in Zukunft).
  * `today` ist ein ISO-Datum (YYYY-MM-DD). Wenn der Cutoff bereits vergangen ist,
  * gibt die Funktion einen negativen Wert zurück.

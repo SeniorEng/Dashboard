@@ -48,6 +48,8 @@ import type {
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 import { documentedSqlRaw } from "../../lib/appointment-signed";
 import { POTENTIAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
+import { isMonthClosedAt } from "@shared/utils/month-close-cutoff";
+import { todayISO } from "@shared/utils/datetime";
 import type {
   BillingEconomicsResponse,
   BillingEconomicsRow,
@@ -203,9 +205,22 @@ function emptyAgg(): EmpAgg {
 export async function readBillingEconomics(
   billingYear: number,
   billingMonth: number,
-  opts: { employeeId?: number; insuranceProviderId?: number } = {},
+  opts: {
+    employeeId?: number;
+    insuranceProviderId?: number;
+    /**
+     * Welcher Tag ist heute? Nur fuer die Frage „ist der Monat schon
+     * abgeschlossen?" (Potenzial-Spalte, siehe unten). Default = heute.
+     *
+     * Parameter statt `todayISO()` im Rumpf: die Frage haengt hier wirklich an
+     * der Wanduhr und nicht an einem Stichtag — aber sie muss pruefbar
+     * bleiben, ohne die Zeit zu manipulieren.
+     */
+    asOfDate?: string;
+  } = {},
 ): Promise<BillingEconomicsResponse> {
   const { employeeId, insuranceProviderId } = opts;
+  const heute = opts.asOfDate ?? todayISO();
   // Overhead + Zeiterfassungs-km sind nicht kassenspezifisch zurechenbar.
   const includeOverhead = insuranceProviderId === undefined;
 
@@ -232,6 +247,20 @@ export async function readBillingEconomics(
   // Leistung wert?" hat eine Formel, und zwei Kopien davon wuerden beim
   // naechsten Preis-Detail auseinanderdriften (Ticket 6hWgVqw2C8442hcG).
   const istFilter = documentedSqlRaw("a");
+
+  // WEG B (Alrik, 17.09.2026): in einem ABGESCHLOSSENEN Monat faellt das
+  // Potenzial auf das Ist zurueck.
+  //
+  // Die Spalte beantwortet „was kommt noch" — und nach dem Monatsabschluss
+  // kommt nichts mehr. Ein `scheduled`-Termin in einem geschlossenen Monat
+  // wird ueberall sonst als „Nicht abgerechnet" ausgewiesen
+  // (`deriveAppointmentDisplayStatus`); ihn hier weiter als Erloespotenzial zu
+  // fuehren, behauptete Geld, das das System selbst schon abgeschrieben hat.
+  //
+  // Die Alternative waere „was der Monat haette sein koennen" gewesen — auch
+  // vertretbar, aber dann muesste die Spalte anders heissen. Alrik hat sich
+  // fuer „was noch kommt" entschieden.
+  const monatAbgeschlossen = isMonthClosedAt(heute, billingYear, billingMonth);
   // `sql.join` statt `= ANY(${liste})`: das `sql`-Template expandiert ein Array
   // als TUPEL, nicht als Array-Literal — `ANY((...))` scheitert dann mit 42809.
   // Die Liste kommt weiter aus der SSoT, nur die Einsetzung ist explizit.
@@ -241,7 +270,7 @@ export async function readBillingEconomics(
   // `completed`), und ein lauter Abbruch waere hier auch das Richtige — eine
   // Potenzial-Spalte ohne Status waere keine Messung. Festgehalten, damit es
   // beim naechsten Lesen nicht wie ein uebersehener Fall aussieht.
-  const potenzialFilter = sql`(a.status IN (${sql.join(
+  const potenzialFilter = monatAbgeschlossen ? istFilter : sql`(a.status IN (${sql.join(
     POTENTIAL_APPOINTMENT_STATUSES.map((st) => sql`${st}`),
     sql`, `,
   )}))`;

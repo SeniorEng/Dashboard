@@ -22,6 +22,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { readBillingEconomics } from "../../server/storage/billing/economics-reader";
+import { computeMonthCloseCutoff } from "@shared/utils/month-close-cutoff";
 import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
 
 /**
@@ -420,6 +421,49 @@ describe("Umsatz-Kachel, unterer Block — Kosten aufgefächert", () => {
     // zugeordneten Termins.
     const hwIst = e.byService.find((r) => r.key === "hauswirtschaft")!;
     expect(unzugeordnet * 2).toBe(hwIst.revenueCents);
+  });
+
+  it("PO-6 – im ABGESCHLOSSENEN Monat faellt das Potenzial auf das Ist zurueck", async () => {
+    // Weg B (Alrik, 17.09.2026). Die Spalte beantwortet „was kommt noch" — und
+    // nach dem Monatsabschluss kommt nichts mehr. Ein `scheduled`-Termin in
+    // einem geschlossenen Monat wird ueberall sonst als „Nicht abgerechnet"
+    // ausgewiesen; ihn hier weiter als Erloespotenzial zu fuehren, behauptete
+    // Geld, das das System selbst schon abgeschrieben hat.
+    //
+    // Der Stichtag kommt als Parameter, nicht aus der Wanduhr — sonst waere
+    // dieser Test nur an einem bestimmten Kalendertag gruen.
+    const cutoff = computeMonthCloseCutoff(YEAR, MONTH);
+    const [cy, cm, cd] = cutoff.split("-").map(Number);
+    const einTagNachCutoff = new Date(Date.UTC(cy, cm - 1, cd + 1))
+      .toISOString().slice(0, 10);
+
+    const offen = await readBillingEconomics(YEAR, MONTH, {
+      employeeId: userId, asOfDate: cutoff,
+    });
+    const zu = await readBillingEconomics(YEAR, MONTH, {
+      employeeId: userId, asOfDate: einTagNachCutoff,
+    });
+
+    const hwOffen = offen.byService.find((r) => r.key === "hauswirtschaft")!;
+    const hwZu = zu.byService.find((r) => r.key === "hauswirtschaft")!;
+
+    // Am Cutoff-Tag SELBST ist der Monat noch offen — dort gilt das Potenzial
+    // weiter, und der geplante Termin ist drin.
+    expect(
+      hwOffen.potentialRevenueCents,
+      "am Cutoff-Tag ist der Monat noch offen",
+    ).toBeGreaterThan(hwOffen.revenueCents);
+
+    // Einen Tag spaeter: Potenzial === Ist, der geplante Termin zaehlt nicht
+    // mehr als Erloes, der er nie wird.
+    expect(hwZu.potentialRevenueCents, "Potenzial faellt auf Ist").toBe(hwZu.revenueCents);
+    expect(hwZu.potentialCostCents).toBe(hwZu.costCents);
+
+    // Gegenrichtung: das IST darf sich dabei nicht veraendert haben. Der
+    // Monatsabschluss ist eine Aussage ueber die Zukunft, nicht ueber das
+    // bereits Geleistete.
+    expect(hwZu.revenueCents, "das Ist haengt nicht am Abschluss").toBe(hwOffen.revenueCents);
+    expect(hwZu.costCents).toBe(hwOffen.costCents);
   });
 
   it("KO-8 – der Mitarbeiter-Drilldown hat dieselbe Form wie die Gesamt-Sicht", async () => {
