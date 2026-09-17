@@ -293,6 +293,17 @@ export async function readBillingPipeline(
         // Verrechnung) und deshalb nicht in diese Zeile gehört. Sie geht
         // nicht verloren: die Rechnungsliste weist sie über
         // `paidCents`/`openAmountCents` aus (#1822/#1897).
+        //
+        // Der Deckel fängt nebenbei auch `gross <= 0` ab (Rechnung, deren
+        // Positionen alle 0 Cent tragen — ein Kunden-Preis-Override auf 0 ist
+        // zulässig, #1291): min(irgendwas, 0) = 0.
+        //
+        // VORAUSSETZUNG, unter der „davon" hier gilt: keine Rechnung mit
+        // NEGATIVEM Netto steht auf einer Stufe. Heute trifft das zu —
+        // negative Beträge entstehen ausschliesslich auf `stornorechnung`
+        // (`invoice-storno.ts`), und die ist Seitenzustand. Käme je eine
+        // negative `nachberechnung` dazu, sänke die Schlagzeile, ohne dass
+        // der Eingang mitsänke.
         receivedCents += Math.min(nettoAnteil, cents);
       }
 

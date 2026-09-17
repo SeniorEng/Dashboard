@@ -51,7 +51,22 @@ const STAGE_ORDER: BillingTermineStage[] = [
 const STAGE_LABELS: Record<BillingTermineStage, string> = {
   offen: PIPELINE_STAGE_LABELS.offen,
   dokumentiert: PIPELINE_STAGE_LABELS.dokumentiert,
-  nachgewiesen: PIPELINE_STAGE_LABELS.unterschrieben,
+  // NICHT `PIPELINE_STAGE_LABELS.unterschrieben` („abrechnungsreif“).
+  //
+  // Die beiden Stufen sind NICHT dasselbe, und der Unterschied sitzt genau
+  // dort, wo die Beschriftung eine Handlung auslöst: `nachgewiesen` ist in
+  // dieser Liste zahler-typ-BLIND definiert (`termine-reader.ts` reicht
+  // `documentedAndSignedSqlRaw` als „direkte Unterschrift“ durch, und das
+  // Prädikat akzeptiert `msr.status = 'employee_signed'`). Ein
+  // Pflegekassen-Termin mit nur mitarbeiter-signiertem Nachweis landet hier
+  // also unter `nachgewiesen`, während die Geld-Sicht ihn — richtig, #1874 —
+  // unter „Leistungsnachweis fehlt“ führt.
+  //
+  // „abrechnungsreif“ schickte dann jemanden zum Abrechnen, wo die
+  // Kundenunterschrift fehlt. Diese Beschriftung sagt deshalb nur, was
+  // gesichert ist: der Nachweis liegt vor. Die eigentliche Auflösung ist die
+  // Zusammenlegung der beiden Stufen-Typen (FINDING [P2] im PR).
+  nachgewiesen: "Nachweis liegt vor",
   rechnung_erstellt: PIPELINE_STAGE_LABELS.rechnung_erstellt,
   versendet: PIPELINE_STAGE_LABELS.versendet,
   bezahlt: PIPELINE_STAGE_LABELS.bezahlt,

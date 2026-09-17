@@ -32,9 +32,22 @@ import { uniqueId } from "../test-utils";
 import { withGobdMutation } from "../helpers/gobd";
 import { readBillingPipeline } from "../../server/storage/billing/pipeline-reader";
 
-/** Eigenes Jahr, damit die Fixtures dieser Datei in der geteilten CI-DB allein stehen. */
+/**
+ * Eigenes MONATS-Fenster, damit die Fixtures dieser Datei in der geteilten
+ * CI-DB niemandem in die Quere kommen: `readBillingPipeline` liest alles, was
+ * im selben Abrechnungsmonat liegt.
+ *
+ * Das Jahr allein reicht dafür NICHT — 2033 benutzen ausserdem
+ * `equality/no-show-wage-ssot` (Monat 7), `equality/no-show-kilometers-ssot`
+ * und `billing/invoice-number-never-reused` (beide Monat 5). Massgeblich ist
+ * das Paar; 2033/9 ist frei. Wer hier etwas ändert, prüft `grep -rn "YEAR ="
+ * tests/` gegen den neuen Monat.
+ *
+ * Die Tests messen zusätzlich DIFFERENZEN zweier Messungen statt Absolutwerte,
+ * damit ein fremder Eintrag im selben Fenster sie nicht rot färbt.
+ */
 const YEAR = 2033;
-const MONTH = 7;
+const MONTH = 9;
 const AS_OF = `${YEAR}-${String(MONTH + 1).padStart(2, "0")}-15`;
 
 /** Selbstzahler: 1.000,00 € netto + 19 % ⇒ 1.190,00 € auf dem Konto. */
@@ -48,6 +61,10 @@ let storniertInvoiceId = 0;
 let storniertTxId = 0;
 let ueberzahltInvoiceId = 0;
 let ueberzahltTxId = 0;
+let teilInvoiceId = 0;
+let teilTxId = 0;
+let vollInvoiceId = 0;
+let vollTxId = 0;
 
 async function insertInvoice(opts: {
   suffix: string;
@@ -98,17 +115,18 @@ beforeAll(async () => {
   } as any).returning({ id: customers.id });
   customerId = cust.id;
 
-  // (1) Versendet, voll bezahlt — Brutto aufs Konto, Netto in der Kaskade.
+  // Grundlast, damit RC-2/RC-4 („davon" hält) nicht auf einer leeren Kachel
+  // trivial grün werden: eine versendete, voll bezahlte Rechnung.
   ustInvoiceId = await insertInvoice({ suffix: "UST", status: "versendet", net: NETTO, gross: BRUTTO });
   ustTxId = await bindPayment(ustInvoiceId, "ust", BRUTTO);
 });
 
 afterAll(async () => {
-  const txIds = [ustTxId, storniertTxId, ueberzahltTxId].filter(Boolean);
+  const txIds = [ustTxId, storniertTxId, ueberzahltTxId, teilTxId, vollTxId].filter(Boolean);
   if (txIds.length > 0) {
     await db.delete(qontoTransactions).where(inArray(qontoTransactions.id, txIds));
   }
-  const ids = [ustInvoiceId, storniertInvoiceId, ueberzahltInvoiceId].filter(Boolean);
+  const ids = [ustInvoiceId, storniertInvoiceId, ueberzahltInvoiceId, teilInvoiceId, vollInvoiceId].filter(Boolean);
   if (ids.length > 0) {
     // Gestellte Rechnungen sind GoBD-geschützt (invoices_prevent_finalized_delete).
     await withGobdMutation(async (tx) => {
@@ -129,21 +147,31 @@ async function totals() {
   return b.totals;
 }
 
+/**
+ * REIHENFOLGE-ABHÄNGIG: die Tests bauen aufeinander auf (RC-2 prüft den Stand
+ * nach RC-1, RC-4 den nach RC-3). Das ist mit der Vitest-Standardsequenz
+ * korrekt; ein `sequence.shuffle` in der Konfiguration bräche sie.
+ */
 describe("Umsatz-Kachel — die Zeile „davon bereits eingegangen“", () => {
   it("RC-1 – der Eingang steht auf derselben Basis wie die Schlagzeile (netto, nicht brutto)", async () => {
-    const t = await totals();
+    // Gemessen als DIFFERENZ, nicht als Bereich auf dem globalen Wert: ein
+    // Faktor-Fehler, der irgendwo zwischen netto und brutto landet, käme
+    // durch eine Bereichsprüfung durch.
+    const vorher = await totals();
 
+    vollInvoiceId = await insertInvoice({
+      suffix: "VOLL", status: "versendet", net: NETTO, gross: BRUTTO,
+    });
+    vollTxId = await bindPayment(vollInvoiceId, "voll", BRUTTO);
+
+    const danach = await totals();
     // 1.190,00 € sind geflossen, 1.000,00 € standen als Forderung in der
-    // Kaskade. Gezeigt werden muss der Netto-Gegenwert — sonst behauptet die
+    // Kaskade. Zugehen darf genau der Netto-Gegenwert — sonst behauptet die
     // Zeile einen Eingang, der die Erwartung um 19 % übersteigt.
     expect(
-      t.receivedCents,
-      "Brutto-Betrag durchgereicht statt auf Netto-Basis gebracht",
-    ).toBeGreaterThanOrEqual(NETTO);
-    expect(
-      t.receivedCents,
+      danach.receivedCents - vorher.receivedCents,
       `${BRUTTO} wäre der Kontobetrag — die Kaskade rechnet aber netto`,
-    ).toBeLessThan(BRUTTO);
+    ).toBe(NETTO);
   });
 
   it("RC-2 – „davon“ hält: der Eingang übersteigt den erwarteten Kontoeingang nicht", async () => {
@@ -197,6 +225,30 @@ describe("Umsatz-Kachel — die Zeile „davon bereits eingegangen“", () => {
   it("RC-4 – „davon“ hält auch nach dem Storno", async () => {
     const t = await totals();
     expect(t.receivedCents).toBeLessThanOrEqual(t.expectedRevenueTotalCents);
+  });
+
+  it("RC-6 – eine TEILZAHLUNG wird anteilig umgerechnet, nicht bloss gedeckelt", async () => {
+    // Die Lücke, die RC-1/RC-3/RC-5 offen lassen: bei Voll- und Überzahlung
+    // liefern `round(paid · netto/brutto)` und ein simples `min(paid, netto)`
+    // DENSELBEN Wert. Wer die Proration ersatzlos durch den Deckel ersetzt,
+    // bliebe dort grün — und beim nächsten Teilbetrag stünde wieder Brutto
+    // auf dem Schirm.
+    //
+    // Halbe Brutto-Zahlung auf netto 1.000 / brutto 1.190:
+    //   proriert  59.500 · 100.000 / 119.000 = 50.000  ← richtig
+    //   gedeckelt min(59.500, 100.000)       = 59.500  ← der Fehler
+    const vorher = await totals();
+
+    teilInvoiceId = await insertInvoice({
+      suffix: "TEIL", status: "versendet", net: NETTO, gross: BRUTTO,
+    });
+    teilTxId = await bindPayment(teilInvoiceId, "teil", BRUTTO / 2);
+
+    const danach = await totals();
+    expect(
+      danach.receivedCents - vorher.receivedCents,
+      "halbe Zahlung ⇒ halber Netto-Anteil, nicht der halbe Brutto-Betrag",
+    ).toBe(NETTO / 2);
   });
 
   it("RC-5 – eine ÜBERZAHLUNG hebt den Eingang nicht über die Forderung", async () => {
