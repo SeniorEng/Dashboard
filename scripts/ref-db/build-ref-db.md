@@ -191,6 +191,102 @@ laut statt still.
 - **Offen:** die „muss > 0"-Richtung gegen echte Daten. Die Schema-Kopie ist
   leer, deshalb ist der erste Lauf nach Schritt 3 das eigentliche Gate.
 
+## Automatischer Refresh (Ticket 6hQRJr4hxjXGx88p)
+
+Die Pipeline oben ist der Handlauf. Zwei Skripte fahren sie unbeaufsichtigt:
+
+| Skript | Läuft auf | Macht |
+|---|---|---|
+| `refresh-replit.sh` | **Replit** | Schritte 1–5: Dump, Scrub, Verifikation, Dump, Transfer |
+| `refresh-box.sh` | **Box** | Schritt 6: Einspielen + Refresh-Zeitstempel |
+
+### Warum der Auslöser auf Replit sitzt und nicht auf der Box
+
+Das ist keine Geschmacksfrage, sondern folgt aus zwei Eigenschaften der
+Pipeline:
+
+1. **Der Scrub muss an der Quelle laufen** — Designprinzip ganz oben. Ein
+   Refresh, den die Box anstößt, müsste Roh-PII zur Box holen.
+2. **Von der Box aus ist Replit nicht erreichbar** (Schritt 5). Die Box kann
+   also gar nicht ziehen, nur empfangen.
+
+Ein Cron auf der Hetzner-Box kann den Refresh deshalb **nicht** auslösen. Er
+kann höchstens einspielen, was schon angekommen ist.
+
+### Empfohlene Kadenz: täglich, nachts
+
+Begründet, nicht gewählt:
+
+- Die Fragen, für die die Ref-DB gebraucht wird, sind überwiegend
+  **Monatsfragen des laufenden Monats** (geplante Termine, Rechnungsstände,
+  offene Nachweise). Bei wöchentlichem Refresh wäre ein Stand bis zu sieben
+  Tage alt — für „wie viele geplante Termine haben noch keinen Mitarbeiter"
+  ist das der Unterschied zwischen einer Antwort und einer Vermutung.
+- Der teure Teil ist der Voll-Dump gegen Neon. Nachts ist die Last am
+  niedrigsten, und ein fehlgeschlagener Lauf kostet nichts: die alte
+  `engeldesk_ref` bleibt stehen, und der Alters-Guard (unten) meldet sich,
+  bevor jemand gegen einen veralteten Stand misst.
+
+**Ungemessen und im Blick zu behalten:** wie lange der Voll-Dump dauert und
+was er auf Neon kostet. Die Doku warnt oben selbst („Hängt der Voll-Dump
+(Neon-Last)"). Wenn der nächtliche Lauf Probleme macht, ist der richtige
+Hebel eine **Tabellen-Einschränkung**, nicht eine seltenere Kadenz — dann
+lieber täglich weniger Tabellen als wöchentlich alle.
+
+### Der Refresh-Zeitstempel
+
+`refresh-box.sh` legt beim Einspielen eine einzeilige Tabelle `ref_db_meta`
+an (`last_refresh_at`, `source_dump_name`) und setzt zusätzlich einen
+`COMMENT ON DATABASE`.
+
+Der Stempel kommt aus dem **Dateinamen des Dumps**, nicht aus `now()`: der
+Dump trägt das Datum seiner Erzeugung. Wird ein alter Dump erneut
+eingespielt, soll der Stempel das sagen statt Frische zu behaupten.
+
+Analyse-Skripte lesen ihn über `scripts/lib/ref-db-freshness.ts`:
+
+```ts
+import { assertRefDbFresh, refDbStandLine } from "../../scripts/lib/ref-db-freshness";
+
+const stand = await assertRefDbFresh();   // bricht mit Exit 2 ab, wenn zu alt
+console.log(refDbStandLine(stand));       // Stichtag in den Kopf der Ausgabe
+```
+
+Toleranz: **2 Tage** (`REF_DB_MAX_AGE_DAYS`) — die tägliche Kadenz plus ein
+Tag Luft, damit ein einzelner ausgefallener Lauf nicht die Arbeit blockiert,
+zwei aber schon. Wer die Kadenz ändert, ändert diese Zahl mit.
+
+Der Guard bricht **ab** statt zu warnen, und zwar aus demselben Grund wie die
+Abbruch-Guards in den Analyse-Skripten: eine Warnung, die man wegliest,
+verhindert kein Artefakt. Genau so entstand am 02.09.2026 die Zahl
+„64.837,30 € verfallener Anspruch" aus einer Ref-DB, die für das Quelljahr
+gar keine Bewegungsdaten hatte.
+
+---
+
+## Was die Referenz-DB NICHT beantworten kann
+
+Sie ist pseudonymisiert — das ist ihr Zweck und zugleich ihre Grenze. Wer
+eine dieser Fragenklassen hat, braucht Prod (read-only, über Alrik):
+
+| Fragenklasse | Warum nicht |
+|---|---|
+| **Ops-Listen mit Kundennamen** | `vorname = 'Kunde'`, `nachname = id::text`. Eine Liste „welche Kunden anrufen" ist hier eine Liste von IDs. |
+| **Freitext-Inhalte** | Notizen, `deactivation_note`, Termin-`notes`, Signatur-Daten sind geleert oder ersetzt. Eine Frage wie „stammen diese Nachweise aus dem Altdaten-Import?" hängt an `notes LIKE 'Import aus Altdaten%'` — in der Ref-DB nicht beantwortbar. |
+| **Kontaktdaten** | E-Mail, Telefon, Adresse sind ersetzt. |
+| **Mitarbeiter-Identität** | `vorname = 'Mitarbeiter'`, `nachname = id::text`. |
+| **Alles nach dem letzten Refresh** | Bis zu 24 h Rückstand bei täglicher Kadenz. Für „was ist heute passiert" ungeeignet. |
+
+**Und die Falle, die schon zugeschnappt ist:** Zeiträume, für die Prod selbst
+keine Daten hat, sehen in der Ref-DB genauso leer aus wie Daten, die der
+Scrub entfernt hat. Prod hat vor dem 02.01.2026 keine §45b-Bewegungsdaten —
+ein Skript, das daraus „Anspruch verfallen" schließt, misst die Abwesenheit
+von Daten, nicht einen Sachverhalt.
+
+Deshalb prüft ein Analyse-Skript **beides**: das Alter (`assertRefDbFresh`)
+und die fachliche Datenlage (eigener Abbruch-Guard, Muster: Block 0 in den
+`docs/check-*.sql`-Messungen).
+
 ## Auffrischen
 
 Die Referenz-DB veraltet. Zum Auffrischen dieselbe Pipeline von vorn — sie ist
