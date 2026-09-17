@@ -11,6 +11,22 @@
 -- Block 3  Ausfallquote (v1 faehrt ohne, aber die Zahl ist billig)
 -- Block 4  Die Betraege je Verlust-Kategorie
 -- Block 5  Selbsttest: geht die Kaskade auf?
+-- Block 6  km getrennt: abrechenbar (Termin) vs. nur-Kosten (Zeiterfassung)
+-- Block 7  Lohnmodell: welche Saetze sind ueberhaupt hinterlegt?
+-- Block 8  DAS MIX-PROBLEM: Stunden je Leistungsart nach Rolle
+--
+-- Die Fragen 6, 8 und 9 der Zehnerliste sind am CODE beantwortet und stehen
+-- nicht hier — die Antworten im Ticket. Kurz:
+--   • Zeiterfassungs-km liegen in der km-ZEILE, nicht in den Gemeinkosten.
+--     Deren Kosten und Menge sind dadurch gemischt; nur das Satz-LABEL ist
+--     sauber (Task #1752). Die ausgewiesene km-Marge ist also verduennt.
+--   • Personen-Overrides gibt es NICHT: `role_wage_rates` hat kein `user_id`.
+--     Das Modell ist Rolle x Leistung x Datum.
+--   • Die Saetze KOENNEN je Leistung verschieden sein — ob sie es sind, ist
+--     eine Datenfrage und steht in Block 7.
+--
+-- Sozialabgaben sind gestrichen (Alrik, 17.09.2026): die Kachel rechnet mit
+-- BRUTTO. Dieses Skript misst deshalb keine Personalnebenkosten.
 --
 -- ── Art und Aufruf ───────────────────────────────────────────────────
 -- AUSSCHLIESSLICH LESEND. Nur SELECT, read only, ROLLBACK.
@@ -191,6 +207,107 @@ FROM appt_rev;
 \echo '           als Termin-Umsatz — kleine Differenz ist normal und KEIN Fehler)'
 \echo '  c      = der Abzugs-/Verlust-Block, heute NICHT in der Summe enthalten'
 \echo '  a+b+c  = alle Stunden-Leistungen des Monats (die Brutto-Zahl aus Weg 2)'
+
+\echo ''
+\echo '=== 6 — KILOMETER getrennt: abrechenbar vs. nur Kosten ============='
+\echo '--- Heute stecken BEIDE in EINER Zeile — die km-Marge ist verduennt -'
+-- Abrechenbare km kommen aus TERMINEN (Anfahrt + Kunden-km), nicht
+-- abrechenbare aus der ZEITERFASSUNG. Nur Erstere erzeugen Erloes; beide
+-- erzeugen Kosten. Die Saetze kommen aus dem Leistungs-Katalog.
+WITH saetze AS (
+  SELECT
+    max(CASE WHEN code = 'travel_km'   THEN COALESCE(default_price_cents, 0) END) AS travel_preis,
+    max(CASE WHEN code = 'travel_km'   THEN COALESCE(employee_rate_cents, 0) END) AS travel_lohn,
+    max(CASE WHEN code = 'customer_km' THEN COALESCE(default_price_cents, 0) END) AS kunden_preis,
+    max(CASE WHEN code = 'customer_km' THEN COALESCE(employee_rate_cents, 0) END) AS kunden_lohn
+  FROM services WHERE code IN ('travel_km','customer_km')
+), termin_km AS (
+  SELECT COALESCE(sum(a.travel_kilometers), 0)   AS travel_km,
+         COALESCE(sum(a.customer_kilometers), 0) AS kunden_km
+  FROM appointments a
+  WHERE a.deleted_at IS NULL
+    AND a.status = 'completed'
+    AND a.date::date BETWEEN :'MONAT_START' AND :'MONAT_ENDE'
+), te_km AS (
+  SELECT COALESCE(sum(t.kilometers), 0) AS km
+  FROM employee_time_entries t
+  WHERE t.deleted_at IS NULL
+    AND t.entry_date::date BETWEEN :'MONAT_START' AND :'MONAT_ENDE'
+)
+SELECT 'abrechenbar (Anfahrt + Kunden-km aus Terminen)' AS art,
+       round((tk.travel_km + tk.kunden_km)::numeric, 1) AS km,
+       round((tk.travel_km * s.travel_preis + tk.kunden_km * s.kunden_preis) / 100.0, 2) AS umsatz_eur,
+       round((tk.travel_km * s.travel_lohn  + tk.kunden_km * s.kunden_lohn)  / 100.0, 2) AS kosten_eur
+FROM termin_km tk, saetze s
+UNION ALL
+SELECT 'nur Kosten (Zeiterfassung: Vertrieb, Buero, ...)',
+       round(te.km::numeric, 1),
+       0.00,
+       round(te.km * s.travel_lohn / 100.0, 2)
+FROM te_km te, saetze s;
+
+\echo ''
+\echo '=== 7 — LOHNMODELL: welche Saetze sind hinterlegt? =================='
+\echo '--- Leere Tabelle ⇒ ALLE zahlen den Katalog-Default je Leistung -----'
+-- `role_wage_rates` hat KEIN `user_id` — Personen-Overrides sind strukturell
+-- unmoeglich. Gemessen wird hier nur, OB und WIE die Rollen-Saetze belegt
+-- sind, und ob sie je Leistung auseinandergehen (Frage 9).
+SELECT w.role,
+       s.code                              AS leistung,
+       w.cents / 100.0                     AS eur_pro_stunde,
+       w.valid_from,
+       w.valid_to
+FROM role_wage_rates w
+JOIN services s ON s.id = w.service_id
+WHERE w.deleted_at IS NULL
+ORDER BY s.code, w.role, w.valid_from DESC;
+
+\echo ''
+\echo '--- Gegenprobe: die Katalog-Defaults (greifen ohne Rollen-Zeile) ----'
+SELECT code, COALESCE(employee_rate_cents, 0) / 100.0 AS lohn_eur,
+       COALESCE(default_price_cents, 0) / 100.0       AS preis_eur
+FROM services
+WHERE code IN ('hauswirtschaft','alltagsbegleitung','erstberatung','travel_km','customer_km')
+ORDER BY code;
+
+\echo ''
+\echo '=== 8 — DAS MIX-PROBLEM: Stunden je Leistungsart nach Rolle ========='
+\echo '--- Weicht der Mix ab, sind die Margen von HW und AB NICHT vergleichbar'
+-- Rolle exakt wie `wageRoleSql`: admin > teamLead > employee, abgeleitet aus
+-- den Flags des LEISTENDEN Mitarbeiters. Keine zweite Definition.
+WITH je_termin AS (
+  SELECT s.code AS leistung,
+         CASE
+           WHEN u.is_admin OR u.is_super_admin THEN 'admin'
+           WHEN u.is_team_lead AND u.is_active AND NOT COALESCE(u.is_anonymized, false) THEN 'teamLead'
+           ELSE 'employee'
+         END AS rolle,
+         COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) AS minuten
+  FROM appointments a
+  JOIN appointment_services asvc ON asvc.appointment_id = a.id
+  JOIN services s ON s.id = asvc.service_id
+  LEFT JOIN users u ON u.id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id)
+  WHERE a.deleted_at IS NULL
+    AND a.status = 'completed'
+    AND s.unit_type = 'hours'
+    AND s.code IN ('hauswirtschaft','alltagsbegleitung')
+    AND a.date::date BETWEEN :'MONAT_START' AND :'MONAT_ENDE'
+)
+SELECT leistung,
+       rolle,
+       round(sum(minuten) / 60.0, 1)                                          AS stunden,
+       round(100.0 * sum(minuten) / NULLIF(sum(sum(minuten)) OVER (PARTITION BY leistung), 0), 1)
+                                                                              AS prozent_der_leistungsart
+FROM je_termin
+GROUP BY leistung, rolle
+ORDER BY leistung, stunden DESC;
+
+\echo ''
+\echo '--- Lesehilfe -------------------------------------------------------'
+\echo '  Aehnlicher Prozent-Mix in beiden Leistungsarten ⇒ die Margen sind'
+\echo '  vergleichbar, das Thema ist erledigt.'
+\echo '  Deutlich abweichender Mix ⇒ die Marge je Leistungsart zeigt einen'
+\echo '  Personalplan-Effekt, nicht die Wirtschaftlichkeit der Leistung.'
 
 ROLLBACK;
 
