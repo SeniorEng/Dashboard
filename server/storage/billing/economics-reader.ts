@@ -530,12 +530,27 @@ export async function readBillingEconomics(
     // prüft. Genau die Fehlerklasse aus #146: jede Stelle einzeln plausibel.
     //
     // Deshalb hier fail-closed statt einer Doku-Zeile.
+    //
+    // BLAST-RADIUS, bewusst in Kauf genommen: `buildRow` ist die gemeinsame
+    // Closure für `byService` UND jede `byEmployee`-Zeile. Feuerte der Riegel,
+    // wäre nicht eine Zeile kaputt, sondern der ganze Endpunkt — inklusive der
+    // Kopf-Kacheln —, und zwar daten-abhängig (ein Monat, ein Mitarbeiter).
+    // Das ist vertretbar, weil er auf keinem realen Pfad erreichbar ist: alle
+    // fünf Aufrufe übergeben für diesen Block entweder ein Literal 0 oder
+    // `km.timeEntry.chargedCents`, und das ist in der SSoT selbst ein Literal 0
+    // ausserhalb jedes Override-Zweigs. Träfe die Annahme nicht mehr zu, ist
+    // ein lauter Abbruch immer noch besser als ein unsichtbarer Betrag — aber
+    // dann gehört der Riegel auf die Zeile statt auf die Antwort.
+    //
+    // Die Meldung nennt Jahr und Monat: ohne sie wäre der Fall im Log nicht
+    // reproduzierbar, weil er nur für bestimmte Daten auftritt.
     if (group === "kosten_ohne_umsatz" && revenueCents !== 0) {
       throw new Error(
-        `Zeile "${key}" ist als \`kosten_ohne_umsatz\` ausgewiesen, trägt aber `
-        + `${revenueCents} Cent Erlös. Entweder gehört sie in den Block `
-        + `\`leistung\`, oder der Erlös ist falsch zugeordnet — beides muss `
-        + "entschieden werden, nicht auf dem Bildschirm verschwinden.",
+        `Zeile "${key}" (${billingMonth}/${billingYear}) ist als `
+        + `\`kosten_ohne_umsatz\` ausgewiesen, trägt aber ${revenueCents} Cent `
+        + "Erlös. Entweder gehört sie in den Block `leistung`, oder der Erlös "
+        + "ist falsch zugeordnet — beides muss entschieden werden, nicht auf "
+        + "dem Bildschirm verschwinden.",
       );
     }
     const marginCents = revenueCents - costCents;

@@ -186,13 +186,36 @@ export function paymentBadgeTitle(inv: InvoiceItem): string {
  * Kosten-Spalte angewandt. Dasselbe gilt für einen leeren Monat und für jede
  * Person ohne Zeiterfassung im Mitarbeiter-Drilldown.
  *
- * Geprüft wird auf Geld UND Menge: eine Kategorie mit 0 Cent, aber gebuchten
- * Minuten ist eine echte Messung (Lohnsatz 0) und gehört gezeigt.
+ * Geprüft wird auf Geld UND Menge — aber mit einem Geltungsbereich, der heute
+ * kleiner ist, als die Bedingung aussieht:
+ *
+ * Die sechs Overhead-Zeilen tragen `quantity: 0` per Konstruktion (der Reader
+ * setzt es hart, `unit: "none"`; die Minuten je Kategorie liegen zwar in der
+ * SSoT, erreichen die Zeile aber nicht — FINDING [P3] im PR). Für sie ist der
+ * Mengen-Zweig deshalb WIRKUNGSLOS, und ein Monat mit gebuchten Gemeinkosten
+ * zum Lohnsatz 0 blendet den Block aus, obwohl gemessen wurde.
+ *
+ * Wirksam ist er heute nur für `kilometer_zeiterfassung`: gefahrene km bei
+ * km-Lohnsatz 0 sind eine echte Messung und bleiben sichtbar.
+ *
+ * Die Bedingung steht trotzdem so da, weil sie die richtige ist — sobald die
+ * Overhead-Zeilen ihre Minuten tragen, greift sie von selbst. Beide Punkte
+ * gehören zusammen angefasst, nicht als zwei unabhängige Änderungen.
  */
 export function splitEconomicsRows(rows: BillingEconomicsRow[]): {
   leistung: BillingEconomicsRow[];
   ohneUmsatz: BillingEconomicsRow[];
   ohneUmsatzCents: number;
+  /**
+   * Σ der MARGEN des unteren Blocks (also negativ).
+   *
+   * Nicht `−ohneUmsatzCents`: das wäre dieselbe Zahl nur, solange keine Zeile
+   * des Blocks Erlös trägt. Genau dafür gibt es pro Zeile schon einen Riegel
+   * (`ServiceRow` prüft `revenueCents === 0`) — die Summenzeile hatte ihn
+   * nicht. Über die echten Margen zu gehen schliesst ihn, erspart das
+   * handgesetzte Minuszeichen und kann nicht doppelt-negativ werden.
+   */
+  ohneUmsatzMargeCents: number;
   summeCents: number;
   zeigeOhneUmsatz: boolean;
 } {
@@ -203,6 +226,7 @@ export function splitEconomicsRows(rows: BillingEconomicsRow[]): {
     leistung,
     ohneUmsatz,
     ohneUmsatzCents,
+    ohneUmsatzMargeCents: ohneUmsatz.reduce((s, r) => s + r.marginCents, 0),
     summeCents: rows.reduce((s, r) => s + r.costCents, 0),
     zeigeOhneUmsatz:
       ohneUmsatz.length > 0

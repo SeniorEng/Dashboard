@@ -149,8 +149,9 @@ function ServiceTable({
   // Aufteilung + „darf der untere Block überhaupt gezeigt werden?" liegen als
   // reine Funktion in `../utils` — sie tragen eine Aussage, die falsch sein
   // kann, und im JSX könnte sie niemand prüfen.
-  const { leistung, ohneUmsatz, ohneUmsatzCents, summeCents, zeigeOhneUmsatz } =
-    splitEconomicsRows(rows);
+  const {
+    leistung, ohneUmsatz, ohneUmsatzCents, ohneUmsatzMargeCents, summeCents, zeigeOhneUmsatz,
+  } = splitEconomicsRows(rows);
   const stimmt = laborCostCents === undefined || summeCents === laborCostCents;
 
   return (
@@ -198,17 +199,24 @@ function ServiceTable({
                 >
                   {formatAmount(ohneUmsatzCents)}
                 </td>
-                {/* Der Betrag MUSS auch in der Marge-Spalte stehen, mit
-                    Vorzeichen. Die Einzelzeilen darüber zeigen dort „—", weil
-                    für sie keine Marge gerechnet werden kann — wer die Spalte
-                    von oben nach unten addiert, landet sonst um genau diese
-                    Summe ÜBER dem Deckungsbeitrag in der Kopfzeile. Hier
-                    schliesst sich die Spalte. */}
+                {/* Der Betrag MUSS auch in der Marge-Spalte stehen. Die
+                    Einzelzeilen darüber zeigen dort „—", weil für sie keine
+                    Marge gerechnet werden kann — wer die Spalte von oben nach
+                    unten addiert, landet sonst um genau diese Summe ÜBER dem
+                    Deckungsbeitrag in der Kopfzeile. Hier schliesst sie sich.
+
+                    Gebildet aus den echten Margen des Blocks, nicht als
+                    `−ohneUmsatzCents`: die beiden sind nur gleich, solange
+                    keine Block-Zeile Erlös trägt, und genau dafür gibt es pro
+                    Zeile bereits einen Riegel. Das Vorzeichen kommt damit aus
+                    der Zahl statt von Hand. */}
                 <td
-                  className="py-2 px-3 text-right text-sm font-semibold tabular-nums text-rose-700"
+                  className={`py-2 px-3 text-right text-sm font-semibold tabular-nums ${
+                    ohneUmsatzMargeCents < 0 ? "text-rose-700" : "text-gray-900"
+                  }`}
                   data-testid="text-econ-ohne-umsatz-marge"
                 >
-                  −{formatAmount(ohneUmsatzCents)}
+                  {formatAmount(ohneUmsatzMargeCents)}
                 </td>
                 <td />
               </tr>

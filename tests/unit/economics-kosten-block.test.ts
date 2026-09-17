@@ -79,13 +79,19 @@ describe("Kosten-Block der Umsatz-Kachel", () => {
     expect(r.zeigeOhneUmsatz).toBe(true);
   });
 
-  it("KB-4 – zeigt den Block auch bei 0 Cent, aber gebuchter MENGE", () => {
-    // Die Gegenrichtung zu KB-2, und der Grund, warum nicht nur auf Geld
-    // geprüft wird: gebuchte Minuten zum Lohnsatz 0 sind eine echte Messung.
-    // Sie zu verstecken hieße, eine Null als Nicht-Messung auszugeben — der
-    // Fehler in die andere Richtung.
+  it("KB-4 – zeigt den Block auch bei 0 Cent, aber gefahrenen KILOMETERN", () => {
+    // Die Gegenrichtung zu KB-2: eine Menge ohne Geld ist eine echte Messung
+    // (km-Lohnsatz 0). Sie zu verstecken hieße, eine Null als Nicht-Messung
+    // auszugeben — der Fehler in die andere Richtung.
+    //
+    // BEWUSST `kilometer_zeiterfassung` und NICHT eine Overhead-Zeile: die
+    // erste Fassung nahm `overhead_urlaub` mit quantity 2400 — eine Form, die
+    // der Reader gar nicht erzeugen kann (`quantity` ist dort hart 0, siehe
+    // KO-9 und `economics-effective-rate-drift`). Der Test beschrieb also eine
+    // andere Welt als die Integrationstests daneben und belegte einen Riegel,
+    // den es für Overhead nicht gibt. Jetzt der erreichbare Fall.
     const r = splitEconomicsRows([
-      zeile("overhead_urlaub", "kosten_ohne_umsatz", 0, 2_400),
+      zeile("kilometer_zeiterfassung", "kosten_ohne_umsatz", 0, 12.5),
     ]);
     expect(r.zeigeOhneUmsatz).toBe(true);
   });
