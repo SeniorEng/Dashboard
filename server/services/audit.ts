@@ -94,7 +94,32 @@ class AuditService {
   async serviceRecordCreated(
     userId: number,
     serviceRecordId: number,
-    metadata: { customerId: number; year: number; month: number; appointmentCount: number; recordType?: string; appointmentId?: number; mergedIntoPending?: boolean },
+    metadata: {
+      customerId: number;
+      year: number;
+      month: number;
+      appointmentCount: number;
+      recordType?: string;
+      appointmentId?: number;
+      mergedIntoPending?: boolean;
+      /**
+       * Ticket 6hWgf8W5hRq8W99G — Massenanlage (Altdaten-Import): gemeinsame
+       * Kennung aller Nachweise EINES Laufs. Der Eintrag bleibt einzeln je
+       * Beleg (das zaehlt fuer GoBD), die `batchId` beantwortet zusaetzlich
+       * „was gehoerte zu diesem Lauf?" ueber eine Abfrage statt ueber
+       * Zeitfenster-Raten.
+       */
+      batchId?: string;
+      /** Herkunft, wenn nicht interaktiv erzeugt (z.B. `altdaten-import`). */
+      source?: string;
+      /**
+       * Der Import setzt `completed` hart, ohne Kundenunterschrift. Ohne
+       * diesen Vermerk liest sich der Status spaeter wie „vom Kunden
+       * unterschrieben" — die Verwechslung, gegen die es die Invariante
+       * `completed => customer_signed_at IS NOT NULL` gibt.
+       */
+      statusSetWithoutSignature?: boolean;
+    },
     ipAddress?: string,
     exec?: DbOrTx,
   ): Promise<void> {
