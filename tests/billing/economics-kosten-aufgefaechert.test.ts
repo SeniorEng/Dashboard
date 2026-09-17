@@ -140,7 +140,12 @@ afterAll(async () => {
   if (userId) {
     await db.execute(sql`DELETE FROM employee_time_entries WHERE user_id = ${userId}`);
   }
-  if (customerId) await cleanupCustomer(customerId); // entfernt Termine (FK-Cascade)
+  // `cleanupCustomer` ruft den Purge-Endpunkt, der HART loescht — keine
+  // FK-Cascade, wie hier zuerst stand. Und er SCHLUCKT Fehler: schlaegt er
+  // fehl, stirbt das `DELETE FROM users` darunter an der Fremdschluessel-
+  // Beziehung, und der Fehler erscheint als raetselhafter afterAll-Abbruch
+  // statt als Cleanup-Fehler.
+  if (customerId) await cleanupCustomer(customerId);
   if (userId) await db.execute(sql`DELETE FROM users WHERE id = ${userId}`);
   if (nurGeplantUserId) {
     await db.execute(sql`DELETE FROM users WHERE id = ${nurGeplantUserId}`);

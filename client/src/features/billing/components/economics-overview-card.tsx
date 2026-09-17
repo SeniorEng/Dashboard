@@ -128,7 +128,10 @@ function ServiceRow({ row }: { row: BillingEconomicsRow }) {
       >
         {row.potentialRevenueCents === null ? "—" : formatAmount(row.potentialRevenueCents)}
       </td>
-      <td className="py-2 px-3 text-right tabular-nums text-gray-500">
+      <td
+        className="py-2 px-3 text-right tabular-nums text-gray-500"
+        data-testid={`text-econ-potential-cost-${row.key}`}
+      >
         {row.potentialCostCents === null ? "—" : formatAmount(row.potentialCostCents)}
       </td>
       <td

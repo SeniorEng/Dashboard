@@ -235,6 +235,12 @@ export async function readBillingEconomics(
   // `sql.join` statt `= ANY(${liste})`: das `sql`-Template expandiert ein Array
   // als TUPEL, nicht als Array-Literal — `ANY((...))` scheitert dann mit 42809.
   // Die Liste kommt weiter aus der SSoT, nur die Einsetzung ist explizit.
+  //
+  // Eine LEERE Liste ergaebe `IN ()` und damit 42601 auf dem ganzen Endpunkt.
+  // Heute unerreichbar (`POTENTIAL_APPOINTMENT_STATUSES` enthaelt mindestens
+  // `completed`), und ein lauter Abbruch waere hier auch das Richtige — eine
+  // Potenzial-Spalte ohne Status waere keine Messung. Festgehalten, damit es
+  // beim naechsten Lesen nicht wie ein uebersehener Fall aussieht.
   const potenzialFilter = sql`(a.status IN (${sql.join(
     POTENTIAL_APPOINTMENT_STATUSES.map((st) => sql`${st}`),
     sql`, `,
@@ -283,7 +289,7 @@ export async function readBillingEconomics(
     ${mitUnzugeordneten ? sql`` : sql`WHERE employee_id IS NOT NULL`}
     GROUP BY employee_id
   `);
-  const minutesRes = await minutenUndKosten(istFilter);
+  const minutesResP = minutenUndKosten(istFilter);
 
   // --- 2) HW/AB-Erlös je Mitarbeiter (Kunden-Preis ODER Katalog, wie SSoT). ----
   const erloes = (statusFilter: SQL, mitUnzugeordneten = false) => db.execute(sql`
@@ -319,7 +325,10 @@ export async function readBillingEconomics(
     ${mitUnzugeordneten ? sql`` : sql`WHERE employee_id IS NOT NULL`}
     GROUP BY employee_id
   `);
+  // Ist- und Potenzial-Lauf sind voneinander unabhaengig — sequenziell
+  // `await`-et haetten sich die vier Abfragen auf einem echten Monat addiert.
   const revenueRes = await erloes(istFilter);
+  const minutesRes = await minutesResP;
 
   // Dieselben zwei Abfragen ein zweites Mal — nur der Status-Filter ist weiter.
   // MIT den unzugeordneten Terminen. `assigned_employee_id` ist nullable, und
@@ -332,8 +341,10 @@ export async function readBillingEconomics(
   // Mitarbeiter-Bezug), die Spalte hier heisst „Potenzial (GANZER Monat)" und
   // liesse ihn weg. Die Ist-Seite ist davon nicht betroffen: ein
   // dokumentierter Termin hat immer einen leistenden Mitarbeiter.
-  const potenzialMinutenRes = await minutenUndKosten(potenzialFilter, true);
-  const potenzialErloesRes = await erloes(potenzialFilter, true);
+  const [potenzialMinutenRes, potenzialErloesRes] = await Promise.all([
+    minutenUndKosten(potenzialFilter, true),
+    erloes(potenzialFilter, true),
+  ]);
 
   // --- 3) Termin-km (Anfahrt + Kunden-km) + rollenbasierte km-Kosten je MA. ----
   // km je Termin auf 2 NK quantisiert (km-SSoT) × `wageFor`-km-Lohnsatz, pro

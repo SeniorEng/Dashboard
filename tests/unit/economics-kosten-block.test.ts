@@ -37,6 +37,12 @@ const zeile = (
   marginPercent: 0,
   revenueRateCents: 0,
   costRateCents: 0,
+  // Pflichtfelder des Vertrags. Ohne sie beschriebe die Fabrik eine Form, die
+  // es nicht mehr gibt — und es faellt nicht auf, weil `tsconfig.json` die
+  // Testdateien ausschliesst. `splitEconomicsRows` liest sie nicht; der Punkt
+  // ist die Ehrlichkeit der Fixture, nicht die Laufzeit.
+  potentialRevenueCents: null,
+  potentialCostCents: null,
 });
 
 describe("Kosten-Block der Umsatz-Kachel", () => {
