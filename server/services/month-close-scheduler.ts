@@ -8,6 +8,8 @@ import {
 } from "@shared/schema";
 import { log } from "../lib/log";
 import {
+  DAILY_SCHEDULER_SLOTS,
+  type DailySchedulerSlot,
   computeMonthCloseCutoff,
   daysUntilCutoff,
   isCutoffDay,
@@ -456,27 +458,70 @@ export async function getMonthCloseBanner(userId: number): Promise<{
   };
 }
 
-let lastDailyRunDate: string | null = null;
+/**
+ * Tages-Entprellung je Slot — EINE Marke pro Aufgabe, nicht eine geteilte.
+ *
+ * Vorher stand hier eine einzige Variable, die BEIDE Slots beschrieben:
+ * `lastDailyRunDate = today + "-reminder"` bzw. `+ "-autoclose"`. Da jeder
+ * Schreibvorgang die Marke des anderen ueberschreibt, war die Bedingung des
+ * jeweils anderen Slots danach wieder wahr.
+ *
+ * WIE WIRKSAM das auf dem heutigen Stand ist: LATENT, nicht wirksam. Das ist
+ * durchgerechnet und korrigiert eine frühere, zu großzügige Fassung dieses
+ * Absatzes, die „Neustart in Stunde 23" als Auslöser nannte. Ein Neustart
+ * loescht die Marke SELBST — sie ist prozess-lokal. Vor und nach dem Fix
+ * verhaelt sich dieser Fall identisch.
+ *
+ * Die verbleibende Differenz braucht ZWEI Polls mit `berlinHour() === 23` am
+ * selben Berliner Datum INNERHALB eines Prozesses. Bei `POLL_INTERVAL_MS = 1h`
+ * und `setInterval` ist das nicht erreichbar: der Timer feuert spaet, nie
+ * frueh, und der naechste Tick nach einem 23:xx-Poll liegt in Stunde 0 des
+ * Folgetags. Erreichbar nur ueber einen Rueckwaerts-Sprung der Wanduhr
+ * (NTP-Korrektur, VM-Resume).
+ *
+ * Gerichtet wird es deshalb als Vorsorge, nicht als Reparatur eines laufenden
+ * Schadens: eine Entprellung, deren Korrektheit an der Taktrate des Timers
+ * haengt statt an ihrer eigenen Struktur, ist keine. Wer den naechsten Slot
+ * einhaengt — insbesondere einen, der sich die Stunde mit dem Reminder teilt —,
+ * erbt einen echten Stunden-Takt.
+ *
+ * Die Schluessel liegen in `DAILY_SCHEDULER_SLOTS`
+ * (`shared/utils/month-close-cutoff.ts` — dort, weil dieses Modul beim Import
+ * eine `DATABASE_URL` verlangt und eine Konstante dahinter nicht als Einheit
+ * pruefbar waere). Das Buendeln allein macht sie NICHT
+ * eindeutig — `{ reminder: "reminder", autoClose: "reminder" }` typprueft
+ * anstandslos, und die Folge waere schwerer als der Ausgangsfehler: der
+ * Auto-Close laese die Marke des Reminders, uebersprange sich selbst, und der
+ * Monat wuerde wegen `isCutoffDay` (strikte Tagesgleichheit) NIE geschlossen —
+ * still, ohne Log. Die Eindeutigkeit der WERTE ist deshalb als Test
+ * abgesichert (`tests/unit/scheduler-daily-debounce.test.ts`), nicht als
+ * Zusage im Kommentar. Darum ist die Konstante exportiert.
+ */
+const lastRunPerSlot = new Map<DailySchedulerSlot, string>();
+
+function alreadyRanToday(slot: DailySchedulerSlot, today: string): boolean {
+  return lastRunPerSlot.get(slot) === today;
+}
 
 async function runDaily(): Promise<void> {
   const today = todayBerlinIso();
   const hour = berlinHour();
 
   // Reminders fire once per day (>= 8:00 Berlin)
-  if (hour >= 8 && lastDailyRunDate !== today + "-reminder") {
+  if (hour >= 8 && !alreadyRanToday(DAILY_SCHEDULER_SLOTS.reminder, today)) {
     try {
       await sendMonthCloseReminders(today);
-      lastDailyRunDate = today + "-reminder";
+      lastRunPerSlot.set(DAILY_SCHEDULER_SLOTS.reminder, today);
     } catch (err) {
       console.error("[month-close] Reminder-Fehler:", err);
     }
   }
 
   // Auto-close fires at >= 23:00 Berlin on the cutoff day
-  if (hour >= 23 && lastDailyRunDate !== today + "-autoclose") {
+  if (hour >= 23 && !alreadyRanToday(DAILY_SCHEDULER_SLOTS.autoClose, today)) {
     try {
       await autoCloseMonthForCutoff(today);
-      lastDailyRunDate = today + "-autoclose";
+      lastRunPerSlot.set(DAILY_SCHEDULER_SLOTS.autoClose, today);
     } catch (err) {
       console.error("[month-close] Auto-Close-Fehler:", err);
     }
