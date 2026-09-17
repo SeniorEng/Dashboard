@@ -23,8 +23,12 @@ and a `prices` row (scope='customer', origin='customer_service_prices') both ≠
 assert each reader shows the effective value. See `tests/economics-effective-rate-drift.test.ts`.
 
 **Two per-category traps (Task #1551):**
-- Erstberatung is NOT a line in Reader 1 (billing economics-reader): it hard-sets
-  `erstberatungMinutes:0`/`erstberatungCostCents:0`, so only Readers 2 & 3 expose an EB rate.
+- Erstberatung carries no PRODUCTIVE line in Reader 1 (billing economics-reader): it hard-sets
+  `erstberatungMinutes:0`/`erstberatungCostCents:0`, so only Readers 2 & 3 expose an EB *rate*.
+  Since ticket 6hWgVqw2C8442hcG it DOES have a cost line — `overhead_erstberatung`, in the
+  `kosten_ohne_umsatz` block, quantity 0 and therefore still no rate. Its label comes from
+  `byCategory[].label` (the reader supplies it, because `getEntryTypeLabel` does not know the
+  key — `erstberatung` is not a time-entry type).
   An EB appointment needs `appointment_type='Erstberatung'` (the category branch keys off it),
   and EB catalog `default_price_cents=0` so the effective customer price is what makes the label ≠ catalog.
 - Each category MUST live in its OWN far-future year. Reader 1 categorizes purely by
@@ -32,4 +36,5 @@ assert each reader shows the effective value. See `tests/economics-effective-rat
   so an EB appointment in the same year as HW gets merged into Reader 1's Hauswirtschaft row and
   corrupts its rate assertion. Reader 3 falls back to the CATALOG rate (not 0) when minutes=0 by
   design ("Katalog-Referenz"), so don't assert "qty0⇒rate0" on Reader 3 — that guard only holds
-  for Reader 1's gemeinkosten row.
+  for Reader 1's `overhead_*` rows (formerly the single `gemeinkosten` row, split per category
+  in ticket 6hWgVqw2C8442hcG).

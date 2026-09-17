@@ -597,8 +597,13 @@ describe("Task #1554 — Reporting: Nicht-abrechenbar-Export Lohn effektiv aus G
  *     aggregiert — beide Kategorien erscheinen, jede mit ihren Ist-Minuten.
  *  2) Der km-Satz-Label-Nenner verwendete die GESAMT-km (inkl. nicht-
  *     abrechenbarer Zeiterfassungs-km) und verdünnte so den angezeigten €/km-
- *     Satz. Der Satz beruht jetzt auf den ABRECHENBAREN Termin-km, während die
- *     angezeigte Mengen-Spalte weiterhin die Gesamt-km zeigt.
+ *     Satz. #1752 bog den Nenner über einen Zusatzparameter (`rateBasis`) auf
+ *     die abrechenbaren km zurück; die Mengen-Spalte zeigte weiter die
+ *     Gesamt-km. Seit Ticket 6hWgVqw2C8442hcG trägt die Zeile nur noch die
+ *     abrechenbaren km und die Zeiterfassungs-km stehen in einer eigenen —
+ *     damit sind Menge und Satz-Basis dasselbe, und der Zusatzparameter ist
+ *     entfallen. Die Zusage von #1752 gilt unverändert, sie folgt jetzt aus
+ *     dem Zuschnitt statt aus einer Ausnahme.
  *
  * Isoliertes, weit entferntes Jahr ⇒ keine Vermischung mit anderen Suites; ohne
  * geseedete `role_wage_rates` fällt die Lohn-Auflösung auf den Katalog zurück
@@ -754,10 +759,15 @@ describe("Task #1752 — Nach Mitarbeiter: Ist-Minuten-SSoT (kein Termin-Kollaps
     // Satz unverdünnt — der Kern von #1752.
     expect(kmRow.revenueRateCents).toBe(catalogTravelPriceCents);
     expect(kmRow.costRateCents).toBe(catalogTravelRateCents);
-    // Gegenprobe: über die GESAMT-km gerechnet käme ein anderer Satz heraus.
-    expect(kmRow.revenueRateCents).not.toBe(
-      Math.round(kmRow.revenueCents / (TRAVEL_KM + TE_KM)),
-    );
+    // Die frühere „Gegenprobe" an dieser Stelle rechnete den Katalogsatz gegen
+    // `revenueCents / (TRAVEL_KM + TE_KM)`. Das war schon vor dem Zuschnitt
+    // keine echte Prüfung — `revenueCents` enthielt die Zeiterfassungs-km nie,
+    // die Rechnung ging also gegen ein Drittel der eigenen Zahl. Sie
+    // suggerierte eine Absicherung, die es nicht gab, und ist ERSETZT durch
+    // die Aussage, die wirklich trägt: der Satz beruht auf der Menge, die in
+    // DIESER Zeile steht, und die Zeiterfassungs-km stehen nicht darin.
+    expect(Math.round(kmRow.costCents / kmRow.quantity)).toBe(kmRow.costRateCents);
+    expect(teRow.quantity, "sonst wäre der Zuschnitt nicht geprüft").toBeGreaterThan(0);
   });
 
   it("Economics-Stunden === Lohn-Aufschlüsselung-Stunden pro Kategorie (gleiche Ist-Minuten-SSoT)", async () => {

@@ -12,6 +12,7 @@ import {
   formatKm,
   formatRate,
   marginHealthTextColor,
+  splitEconomicsRows,
 } from "../utils";
 import { MONTH_NAMES } from "../constants";
 import { CollapsibleCard } from "./collapsible-card";
@@ -41,6 +42,21 @@ function rateLabel(row: BillingEconomicsRow): string | null {
   if (row.unit === "km") {
     return `${formatRate(row.revenueRateCents)} / ${formatRate(row.costRateCents)} pro km`;
   }
+  return null;
+}
+
+/**
+ * Satz-Unterzeile für Zeilen ohne Erlös: nur der Kostensatz.
+ *
+ * `rateLabel` rendert „Erlös / Kosten pro km" — für „Kilometer
+ * (Zeiterfassung)" stand dort „0,00 € / 0,35 € pro km", während die
+ * Umsatz-Spalte derselben Zeile „—" zeigte („die Frage ist nicht gestellt").
+ * Dieselbe Frage darf nicht zwei Zentimeter weiter mit 0,00 € beantwortet
+ * werden.
+ */
+function costOnlyRateLabel(row: BillingEconomicsRow): string | null {
+  if (row.unit === "hours") return `${formatRate(row.costRateCents)} pro Std`;
+  if (row.unit === "km") return `${formatRate(row.costRateCents)} pro km`;
   return null;
 }
 
@@ -80,8 +96,14 @@ function KpiTile({
  * Kategorie einfach Kosten trägt.
  */
 function ServiceRow({ row }: { row: BillingEconomicsRow }) {
-  const rate = rateLabel(row);
-  const ohneUmsatz = row.group === "kosten_ohne_umsatz";
+  // Der Gedankenstrich hängt NICHT allein am Block, sondern zusätzlich daran,
+  // dass die Zeile wirklich keinen Erlös trägt. Sonst versteckte die Anzeige
+  // Geld, sobald Block und Betrag auseinanderfallen — der Server bricht
+  // dafür inzwischen ab (`buildRow`), aber die Anzeige soll den Fall nicht
+  // ihrerseits unsichtbar machen. Zwei Riegel, unabhängig voneinander.
+  const ohneUmsatz = row.group === "kosten_ohne_umsatz" && row.revenueCents === 0;
+  // N-3: für eine Zeile ohne Erlös ist auch der Erlös-SATZ keine Aussage.
+  const rate = ohneUmsatz ? costOnlyRateLabel(row) : rateLabel(row);
   return (
     <tr className="border-b border-gray-100" data-testid={`row-econ-service-${row.key}`}>
       <td className="py-2 pr-3">
@@ -124,10 +146,11 @@ function ServiceTable({
    */
   laborCostCents?: number;
 }) {
-  const leistung = rows.filter((r) => r.group !== "kosten_ohne_umsatz");
-  const ohneUmsatz = rows.filter((r) => r.group === "kosten_ohne_umsatz");
-  const ohneUmsatzCents = ohneUmsatz.reduce((s, r) => s + r.costCents, 0);
-  const summeCents = rows.reduce((s, r) => s + r.costCents, 0);
+  // Aufteilung + „darf der untere Block überhaupt gezeigt werden?" liegen als
+  // reine Funktion in `../utils` — sie tragen eine Aussage, die falsch sein
+  // kann, und im JSX könnte sie niemand prüfen.
+  const { leistung, ohneUmsatz, ohneUmsatzCents, summeCents, zeigeOhneUmsatz } =
+    splitEconomicsRows(rows);
   const stimmt = laborCostCents === undefined || summeCents === laborCostCents;
 
   return (
@@ -148,7 +171,7 @@ function ServiceTable({
             <ServiceRow key={row.key} row={row} />
           ))}
 
-          {ohneUmsatz.length > 0 && (
+          {zeigeOhneUmsatz && (
             <>
               {/* Der Block, den Alrik wörtlich gefragt hat: „wofür zahle ich,
                   ohne dafür Geld zu bekommen?" Bis hierher ERSETZTE eine
@@ -175,7 +198,18 @@ function ServiceTable({
                 >
                   {formatAmount(ohneUmsatzCents)}
                 </td>
-                <td />
+                {/* Der Betrag MUSS auch in der Marge-Spalte stehen, mit
+                    Vorzeichen. Die Einzelzeilen darüber zeigen dort „—", weil
+                    für sie keine Marge gerechnet werden kann — wer die Spalte
+                    von oben nach unten addiert, landet sonst um genau diese
+                    Summe ÜBER dem Deckungsbeitrag in der Kopfzeile. Hier
+                    schliesst sich die Spalte. */}
+                <td
+                  className="py-2 px-3 text-right text-sm font-semibold tabular-nums text-rose-700"
+                  data-testid="text-econ-ohne-umsatz-marge"
+                >
+                  −{formatAmount(ohneUmsatzCents)}
+                </td>
                 <td />
               </tr>
             </>
@@ -308,7 +342,7 @@ function EmployeeTable({
                 {isOpen && (
                   <tr key={`${emp.employeeId}-drill`} data-testid={`row-econ-employee-drill-${emp.employeeId}`}>
                     <td colSpan={7} className="bg-gray-50 px-3 py-2">
-                      <ServiceTable rows={emp.services} />
+                      <ServiceTable rows={emp.services} laborCostCents={emp.costCents} />
                     </td>
                   </tr>
                 )}

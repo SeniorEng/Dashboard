@@ -47,7 +47,6 @@ import type {
 } from "@shared/statistics";
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 import { documentedSqlRaw } from "../../lib/appointment-signed";
-import { getEntryTypeLabel } from "@shared/domain/time-entries";
 import type {
   BillingEconomicsResponse,
   BillingEconomicsRow,
@@ -63,8 +62,8 @@ const NON_BILLABLE_TYPES = ["bueroarbeit", "vertrieb", "sonstiges", "krankheit",
  * Task #1765: Overhead-Schlüssel für die (unberechnete, aber bezahlte)
  * Erstberatungs-Arbeitszeit. Erstberatung ist im billing-scoped Überblick KEINE
  * produktive Erlös-/Zeilen-Größe, sondern fließt als Gemeinkosten (Overhead) in
- * `nonBillableCostCents` → die einzelne Gemeinkosten-Zeile und die Headline-
- * Lohnkosten. Sie wird über denselben `nonBillable`/`nonBillableCost`-Kanal wie
+ * `nonBillableCostCents` → ihre eigene `overhead_erstberatung`-Zeile im Block
+ * `kosten_ohne_umsatz` und die Headline-Lohnkosten. Sie wird über denselben `nonBillable`/`nonBillableCost`-Kanal wie
  * die Zeiterfassungs-Overhead-Typen geführt und folgt demselben
  * `includeOverhead`-Gate (bei gesetztem Kassen-Filter nicht zurechenbar).
  */
@@ -74,26 +73,30 @@ const ERSTBERATUNG_OVERHEAD_CATEGORY = "erstberatung";
 const OVERHEAD_CATEGORIES = [...NON_BILLABLE_TYPES, ERSTBERATUNG_OVERHEAD_CATEGORY] as const;
 
 /**
- * Beschriftung einer Overhead-Kategorie für die aufgefächerte Kosten-Sicht.
+ * Beschriftung des Overhead-Schlüssels, den DIESER Reader einführt.
  *
- * Die fünf Zeiterfassungs-Typen kommen aus `getEntryTypeLabel` — dort liegt
- * die SSoT für ihre Benennung, und sie soll hier nicht ein zweites Mal
- * stehen. `erstberatung` ist der Sonderfall: es ist KEIN Zeiterfassungs-Typ,
- * sondern ein hier eingeführter Overhead-Schlüssel (#1765). `getEntryTypeLabel`
- * kennt ihn folglich nicht und gibt den Rohschlüssel zurück.
+ * `erstberatung` ist kein Zeiterfassungs-Typ, sondern ein hier erfundener
+ * Kanal-Schlüssel (#1765) — `getEntryTypeLabel` kennt ihn nicht und gäbe den
+ * Rohschlüssel zurück. Solange alle sechs Kategorien zu EINER
+ * „Gemeinkosten"-Zeile summiert wurden, fiel das nicht auf: kein Label wurde
+ * je angezeigt. Mit der Auffächerung stünde dort kleingeschrieben
+ * „erstberatung" zwischen fünf sauber benannten Zeilen.
  *
- * Solange alle sechs Kategorien zu EINER „Gemeinkosten"-Zeile summiert wurden,
- * fiel das nicht auf — kein Label wurde je angezeigt. Mit der Auffächerung
- * stünde dort ein kleingeschriebenes „erstberatung" zwischen sechs sauber
- * benannten Zeilen. Den Schlüssel in `ENTRY_TYPE_LABELS` nachzutragen wäre der
- * falsche Ort: das würde behaupten, es gäbe einen Zeiterfassungs-Typ
- * „Erstberatung", den man buchen kann. Die Ausnahme gehört dorthin, wo der
- * Schlüssel entsteht.
+ * Die Beschriftung wird deshalb DORT mitgegeben, wo der Schlüssel entsteht
+ * (`inputFor`), und `buildEconomics` legt sie in `byCategory[].label` — die
+ * eine Antwort auf „wie heißt diese Kategorie?".
+ *
+ * Das ERSETZT eine erste Fassung, die das Label in der Sicht-Schicht noch
+ * einmal ableitete. Die war ein Zweitbegriff und WIDERSPRACH der SSoT: dort
+ * stand für dieselbe Kategorie weiter „erstberatung", hier „Erstberatung" —
+ * zwei Namen für einen Betrag, sobald irgendein anderer Pfad `byCategory`
+ * anzeigt.
+ *
+ * `ENTRY_TYPE_LABELS` nachzutragen wäre der falsche Ort: das behauptete einen
+ * buchbaren Zeiterfassungs-Typ „Erstberatung", den es nicht gibt.
  */
-function overheadLabel(category: string): string {
-  return category === ERSTBERATUNG_OVERHEAD_CATEGORY
-    ? "Erstberatung"
-    : getEntryTypeLabel(category);
+function overheadCategoryLabel(category: string): string | undefined {
+  return category === ERSTBERATUNG_OVERHEAD_CATEGORY ? "Erstberatung" : undefined;
 }
 
 type Rows = Record<string, unknown>[];
@@ -496,6 +499,7 @@ export async function readBillingEconomics(
     nonBillable: OVERHEAD_CATEGORIES.map((category) => ({
       category,
       minutes: agg.nonBillable.get(category) ?? 0,
+      label: overheadCategoryLabel(category),
     })),
     travelKm: agg.travelKm,
     customerKm: agg.customerKm,
@@ -517,6 +521,23 @@ export async function readBillingEconomics(
     costCents: number,
     group: BillingEconomicsRowGroup = "leistung",
   ): BillingEconomicsRow => {
+    // `kosten_ohne_umsatz` ist keine Beschreibung, sondern eine Zusage: die
+    // Karte zeigt für diese Zeilen in Umsatz/Marge/% einen Gedankenstrich und
+    // rechnet sie aus der Marge-Ampel heraus. Träge eine solche Zeile Erlös,
+    // wäre er auf dem Bildschirm UNSICHTBAR und läge trotzdem in
+    // `totals.revenueCents` — die Kopfzeile stünde höher als die Summe ihrer
+    // Zeilen, und der Selbsttest bemerkte es nicht, weil er die Kosten-Spalte
+    // prüft. Genau die Fehlerklasse aus #146: jede Stelle einzeln plausibel.
+    //
+    // Deshalb hier fail-closed statt einer Doku-Zeile.
+    if (group === "kosten_ohne_umsatz" && revenueCents !== 0) {
+      throw new Error(
+        `Zeile "${key}" ist als \`kosten_ohne_umsatz\` ausgewiesen, trägt aber `
+        + `${revenueCents} Cent Erlös. Entweder gehört sie in den Block `
+        + `\`leistung\`, oder der Erlös ist falsch zugeordnet — beides muss `
+        + "entschieden werden, nicht auf dem Bildschirm verschwinden.",
+      );
+    }
     const marginCents = revenueCents - costCents;
     return {
       key,
@@ -593,7 +614,13 @@ export async function readBillingEconomics(
         "Kilometer (Zeiterfassung)",
         "km",
         econ.km.timeEntry.km,
-        0,
+        // BEWUSST der echte Wert, nicht das Literal 0. Er IST heute 0
+        // (`chargedCents: 0` in der SSoT, weil ohne Termin-Bezug niemand
+        // existiert, dem man die km berechnen könnte) — aber eine 0 von Hand
+        // hinzuschreiben verschweigt jede künftige Änderung daran: der Betrag
+        // wäre in `totals.revenueCents` und fehlte in der Zeilenmenge.
+        // Den Widerspruch fängt jetzt `buildRow` ab, statt ihn zu verstecken.
+        econ.km.timeEntry.chargedCents,
         econ.km.timeEntry.paidCents,
         "kosten_ohne_umsatz",
       ),
@@ -612,7 +639,7 @@ export async function readBillingEconomics(
       ...econ.personnel.nonBillable.byCategory.map((c) =>
         buildRow(
           `overhead_${c.category}`,
-          overheadLabel(c.category),
+          c.label,
           "none",
           0,
           0,

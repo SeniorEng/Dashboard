@@ -60,13 +60,13 @@ export interface BillingEconomicsRow {
   group: BillingEconomicsRowGroup;
   label: string;
   unit: BillingEconomicsUnit;
-  /** Menge in der Einheit: Minuten (unit=hours), km (unit=km), 0 (unit=none/Gemeinkosten). */
+  /** Menge in der Einheit: Minuten (unit=hours), km (unit=km), 0 (unit=none). */
   quantity: number;
   revenueCents: number;
   costCents: number;
   marginCents: number;
   marginPercent: number;
-  /** Anzeige-Satz pro Einheit (Katalog-Standard): Erlös-Satz; 0 für Gemeinkosten. */
+  /** Anzeige-Satz pro Einheit: Erlös-Satz; 0 bei Einheit `none` und ohne Menge. */
   revenueRateCents: number;
   /** Anzeige-Satz pro Einheit: an Mitarbeiter:innen ausgezahlter Kostensatz. */
   costRateCents: number;
@@ -84,7 +84,7 @@ export interface BillingEconomicsEmployeeRow {
   costCents: number;
   marginCents: number;
   marginPercent: number;
-  /** Per-Leistungs-Drilldown (hauswirtschaft/alltagsbegleitung/kilometer/gemeinkosten). */
+  /** Per-Leistungs-Drilldown mit denselben Schlüsseln wie `byService`. */
   services: BillingEconomicsRow[];
 }
 
@@ -100,7 +100,12 @@ export interface BillingEconomicsResponse {
     marginCents: number;
     marginPercent: number;
   };
-  /** „Nach Leistung": Hauswirtschaft, Alltagsbegleitung, Kilometer, Gemeinkosten. */
+  /**
+   * „Nach Leistung", zwei Blöcke (siehe `BillingEconomicsRowGroup`):
+   * `leistung` = Hauswirtschaft, Alltagsbegleitung, Kilometer aus Terminen;
+   * `kosten_ohne_umsatz` = Kilometer aus der Zeiterfassung + die sechs
+   * Overhead-Kategorien einzeln.
+   */
   byService: BillingEconomicsRow[];
   /** „Nach Mitarbeiter": pro zugerechnetem Mitarbeiter, absteigend nach Umsatz. */
   byEmployee: BillingEconomicsEmployeeRow[];

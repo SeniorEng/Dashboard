@@ -80,7 +80,18 @@ afterAll(async () => {
   if (userId) await db.execute(sql`DELETE FROM users WHERE id = ${userId}`);
 });
 
-const read = () => readBillingEconomics(YEAR, MONTH);
+/**
+ * AUF DIE FIXTURE GESCOPET (`employeeId`). Ungescopet setzten KO-4/KO-5/KO-7
+ * voraus, dass im gesamten Shard-Leg niemand sonst in diesem Monat bucht — und
+ * der Beleg dafür wäre ein Grep über eine Variablenschreibweise, nicht über die
+ * Voraussetzung. Genau die CI-only-Kontamination, die CLAUDE.md als
+ * Fehlerklasse ausweist. Mit dem Scope hängen die Zusagen nur noch an den
+ * eigenen Daten.
+ *
+ * KO-1 und KO-8 wären auch ungescopet robust (sie prüfen Identitäten, keine
+ * Absolutwerte) — sie laufen aus Einheitlichkeit mit.
+ */
+const read = () => readBillingEconomics(YEAR, MONTH, { employeeId: userId });
 
 describe("Umsatz-Kachel, unterer Block — Kosten aufgefächert", () => {
   it("KO-1 – die Zusage hält: Σ(Zeilen-Kosten) === Lohnkosten der Kopfzeile", async () => {
@@ -169,6 +180,37 @@ describe("Umsatz-Kachel, unterer Block — Kosten aufgefächert", () => {
     }
   });
 
+  it("KO-9 – mit Kassen-Filter wird Overhead NICHT gemessen und darf nichts behaupten", async () => {
+    // Bei gesetzter Kasse ist Overhead nicht zurechenbar (`includeOverhead =
+    // false`). Der Reader liefert die Zeilen trotzdem, dann mit 0 — die
+    // Darstellung darf daraus keine Messung machen. Die Zusage der Kachel:
+    // `splitEconomicsRows` blendet den Block aus, wenn weder Geld noch Menge
+    // da ist. Hier wird die DATEN-Seite davon festgenagelt.
+    const e = await readBillingEconomics(YEAR, MONTH, {
+      employeeId: userId,
+      insuranceProviderId: 1,
+    });
+
+    const ohne = e.byService.filter((r) => r.group === "kosten_ohne_umsatz");
+    expect(ohne.length, "die Zeilen bleiben im Vertrag, nur leer").toBeGreaterThan(0);
+    for (const r of ohne) {
+      expect(r.costCents, `Zeile ${r.key} traegt Geld trotz Kassen-Filter`).toBe(0);
+      expect(r.quantity, `Zeile ${r.key} traegt Menge trotz Kassen-Filter`).toBe(0);
+    }
+
+    // Und die Invariante hält auch in diesem Modus — sonst wäre die
+    // Auffächerung nur im Normalfall korrekt.
+    expect(e.byService.reduce((s, r) => s + r.costCents, 0)).toBe(e.totals.laborCostCents);
+  });
+
+  it("KO-10 – auch die UMSATZ-Seite summiert sich auf die Kopfzeile", async () => {
+    // Das Gegenstück zu KO-1. Es fehlte: der Selbsttest in der Kachel prüft nur
+    // die Kosten-Spalte, und genau deshalb könnte ein Erlös, der aus der
+    // Zeilenmenge fällt, unentdeckt in `totals.revenueCents` liegen.
+    const e = await read();
+    expect(e.byService.reduce((s, r) => s + r.revenueCents, 0)).toBe(e.totals.revenueCents);
+  });
+
   it("KO-7 – die beiden gebuchten Kategorien tragen ihre Kosten getrennt", async () => {
     // Die eigentliche Frage des Blocks: wofür zahle ich, ohne Geld dafür zu
     // bekommen? Eine Sammelzeile konnte sie nicht beantworten.
@@ -178,8 +220,23 @@ describe("Umsatz-Kachel, unterer Block — Kosten aufgefächert", () => {
 
     expect(buero.costCents).toBeGreaterThan(0);
     expect(vertrieb.costCents).toBeGreaterThan(0);
-    // 90 min Büro gegen 45 min Vertrieb, gleicher Satz ⇒ doppelt so teuer.
-    expect(buero.costCents).toBe(vertrieb.costCents * 2);
+
+    // Büro ist teurer als Vertrieb, weil 90 min > 45 min bei gleichem Satz.
+    //
+    // BEWUSST keine Gleichung `buero === vertrieb * 2`: die Kosten entstehen
+    // als `ROUND(min/60 × Satz)` PRO EINTRAG, also `ROUND(1,5·r)` gegen
+    // `ROUND(0,75·r)`. Die Verdopplung bricht für jeden Satz mit `r % 4 === 2`
+    // (1802 ⇒ 2703 vs. 1352). Beim heutigen Katalogsatz ginge sie auf — der
+    // Test wäre dann von einem Lohnsatz abhängig, den dieses Ticket gar nicht
+    // betrachtet, und würde rot, ohne dass am Produktionscode etwas falsch ist.
+    expect(buero.costCents).toBeGreaterThan(vertrieb.costCents);
+    // Die tragende Aussage: die Kategorien sind getrennt und summieren sich
+    // vollständig — nicht, in welchem Verhältnis sie stehen.
+    expect(buero.costCents + vertrieb.costCents).toBe(
+      e.byService
+        .filter((r) => r.key.startsWith("overhead_"))
+        .reduce((s, r) => s + r.costCents, 0),
+    );
 
     // Gegenrichtung: die nicht gebuchten Kategorien bleiben bei 0 — sonst
     // hätte die Auffächerung Kosten irgendwohin verteilt.
