@@ -84,3 +84,28 @@ export function previousMonth(today: string): { year: number; month: number } {
   if (month === 1) return { year: year - 1, month: 12 };
   return { year, month: month - 1 };
 }
+
+/**
+ * Slots der Tages-Entprellung des Monatsabschluss-Schedulers
+ * (`server/services/month-close-scheduler.ts`, `runDaily`).
+ *
+ * Liegt HIER und nicht beim Scheduler, obwohl sie dort hingehört: das
+ * Scheduler-Modul zieht beim Import `server/lib/db` mit und verlangt eine
+ * `DATABASE_URL`. Eine Konstante hinter einer DB-Abhängigkeit lässt sich nicht
+ * als Einheit prüfen — und genau diese Prüfung ist der Punkt.
+ *
+ * Denn die WERTE müssen paarweise verschieden sein, und der Typ erzwingt das
+ * NICHT: `{ reminder: "reminder", autoClose: "reminder" }` typprüft anstandslos.
+ * Die Folge wäre schwerer als der Fehler, den die Entprellung behebt — der
+ * Auto-Close läse die Marke des Reminders, übersprünge sich selbst, und wegen
+ * `isCutoffDay` (strikte Tagesgleichheit) würde der Monat NIE geschlossen,
+ * still und ohne Log. Abgesichert in
+ * `tests/unit/scheduler-daily-debounce.test.ts`.
+ */
+export const DAILY_SCHEDULER_SLOTS = {
+  reminder: "reminder",
+  autoClose: "auto-close",
+} as const;
+
+export type DailySchedulerSlot =
+  (typeof DAILY_SCHEDULER_SLOTS)[keyof typeof DAILY_SCHEDULER_SLOTS];
