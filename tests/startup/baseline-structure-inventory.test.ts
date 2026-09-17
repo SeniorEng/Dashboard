@@ -73,6 +73,21 @@ const KNOWN_STARTUP_ONLY_CONSTRAINTS: ReadonlyArray<{ name: string; why: string 
       "eine fachliche Entscheidung und braucht wegen des Ledgers eine NEUE " +
       "Migration, nicht nur den vorhandenen Startup-Pfad — siehe FINDING.",
   },
+  {
+    name: "monthly_service_records_completed_requires_signature_check",
+    why:
+      "ABSICHTLICH startup-only (Ticket 6hWgf8W5hRq8W99G). Die Invariante " +
+      "`status = 'completed' => customer_signed_at IS NOT NULL` wird als " +
+      "NOT VALID angelegt, weil 42 Bestandszeilen aus dem Altdaten-Import sie " +
+      "verletzen (gemessen 17.09.2026, Protokoll in " +
+      "docs/corrections/2026-09-17_42er-unsignierte-nachweise-kassenbelege.md). " +
+      "Im Drizzle-Modell gaebe es die NOT-VALID-Stufe nicht: eine frisch " +
+      "gebaute DB bekaeme den Constraint VALIDIERT, Prod haette ihn nur " +
+      "NOT VALID — genau die Asymmetrie, die diese Liste sichtbar halten soll. " +
+      "Er wandert ins Modell, sobald der Bestand bereinigt und der Constraint " +
+      "per VALIDATE CONSTRAINT scharf geschaltet ist. Angelegt in " +
+      "server/startup/ensure-service-record-signed-invariant.ts.",
+  },
 ];
 
 type Snapshot = Record<string, Map<string, string>>;
