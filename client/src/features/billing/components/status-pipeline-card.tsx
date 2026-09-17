@@ -104,6 +104,25 @@ export function StatusPipelineCard({
   };
 
   /**
+   * Die Summe der Zeilen, die tatsächlich auf dem Bildschirm stehen — Grundlage
+   * des Selbsttests weiter unten. Bewusst aus denselben Quellen gelesen, aus
+   * denen `renderStage` und `renderWartetAufUnterschrift` ihre Beträge nehmen:
+   * eine Prüfung gegen die Schlagzeile ist nur dann eine, wenn die beiden Seiten
+   * unabhängig entstanden sind.
+   */
+  const sichtbareSummeCents =
+    PIPELINE_CASCADE_ORDER.reduce(
+      (n, stage) => n + (stageByKey.get(stage)?.totalCents ?? 0),
+      0,
+    ) +
+    // Spiegelt die Abbruchbedingung von `renderWartetAufUnterschrift` mit:
+    // eine Zeile, die nicht gerendert wird, darf auch nicht mitsummiert werden,
+    // sonst prüfte der Selbsttest etwas anderes als das Sichtbare.
+    (((s) => (s && s.itemCount > 0 ? s.totalCents : 0))(
+      (pipeline?.sides ?? []).find((x) => x.state === "wartet_auf_kundenunterschrift"),
+    ));
+
+  /**
    * Die drei Verlust-Arten in einer Liste — Beträge aus zwei verschiedenen
    * Quellen, weil `cancelled` kein Side-Zustand ist, sondern `excluded`.
    */
@@ -173,8 +192,13 @@ export function StatusPipelineCard({
         >
           {formatAmount(group.totalCents)}
         </span>
+        {/* `itemCount`, NICHT `caseCount`. `caseCount` zählt distinkte FÄLLE —
+            auf den frühen Stufen also Kunden, nicht Termine (`pipeline-reader`
+            sammelt dort `cust-<id>`). Solange die Zahl ohne Einheit dastand,
+            war sie bloß vage; mit „Termine" daneben wird sie falsch: 61 offene
+            Termine bei 12 Kunden läsen sich als „12 Termine". */}
         <span className="text-xs text-gray-400">
-          {group.caseCount} {einheitFuer(stage, group.caseCount)}
+          {group.itemCount} {einheitFuer(stage, group.itemCount)}
         </span>
         {group.overdueCount > 0 && (
           <span className="text-xs text-rose-700" data-testid={`pipeline-stage-overdue-${stage}`}>
@@ -194,11 +218,21 @@ export function StatusPipelineCard({
       title={`${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
       headerRight={
         <div className="text-right">
-          {/* „(Leistungen)" ist kein Beiwerk: die Zahl enthält KEINE km und
-              keinen Overhead (`unit_type = 'hours'`). Ohne den Zusatz
-              verspricht die Schlagzeile den vollen Kontoeingang und liefert
-              die Stunden-Hälfte. */}
-          <div className="text-xs text-gray-500">Erwarteter Kontoeingang (Leistungen)</div>
+          {/* „(netto)" ist kein Beiwerk, sondern die Basis: die Kaskade rechnet
+              durchgehend mit `netAmountCents`, die Zeile „davon eingegangen"
+              unten ist auf dieselbe Basis gebracht. Ohne den Zusatz läse man
+              eine Netto-Summe als Kontoeingang und wunderte sich bei
+              Selbstzahlern über 19 %.
+
+              Der frühere Zusatz war „(Leistungen)" — gemeint als „ohne km".
+              Das stimmt nur für die drei TERMIN-Stufen (`unit_type = 'hours'`,
+              `pipeline-reader`); sobald abgerechnet ist, trägt die Stufe den
+              vollen Rechnungs-Netto INKLUSIVE km-Positionen. Die Kaskade
+              wächst beim Übergang `abrechnungsreif → gestellt` also um die km,
+              ohne dass jemand mehr verdient hätte. Das ist Altbestand aus
+              #1405 und hier NICHT repariert — aber die Kachel darf das
+              Gegenteil nicht behaupten (FINDING im PR). */}
+          <div className="text-xs text-gray-500">Erwarteter Kontoeingang (netto)</div>
           <div
             className="text-lg font-semibold tabular-nums text-gray-900"
             data-testid="text-pipeline-grand-total"
@@ -231,12 +265,32 @@ export function StatusPipelineCard({
                 <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                   Wo das Geld gerade steht
                 </span>
-                {/* Der Selbsttest der Darstellung, sichtbar statt zugesichert:
-                    die Stufen MÜSSEN sich auf die Schlagzeile summieren. Geht
-                    es nicht auf, sieht man es hier — nicht erst, wenn jemand
-                    nachrechnet. */}
-                <span className="text-xs text-gray-400 tabular-nums">
-                  Summe = {formatAmount(pipeline.totals.expectedRevenueTotalCents)}
+                {/* Der Selbsttest der Darstellung — und zwar einer, der
+                    fehlschlagen KANN.
+
+                    Die erste Fassung druckte hier `expectedRevenueTotalCents`,
+                    also denselben Wert wie die Schlagzeile darüber. Das sah aus
+                    wie eine Prüfung und war keine: die Zahl konnte per
+                    Konstruktion nie widersprechen.
+
+                    Der Punkt ist, dass die beiden Seiten aus ZWEI unabhängigen
+                    Aggregationen stammen — die Zeilen aus `stages`/`sides`, die
+                    Schlagzeile aus `summarizePipelineCents`. Genau deshalb kann
+                    ein Auseinanderdriften überhaupt passieren, und genau deshalb
+                    muss hier die Summe der GERENDERTEN Zeilen stehen. */}
+                <span
+                  className={`text-xs tabular-nums ${
+                    sichtbareSummeCents === pipeline.totals.expectedRevenueTotalCents
+                      ? "text-gray-400"
+                      : "font-semibold text-rose-700"
+                  }`}
+                  data-testid="text-pipeline-selbsttest"
+                >
+                  {sichtbareSummeCents === pipeline.totals.expectedRevenueTotalCents
+                    ? `Summe = ${formatAmount(sichtbareSummeCents)}`
+                    : `Summe ${formatAmount(sichtbareSummeCents)} ≠ ${formatAmount(
+                        pipeline.totals.expectedRevenueTotalCents,
+                      )}`}
                 </span>
               </div>
               <div className="flex flex-col gap-1.5">

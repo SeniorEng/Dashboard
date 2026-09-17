@@ -229,12 +229,6 @@ export async function readBillingPipeline(
     : new Map<number, { paidCents: number; skontoCents: number }>();
 
   let receivedCents = 0;
-  for (const inv of invoices) {
-    // Storno-Dokumente tragen keine Forderung — eine daran gebundene Zahlung
-    // waere eine Rueckzahlung, kein Eingang auf den Monatsumsatz.
-    if (inv.invoiceType === "stornorechnung") continue;
-    receivedCents += paymentTotals.get(inv.id)?.paidCents ?? 0;
-  }
 
   for (const inv of invoices) {
     const cents = inv.netAmountCents ?? 0;
@@ -246,6 +240,45 @@ export async function readBillingPipeline(
       grp.caseKeys.add(`inv-${inv.id}`);
       grp.itemCount += 1;
       grp.totalCents += cents;
+
+      // „davon bereits eingegangen" wird GENAU HIER summiert — im Zweig, der
+      // die Rechnung auch in die Kaskade stellt. Damit ist „davon" keine
+      // Behauptung, sondern eine Konstruktion: die Menge hinter dem Eingang
+      // ist per Bauart eine Teilmenge der Menge hinter der Schlagzeile.
+      //
+      // Das ERSETZT den vorherigen eigenen Lauf über `invoices` mit der
+      // handgeschriebenen Bedingung `invoiceType === "stornorechnung"`. Die
+      // war aus zwei Gründen falsch:
+      //   1. Sie war ein Zweitbegriff von `istForderungsdokument()` — die
+      //      Regel stünde ein zweites Mal im Code und driftete lautlos.
+      //   2. Sie übersah den anderen Fall: eine STORNIERTE ORIGINALrechnung
+      //      behält `invoiceType = 'rechnung'` und bekommt nur
+      //      `status = 'storniert'`. `assignInvoiceStage` schickt sie in den
+      //      Seitenzustand `storniert` — ihr Betrag steht also NICHT in der
+      //      Schlagzeile, ihre gebundene Zahlung wurde aber weitergezählt
+      //      (der Storno löst die Qonto-Bindung nicht). Ergebnis auf dem
+      //      Bildschirm: erwartet 0,00 €, davon eingegangen 500,00 €.
+      //
+      // Über den Stufen-Zweig zu gehen fängt beide Fälle ohne eigene Regel:
+      // was nicht in der Kaskade steht, kann auch kein „davon" sein.
+      //
+      // BASIS-ANGLEICHUNG (netto): die Kaskade rechnet durchgehend netto
+      // (`netAmountCents`, oben), eine Banküberweisung ist aber BRUTTO. Bei
+      // Selbstzahlern liegen 19 % USt dazwischen. Ungerechnet zeigte eine
+      // voll bezahlte Netto-1.000-€-Rechnung „davon eingegangen 1.190,00 €"
+      // — 119 % einer Summe, aus der nie 1.190 € erwartet wurden. Der
+      // Eingang wird deshalb im Verhältnis netto/brutto auf dieselbe Basis
+      // gebracht; bei USt-freien Rechnungen ist brutto === netto und der
+      // Faktor exakt 1. Teilzahlungen werden dabei anteilig zugeordnet —
+      // die übliche Annahme, und die einzige, die ohne Positionsbezug der
+      // Zahlung überhaupt möglich ist.
+      const paidGrossCents = paymentTotals.get(inv.id)?.paidCents ?? 0;
+      if (paidGrossCents > 0) {
+        const gross = inv.grossAmountCents ?? 0;
+        receivedCents += gross > 0
+          ? Math.round((paidGrossCents * cents) / gross)
+          : paidGrossCents;
+      }
 
       // #1897 — Aging über den CLUSTER statt über die Stufe. ERSETZT die
       // frühere Bedingung `stage === "versendet" || stage === "avis_erhalten"`,
