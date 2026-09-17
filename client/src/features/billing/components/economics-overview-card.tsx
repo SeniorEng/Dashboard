@@ -68,7 +68,68 @@ function KpiTile({
   );
 }
 
-function ServiceTable({ rows }: { rows: BillingEconomicsRow[] }) {
+/**
+ * Eine Zeile der Kosten-Tabelle.
+ *
+ * `kosten_ohne_umsatz`-Zeilen zeigen in den Spalten Umsatz / Marge / % bewusst
+ * einen Gedankenstrich statt „0,00 €" und „0 %". Eine 0 läse sich wie eine
+ * Messung („hier wurde nichts verdient"); tatsächlich ist die Frage für diese
+ * Zeilen gar nicht gestellt — es GIBT keinen Umsatz, gegen den eine Marge
+ * gerechnet werden könnte. „0 %" wäre besonders irreführend, weil die
+ * Marge-Ampel es rot einfärbte und damit ein Problem behauptete, wo eine
+ * Kategorie einfach Kosten trägt.
+ */
+function ServiceRow({ row }: { row: BillingEconomicsRow }) {
+  const rate = rateLabel(row);
+  const ohneUmsatz = row.group === "kosten_ohne_umsatz";
+  return (
+    <tr className="border-b border-gray-100" data-testid={`row-econ-service-${row.key}`}>
+      <td className="py-2 pr-3">
+        <div className={`font-medium ${ohneUmsatz ? "text-gray-600" : "text-gray-900"}`}>
+          {row.label}
+        </div>
+        {rate && <div className="text-xs text-gray-400">{rate}</div>}
+      </td>
+      <td className="py-2 px-3 text-right tabular-nums text-gray-700">{quantityLabel(row)}</td>
+      <td className="py-2 px-3 text-right tabular-nums text-gray-900">
+        {ohneUmsatz ? "—" : formatAmount(row.revenueCents)}
+      </td>
+      <td className="py-2 px-3 text-right tabular-nums text-gray-700">
+        {formatAmount(row.costCents)}
+      </td>
+      <td
+        className={`py-2 px-3 text-right tabular-nums ${row.marginCents < 0 && !ohneUmsatz ? "text-rose-700" : "text-gray-900"}`}
+      >
+        {ohneUmsatz ? "—" : formatAmount(row.marginCents)}
+      </td>
+      <td
+        className={`py-2 pl-3 text-right tabular-nums font-medium ${ohneUmsatz ? "text-gray-400" : marginHealthTextColor(row.marginPercent)}`}
+        data-testid={`text-econ-service-margin-${row.key}`}
+      >
+        {ohneUmsatz ? "—" : `${row.marginPercent}%`}
+      </td>
+    </tr>
+  );
+}
+
+function ServiceTable({
+  rows,
+  laborCostCents,
+}: {
+  rows: BillingEconomicsRow[];
+  /**
+   * Nur für den Selbsttest. Die Zeilen MÜSSEN sich auf die Lohnkosten-Kachel
+   * summieren — dieselbe Zusage wie oben in der Kaskade, und dieselbe Art, sie
+   * zu zeigen: sichtbar statt zugesichert.
+   */
+  laborCostCents?: number;
+}) {
+  const leistung = rows.filter((r) => r.group !== "kosten_ohne_umsatz");
+  const ohneUmsatz = rows.filter((r) => r.group === "kosten_ohne_umsatz");
+  const ohneUmsatzCents = ohneUmsatz.reduce((s, r) => s + r.costCents, 0);
+  const summeCents = rows.reduce((s, r) => s + r.costCents, 0);
+  const stimmt = laborCostCents === undefined || summeCents === laborCostCents;
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -83,42 +144,65 @@ function ServiceTable({ rows }: { rows: BillingEconomicsRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
-            const rate = rateLabel(row);
-            return (
-              <tr
-                key={row.key}
-                className="border-b border-gray-100"
-                data-testid={`row-econ-service-${row.key}`}
-              >
-                <td className="py-2 pr-3">
-                  <div className="font-medium text-gray-900">{row.label}</div>
-                  {rate && <div className="text-xs text-gray-400">{rate}</div>}
-                </td>
-                <td className="py-2 px-3 text-right tabular-nums text-gray-700">
-                  {quantityLabel(row)}
-                </td>
-                <td className="py-2 px-3 text-right tabular-nums text-gray-900">
-                  {formatAmount(row.revenueCents)}
-                </td>
-                <td className="py-2 px-3 text-right tabular-nums text-gray-700">
-                  {formatAmount(row.costCents)}
-                </td>
+          {leistung.map((row) => (
+            <ServiceRow key={row.key} row={row} />
+          ))}
+
+          {ohneUmsatz.length > 0 && (
+            <>
+              {/* Der Block, den Alrik wörtlich gefragt hat: „wofür zahle ich,
+                  ohne dafür Geld zu bekommen?" Bis hierher ERSETZTE eine
+                  einzige „Gemeinkosten"-Zeile diese sechs Kategorien plus die
+                  Zeiterfassungs-km — die Frage war damit nicht beantwortbar. */}
+              <tr className="border-b border-gray-100">
                 <td
-                  className={`py-2 px-3 text-right tabular-nums ${row.marginCents < 0 ? "text-rose-700" : "text-gray-900"}`}
+                  colSpan={6}
+                  className="pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-400"
                 >
-                  {formatAmount(row.marginCents)}
-                </td>
-                <td
-                  className={`py-2 pl-3 text-right tabular-nums font-medium ${marginHealthTextColor(row.marginPercent)}`}
-                  data-testid={`text-econ-service-margin-${row.key}`}
-                >
-                  {row.marginPercent}%
+                  Kosten ohne Umsatz
                 </td>
               </tr>
-            );
-          })}
+              {ohneUmsatz.map((row) => (
+                <ServiceRow key={row.key} row={row} />
+              ))}
+              <tr className="border-b border-gray-200">
+                <td className="py-2 pr-3 text-xs text-gray-500">zusammen</td>
+                <td />
+                <td />
+                <td
+                  className="py-2 px-3 text-right text-sm font-semibold tabular-nums text-gray-900"
+                  data-testid="text-econ-ohne-umsatz-summe"
+                >
+                  {formatAmount(ohneUmsatzCents)}
+                </td>
+                <td />
+                <td />
+              </tr>
+            </>
+          )}
         </tbody>
+        {laborCostCents !== undefined && (
+          <tfoot>
+            <tr>
+              <td colSpan={3} className="pt-2 text-xs text-gray-400">
+                {stimmt ? (
+                  <span data-testid="text-econ-selbsttest">
+                    Summe aller Zeilen = Lohnkosten
+                  </span>
+                ) : (
+                  <span className="font-semibold text-rose-700" data-testid="text-econ-selbsttest">
+                    Summe {formatAmount(summeCents)} ≠ Lohnkosten{" "}
+                    {formatAmount(laborCostCents)}
+                  </span>
+                )}
+              </td>
+              <td className="pt-2 px-3 text-right text-xs tabular-nums text-gray-400">
+                {formatAmount(summeCents)}
+              </td>
+              <td colSpan={2} />
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );
@@ -342,7 +426,7 @@ export function EconomicsOverviewCard({
             </div>
 
             {view === "leistung" ? (
-              <ServiceTable rows={economics.byService} />
+              <ServiceTable rows={economics.byService} laborCostCents={economics.totals.laborCostCents} />
             ) : economics.byEmployee.length > 0 ? (
               <EmployeeTable
                 employees={economics.byEmployee}

@@ -8,11 +8,17 @@
  * Mengen je Mitarbeiter und füttert sie pro Mitarbeiter UND als Summe in
  * `buildEconomics`.
  *
- * Itemisierung (Vertrag `shared/api/billing-economics.ts`): produktive
- * Leistungen (Hauswirtschaft, Alltagsbegleitung) + EINE Kilometer-Zeile + EINE
- * Gemeinkosten-Restzeile (nicht-abrechenbarer Overhead zum HW-Satz). Damit gilt
- * Σ(Zeilen) === Headline-KPI exakt, weil Headline und Zeilen aus DEMSELBEN
- * `buildEconomics`-Aufruf stammen.
+ * Itemisierung (Vertrag `shared/api/billing-economics.ts`), zwei Blöcke:
+ *  - `leistung`: Hauswirtschaft, Alltagsbegleitung, Kilometer aus Terminen.
+ *  - `kosten_ohne_umsatz`: Kilometer aus der Zeiterfassung sowie die sechs
+ *    Overhead-Kategorien EINZELN (Büroarbeit, Vertrieb, Sonstiges, Krankheit,
+ *    Urlaub, Erstberatung).
+ *
+ * Σ(Zeilen) === Headline-KPI gilt exakt, weil Headline und Zeilen aus DEMSELBEN
+ * `buildEconomics`-Aufruf stammen — die Auffächerung ändert nur, wie fein
+ * dieselben Beträge dargestellt werden (Ticket 6hWgVqw2C8442hcG). Sie ERSETZT
+ * eine km-Sammelzeile über alle drei km-Arten und eine Gemeinkosten-Restzeile
+ * über alle sechs Kategorien; kein Betrag wird neu berechnet.
  *
  * Scope-Semantik:
  *  - `employeeId`   filtert die Termin-Zurechnung (COALESCE(performed, assigned))
@@ -41,9 +47,11 @@ import type {
 } from "@shared/statistics";
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 import { documentedSqlRaw } from "../../lib/appointment-signed";
+import { getEntryTypeLabel } from "@shared/domain/time-entries";
 import type {
   BillingEconomicsResponse,
   BillingEconomicsRow,
+  BillingEconomicsRowGroup,
   BillingEconomicsEmployeeRow,
   BillingEconomicsUnit,
 } from "@shared/api/billing-economics";
@@ -64,6 +72,29 @@ const ERSTBERATUNG_OVERHEAD_CATEGORY = "erstberatung";
 
 /** Overhead-Kategorien, die in `buildEconomics` in die Gemeinkosten fließen. */
 const OVERHEAD_CATEGORIES = [...NON_BILLABLE_TYPES, ERSTBERATUNG_OVERHEAD_CATEGORY] as const;
+
+/**
+ * Beschriftung einer Overhead-Kategorie für die aufgefächerte Kosten-Sicht.
+ *
+ * Die fünf Zeiterfassungs-Typen kommen aus `getEntryTypeLabel` — dort liegt
+ * die SSoT für ihre Benennung, und sie soll hier nicht ein zweites Mal
+ * stehen. `erstberatung` ist der Sonderfall: es ist KEIN Zeiterfassungs-Typ,
+ * sondern ein hier eingeführter Overhead-Schlüssel (#1765). `getEntryTypeLabel`
+ * kennt ihn folglich nicht und gibt den Rohschlüssel zurück.
+ *
+ * Solange alle sechs Kategorien zu EINER „Gemeinkosten"-Zeile summiert wurden,
+ * fiel das nicht auf — kein Label wurde je angezeigt. Mit der Auffächerung
+ * stünde dort ein kleingeschriebenes „erstberatung" zwischen sechs sauber
+ * benannten Zeilen. Den Schlüssel in `ENTRY_TYPE_LABELS` nachzutragen wäre der
+ * falsche Ort: das würde behaupten, es gäbe einen Zeiterfassungs-Typ
+ * „Erstberatung", den man buchen kann. Die Ausnahme gehört dorthin, wo der
+ * Schlüssel entsteht.
+ */
+function overheadLabel(category: string): string {
+  return category === ERSTBERATUNG_OVERHEAD_CATEGORY
+    ? "Erstberatung"
+    : getEntryTypeLabel(category);
+}
 
 type Rows = Record<string, unknown>[];
 
@@ -484,16 +515,12 @@ export async function readBillingEconomics(
     quantity: number,
     revenueCents: number,
     costCents: number,
-    // Task #1752: Optionale Satz-Basis (Menge + Geld) für das Satz-LABEL, falls
-    // sie von den angezeigten Spalten abweicht. Die km-Zeile zeigt die GESAMT-km
-    // (inkl. nicht-abrechenbarer Zeiterfassungs-km), aber ihr €/km-Satz muss auf
-    // den ABRECHENBAREN Termin-km beruhen (sonst driftet 0,35 → 0,33 €/km).
-    rateBasis?: { quantity: number; revenueCents: number; costCents: number },
+    group: BillingEconomicsRowGroup = "leistung",
   ): BillingEconomicsRow => {
     const marginCents = revenueCents - costCents;
-    const rb = rateBasis ?? { quantity, revenueCents, costCents };
     return {
       key,
+      group,
       label,
       unit,
       quantity,
@@ -501,8 +528,8 @@ export async function readBillingEconomics(
       costCents,
       marginCents,
       marginPercent: marginPercent(revenueCents, marginCents),
-      revenueRateCents: effectiveRateCents(unit, rb.quantity, rb.revenueCents),
-      costRateCents: effectiveRateCents(unit, rb.quantity, rb.costCents),
+      revenueRateCents: effectiveRateCents(unit, quantity, revenueCents),
+      costRateCents: effectiveRateCents(unit, quantity, costCents),
     };
   };
 
@@ -511,15 +538,31 @@ export async function readBillingEconomics(
     hwRevenueCents: number,
     abRevenueCents: number,
   ): BillingEconomicsRow[] => {
-    const kmQuantity = econ.km.travel.km + econ.km.customer.km + econ.km.timeEntry.km;
-    // Task #1752: Satz-Basis der km-Zeile = NUR abrechenbare Termin-km
-    // (Anfahrt + Kunden-km) und deren Geld. Der berechnete km-Erlös entsteht
-    // ausschließlich aus diesen (Zeiterfassungs-km werden nie berechnet), und der
-    // ausgezahlte km-Lohn wird auf diese Basis bezogen, damit €/km === Katalog-
-    // km-Satz gilt statt durch die nicht-abrechenbaren Zeiterfassungs-km verdünnt.
+    // ── km: berechenbar vs. nicht berechenbar ───────────────────────────────
+    // Ticket 6hWgVqw2C8442hcG. Alriks Satz dazu: „Nur für Termine bekomme ich
+    // Geld, also auch nur für die dort anfallenden km. Km die bei Vertrieb,
+    // Erstberatungen anfallen bekomme ich logischerweise nicht bezahlt, die
+    // fallen nur als Kosten an."
+    //
+    // ERSETZT die EINE `kilometer`-Zeile, die alle drei km-Arten in Menge und
+    // Geld mischte. Weil die Zeiterfassungs-km nie berechnet werden
+    // (`km.timeEntry.chargedCents` ist per Konstruktion 0), stand in ihrer
+    // Kosten-Spalte Geld ohne Gegenstück in der Umsatz-Spalte — die
+    // ausgewiesene MARGE war dadurch verdünnt. Gemessen ist der Effekt klein
+    // (8,5 von 1.282,6 km = 0,66 %), aber die Zeile behauptete eine Marge, die
+    // sie nicht hatte.
+    //
+    // Damit entfällt auch die `rateBasis`-Sonderbehandlung aus #1752: die
+    // existierte NUR, um das Satz-Label gegen genau diese Mischung zu
+    // schützen (€/km driftete sonst 0,35 → 0,33). Trägt die Zeile nur noch die
+    // berechenbaren km, sind angezeigte Menge und Satz-Basis dasselbe — die
+    // Ausnahme hat kein Problem mehr zu lösen. Die Zusage von #1752
+    // (€/km === Katalog-km-Satz) gilt unverändert, sie ergibt sich jetzt aus
+    // dem Zuschnitt statt aus einem Zusatzparameter.
     const billableKm = econ.km.travel.km + econ.km.customer.km;
     const billableChargedCents = econ.km.travel.chargedCents + econ.km.customer.chargedCents;
     const billablePaidCents = econ.km.travel.paidCents + econ.km.customer.paidCents;
+
     return [
       buildRow(
         "hauswirtschaft",
@@ -539,20 +582,43 @@ export async function readBillingEconomics(
       ),
       buildRow(
         "kilometer",
-        "Kilometer",
+        "Kilometer (aus Terminen)",
         "km",
-        kmQuantity,
-        econ.km.totalChargedCents,
-        econ.km.totalPaidCents,
-        { quantity: billableKm, revenueCents: billableChargedCents, costCents: billablePaidCents },
+        billableKm,
+        billableChargedCents,
+        billablePaidCents,
       ),
       buildRow(
-        "gemeinkosten",
-        "Gemeinkosten",
-        "none",
+        "kilometer_zeiterfassung",
+        "Kilometer (Zeiterfassung)",
+        "km",
+        econ.km.timeEntry.km,
         0,
-        0,
-        econ.result.nonBillableCostCents,
+        econ.km.timeEntry.paidCents,
+        "kosten_ohne_umsatz",
+      ),
+      // ── Gemeinkosten: je Kategorie einzeln ────────────────────────────────
+      // ERSETZT die EINE `gemeinkosten`-Restzeile. Sie war die Summe über
+      // sechs Kategorien und ließ damit genau die Frage offen, für die Alrik
+      // den Block haben will: wofür zahle ich, ohne dafür Geld zu bekommen?
+      //
+      // `buildEconomics` liefert die Aufschlüsselung längst
+      // (`personnel.nonBillable.byCategory`) — sie wurde hier nur wieder
+      // eingeschmolzen. Σ der Kategorien === `nonBillableCostCents` gilt per
+      // Konstruktion in der SSoT, die Σ === KPI-Invariante bleibt also
+      // unberührt. Menge 0: die Kategorien tragen Minuten, aber keine für den
+      // Kunden abrechenbare Menge — ein Stunden-„Satz" auf Overhead wäre eine
+      // Zahl ohne fachliche Bedeutung.
+      ...econ.personnel.nonBillable.byCategory.map((c) =>
+        buildRow(
+          `overhead_${c.category}`,
+          overheadLabel(c.category),
+          "none",
+          0,
+          0,
+          c.costCents,
+          "kosten_ohne_umsatz",
+        ),
       ),
     ];
   };
