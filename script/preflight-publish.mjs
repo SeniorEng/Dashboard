@@ -36,16 +36,54 @@ const replicaDrops = replica.available ? flattenDestructiveDiff(replica) : [];
 const hasDestructive = migrationDrops.length > 0 || replicaDrops.length > 0;
 
 // --- (a) Harte Backup-Sperre. ---
-if (!hasDestructive) {
+//
+// „Nichts gefunden" darf NUR dann grün sein, wenn auch nachgesehen wurde.
+//
+// Vorher stand hier ein `[✓] Keine destruktiven Schema-Änderungen erkannt`
+// samt `[✓] Pre-Publish-Backup nicht zwingend nötig`, sobald beide Listen leer
+// waren — und `replicaDrops` ist leer, wenn der Diff gar nicht LIEF
+// (`replica.available === false` ⇒ `[]`). Aus dem Ausfall der einzigen
+// Prüfung, die Dev gegen Prod stellt, wurde damit ein Häkchen plus die
+// Empfehlung, das Backup wegzulassen.
+//
+// Das ist die Mechanik des 10.08.2026-Incidents: eine übersprungene Prüfung,
+// die als bestanden ausgewiesen wird, ist gefährlicher als eine, die rot wird.
+// `schema-replica-diff.mjs` meldet `available:false` ausdrücklich, damit der
+// Aufrufer es „als manuellen Restpunkt behandeln kann (statt fälschlich
+// ,keine Drops' zu melden)" — genau das wurde hier nicht getan.
+//
+// Zweite Hälfte desselben Problems: der Migrations-Grep ist bei `push` PER
+// KONSTRUKTION blind (`drizzle-kit push` schreibt keine Migrationsdateien,
+// siehe CLAUDE.md). Ohne Replica-Diff ist also nicht „die Hälfte" der Evidenz
+// da, sondern keine. Deshalb nennt die Beschriftung jetzt die Quelle, die
+// tatsächlich gelaufen ist, statt beide aufzuzählen.
+if (!hasDestructive && replica.available) {
   record(
     "Keine destruktiven Schema-Änderungen erkannt (Migration-Grep + Prod-Replica-Diff)",
     "ok",
-    `Migration: ${result.latestMigration ?? "keine"}${replica.available ? "" : ` · Replica-Diff übersprungen (${replica.reason})`}`,
+    `Migration: ${result.latestMigration ?? "keine"}`,
   );
   record(
     "Pre-Publish-Backup nicht zwingend nötig (keine DROP-Statements)",
     "ok",
     "Trotzdem: bei Daten-Migrationen oder neuen NOT-NULL-Constraints manuell prüfen.",
+  );
+} else if (!hasDestructive) {
+  record(
+    "Schema-Diff gegen Prod NICHT gemessen — „keine Drops\" ist hier unbelegt",
+    "fail",
+    `${replica.reason}. Der Migrations-Grep allein beweist nichts: bei `
+      + `\`drizzle-kit push\` entstehen keine Migrationsdateien, er ist dafür blind `
+      + `(jüngste Migration: ${result.latestMigration ?? "keine"}). `
+      + "PROD_DATABASE_URL aus dem Publishing-Tab setzen, erneut ausführen, danach wieder unset.",
+  );
+  record(
+    "Pre-Publish-Backup vorhanden",
+    result.recentBackup ? "ok" : "fail",
+    result.recentBackup
+      ? `Datei: ${result.recentBackup.path}`
+      : "Ohne gemessenen Schema-Diff ist das Backup NICHT optional — die Aussage, "
+        + "die es entbehrlich machen würde, ist ungeprüft. Ausführen: bash scripts/backup-prod-db.sh",
   );
 } else {
   if (migrationDrops.length > 0) {
