@@ -46,6 +46,8 @@ let ustInvoiceId = 0;
 let ustTxId = 0;
 let storniertInvoiceId = 0;
 let storniertTxId = 0;
+let ueberzahltInvoiceId = 0;
+let ueberzahltTxId = 0;
 
 async function insertInvoice(opts: {
   suffix: string;
@@ -102,11 +104,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  const txIds = [ustTxId, storniertTxId].filter(Boolean);
+  const txIds = [ustTxId, storniertTxId, ueberzahltTxId].filter(Boolean);
   if (txIds.length > 0) {
     await db.delete(qontoTransactions).where(inArray(qontoTransactions.id, txIds));
   }
-  const ids = [ustInvoiceId, storniertInvoiceId].filter(Boolean);
+  const ids = [ustInvoiceId, storniertInvoiceId, ueberzahltInvoiceId].filter(Boolean);
   if (ids.length > 0) {
     // Gestellte Rechnungen sind GoBD-geschützt (invoices_prevent_finalized_delete).
     await withGobdMutation(async (tx) => {
@@ -195,5 +197,32 @@ describe("Umsatz-Kachel — die Zeile „davon bereits eingegangen“", () => {
   it("RC-4 – „davon“ hält auch nach dem Storno", async () => {
     const t = await totals();
     expect(t.receivedCents).toBeLessThanOrEqual(t.expectedRevenueTotalCents);
+  });
+
+  it("RC-5 – eine ÜBERZAHLUNG hebt den Eingang nicht über die Forderung", async () => {
+    // Der leisere Bruch derselben Zusage: 1.300 € auf eine Rechnung mit
+    // 1.190 € brutto / 1.000 € netto. Ohne Deckel ergäbe die Proration
+    // 1.092,44 € — mehr, als von dieser Rechnung je erwartet wurde, und die
+    // Gesamtsumme stiege wieder über die Schlagzeile.
+    //
+    // Überzahlungen kommen vor (Fixture „600 auf 500 EUR" in
+    // `payment-bound-read-side.test.ts`). Der Überhang ist eine eigene
+    // fachliche Tatsache und steht in der Rechnungsliste, nicht hier.
+    const vorher = await totals();
+
+    ueberzahltInvoiceId = await insertInvoice({
+      suffix: "UEBER", status: "versendet", net: NETTO, gross: BRUTTO,
+    });
+    ueberzahltTxId = await bindPayment(ueberzahltInvoiceId, "ueber", BRUTTO + 11_000);
+
+    const danach = await totals();
+    expect(
+      danach.receivedCents - vorher.receivedCents,
+      "höchstens der Netto-Betrag DIESER Rechnung darf zugehen",
+    ).toBe(NETTO);
+    expect(
+      danach.receivedCents,
+      "…und „davon“ hält damit auch hier",
+    ).toBeLessThanOrEqual(danach.expectedRevenueTotalCents);
   });
 });

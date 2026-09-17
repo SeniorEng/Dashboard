@@ -275,9 +275,25 @@ export async function readBillingPipeline(
       const paidGrossCents = paymentTotals.get(inv.id)?.paidCents ?? 0;
       if (paidGrossCents > 0) {
         const gross = inv.grossAmountCents ?? 0;
-        receivedCents += gross > 0
+        const nettoAnteil = gross > 0
           ? Math.round((paidGrossCents * cents) / gross)
           : paidGrossCents;
+        // DECKEL auf den Netto-Betrag DIESER Rechnung.
+        //
+        // Ohne ihn bräche „davon" ein zweites Mal, nur leiser: bei einer
+        // Überzahlung (600 € auf eine 500-€-Rechnung — kommt vor, siehe
+        // Fixture in `payment-bound-read-side.test.ts`) überstiege der
+        // Eingang den Betrag, der überhaupt erwartet wurde. Die Summe stiege
+        // dann wieder über die Schlagzeile.
+        //
+        // Der Deckel ist keine Kosmetik, sondern die Bedeutung des Wortes:
+        // von einer Forderung kann höchstens die Forderung eingegangen sein.
+        // Was darüber liegt, ist eine Überzahlung — eine eigene fachliche
+        // Tatsache, die eine andere Handlung auslöst (Rückerstattung oder
+        // Verrechnung) und deshalb nicht in diese Zeile gehört. Sie geht
+        // nicht verloren: die Rechnungsliste weist sie über
+        // `paidCents`/`openAmountCents` aus (#1822/#1897).
+        receivedCents += Math.min(nettoAnteil, cents);
       }
 
       // #1897 — Aging über den CLUSTER statt über die Stufe. ERSETZT die
