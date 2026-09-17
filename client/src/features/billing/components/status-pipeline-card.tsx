@@ -3,6 +3,7 @@ import { iconSize } from "@/design-system";
 import type { BillingPipelineResponse } from "@shared/api";
 import type { PipelineStage } from "@shared/domain/billing-pipeline";
 import { PIPELINE_CASCADE_ORDER } from "@shared/domain/billing-pipeline";
+import { ZAEHLWEISE_UMSATZ_KACHEL } from "@shared/domain/billing-zaehlweise";
 import type { BillingTermineStage } from "@shared/api";
 import { formatAmount } from "../utils";
 import { MONTH_NAMES } from "../constants";
@@ -240,6 +241,12 @@ export function StatusPipelineCard({
             {isLoading || !pipeline
               ? "—"
               : formatAmount(pipeline.totals.expectedRevenueTotalCents)}
+          </div>
+          {/* Weg 3 (Alrik, 17.09.2026): sichtbar machen statt angleichen.
+              Der Hinweis steht DORT, wo die Zahl steht — der Moment, in dem
+              jemand sie mit der Rechnungsliste vergleicht, ist genau dieser. */}
+          <div className="text-xs text-gray-400" data-testid="text-pipeline-zaehlweise">
+            {ZAEHLWEISE_UMSATZ_KACHEL}
           </div>
           {!isLoading && pipeline && (
             <div className="text-xs text-gray-500" data-testid="text-pipeline-received">
