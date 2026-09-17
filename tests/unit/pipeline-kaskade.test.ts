@@ -5,6 +5,7 @@ import {
   PIPELINE_STAGE_LABELS,
   EXPECTED_REVENUE_SIDE_STATES,
   summarizePipelineCents,
+  assignAppointmentStage,
   type PipelineAtomicUnit,
 } from "@shared/domain/billing-pipeline";
 
@@ -121,6 +122,71 @@ describe("Umsatz-Kachel — die Kaskade geht auf", () => {
     expect(EXPECTED_REVENUE_SIDE_STATES).not.toContain("kunde_nicht_angetroffen");
     expect(EXPECTED_REVENUE_SIDE_STATES).not.toContain("nicht_abgerechnet");
     expect(EXPECTED_REVENUE_SIDE_STATES).not.toContain("storniert");
+  });
+
+  it("KA-9 – „Nachweis zu erstellen“ und „Leistungsnachweis fehlt“ sind DISJUNKT", () => {
+    // Alriks Verdacht vom 17.09.2026 (August-Zahlen): beide Zeilen zeigten
+    // 57,00 €, die eine mit 1 Termin, die andere mit 2. Liegt derselbe Termin
+    // in beiden, zaehlt die Schlagzeile ihn doppelt — und der sichtbare
+    // Selbsttest merkt es NICHT, weil er die gezeigten Zeilen addiert: eine
+    // doppelt gezaehlte Zeile geht genauso auf wie eine echte.
+    //
+    // Hier wird die Frage als MENGEN-Aussage entschieden, nicht an einer
+    // Fixture: ueber alle Eingabe-Kombinationen darf keine einzige in beiden
+    // Ausgaengen landen. `assignAppointmentStage` gibt genau einen Ausgang
+    // zurueck (frueher Return), die Partition ist also strukturell — dieser
+    // Test haelt sie fest, falls jemand den Rueckgabewert je zu einer Liste
+    // macht oder die Reihenfolge der Zweige aendert.
+    const stati = ["scheduled", "documenting", "completed",
+      "cancelled", "expired_unsigned", "customer_no_show"] as const;
+    // Die ECHTEN Werte — "pflegekasse" gibt es nicht, der Seitenzustand haengt
+    // an `isPflegekasseBillingType` (gesetzlich ODER privat). Die
+    // Erreichbarkeits-Pruefung unten hat genau diesen Tippfehler gefangen.
+    const zahler = [null, "selbstzahler", "privat",
+      "pflegekasse_gesetzlich", "pflegekasse_privat"] as const;
+    const boolsch = [false, true] as const;
+
+    const inDokumentiert: string[] = [];
+    const inWartet: string[] = [];
+
+    for (const status of stati) {
+      for (const billingType of zahler) {
+        for (const hasDirectSignature of boolsch) {
+          for (const hasCompletedServiceRecord of boolsch) {
+            for (const hasEmployeeSignedServiceRecord of boolsch) {
+              for (const isInvoiced of boolsch) {
+                const key = [status, billingType, hasDirectSignature,
+                  hasCompletedServiceRecord, hasEmployeeSignedServiceRecord,
+                  isInvoiced].join("|");
+                const a = assignAppointmentStage({
+                  status: status as never,
+                  billingType,
+                  hasDirectSignature,
+                  hasCompletedServiceRecord,
+                  hasEmployeeSignedServiceRecord,
+                  isInvoiced,
+                });
+                if (a.kind === "stage" && a.stage === "dokumentiert") inDokumentiert.push(key);
+                if (a.kind === "side" && a.state === "wartet_auf_kundenunterschrift") {
+                  inWartet.push(key);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Beide Ausgaenge muessen ueberhaupt erreichbar sein — sonst prueft der
+    // Schnittmengen-Test nichts.
+    expect(inDokumentiert.length, "Stufe `dokumentiert` unerreichbar").toBeGreaterThan(0);
+    expect(inWartet.length, "Seitenzustand `wartet…` unerreichbar").toBeGreaterThan(0);
+
+    const schnitt = inDokumentiert.filter((k) => inWartet.includes(k));
+    expect(
+      schnitt,
+      "dieselbe Eingabe landet in BEIDEN Zeilen — die Schlagzeile zaehlt doppelt",
+    ).toEqual([]);
   });
 
   it("KA-8 – `dokumentiert` heißt nicht „Doku fehlt“", () => {
