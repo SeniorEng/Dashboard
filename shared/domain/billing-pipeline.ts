@@ -42,14 +42,49 @@ export const PIPELINE_STAGES = [
 ] as const;
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
 
+/**
+ * Beschriftung der Stufen.
+ *
+ * Seit dem Kaskaden-Umbau benennen sie den ZUSTAND aus Sicht der Frage „was
+ * kommt aufs Konto", nicht mehr den Verarbeitungsschritt. `PIPELINE_STAGES`
+ * bleibt die technische Reihenfolge; diese Namen sind das, was Alrik liest.
+ *
+ * EINE Quelle, kein zweiter Satz in der Karte: die Labels wandern über den
+ * API-Vertrag mit und werden nirgends sonst gebildet.
+ *
+ * Zu `dokumentiert`: die frühere Beschriftung war „Dokumentiert", der erste
+ * Kachel-Entwurf schlug „Doku fehlt" vor — beides trifft es nicht. Die Stufe
+ * ist `status = 'completed'` OHNE gültige Unterschrift; der Termin IST also
+ * dokumentiert, es fehlt der NACHWEIS. „Doku fehlt" hätte den Mitarbeiter zur
+ * falschen Handlung geschickt.
+ */
 export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
-  offen: "Offen",
-  dokumentiert: "Dokumentiert",
-  unterschrieben: "Unterschrieben",
-  rechnung_erstellt: "Rechnung erstellt",
-  versendet: "Versendet",
-  bezahlt: "Bezahlt",
+  offen: "noch geplant",
+  dokumentiert: "Nachweis zu erstellen",
+  unterschrieben: "abrechnungsreif",
+  rechnung_erstellt: "Rechnung im Entwurf",
+  versendet: "gestellt",
+  bezahlt: "bezahlt",
 };
+
+/**
+ * Reihenfolge der Kaskade: das SICHERSTE zuerst.
+ *
+ * Nicht `PIPELINE_STAGES` — die ist die fachliche Durchlauf-Reihenfolge
+ * (offen → … → bezahlt). Die Kachel beantwortet „was kann ich erwarten", und
+ * dann gehört oben hin, was dem Konto am nächsten ist. Die Bewegung, die im
+ * Monatsverlauf sichtbar werden soll — „noch geplant" und „Nachweis zu
+ * erstellen" laufen leer, „abrechnungsreif" wächst — läuft damit von unten
+ * nach oben.
+ */
+export const PIPELINE_CASCADE_ORDER: readonly PipelineStage[] = [
+  "bezahlt",
+  "versendet",
+  "rechnung_erstellt",
+  "unterschrieben",
+  "dokumentiert",
+  "offen",
+] as const;
 
 /**
  * Side-/Endzustände — KEIN Pipeline-Schritt, sondern Badges. Ihre € fließen
@@ -622,6 +657,21 @@ export interface PipelineCentsSummary {
   stageTotalCents: number;
   /** Σ über alle Side-Badges. */
   sideTotalCents: number;
+  /**
+   * €-Summe der ABGESAGTEN Termine (`excluded: cancelled`).
+   *
+   * Bis zur Kachel-Kaskade verwarf `summarizePipelineCents` den € jeder
+   * `excluded`-Einheit. Für die Zeile „abgesagt" im Block „abgesagt / nicht
+   * erbracht" wird er gebraucht — er steht NEBEN der erwarteten Summe, nicht
+   * darin, und darf von ihr NICHT abgezogen werden (er war nie Teil von ihr).
+   *
+   * BEWUSST nur `cancelled`: `excluded` hat zwei Gründe. Der zweite,
+   * `invoiced`, markiert Termine, deren € auf die RECHNUNGS-Karte gewandert
+   * ist (Hybrid-Kante). Würde er hier mitzählen, stünde jeder abgerechnete
+   * Termin doppelt — einmal als Termin, einmal als Rechnung. Genau die
+   * Doppelzählung, die die Hybrid-Kante verhindert.
+   */
+  cancelledCents: number;
   /** Σ Stufen + Side-Badges = Gesamtumsatz-Sicht (Q1). */
   grandTotalCents: number;
   /**
@@ -663,13 +713,17 @@ function emptySideRecord(): Record<PipelineSideState, number> {
 export function summarizePipelineCents(units: PipelineAtomicUnit[]): PipelineCentsSummary {
   const stageCents = emptyStageRecord();
   const sideCents = emptySideRecord();
+  let cancelledCents = 0;
   for (const unit of units) {
     if (unit.assignment.kind === "stage") {
       stageCents[unit.assignment.stage] += unit.cents;
     } else if (unit.assignment.kind === "side") {
       sideCents[unit.assignment.state] += unit.cents;
+    } else if (unit.assignment.reason === "cancelled") {
+      // Getrennt geführt, NICHT in eine der Summen unten. Siehe
+      // `cancelledCents` — `invoiced` bleibt ausdrücklich draußen.
+      cancelledCents += unit.cents;
     }
-    // excluded: kein €-Beitrag
   }
   const stageTotalCents = PIPELINE_STAGES.reduce((sum, s) => sum + stageCents[s], 0);
   const sideTotalCents = PIPELINE_SIDE_STATES.reduce((sum, s) => sum + sideCents[s], 0);
@@ -680,6 +734,7 @@ export function summarizePipelineCents(units: PipelineAtomicUnit[]): PipelineCen
   return {
     stageCents,
     sideCents,
+    cancelledCents,
     stageTotalCents,
     sideTotalCents,
     grandTotalCents: stageTotalCents + sideTotalCents,

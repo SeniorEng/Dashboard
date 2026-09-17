@@ -208,6 +208,34 @@ export async function readBillingPipeline(
     ? await qontoStorage.getClaimedInvoiceIds(db, invoices.map((i) => i.id))
     : new Set<number>();
 
+  // Kachel-Zeile „davon bereits eingegangen": die Summe der TATSAECHLICH
+  // eingegangenen Zahlungen.
+  //
+  // Bewusst NICHT aus `status = 'bezahlt'`. Der Status ist eine MANUELLE
+  // Markierung und haengt an einem Pflegeprozess — gemessen am 17.09.2026
+  // war die letzte Markierung vom 04.08., waehrend 275 Rechnungen ueber
+  // 36.378 EUR versendet waren. Eine Zeile auf dieser Grundlage zeigte
+  // dauerhaft 0 und behauptete damit „kein Geld gekommen", wo in Wahrheit
+  // „niemand hat das Haekchen gesetzt" gilt.
+  //
+  // `getInvoicePaymentTotals` summiert gebundene Qonto-Transaktionen UND
+  // Zahlungsavis-Positionen — echtes Geld, dieser Rechnung zugeordnet. Es
+  // erfasst ausserdem TEILZAHLUNGEN, die ein binaerer Status per
+  // Konstruktion nicht abbilden kann. Skonto bleibt dort bewusst getrennt
+  // (legitime Minderung der Forderung, aber kein Geldeingang) und zaehlt
+  // hier deshalb nicht mit.
+  const paymentTotals = invoices.length > 0
+    ? await qontoStorage.getInvoicePaymentTotals(invoices.map((i) => i.id))
+    : new Map<number, { paidCents: number; skontoCents: number }>();
+
+  let receivedCents = 0;
+  for (const inv of invoices) {
+    // Storno-Dokumente tragen keine Forderung — eine daran gebundene Zahlung
+    // waere eine Rueckzahlung, kein Eingang auf den Monatsumsatz.
+    if (inv.invoiceType === "stornorechnung") continue;
+    receivedCents += paymentTotals.get(inv.id)?.paidCents ?? 0;
+  }
+
   for (const inv of invoices) {
     const cents = inv.netAmountCents ?? 0;
     const assignment = assignInvoiceStage({ status: parseInvoiceStatus(inv.status), invoiceType: inv.invoiceType });
@@ -301,6 +329,8 @@ export async function readBillingPipeline(
     totals: {
       stageTotalCents: summary.stageTotalCents,
       sideTotalCents: summary.sideTotalCents,
+      cancelledCents: summary.cancelledCents,
+      receivedCents,
       grandTotalCents: summary.grandTotalCents,
       expectedRevenueTotalCents: summary.expectedRevenueTotalCents,
     },
