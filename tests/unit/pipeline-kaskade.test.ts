@@ -102,16 +102,24 @@ describe("Umsatz-Kachel — die Kaskade geht auf", () => {
     expect([...PIPELINE_CASCADE_ORDER].sort()).toEqual([...PIPELINE_STAGES].sort());
   });
 
-  it("KA-6 – die Reihenfolge ist sicherstes zuerst, nicht die Durchlauf-Folge", () => {
-    expect(PIPELINE_CASCADE_ORDER[0], "oben steht, was am nächsten am Konto ist").toBe("bezahlt");
+  it("KA-6 – die Leserichtung ist links unsicher, rechts das Geld", () => {
+    // GEDREHT gegenüber der ersten Fassung (Alrik, 17.09.2026): die Kaskade ist
+    // waagerecht, und dann soll die Bewegung im Monatsverlauf — Beträge wandern
+    // von „noch geplant" nach „bezahlt" — die natürliche Leserichtung sein
+    // statt eine Aufwärtsbewegung, die man erklären muss.
+    expect(PIPELINE_CASCADE_ORDER[0], "links das Unsicherste").toBe("offen");
     expect(
       PIPELINE_CASCADE_ORDER[PIPELINE_CASCADE_ORDER.length - 1],
-      "unten das Unsicherste",
-    ).toBe("offen");
+      "rechts das, was auf dem Konto ist",
+    ).toBe("bezahlt");
+
+    // Sie ist damit wieder deckungsgleich mit der fachlichen Durchlauf-Folge —
+    // aber BEWUSST eine eigene Konstante. Fielen sie zusammen, wäre die
+    // nächste Layout-Entscheidung eine Änderung an der Domäne.
     expect(
       PIPELINE_CASCADE_ORDER,
-      "bewusst NICHT die fachliche Durchlauf-Reihenfolge",
-    ).not.toEqual(PIPELINE_STAGES);
+      "Anzeige-Reihenfolge und Durchlauf-Folge sind zwei Fragen",
+    ).not.toBe(PIPELINE_STAGES);
   });
 
   it("KA-7 – `wartet auf Kundenunterschrift` ist erwarteter Umsatz und gehört in die Kaskade", () => {

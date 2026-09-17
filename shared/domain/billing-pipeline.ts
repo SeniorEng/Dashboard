@@ -68,22 +68,33 @@ export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
 };
 
 /**
- * Reihenfolge der Kaskade: das SICHERSTE zuerst.
+ * Anzeige-Reihenfolge der Kaskade: LINKS das Unsicherste, RECHTS das Geld.
  *
- * Nicht `PIPELINE_STAGES` — die ist die fachliche Durchlauf-Reihenfolge
- * (offen → … → bezahlt). Die Kachel beantwortet „was kann ich erwarten", und
- * dann gehört oben hin, was dem Konto am nächsten ist. Die Bewegung, die im
- * Monatsverlauf sichtbar werden soll — „noch geplant" und „Nachweis zu
- * erstellen" laufen leer, „abrechnungsreif" wächst — läuft damit von unten
- * nach oben.
+ * ERSETZT die erste Fassung („das Sicherste zuerst", senkrecht von oben nach
+ * unten). Die Begründung dort war: die Kachel beantwortet „was kann ich
+ * erwarten", also gehört nach oben, was dem Konto am nächsten ist. Alrik hat
+ * nach dem Prod-Gang anders entschieden (17.09.2026), und seine Begründung
+ * trägt besser:
+ *
+ *   „Fande die Logik links ,geplant' bis rechts ,Geld eingegangen' besser."
+ *
+ * Waagerecht ist kompakter, und die Bewegung, die er im Monatsverlauf sehen
+ * will — Beträge wandern von „noch geplant" nach „bezahlt" — wird damit zur
+ * natürlichen LESERICHTUNG statt zu einer Aufwärtsbewegung, die man erst
+ * erklären muss.
+ *
+ * Das ist zufällig wieder `PIPELINE_STAGES`, die fachliche Durchlauf-Folge —
+ * aber es bleibt eine eigene Konstante: die eine sagt, wie das Geld läuft, die
+ * andere, wie die Kachel es zeigt. Fielen sie zusammen, wäre die nächste
+ * Layout-Entscheidung eine Änderung an der Domäne.
  */
 export const PIPELINE_CASCADE_ORDER: readonly PipelineStage[] = [
-  "bezahlt",
-  "versendet",
-  "rechnung_erstellt",
-  "unterschrieben",
-  "dokumentiert",
   "offen",
+  "dokumentiert",
+  "unterschrieben",
+  "rechnung_erstellt",
+  "versendet",
+  "bezahlt",
 ] as const;
 
 /**
