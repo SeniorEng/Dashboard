@@ -174,12 +174,19 @@ describe("Task #1546/#1551 — Reporting: Sätze effektiv aus Geld ÷ Menge (Anz
       expect(Math.round((row!.costRateCents * row!.quantity) / 60)).toBe(row!.costCents);
       expect(Math.round((row!.revenueRateCents * row!.quantity) / 60)).toBe(row!.revenueCents);
 
-      // Menge 0 ⇒ kein Satz (Gemeinkosten-Zeile).
-      const gk = billing.byService.find((r) => r.key === "gemeinkosten");
-      expect(gk).toBeDefined();
-      expect(gk!.quantity).toBe(0);
-      expect(gk!.costRateCents).toBe(0);
-      expect(gk!.revenueRateCents).toBe(0);
+      // Menge 0 ⇒ kein Satz. Geprüft an ALLEN Overhead-Zeilen statt an der
+      // früheren Sammelzeile `gemeinkosten`: seit Ticket 6hWgVqw2C8442hcG sind
+      // die sechs Kategorien einzeln ausgewiesen, und die Zusage „Overhead
+      // trägt keinen Satz" muss für jede von ihnen gelten, nicht nur für ihre
+      // Summe.
+      const overhead = billing.byService.filter((r) => r.key.startsWith("overhead_"));
+      expect(overhead.length).toBeGreaterThan(0);
+      for (const gk of overhead) {
+        expect(gk.group).toBe("kosten_ohne_umsatz");
+        expect(gk.quantity).toBe(0);
+        expect(gk.costRateCents).toBe(0);
+        expect(gk.revenueRateCents).toBe(0);
+      }
     });
   }
 
@@ -590,15 +597,20 @@ describe("Task #1554 — Reporting: Nicht-abrechenbar-Export Lohn effektiv aus G
  *     aggregiert — beide Kategorien erscheinen, jede mit ihren Ist-Minuten.
  *  2) Der km-Satz-Label-Nenner verwendete die GESAMT-km (inkl. nicht-
  *     abrechenbarer Zeiterfassungs-km) und verdünnte so den angezeigten €/km-
- *     Satz. Der Satz beruht jetzt auf den ABRECHENBAREN Termin-km, während die
- *     angezeigte Mengen-Spalte weiterhin die Gesamt-km zeigt.
+ *     Satz. #1752 bog den Nenner über einen Zusatzparameter (`rateBasis`) auf
+ *     die abrechenbaren km zurück; die Mengen-Spalte zeigte weiter die
+ *     Gesamt-km. Seit Ticket 6hWgVqw2C8442hcG trägt die Zeile nur noch die
+ *     abrechenbaren km und die Zeiterfassungs-km stehen in einer eigenen —
+ *     damit sind Menge und Satz-Basis dasselbe, und der Zusatzparameter ist
+ *     entfallen. Die Zusage von #1752 gilt unverändert, sie folgt jetzt aus
+ *     dem Zuschnitt statt aus einer Ausnahme.
  *
  * Isoliertes, weit entferntes Jahr ⇒ keine Vermischung mit anderen Suites; ohne
  * geseedete `role_wage_rates` fällt die Lohn-Auflösung auf den Katalog zurück
  * (Standard-Preis-Szenario), sodass die effektiven Satz-Labels exakt den
  * Katalog-Sätzen entsprechen müssen.
  */
-describe("Task #1752 — Nach Mitarbeiter: Ist-Minuten-SSoT (kein Termin-Kollaps, km-Satz nur abrechenbar)", () => {
+describe("Task #1752 — Nach Mitarbeiter: Ist-Minuten-SSoT (kein Termin-Kollaps, km getrennt)", () => {
   const YEAR = 2045; // Eigenes, weit entferntes Jahr.
   const MONTH = 6;
   const HW_ACTUAL = 120; // 2,00 h — dokumentierte Ist-Minuten (≠ planned).
@@ -713,22 +725,49 @@ describe("Task #1752 — Nach Mitarbeiter: Ist-Minuten-SSoT (kein Termin-Kollaps
     expect(Math.round((abRow.revenueRateCents * abRow.quantity) / 60)).toBe(abRow.revenueCents);
   });
 
-  it("km-Satz beruht auf abrechenbaren Termin-km (Menge zeigt Gesamt inkl. Zeiterfassungs-km)", async () => {
+  it("km-Satz beruht auf abrechenbaren Termin-km (Zeiterfassungs-km stehen in EIGENER Zeile)", async () => {
+    // Die Zusage von #1752 gilt unverändert: der €/km-Satz der Termin-Zeile ist
+    // der Katalog-Satz, nicht durch die nie berechneten Zeiterfassungs-km
+    // verwässert. GEÄNDERT hat sich, WORAUS sie folgt (Ticket 6hWgVqw2C8442hcG):
+    //
+    //   vorher  EINE Zeile mit Gesamt-km, dazu ein `rateBasis`-Zusatzparameter,
+    //           der den Satz-Nenner auf die abrechenbaren km zurückbog.
+    //   jetzt   ZWEI Zeilen. Die Termin-Zeile trägt nur abrechenbare km, also
+    //           ist ihr Nenner ohne Sonderbehandlung der richtige.
+    //
+    // Die Ausnahme hatte damit kein Problem mehr zu lösen und ist entfallen.
     const billing = await readBillingEconomics(YEAR, MONTH);
     const emp = billing.byEmployee.find((e) => e.employeeId === userId)!;
     const kmRow = emp.services.find((r) => r.key === "kilometer")!;
+    const teRow = emp.services.find((r) => r.key === "kilometer_zeiterfassung")!;
 
-    // Angezeigte Menge = Gesamt-km (abrechenbar + Zeiterfassung).
+    // Termin-Zeile: NUR abrechenbare km, als Leistung.
     expect(kmRow.unit).toBe("km");
-    expect(kmRow.quantity).toBe(TRAVEL_KM + TE_KM);
+    expect(kmRow.group).toBe("leistung");
+    expect(kmRow.quantity).toBe(TRAVEL_KM);
 
-    // Satz-Nenner = NUR abrechenbare Termin-km ⇒ Katalog-km-Satz, NICHT verdünnt.
+    // Zeiterfassungs-Zeile: eigene Menge, Kosten ohne Umsatz.
+    expect(teRow.group).toBe("kosten_ohne_umsatz");
+    expect(teRow.quantity).toBe(TE_KM);
+    expect(teRow.revenueCents).toBe(0);
+    expect(teRow.costCents).toBeGreaterThan(0);
+
+    // Sicht-Änderung, kein Rechenweg: zusammen tragen beide Zeilen exakt das,
+    // was die frühere Sammelzeile trug.
+    expect(kmRow.quantity + teRow.quantity).toBe(TRAVEL_KM + TE_KM);
+
+    // Satz unverdünnt — der Kern von #1752.
     expect(kmRow.revenueRateCents).toBe(catalogTravelPriceCents);
     expect(kmRow.costRateCents).toBe(catalogTravelRateCents);
-    // Ohne den Fix würde der Nenner die Gesamt-km nutzen und den Satz verwässern.
-    expect(kmRow.revenueRateCents).not.toBe(
-      Math.round(kmRow.revenueCents / (TRAVEL_KM + TE_KM)),
-    );
+    // Die frühere „Gegenprobe" an dieser Stelle rechnete den Katalogsatz gegen
+    // `revenueCents / (TRAVEL_KM + TE_KM)`. Das war schon vor dem Zuschnitt
+    // keine echte Prüfung — `revenueCents` enthielt die Zeiterfassungs-km nie,
+    // die Rechnung ging also gegen ein Drittel der eigenen Zahl. Sie
+    // suggerierte eine Absicherung, die es nicht gab, und ist ERSETZT durch
+    // die Aussage, die wirklich trägt: der Satz beruht auf der Menge, die in
+    // DIESER Zeile steht, und die Zeiterfassungs-km stehen nicht darin.
+    expect(Math.round(kmRow.costCents / kmRow.quantity)).toBe(kmRow.costRateCents);
+    expect(teRow.quantity, "sonst wäre der Zuschnitt nicht geprüft").toBeGreaterThan(0);
   });
 
   it("Economics-Stunden === Lohn-Aufschlüsselung-Stunden pro Kategorie (gleiche Ist-Minuten-SSoT)", async () => {
@@ -853,14 +892,27 @@ describe("Task #1765 — Reader 1: Erstberatung verdünnt Hauswirtschaft-Satz ni
     expect(abRow.revenueRateCents).toBe(catalogAbPriceCents);
   });
 
-  it("(c) Erstberatungs-Lohnkosten stecken in der Gemeinkosten-Zeile", async () => {
+  it("(c) Erstberatungs-Lohnkosten stehen in IHRER EIGENEN Overhead-Zeile", async () => {
     const billing = await readBillingEconomics(YEAR, MONTH);
-    const gk = billing.byService.find((r) => r.key === "gemeinkosten")!;
+    // Seit Ticket 6hWgVqw2C8442hcG ist die Zusage SCHÄRFER: vorher stand hier
+    // die Sammelzeile `gemeinkosten`, und der Betrag stimmte nur, WEIL alle
+    // anderen fünf Kategorien in dieser Fixture 0 sind. Jetzt wird die Zeile
+    // benannt — ein Betrag, der versehentlich in „Sonstiges" landet, fällt auf.
+    const eb = billing.byService.find((r) => r.key === "overhead_erstberatung")!;
+    expect(eb).toBeDefined();
+    expect(eb.label).toBe("Erstberatung"); // NICHT der Rohschlüssel.
     // Erwartete Erstberatungs-Kosten = Katalog-Lohnsatz × Std (kein Rollen-Override).
     const expectedEbCost = Math.round((catalogEbRateCents * EB_MIN) / 60);
     expect(expectedEbCost).toBeGreaterThan(0);
-    expect(gk.costCents).toBe(expectedEbCost);
-    expect(gk.quantity).toBe(0); // Gemeinkosten sind eine reine Kosten-Restzeile.
+    expect(eb.costCents).toBe(expectedEbCost);
+    expect(eb.quantity).toBe(0); // Overhead ist eine reine Kosten-Zeile.
+    expect(eb.revenueCents).toBe(0);
+
+    // Gegenrichtung: der Betrag darf nicht ZUSÄTZLICH woanders stehen.
+    const andereOverhead = billing.byService
+      .filter((r) => r.key.startsWith("overhead_") && r.key !== "overhead_erstberatung")
+      .reduce((s, r) => s + r.costCents, 0);
+    expect(andereOverhead).toBe(0);
   });
 
   it("(d) Σ(byService.costCents) === totals.laborCostCents (Anzeige === Buchung)", async () => {

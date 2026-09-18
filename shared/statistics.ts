@@ -245,7 +245,18 @@ export interface EconomicsInput {
   hauswirtschaftMinutes: number;
   alltagsbegleitungMinutes: number;
   erstberatungMinutes: number;
-  nonBillable: { category: string; minutes: number }[];
+  /**
+   * Nicht-abrechenbare Zeit je Kategorie.
+   *
+   * `label` ist optional und nur für Kategorien nötig, die KEIN
+   * Zeiterfassungs-Typ sind: `getEntryTypeLabel` kennt die dann nicht und gäbe
+   * den Rohschlüssel zurück. Heute ist das genau ein Fall — der
+   * Overhead-Schlüssel `erstberatung`, den der billing-scoped Reader einführt
+   * (#1765). Wer einen solchen Schlüssel in diesen Kanal einspeist, liefert
+   * seine Beschriftung mit; damit bleibt `byCategory[].label` die EINE Antwort
+   * auf „wie heißt diese Kategorie?" und keine Sicht muss sie nachbauen.
+   */
+  nonBillable: { category: string; minutes: number; label?: string }[];
   travelKm: number;
   customerKm: number;
   timeEntryKm: number;

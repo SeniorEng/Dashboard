@@ -12,6 +12,7 @@ import {
   formatKm,
   formatRate,
   marginHealthTextColor,
+  splitEconomicsRows,
 } from "../utils";
 import { MONTH_NAMES } from "../constants";
 import { CollapsibleCard } from "./collapsible-card";
@@ -44,6 +45,21 @@ function rateLabel(row: BillingEconomicsRow): string | null {
   return null;
 }
 
+/**
+ * Satz-Unterzeile für Zeilen ohne Erlös: nur der Kostensatz.
+ *
+ * `rateLabel` rendert „Erlös / Kosten pro km" — für „Kilometer
+ * (Zeiterfassung)" stand dort „0,00 € / 0,35 € pro km", während die
+ * Umsatz-Spalte derselben Zeile „—" zeigte („die Frage ist nicht gestellt").
+ * Dieselbe Frage darf nicht zwei Zentimeter weiter mit 0,00 € beantwortet
+ * werden.
+ */
+function costOnlyRateLabel(row: BillingEconomicsRow): string | null {
+  if (row.unit === "hours") return `${formatRate(row.costRateCents)} pro Std`;
+  if (row.unit === "km") return `${formatRate(row.costRateCents)} pro km`;
+  return null;
+}
+
 function KpiTile({
   label,
   value,
@@ -68,14 +84,119 @@ function KpiTile({
   );
 }
 
-function ServiceTable({ rows }: { rows: BillingEconomicsRow[] }) {
+/**
+ * Eine Zeile der Kosten-Tabelle.
+ *
+ * `kosten_ohne_umsatz`-Zeilen zeigen in den Spalten Umsatz / Marge / % bewusst
+ * einen Gedankenstrich statt „0,00 €" und „0 %". Eine 0 läse sich wie eine
+ * Messung („hier wurde nichts verdient"); tatsächlich ist die Frage für diese
+ * Zeilen gar nicht gestellt — es GIBT keinen Umsatz, gegen den eine Marge
+ * gerechnet werden könnte. „0 %" wäre besonders irreführend, weil die
+ * Marge-Ampel es rot einfärbte und damit ein Problem behauptete, wo eine
+ * Kategorie einfach Kosten trägt.
+ */
+function ServiceRow({ row }: { row: BillingEconomicsRow }) {
+  // Der Gedankenstrich hängt NICHT allein am Block, sondern zusätzlich daran,
+  // dass die Zeile wirklich keinen Erlös trägt. Sonst versteckte die Anzeige
+  // Geld, sobald Block und Betrag auseinanderfallen — der Server bricht
+  // dafür inzwischen ab (`buildRow`), aber die Anzeige soll den Fall nicht
+  // ihrerseits unsichtbar machen. Zwei Riegel, unabhängig voneinander.
+  const ohneUmsatz = row.group === "kosten_ohne_umsatz" && row.revenueCents === 0;
+  // N-3: für eine Zeile ohne Erlös ist auch der Erlös-SATZ keine Aussage.
+  const rate = ohneUmsatz ? costOnlyRateLabel(row) : rateLabel(row);
+  return (
+    <tr className="border-b border-gray-100" data-testid={`row-econ-service-${row.key}`}>
+      <td className="py-2 pr-3">
+        <div className={`font-medium ${ohneUmsatz ? "text-gray-600" : "text-gray-900"}`}>
+          {row.label}
+        </div>
+        {rate && <div className="text-xs text-gray-400">{rate}</div>}
+      </td>
+      <td className="py-2 px-3 text-right tabular-nums text-gray-700">{quantityLabel(row)}</td>
+      <td className="py-2 px-3 text-right tabular-nums text-gray-900">
+        {ohneUmsatz ? "—" : formatAmount(row.revenueCents)}
+      </td>
+      <td className="py-2 px-3 text-right tabular-nums text-gray-700">
+        {formatAmount(row.costCents)}
+      </td>
+      {/* Potenzial. `null` heisst „fuer diese Zeile nicht gestellt" — km und
+          Overhead werden nicht geplant. Der Strich sagt das; eine 0 wuerde
+          „nichts geplant" behaupten. */}
+      <td
+        className="py-2 px-3 text-right tabular-nums text-gray-500"
+        data-testid={`text-econ-potential-revenue-${row.key}`}
+      >
+        {row.potentialRevenueCents === null ? "—" : formatAmount(row.potentialRevenueCents)}
+      </td>
+      <td
+        className="py-2 px-3 text-right tabular-nums text-gray-500"
+        data-testid={`text-econ-potential-cost-${row.key}`}
+      >
+        {row.potentialCostCents === null ? "—" : formatAmount(row.potentialCostCents)}
+      </td>
+      <td
+        className={`py-2 px-3 text-right tabular-nums ${row.marginCents < 0 && !ohneUmsatz ? "text-rose-700" : "text-gray-900"}`}
+      >
+        {ohneUmsatz ? "—" : formatAmount(row.marginCents)}
+      </td>
+      <td
+        className={`py-2 pl-3 text-right tabular-nums font-medium ${ohneUmsatz ? "text-gray-400" : marginHealthTextColor(row.marginPercent)}`}
+        data-testid={`text-econ-service-margin-${row.key}`}
+      >
+        {ohneUmsatz ? "—" : `${row.marginPercent}%`}
+      </td>
+    </tr>
+  );
+}
+
+function ServiceTable({
+  rows,
+  laborCostCents,
+}: {
+  rows: BillingEconomicsRow[];
+  /**
+   * Nur für den Selbsttest. Die Zeilen MÜSSEN sich auf die Lohnkosten-Kachel
+   * summieren — dieselbe Zusage wie oben in der Kaskade, und dieselbe Art, sie
+   * zu zeigen: sichtbar statt zugesichert.
+   */
+  laborCostCents?: number;
+}) {
+  // Aufteilung + „darf der untere Block überhaupt gezeigt werden?" liegen als
+  // reine Funktion in `../utils` — sie tragen eine Aussage, die falsch sein
+  // kann, und im JSX könnte sie niemand prüfen.
+  const {
+    leistung, ohneUmsatz, ohneUmsatzCents, ohneUmsatzMargeCents, summeCents, zeigeOhneUmsatz,
+  } = splitEconomicsRows(rows);
+  const stimmt = laborCostCents === undefined || summeCents === laborCostCents;
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
+          <tr className="text-left text-xs text-gray-400">
+            <th />
+            <th />
+            {/* „Ist" OHNE den Zusatz „(dokumentiert)".
+                Der stand hier zuerst und galt fuer sieben der zehn Zeilen
+                nicht: die Overhead-Zeilen und die Zeiterfassungs-km kommen aus
+                `employee_time_entries` und haben KEIN Dokumentations-Gate — ein
+                heute erfasster Urlaub fuer naechste Woche steht sofort drin.
+                Eine Gruppen-Ueberschrift gilt fuer alle Zeilen darunter oder
+                gar nicht; was nur fuer drei Zeilen stimmt, gehoert an die
+                Zeile, nicht ueber die Spalte. */}
+            <th colSpan={2} className="pt-1 pb-0.5 px-3 text-center font-medium uppercase tracking-wide">
+              Ist
+            </th>
+            <th colSpan={2} className="pt-1 pb-0.5 px-3 text-center font-medium uppercase tracking-wide">
+              Potenzial (ganzer Monat)
+            </th>
+            <th colSpan={2} />
+          </tr>
           <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
             <th className="py-2 pr-3 font-medium">Leistung</th>
             <th className="py-2 px-3 font-medium text-right">Menge</th>
+            <th className="py-2 px-3 font-medium text-right">Umsatz</th>
+            <th className="py-2 px-3 font-medium text-right">Lohnkosten</th>
             <th className="py-2 px-3 font-medium text-right">Umsatz</th>
             <th className="py-2 px-3 font-medium text-right">Lohnkosten</th>
             <th className="py-2 px-3 font-medium text-right">Marge</th>
@@ -83,45 +204,107 @@ function ServiceTable({ rows }: { rows: BillingEconomicsRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
-            const rate = rateLabel(row);
-            return (
-              <tr
-                key={row.key}
-                className="border-b border-gray-100"
-                data-testid={`row-econ-service-${row.key}`}
-              >
-                <td className="py-2 pr-3">
-                  <div className="font-medium text-gray-900">{row.label}</div>
-                  {rate && <div className="text-xs text-gray-400">{rate}</div>}
-                </td>
-                <td className="py-2 px-3 text-right tabular-nums text-gray-700">
-                  {quantityLabel(row)}
-                </td>
-                <td className="py-2 px-3 text-right tabular-nums text-gray-900">
-                  {formatAmount(row.revenueCents)}
-                </td>
-                <td className="py-2 px-3 text-right tabular-nums text-gray-700">
-                  {formatAmount(row.costCents)}
-                </td>
+          {leistung.map((row) => (
+            <ServiceRow key={row.key} row={row} />
+          ))}
+
+          {zeigeOhneUmsatz && (
+            <>
+              {/* Der Block, den Alrik wörtlich gefragt hat: „wofür zahle ich,
+                  ohne dafür Geld zu bekommen?" Bis hierher ERSETZTE eine
+                  einzige „Gemeinkosten"-Zeile diese sechs Kategorien plus die
+                  Zeiterfassungs-km — die Frage war damit nicht beantwortbar. */}
+              <tr className="border-b border-gray-100">
                 <td
-                  className={`py-2 px-3 text-right tabular-nums ${row.marginCents < 0 ? "text-rose-700" : "text-gray-900"}`}
+                  colSpan={8}
+                  className="pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-400"
                 >
-                  {formatAmount(row.marginCents)}
-                </td>
-                <td
-                  className={`py-2 pl-3 text-right tabular-nums font-medium ${marginHealthTextColor(row.marginPercent)}`}
-                  data-testid={`text-econ-service-margin-${row.key}`}
-                >
-                  {row.marginPercent}%
+                  Kosten ohne Umsatz
                 </td>
               </tr>
-            );
-          })}
+              {ohneUmsatz.map((row) => (
+                <ServiceRow key={row.key} row={row} />
+              ))}
+              <tr className="border-b border-gray-200">
+                <td className="py-2 pr-3 text-xs text-gray-500">zusammen</td>
+                <td />
+                <td />
+                <td
+                  className="py-2 px-3 text-right text-sm font-semibold tabular-nums text-gray-900"
+                  data-testid="text-econ-ohne-umsatz-summe"
+                >
+                  {formatAmount(ohneUmsatzCents)}
+                </td>
+                {/* Potenzial-Spalten: fuer Overhead nicht gestellt. */}
+                <td />
+                <td />
+                {/* Der Betrag MUSS auch in der Marge-Spalte stehen. Die
+                    Einzelzeilen darüber zeigen dort „—", weil für sie keine
+                    Marge gerechnet werden kann — wer die Spalte von oben nach
+                    unten addiert, landet sonst um genau diese Summe ÜBER dem
+                    Deckungsbeitrag in der Kopfzeile. Hier schliesst sie sich.
+
+                    Gebildet aus den echten Margen des Blocks, nicht als
+                    `−ohneUmsatzCents`: die beiden sind nur gleich, solange
+                    keine Block-Zeile Erlös trägt, und genau dafür gibt es pro
+                    Zeile bereits einen Riegel. Das Vorzeichen kommt damit aus
+                    der Zahl statt von Hand. */}
+                <td
+                  className={`py-2 px-3 text-right text-sm font-semibold tabular-nums ${
+                    ohneUmsatzMargeCents < 0 ? "text-rose-700" : "text-gray-900"
+                  }`}
+                  data-testid="text-econ-ohne-umsatz-marge"
+                >
+                  {formatAmount(ohneUmsatzMargeCents)}
+                </td>
+                <td />
+              </tr>
+            </>
+          )}
         </tbody>
+        {laborCostCents !== undefined && (
+          <tfoot>
+            <tr>
+              <td colSpan={3} className="pt-2 text-xs text-gray-400">
+                {stimmt ? (
+                  <span data-testid="text-econ-selbsttest">
+                    Summe aller Zeilen = Lohnkosten
+                  </span>
+                ) : (
+                  <span className="font-semibold text-rose-700" data-testid="text-econ-selbsttest">
+                    Summe {formatAmount(summeCents)} ≠ Lohnkosten{" "}
+                    {formatAmount(laborCostCents)}
+                  </span>
+                )}
+              </td>
+              <td className="pt-2 px-3 text-right text-xs tabular-nums text-gray-400">
+                {formatAmount(summeCents)}
+              </td>
+              <td colSpan={4} />
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );
+}
+
+/**
+ * Marge-Farbe einer Mitarbeiter-Zeile.
+ *
+ * Eine Person mit NUR geplanter Arbeit steht seit den Potenzial-Spalten in
+ * dieser Tabelle — mit lauter Nullen. `marginHealthTextColor(0)` faerbte das
+ * ROT und behauptete damit ein Problem, wo schlicht noch nichts dokumentiert
+ * ist. Das ist dieselbe Fehlerklasse, die in der Kosten-Tabelle daneben schon
+ * abgeraeumt wurde („eine 0 laese sich wie eine Messung") — nur eine Tabelle
+ * weiter, und dort erst durch diesen PR entstanden.
+ *
+ * Ohne Umsatz UND ohne Kosten ist die Marge keine Aussage, sondern eine
+ * Leerstelle.
+ */
+function margeFarbe(emp: BillingEconomicsEmployeeRow): string {
+  const nichtsGemessen = emp.revenueCents === 0 && emp.costCents === 0;
+  return nichtsGemessen ? "text-gray-400" : marginHealthTextColor(emp.marginPercent);
 }
 
 function EmployeeTable({
@@ -215,7 +398,7 @@ function EmployeeTable({
                     {formatAmount(emp.marginCents)}
                   </td>
                   <td
-                    className={`py-2 pl-3 text-right tabular-nums font-medium ${marginHealthTextColor(emp.marginPercent)}`}
+                    className={`py-2 pl-3 text-right tabular-nums font-medium ${margeFarbe(emp)}`}
                     data-testid={`text-econ-employee-margin-${emp.employeeId}`}
                   >
                     {emp.marginPercent}%
@@ -224,7 +407,7 @@ function EmployeeTable({
                 {isOpen && (
                   <tr key={`${emp.employeeId}-drill`} data-testid={`row-econ-employee-drill-${emp.employeeId}`}>
                     <td colSpan={7} className="bg-gray-50 px-3 py-2">
-                      <ServiceTable rows={emp.services} />
+                      <ServiceTable rows={emp.services} laborCostCents={emp.costCents} />
                     </td>
                   </tr>
                 )}
@@ -342,7 +525,7 @@ export function EconomicsOverviewCard({
             </div>
 
             {view === "leistung" ? (
-              <ServiceTable rows={economics.byService} />
+              <ServiceTable rows={economics.byService} laborCostCents={economics.totals.laborCostCents} />
             ) : economics.byEmployee.length > 0 ? (
               <EmployeeTable
                 employees={economics.byEmployee}

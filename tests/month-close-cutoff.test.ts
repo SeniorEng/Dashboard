@@ -4,6 +4,7 @@ import {
   isCutoffDay,
   daysUntilCutoff,
   previousMonth,
+  istNachMonatsCutoff,
 } from "../shared/utils/month-close-cutoff";
 
 describe("computeMonthCloseCutoff", () => {
@@ -78,5 +79,66 @@ describe("previousMonth", () => {
 
   it("rollt im Januar auf Dezember des Vorjahres", () => {
     expect(previousMonth("2026-01-08")).toEqual({ year: 2025, month: 12 });
+  });
+});
+
+/**
+ * Ticket 6hWgVqw2C8442hcG — Weg B. Bis hierher war `istNachMonatsCutoff` nur
+ * indirekt über EINEN Integrationstest mit einer 2049er-Fixture abgedeckt. Die
+ * Kanten waren gerechnet, nicht gefahren; hier werden sie gefahren.
+ */
+describe("istNachMonatsCutoff", () => {
+  it("der Cutoff-Tag SELBST zaehlt noch nicht als vorbei", () => {
+    // An diesem Tag laeuft der Auto-Abschluss erst (`isCutoffDay`, strikte
+    // Tagesgleichheit). Waere es `<= 0`, fiele das Potenzial einen Tag zu
+    // frueh auf das Ist — und zwar waehrend der Abschluss noch laeuft.
+    const cutoff = computeMonthCloseCutoff(2026, 8);
+    expect(cutoff).toBe("2026-09-08");
+    expect(istNachMonatsCutoff(cutoff, 2026, 8)).toBe(false);
+  });
+
+  it("einen Tag spaeter ist er vorbei", () => {
+    expect(istNachMonatsCutoff("2026-09-09", 2026, 8)).toBe(true);
+  });
+
+  it("mitten im Monat ist er nicht vorbei", () => {
+    expect(istNachMonatsCutoff("2026-08-15", 2026, 8)).toBe(false);
+  });
+
+  it("weit vor und weit nach dem Monat", () => {
+    expect(istNachMonatsCutoff("2020-01-01", 2026, 8), "Jahre davor").toBe(false);
+    expect(istNachMonatsCutoff("2030-01-01", 2026, 8), "Jahre danach").toBe(true);
+  });
+
+  it("Dezember → Januar: der Cutoff liegt im Folgejahr", () => {
+    // Der Ueberlauf ist die Stelle, an der eine von Hand gebaute Datumsrechnung
+    // kippt. `computeMonthCloseCutoff` loest ihn ueber `Date.UTC` und nimmt die
+    // Feiertagsliste des FOLGEjahres — hier wird das Ergebnis gefahren, nicht
+    // die Implementierung nacherzaehlt.
+    const cutoff = computeMonthCloseCutoff(2026, 12);
+    expect(cutoff.startsWith("2027-01-"), `Cutoff war ${cutoff}`).toBe(true);
+    expect(istNachMonatsCutoff(cutoff, 2026, 12), "am Cutoff noch offen").toBe(false);
+    expect(istNachMonatsCutoff("2027-01-31", 2026, 12), "Ende Januar vorbei").toBe(true);
+    expect(istNachMonatsCutoff("2026-12-31", 2026, 12), "Silvester noch offen").toBe(false);
+  });
+
+  it("die Rueckverlegung ueber Wochenende/Feiertag wird mitgetragen", () => {
+    // Der Cutoff ist NICHT der 8., sondern der 8. mit Rueckverlegung. Genau
+    // deshalb ist die Funktion abgeleitet und rechnet nicht selbst: wer „der
+    // 8." annimmt, liegt in jedem Monat falsch, in dem der 8. auf ein
+    // Wochenende faellt.
+    //
+    // Gesucht wird ein solcher Monat, statt einen zu behaupten.
+    let gefunden = 0;
+    for (let m = 1; m <= 12; m++) {
+      const c = computeMonthCloseCutoff(2026, m);
+      if (!c.endsWith("-08")) {
+        gefunden += 1;
+        // Am zurueckverlegten Tag noch offen, am Tag darauf vorbei.
+        expect(istNachMonatsCutoff(c, 2026, m), `Cutoff ${c} muss offen sein`).toBe(false);
+      }
+    }
+    expect(gefunden, "kein Monat mit Rueckverlegung gefunden — Annahme pruefen")
+      .toBeGreaterThan(0);
   });
 });

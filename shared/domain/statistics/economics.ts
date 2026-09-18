@@ -68,7 +68,12 @@ export function buildEconomics(input: EconomicsInput): EconomicsBreakdown {
   const nbRate = nonBillableRateCents(rates);
   const byCategory = input.nonBillable.map((c) => ({
     category: c.category,
-    label: getEntryTypeLabel(c.category),
+    // Der Aufrufer darf die Beschriftung mitgeben — nötig für Kategorien, die
+    // kein Zeiterfassungs-Typ sind (`getEntryTypeLabel` gäbe dort den
+    // Rohschlüssel zurück). Damit bleibt DIESES Feld die einzige Antwort auf
+    // „wie heißt die Kategorie?"; vorher musste eine Sicht sie nachbauen und
+    // widersprach der SSoT für `erstberatung`.
+    label: c.label ?? getEntryTypeLabel(c.category),
     minutes: c.minutes,
     costCents: ov
       ? (ov.nonBillableCostCentsByCategory[c.category] ?? 0)
