@@ -48,8 +48,7 @@ import type {
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 import { documentedSqlRaw } from "../../lib/appointment-signed";
 import { POTENTIAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
-import { isMonthClosedAt } from "@shared/utils/month-close-cutoff";
-import { todayISO } from "@shared/utils/datetime";
+import { istNachMonatsCutoff, todayBerlinIso } from "@shared/utils/month-close-cutoff";
 import type {
   BillingEconomicsResponse,
   BillingEconomicsRow,
@@ -220,7 +219,7 @@ export async function readBillingEconomics(
   } = {},
 ): Promise<BillingEconomicsResponse> {
   const { employeeId, insuranceProviderId } = opts;
-  const heute = opts.asOfDate ?? todayISO();
+  const heute = opts.asOfDate ?? todayBerlinIso();
   // Overhead + Zeiterfassungs-km sind nicht kassenspezifisch zurechenbar.
   const includeOverhead = insuranceProviderId === undefined;
 
@@ -251,16 +250,26 @@ export async function readBillingEconomics(
   // WEG B (Alrik, 17.09.2026): in einem ABGESCHLOSSENEN Monat faellt das
   // Potenzial auf das Ist zurueck.
   //
-  // Die Spalte beantwortet „was kommt noch" — und nach dem Monatsabschluss
-  // kommt nichts mehr. Ein `scheduled`-Termin in einem geschlossenen Monat
-  // wird ueberall sonst als „Nicht abgerechnet" ausgewiesen
-  // (`deriveAppointmentDisplayStatus`); ihn hier weiter als Erloespotenzial zu
-  // fuehren, behauptete Geld, das das System selbst schon abgeschrieben hat.
+  // Die Spalte beantwortet „was kommt noch" — und nach dem Cutoff des Monats
+  // ist die Erwartung, dass nichts mehr kommt.
   //
-  // Die Alternative waere „was der Monat haette sein koennen" gewesen — auch
-  // vertretbar, aber dann muesste die Spalte anders heissen. Alrik hat sich
-  // fuer „was noch kommt" entschieden.
-  const monatAbgeschlossen = isMonthClosedAt(heute, billingYear, billingMonth);
+  // KORREKTUR einer ersten Begruendung, die hier stand: sie berief sich darauf,
+  // ein `scheduled`-Termin werde „ueberall sonst als ,Nicht abgerechnet'
+  // ausgewiesen (`deriveAppointmentDisplayStatus`)". Das trifft NICHT zu —
+  // diese Funktion hat im ganzen Repo keinen einzigen Aufrufer ausserhalb von
+  // Tests. „Nicht abgerechnet" erscheint heute nirgends. Die Aussage, das
+  // System habe das Geld „selbst schon abgeschrieben", war also unbelegt.
+  //
+  // Was traegt, ist allein Alriks Entscheidung, was die Spalte BEDEUTEN soll
+  // („was noch kommt", nicht „was der Monat haette sein koennen").
+  //
+  // OFFEN und Alrik gemeldet: der OBERE Block derselben Karte zaehlt denselben
+  // Termin nach dem Cutoff unveraendert unter „noch geplant" — der
+  // Pipeline-Reader kennt keinen Monatsabschluss. Solange das so ist, sagen die
+  // zwei Bloecke ueber denselben Termin etwas Verschiedenes. Das hier zu
+  // beheben, hiesse die Schlagzeile „Erwarteter Kontoeingang" zu aendern; das
+  // ist eine eigene Entscheidung.
+  const nachCutoff = istNachMonatsCutoff(heute, billingYear, billingMonth);
   // `sql.join` statt `= ANY(${liste})`: das `sql`-Template expandiert ein Array
   // als TUPEL, nicht als Array-Literal — `ANY((...))` scheitert dann mit 42809.
   // Die Liste kommt weiter aus der SSoT, nur die Einsetzung ist explizit.
@@ -270,7 +279,7 @@ export async function readBillingEconomics(
   // `completed`), und ein lauter Abbruch waere hier auch das Richtige — eine
   // Potenzial-Spalte ohne Status waere keine Messung. Festgehalten, damit es
   // beim naechsten Lesen nicht wie ein uebersehener Fall aussieht.
-  const potenzialFilter = monatAbgeschlossen ? istFilter : sql`(a.status IN (${sql.join(
+  const potenzialFilter = nachCutoff ? istFilter : sql`(a.status IN (${sql.join(
     POTENTIAL_APPOINTMENT_STATUSES.map((st) => sql`${st}`),
     sql`, `,
   )}))`;
@@ -370,9 +379,14 @@ export async function readBillingEconomics(
   // Mitarbeiter-Bezug), die Spalte hier heisst „Potenzial (GANZER Monat)" und
   // liesse ihn weg. Die Ist-Seite ist davon nicht betroffen: ein
   // dokumentierter Termin hat immer einen leistenden Mitarbeiter.
+  // `mitUnzugeordneten` folgt dem Filter: nach dem Cutoff IST der Potenzial-Lauf
+  // der Ist-Lauf, und der hat `WHERE employee_id IS NOT NULL`. Liefe er weiter
+  // mit `true`, koennte ein dokumentierter Termin OHNE Mitarbeiter im Potenzial
+  // stehen und im Ist fehlen — „faellt auf Ist" waere dann falsch, und PO-2
+  // (`>=`) haette es verdeckt.
   const [potenzialMinutenRes, potenzialErloesRes] = await Promise.all([
-    minutenUndKosten(potenzialFilter, true),
-    erloes(potenzialFilter, true),
+    minutenUndKosten(potenzialFilter, !nachCutoff),
+    erloes(potenzialFilter, !nachCutoff),
   ]);
 
   // --- 3) Termin-km (Anfahrt + Kunden-km) + rollenbasierte km-Kosten je MA. ----

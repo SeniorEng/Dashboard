@@ -63,22 +63,49 @@ export function isCutoffDay(today: string, year: number, month: number): boolean
 }
 
 /**
- * Ist der Abrechnungsmonat (year, month) am Tag `today` bereits abgeschlossen?
+ * Der Tag von HEUTE in Berliner Zeit (ISO, YYYY-MM-DD).
+ *
+ * Der Monatsabschluss ist ein Ereignis in Berliner Zeit — der Scheduler rechnet
+ * so. Wer daneben `todayISO()` (Server-Lokalzeit) benutzt, bekommt am
+ * Cutoff-Tag je nach Container-Zeitzone eine andere Antwort als der Abschluss
+ * selbst.
+ *
+ * Lag bisher als private Funktion im `month-close-scheduler` — hierher gezogen,
+ * damit es EINE gibt und nicht zwei.
+ */
+export function todayBerlinIso(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(new Date());
+}
+
+/**
+ * Liegt der Cutoff des Monats (year, month) am Tag `today` bereits hinter uns?
  *
  * Ticket 6hWgVqw2C8442hcG. ABGELEITET aus `daysUntilCutoff`, nicht als zweite
- * Datumsrechnung: „abgeschlossen" heißt genau „der Cutoff liegt hinter uns".
- * Eine eigene Vergleichslogik daneben wäre ein Zweitbegriff derselben Frage —
- * und der Cutoff ist nicht der 8., sondern der 8. mit Rückverlegung über
- * Wochenenden und Feiertage. Wer das nachbaut, baut es irgendwann anders nach.
+ * Datumsrechnung: der Cutoff ist nicht der 8., sondern der 8. mit Rückverlegung
+ * über Wochenenden und Feiertage. Wer das nachbaut, baut es irgendwann anders
+ * nach.
  *
- * Der Cutoff-Tag SELBST zählt noch als offen: an ihm läuft der Abschluss erst.
- * Deshalb `< 0` und nicht `<= 0`.
+ * Der Cutoff-Tag SELBST zählt noch NICHT als vorbei: an ihm läuft der Abschluss
+ * erst (`autoCloseMonthForCutoff` feuert über `isCutoffDay`). Deshalb `< 0`.
  *
- * `today` ist ein Parameter und kein `todayISO()` im Rumpf — die Frage hängt
- * wirklich an der Wanduhr (anders als eine Stichtags-Frage), aber sie muss
- * prüfbar bleiben, ohne die Zeit zu manipulieren.
+ * ── Warum die Funktion NICHT „istMonatAbgeschlossen" heißt ───────────────
+ * Weil sie das nicht beantwortet. „Ist der Monat abgeschlossen?" hat bereits
+ * eine kanonische, ZUSTANDS-basierte Antwort: `isMonthClosed(userId, dateStr)`
+ * liest `employee_month_closings` und kennt `reopened_at`. Diese hier rechnet
+ * nur den Kalender.
+ *
+ * Und die beiden können auseinanderlaufen: der Auto-Abschluss läuft NUR am
+ * Cutoff-Tag und NUR für Mitarbeiter mit Aktivität im Monat. Lief er an dem Tag
+ * nicht, oder hatte jemand keine Aktivität, ist sein Monat nie abgeschlossen
+ * worden — der Kalender sagt trotzdem „vorbei".
+ *
+ * Eine erste Fassung hieß `isMonthClosedAt` und war damit ein Zweitbegriff
+ * derselben fachlichen Frage mit einer anderen Antwort.
+ *
+ * `today` ist ein Parameter, kein Aufruf im Rumpf — die Frage hängt wirklich an
+ * der Wanduhr, muss aber prüfbar bleiben, ohne die Zeit zu manipulieren.
  */
-export function isMonthClosedAt(today: string, year: number, month: number): boolean {
+export function istNachMonatsCutoff(today: string, year: number, month: number): boolean {
   return daysUntilCutoff(today, year, month) < 0;
 }
 

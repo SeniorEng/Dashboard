@@ -229,7 +229,6 @@ export function StatusPipelineCard({
     );
   };
 
-
   return (
     <CollapsibleCard
       storageKey="pipeline"
@@ -335,7 +334,7 @@ export function StatusPipelineCard({
                   </Fragment>
                 ))}
               </div>
-              <div className="mt-1 flex justify-between text-[0.65rem] uppercase tracking-wide text-gray-300">
+              <div className="mt-1 flex justify-between text-xs uppercase tracking-wide text-gray-500">
                 <span>← unsicher</span>
                 <span>auf dem Konto →</span>
               </div>

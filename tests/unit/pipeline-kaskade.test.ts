@@ -113,7 +113,16 @@ describe("Umsatz-Kachel — die Kaskade geht auf", () => {
       "rechts das, was auf dem Konto ist",
     ).toBe("bezahlt");
 
-    // Sie ist damit wieder deckungsgleich mit der fachlichen Durchlauf-Folge —
+    // Die GANZE Ordnung als Literal — nicht nur erste und letzte Position.
+    // Beide erfüllt `PIPELINE_STAGES` selbst, und KA-5 prüft nur die sortierte
+    // MENGE: ein Vertauschen von `unterschrieben` ↔ `rechnung_erstellt` wäre
+    // an beiden vorbeigelaufen und hätte genau das gebrochen, wofür es diese
+    // Reihenfolge gibt — die Leserichtung „Beträge wandern nach rechts".
+    expect([...PIPELINE_CASCADE_ORDER]).toEqual([
+      "offen", "dokumentiert", "unterschrieben", "rechnung_erstellt", "versendet", "bezahlt",
+    ]);
+
+    // Sie ist damit wieder elementgleich mit der fachlichen Durchlauf-Folge —
     // aber BEWUSST eine eigene Konstante. Fielen sie zusammen, wäre die
     // nächste Layout-Entscheidung eine Änderung an der Domäne.
     expect(

@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { readdirSync, statSync } from "node:fs";
 import {
   ZAEHLWEISE_UMSATZ_KACHEL,
   ZAEHLWEISE_RECHNUNGSLISTE,
 } from "@shared/domain/billing-zaehlweise";
+import { PIPELINE_STAGE_LABELS } from "@shared/domain/billing-pipeline";
 
 /**
  * Ticket 6hWgVqw2C8442hcG, Weg 3 — „sichtbar machen statt angleichen".
@@ -69,21 +71,55 @@ describe("Zählweise-Hinweise (Weg 3)", () => {
   });
 
   it("ZW-5 – die Sätze stehen NUR in ihrer Quelldatei (Anforderung 4)", () => {
-    // Der tragende Test. Ein zweites Literal irgendwo im Client heisst: zwei
-    // Orte, die gepflegt werden müssen — und der eine wird es irgendwann nicht.
+    // Der tragende Test — und die erste Fassung hat NICHT gemessen, was sie
+    // zusagte: sie sah in genau zwei Dateien nach je einem Teilstück. Eine
+    // Kopie in einer dritten Datei wäre unbemerkt geblieben, eine Kopie über
+    // Kreuz ebenso, und eine Kopie nur der ersten Satzhälfte in beiden.
     //
-    // Geprüft werden die beiden Karten, die den Hinweis anzeigen: sie MÜSSEN
-    // ihn importieren und dürfen ihn nicht abschreiben.
-    const kachel = lies("client/src/features/billing/components/status-pipeline-card.tsx");
-    const liste = lies("client/src/features/billing/components/pending-invoices-card.tsx");
+    // Jetzt ein Lauf über den ganzen Quellbaum. Geprüft werden markante
+    // Teilstücke BEIDER Sätze gegen JEDE Datei ausser der Quelle und dieser
+    // Testdatei.
+    const teilstuecke = [
+      "je Termin ohne km",
+      "immer netto",
+      "je Kunde, brutto",
+      "nur noch nicht Abgerechnetes",
+    ];
+    const erlaubt = [
+      "shared/domain/billing-zaehlweise.ts",
+      "tests/unit/billing-zaehlweise.test.ts",
+    ];
 
-    expect(kachel).toContain("ZAEHLWEISE_UMSATZ_KACHEL");
-    expect(liste).toContain("ZAEHLWEISE_RECHNUNGSLISTE");
+    const treffer: string[] = [];
+    const lauf = (rel: string) => {
+      for (const eintrag of readdirSync(path.join(WURZEL, rel))) {
+        if (eintrag === "node_modules" || eintrag.startsWith(".")) continue;
+        const kind = path.join(rel, eintrag);
+        if (statSync(path.join(WURZEL, kind)).isDirectory()) {
+          lauf(kind);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(kind)) continue;
+        if (erlaubt.includes(kind)) continue;
+        const inhalt = lies(kind);
+        for (const t of teilstuecke) {
+          if (inhalt.includes(t)) treffer.push(`${kind}: „${t}“`);
+        }
+      }
+    };
+    for (const wurzel of ["client/src", "shared", "server", "tests", "e2e"]) lauf(wurzel);
 
-    // Kein abgeschriebenes Literal. Geprüft an einem markanten Teilstück, das
-    // ein Copy-Paste mitnähme.
-    expect(kachel, "Hinweis abgeschrieben statt importiert").not.toContain("immer netto");
-    expect(liste, "Hinweis abgeschrieben statt importiert").not.toContain("je Kunde, brutto");
+    expect(
+      treffer,
+      "Zählweise-Satz abgeschrieben statt importiert — zwei Orte, einer driftet",
+    ).toEqual([]);
+
+    // Gegenrichtung: die zwei Karten MÜSSEN ihn importieren. Ohne diese Hälfte
+    // wäre der Test auch dann grün, wenn der Hinweis nirgends mehr steht.
+    expect(lies("client/src/features/billing/components/status-pipeline-card.tsx"))
+      .toContain("ZAEHLWEISE_UMSATZ_KACHEL");
+    expect(lies("client/src/features/billing/components/pending-invoices-card.tsx"))
+      .toContain("ZAEHLWEISE_RECHNUNGSLISTE");
   });
 
   it("ZW-6 – die Kachel behauptet NICHT pauschal „ohne km“", () => {
@@ -99,5 +135,19 @@ describe("Zählweise-Hinweise (Weg 3)", () => {
     expect(ZAEHLWEISE_UMSATZ_KACHEL, "die Grenze fehlt — der Satz gilt dann nur halb")
       .toMatch(/Rechnung/);
     expect(ZAEHLWEISE_UMSATZ_KACHEL).toMatch(/mit km/);
+
+    // UND die Grenze muss an der richtigen Stelle liegen. Die erste Fassung
+    // schrieb „ab ‚gestellt‘" und lag eine Stufe daneben — die Hybrid-Kante
+    // ist `isInvoiced`, und Entwurfs-Rechnungen zaehlen dort mit. Dieser Test
+    // war damals gruen, weil er nur auf „Rechnung" prueste.
+    //
+    // Die Regel: der Satz nennt KEINE Stufen-Beschriftung. Dann kann er nicht
+    // auf die falsche zeigen, und eine Umbenennung macht ihn nicht falsch.
+    for (const [stufe, label] of Object.entries(PIPELINE_STAGE_LABELS)) {
+      expect(
+        ZAEHLWEISE_UMSATZ_KACHEL.includes(label),
+        `nennt die Stufen-Beschriftung „${label}" (${stufe}) — an die Sache binden, nicht an den Namen`,
+      ).toBe(false);
+    }
   });
 });

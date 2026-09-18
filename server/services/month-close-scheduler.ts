@@ -11,6 +11,7 @@ import {
   DAILY_SCHEDULER_SLOTS,
   type DailySchedulerSlot,
   computeMonthCloseCutoff,
+  todayBerlinIso,
   daysUntilCutoff,
   isCutoffDay,
   previousMonth,
@@ -60,11 +61,6 @@ async function reminderAlreadySent(
     )
     .limit(1);
   return !!row;
-}
-
-function todayBerlinIso(): string {
-  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
-  return fmt.format(new Date());
 }
 
 function berlinHour(): number {
