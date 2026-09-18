@@ -33,13 +33,35 @@ import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
  * Tausch.
  */
 /**
- * Jahr/Monat als eigenes Fenster. `obenGeplantCents` und CB-3 messen ueber den
- * GESAMTEN Monat (der Pipeline-Reader kennt keinen Mitarbeiter-Filter), sind
- * also kontaminationsempfindlich.
+ * Jahr/Monat als eigenes Fenster — und zwar in der VERGANGENHEIT.
  *
- * Geprueft: `grep -rn "2051" tests/` findet nichts ausser diesem Fenster.
+ * ── Warum das die tragende Eigenschaft ist (Gate-2-Fund zu #152) ─────────
+ * Das Fenster lag zuerst in der ZUKUNFT (2051-03). Fuer die zwei Geld-Sichten
+ * war das gleichgueltig: sie nehmen einen Stichtag entgegen, CB-1/CB-2 setzen
+ * ihn selbst. Fuer die zwei ARBEITSLISTEN war es fatal — die haben keinen
+ * Stichtag-Parameter und lesen das implizite Heute. In einem Zukunftsmonat ist
+ * „nach dem Cutoff" damit NIE wahr, und CB-6/CB-7 konnten fuer den Regress,
+ * den sie im Namen tragen, gar nicht rot werden.
+ *
+ * Der Reviewer hat das nicht hergeleitet, sondern ausgefuehrt: eine Mutation,
+ * die den Termine-Reader dem Cutoff folgen laesst (ueber
+ * `computeMonthCloseCutoff(...) < todayBerlinIso()`, also OHNE den kanonischen
+ * Aufruf, den ZW-9 sucht), lief mit dem Zukunftsfenster **18/18 gruen**. Die
+ * Beschriftung „noch nicht Dokumentiertes bleibt auch nach dem Abschluss
+ * stehen" waere zur Falschaussage geworden, ohne dass ein Test es meldet.
+ *
+ * Mit einem Vergangenheitsfenster ist „heute" unvermeidlich nach dem Cutoff.
+ * Dieselbe Mutation laesst CB-6 dann fallen — vom Reviewer gegengeprueft.
+ *
+ * ── Warum 2017-03 ───────────────────────────────────────────────────────
+ * `obenGeplantCents` und CB-3 messen ueber den GESAMTEN Monat (der
+ * Pipeline-Reader kennt keinen Mitarbeiter-Filter), sind also
+ * kontaminationsempfindlich; in CI teilen sich die Dateien eines Shard-Legs
+ * eine DB. Geprueft: `grep -rn "2017-" tests/` findet nichts, und die einzige
+ * Erwaehnung von „2017" ueberhaupt ist eine EN16931-URN, kein Datum.
+ * 2021 waere NICHT frei gewesen (zwei Statistik-Dateien nutzen es).
  */
-const YEAR = 2051;
+const YEAR = 2017;
 const MONTH = 3;
 const MINUTEN = 60;
 

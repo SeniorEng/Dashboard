@@ -74,7 +74,7 @@ export type ZaehlweiseSicht =
  */
 export type SichtArt = "geld" | "arbeitsliste";
 
-export interface ZaehlweiseHinweis {
+export interface ZaehlweiseSatz {
   art: SichtArt;
   /** Was diese Ansicht zählt — Einheit und Basis. Ein Satz. */
   zaehlt: string;
@@ -108,7 +108,7 @@ const NACH_ABSCHLUSS: Record<SichtArt, string> = {
  * Hinweis" eine Typ-Aussage. Eine fünfte Ansicht, die dazukommt, fällt beim
  * Ergänzen des Typs auf — statt still ohne Beschriftung zu bleiben.
  */
-export const ZAEHLWEISE: Record<ZaehlweiseSicht, ZaehlweiseHinweis> = {
+export const ZAEHLWEISE: Record<ZaehlweiseSicht, ZaehlweiseSatz> = {
   /**
    * Umsatz-Kachel, obere Kaskade — NUR sie, nicht die Kosten-Tabelle darunter.
    *

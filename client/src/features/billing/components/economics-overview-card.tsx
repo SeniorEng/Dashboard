@@ -502,12 +502,6 @@ export function EconomicsOverviewCard({
               />
             </div>
 
-            {/* S-1 (Alrik, 18.09.2026): auch dieser Block sagt jetzt, was er
-                zaehlt. Er steht UNTER den KPI-Kacheln, weil er sie miterklaert
-                — die Ist/Potenzial-Spalten der Tabelle sind dieselbe Frage wie
-                die vier Zahlen darueber, nur aufgeschluesselt. */}
-            <ZaehlweiseHinweis sicht="kostenTabelle" />
-
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
               <button
                 type="button"
@@ -532,7 +526,23 @@ export function EconomicsOverviewCard({
             </div>
 
             {view === "leistung" ? (
-              <ServiceTable rows={economics.byService} laborCostCents={economics.totals.laborCostCents} />
+              <>
+                {/* S-1 (Alrik, 18.09.2026): der Hinweis steht HIER und nicht
+                    ueber dem Umschalter.
+                    Erste Fassung setzte ihn unter die KPI-Kacheln — er nennt
+                    aber „Ist" und „Potenzial", und diese Spaltenpaare gibt es
+                    nur in DIESER Tabelle. „Nach Mitarbeiter" hat sieben andere
+                    Spalten und kein Potenzial; dort haette der Satz jemanden
+                    eine Spalte suchen lassen, die es nicht gibt. Nach dem
+                    Massstab dieses Tickets — ein Hinweis, der fuer die Haelfte
+                    der Zeilen nicht stimmt, ist schlimmer als keiner — ist das
+                    derselbe Fehler, nur eine Achse weiter. (Gate-2-Fund S3.)
+                    Auch die Begruendung „er erklaert die KPI-Kacheln mit" trug
+                    nicht: die vier Kacheln sind reine Ist-Groessen, das
+                    Potenzial haelt der Reader ausdruecklich aus ihnen heraus. */}
+                <ZaehlweiseHinweis sicht="kostenTabelle" className="mb-2" />
+                <ServiceTable rows={economics.byService} laborCostCents={economics.totals.laborCostCents} />
+              </>
             ) : economics.byEmployee.length > 0 ? (
               <EmployeeTable
                 employees={economics.byEmployee}

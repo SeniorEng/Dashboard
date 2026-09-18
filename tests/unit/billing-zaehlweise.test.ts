@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   ZAEHLWEISE,
   type ZaehlweiseSicht,
-  type ZaehlweiseHinweis,
+  type ZaehlweiseSatz,
 } from "@shared/domain/billing-zaehlweise";
 import { PIPELINE_STAGE_LABELS } from "@shared/domain/billing-pipeline";
 
@@ -44,7 +44,7 @@ function lies(rel: string): string {
 }
 
 /** Beide Sätze einer Sicht — fast jede Prüfung gilt für beide. */
-function saetze(h: ZaehlweiseHinweis): string[] {
+function saetze(h: ZaehlweiseSatz): string[] {
   return [h.zaehlt, h.nachAbschluss];
 }
 
@@ -232,21 +232,55 @@ describe("Zählweise-Hinweise (Weg 3 + S-1)", () => {
     // Fällt dieser Test, ist nicht der Test kaputt: dann ist eine Beschriftung
     // zur Falschaussage geworden. Wer einen Reader umstellt, muss hier
     // vorbeikommen.
-    const reader: Record<ZaehlweiseSicht, string> = {
-      umsatzKaskade: "server/storage/billing/pipeline-reader.ts",
-      kostenTabelle: "server/storage/billing/economics-reader.ts",
-      termineListe: "server/storage/billing/termine-reader.ts",
-      rechnungenListe: "server/services/billing-customer-amounts.ts",
+    //
+    // ZWEI GRENZEN, ausdrücklich benannt statt verschwiegen:
+    //  - Es ist ein Textgrep über genannte Dateien, keine Aussage über den
+    //    Aufrufgraph. Wer den Cutoff auf anderem Weg nachbaut (etwa
+    //    `computeMonthCloseCutoff(...) < todayBerlinIso()`), kommt hier
+    //    vorbei. Genau diese Mutation ist im Gate-2-Review gefahren worden —
+    //    sie fällt seitdem über CB-6 in
+    //    `tests/billing/kachel-cutoff-beide-bloecke.test.ts`, weil dessen
+    //    Fixture-Fenster jetzt in der Vergangenheit liegt. Erst beide Hälften
+    //    zusammen tragen die Beschriftung.
+    //  - Die HTTP-Route-Schicht (`server/routes/billing.ts`) ist bewusst NICHT
+    //    in der Liste: sie bedient alle vier Sichten aus einer Datei, ein
+    //    Riegel darauf würde bei jeder unbeteiligten Änderung falsch
+    //    anschlagen. Heute reicht sie keinen Stichtag durch (geprüft).
+    // Eine Sicht wird von MEHREREN Dateien bestimmt. Die erste Fassung zeigte
+    // für `rechnungenListe` nur auf die Betrags-Berechnung — was einen Kunden
+    // überhaupt in die Liste bringt, entscheiden aber die Reifegrad-Prädikate
+    // und die Termin-Mengen. Ein Cutoff, der dort einzöge, hätte die Karte
+    // leerlaufen lassen, während der Hinweis „bleibt stehen" behauptet.
+    // (Gate-2-Fund S2 zu #152.)
+    const quellen: Record<ZaehlweiseSicht, string[]> = {
+      umsatzKaskade: ["server/storage/billing/pipeline-reader.ts"],
+      kostenTabelle: ["server/storage/billing/economics-reader.ts"],
+      termineListe: ["server/storage/billing/termine-reader.ts"],
+      rechnungenListe: [
+        "server/services/billing-customer-amounts.ts", // die Beträge
+        "server/services/invoice-data.ts",             // welche Termine hineinzählen
+        "shared/domain/billing-eligibility.ts",        // wer überhaupt in der Liste steht
+      ],
     };
+
     for (const sicht of SICHTEN) {
-      const fragtNachAbschluss = /\bistNachMonatsCutoff\s*\(/.test(lies(reader[sicht]));
       const sollte = ZAEHLWEISE[sicht].art === "geld";
-      expect(
-        fragtNachAbschluss,
-        sollte
-          ? `${sicht} ist als Geld-Sicht beschriftet, folgt dem Monatsabschluss aber nicht`
-          : `${sicht} ist als Arbeitsliste beschriftet, folgt dem Monatsabschluss aber doch — die Beschriftung wäre dann falsch`,
-      ).toBe(sollte);
+      for (const datei of quellen[sicht]) {
+        const fragtNachAbschluss = /\bistNachMonatsCutoff\s*\(/.test(lies(datei));
+        if (sollte) {
+          // Bei den Geld-Sichten genügt EINE Datei, die fragt — sie haben je
+          // nur eine. Wären es mehrere, müsste hier `some` stehen.
+          expect(
+            fragtNachAbschluss,
+            `${sicht} ist als Geld-Sicht beschriftet, aber ${datei} folgt dem Monatsabschluss nicht`,
+          ).toBe(true);
+        } else {
+          expect(
+            fragtNachAbschluss,
+            `${sicht} ist als Arbeitsliste beschriftet, aber ${datei} folgt dem Monatsabschluss — die Beschriftung wäre dann falsch`,
+          ).toBe(false);
+        }
+      }
     }
   });
 });
