@@ -39,6 +39,10 @@ const ADMIN_URL = process.env.DATABASE_URL;
 const suffix = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
 const TARGET_DB = `cc_test_schemadiff_target_${suffix}`;
 const PROD_DB = `cc_test_schemadiff_prod_${suffix}`;
+// Eine dritte DB: eine ECHTE Teilmenge des Ziels. Sie ersetzt den frueheren
+// Kunstgriff „Ziel gegen sich selbst diffen" — siehe die Begruendung am Fall
+// „meldet KEINE Drops, wenn das Ziel die Prod-Replica vollstaendig enthaelt".
+const SUBSET_DB = `cc_test_schemadiff_subset_${suffix}`;
 
 // Eine noch von einem Startup-Migrations-Pfad referenzierte Tabelle (Contract).
 const REFERENCED_TABLE = STARTUP_MIGRATION_REFERENCED_TABLES[0];
@@ -85,8 +89,10 @@ beforeAll(async () => {
     // CREATE DATABASE läuft nicht in einer Transaktion → Einzel-Statements.
     await admin.query(`DROP DATABASE IF EXISTS "${TARGET_DB}" WITH (FORCE)`);
     await admin.query(`DROP DATABASE IF EXISTS "${PROD_DB}" WITH (FORCE)`);
+    await admin.query(`DROP DATABASE IF EXISTS "${SUBSET_DB}" WITH (FORCE)`);
     await admin.query(`CREATE DATABASE "${TARGET_DB}"`);
     await admin.query(`CREATE DATABASE "${PROD_DB}"`);
+    await admin.query(`CREATE DATABASE "${SUBSET_DB}"`);
 
     // Ziel-Schema (= Dev/Drizzle): die Basis PLUS eine rein ADDITIVE Tabelle und
     // Spalte, die in der Prod-Replica NICHT existieren (Task #1367 (a)). Diese
@@ -103,6 +109,13 @@ beforeAll(async () => {
       `CREATE TABLE dropped_table (id integer PRIMARY KEY)`,
       `CREATE TABLE "${REFERENCED_TABLE}" (id integer PRIMARY KEY, hourly_rate_cents integer)`,
     ]);
+
+    // Echte Teilmenge des Ziels: jede Tabelle und jede Spalte hier existiert
+    // dort auch. Ein Diff dagegen MUSS leer sein — und zwar als Ergebnis eines
+    // echten Vergleichs zweier verschiedener Datenbanken.
+    await runSql(urlForDb(SUBSET_DB), [
+      `CREATE TABLE kept_table (id integer PRIMARY KEY, kept_col text)`,
+    ]);
     ready = true;
   } catch (e) {
     setupError = e;
@@ -118,6 +131,7 @@ afterAll(async () => {
     admin = await adminClient();
     await admin.query(`DROP DATABASE IF EXISTS "${TARGET_DB}" WITH (FORCE)`);
     await admin.query(`DROP DATABASE IF EXISTS "${PROD_DB}" WITH (FORCE)`);
+    await admin.query(`DROP DATABASE IF EXISTS "${SUBSET_DB}" WITH (FORCE)`);
   } catch {
     // Best-effort Cleanup; der Ephemeral-Sweep räumt cc_test_-DBs ohnehin auf.
   } finally {
@@ -229,15 +243,44 @@ describe("Task #1342 — detectDestructiveSchemaDiffAgainstProd (live, zwei DBs)
       return;
     }
 
-    // Ziel gegen sich selbst diffen → identisches Schema → keine Drops.
+    // FRUEHER stand hier „Ziel gegen sich selbst diffen" — derselbe
+    // Connection-String auf beiden Seiten. Das Ergebnis war garantiert leer,
+    // aber nicht, WEIL das Ziel die Replica enthaelt, sondern weil gar nichts
+    // verglichen wurde. Der Fall sagte damit nichts ueber die Zusage in seinem
+    // eigenen Namen aus — und er haette die Luecke gedeckt, die ID-1 jetzt
+    // schliesst (dieselbe DB auf beiden Seiten ⇒ `available:false`).
+    //
+    // Jetzt eine ECHTE Teilmenge: `SUBSET_DB` enthaelt nur Tabellen/Spalten,
+    // die es im Ziel auch gibt.
     const result = await detectDestructiveSchemaDiffAgainstProd({
       targetUrl: urlForDb(TARGET_DB),
-      prodUrl: urlForDb(TARGET_DB),
+      prodUrl: urlForDb(SUBSET_DB),
     });
 
     expect(result.available).toBe(true);
     expect(result.droppedTables).toEqual([]);
     expect(result.droppedColumns).toEqual([]);
     expect(result.contractViolations).toEqual([]);
+  });
+
+  it("6hWvMvpxpJFFjwQG: dieselbe DB auf beiden Seiten ist KEIN Ergebnis, sondern eine fehlende Messung", async (ctx) => {
+    if (!ready) return ctx.skip();
+
+    // Der praktisch haeufige Fehlgriff: die Dev-URL steht versehentlich auch in
+    // PROD_DATABASE_URL. Frueher kam „0 Drops" heraus — und „0 Drops" liest
+    // sich wie „nichts zu befuerchten". Dieselbe Klasse wie der uebersprungene
+    // Replica-Diff vom 17.09.2026, nur subtiler: die Pruefung laeuft, sie
+    // vergleicht bloss nichts.
+    const result = await detectDestructiveSchemaDiffAgainstProd({
+      targetUrl: urlForDb(TARGET_DB),
+      prodUrl: urlForDb(TARGET_DB),
+    });
+
+    expect(result.available, "dieselbe DB auf beiden Seiten gilt als Messung").toBe(false);
+    expect(result.reason).toMatch(/dieselbe Datenbank/);
+    // Die Identitaet gehoert in die Antwort — sonst kann der Operator nicht
+    // sehen, WAS da doppelt war. Der Connection-String bleibt draussen.
+    expect(result.identity?.prod.database).toBe(TARGET_DB);
+    expect(JSON.stringify(result)).not.toContain("password");
   });
 });

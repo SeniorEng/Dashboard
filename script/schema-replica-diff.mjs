@@ -132,8 +132,16 @@ export function parseAckList(raw) {
 }
 
 /**
- * Leitet die `pg`-SSL-Option aus dem Connection-String ab. Prod-Neon nutzt
- * `sslmode=require` ⇒ tolerantes SSL (Neon-Zertifikat, `rejectUnauthorized:false`).
+ * Leitet die `pg`-SSL-Option aus dem Connection-String ab.
+ *
+ * WICHTIG, gemessen (Gate-2-Notiz N5 zu #154): bei EXPLIZITEM `sslmode` im
+ * Connection-String erreicht dieser Rückgabewert den Socket gar nicht — `pg`
+ * baut seine Config als `Object.assign({}, config, parse(connectionString))`,
+ * der geparste Wert gewinnt also. Wirksam ist unsere Entscheidung nur dort, wo
+ * der String KEIN `sslmode` trägt; die Zweige mit `sslmode` beschreiben, was
+ * wir wollten, und stimmen mit dem überein, was `pg` daraus ohnehin macht.
+ * Der Rückgabewert ist trotzdem korrekt zu halten — er ist die Aussage dieses
+ * Moduls, und ein künftiger Aufrufer ausserhalb von `pg` läse sie.
  * Lokale/Proxy-DBs ohne TLS (`sslmode=disable`, z.B. die Wegwerf-Test-DBs auf
  * dem lokalen Postgres) DÜRFEN NICHT mit erzwungenem SSL verbunden werden —
  * `pg` bricht sonst gegen einen Server ohne SSL hart ab. Damit ist der echte
@@ -141,7 +149,25 @@ export function parseAckList(raw) {
  */
 export function resolveSchemaSnapshotSsl(connectionString) {
   try {
-    if (new URL(connectionString).searchParams.get("sslmode") === "disable") {
+    const url = new URL(connectionString);
+    const modus = url.searchParams.get("sslmode");
+    if (modus === "disable") return false;
+    // Ausdrücklich verlangtes SSL schlägt die Host-Regel darunter.
+    if (modus) return { rejectUnauthorized: false };
+
+    // OHNE `sslmode` entscheidet der Host. Das ERSETZT „ohne Parameter immer
+    // SSL" — eine Regel, an der die Zusage im Absatz darüber („damit ist der
+    // echte DB-Fetch-Pfad integration-testbar") seit jeher scheiterte:
+    // `.env.test.local` und der CI-`postgres:16` tragen keinen `sslmode`, also
+    // wurde SSL erzwungen, der Server kann keins, und
+    // `tests/startup/schema-replica-diff-live.test.ts` brach im `beforeAll` ab
+    // und ÜBERSPRANG sich still — gemessen am 18.09.2026: 5 von 5 Fällen
+    // skipped, ohne eine einzige rote Zeile.
+    //
+    // Eine Loopback-Verbindung zu einem Wegwerf-Container braucht kein TLS.
+    // Jeder andere Host bekommt es weiterhin, auch ohne Parameter — Prod-Neon
+    // verhält sich damit unverändert.
+    if (["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)) {
       return false;
     }
   } catch {
@@ -151,27 +177,107 @@ export function resolveSchemaSnapshotSsl(connectionString) {
 }
 
 /**
- * Liest das öffentliche Schema (Tabellen + Spalten) aus einer Postgres-DB.
+ * Host einer Verbindung — OHNE Benutzer, Passwort, Port, Pfad.
+ *
+ * Die `DATABASE_URL` wird nie ausgegeben (CLAUDE.md). Der Hostname allein ist
+ * kein Geheimnis und ist die einzige Hälfte der Identität, die vor dem
+ * Verbinden feststeht; die andere (`current_database()`) kommt aus der OFFENEN
+ * Verbindung — dieselbe Quelle, gegen die das Prod-Schreib-Gate vergleicht.
+ *
+ * ── `hostname`, NICHT `host` (Gate-2-Fund S1 zu #154) ────────────────────
+ * Die erste Fassung nahm `.host`. Das hatte zwei Fehler auf einmal, beide
+ * gemessen:
+ *
+ *  1. **Es konnte das Passwort auf den Schirm bringen.** `.host` trägt den
+ *     Port mit, und bei unkodiertem `#` in der userinfo wandert ein Stück des
+ *     Passworts genau dorthin:
+ *     `new URL("postgres://user:12345#x@prod.example.com/db").host === "user:12345"`.
+ *     Die Checkliste hätte „Verglichen wurde … user:12345/neondb" gedruckt.
+ *  2. **Es schwächte den Identitätsriegel.** Mit Port verglichen gilt
+ *     `host:5432` als verschieden von `host` — zwei Schreibweisen derselben
+ *     Datenbank wären als echter Vergleich durchgegangen, und der leere Diff
+ *     hätte wieder „keine Drops" geheißen. Das ist die unsichere Richtung.
+ *
+ * Beides verschwindet mit `hostname`. Der Port geht dabei absichtlich
+ * verloren: er unterscheidet keine zwei Datenbanken, die wir auseinanderhalten
+ * müssten, und er ist die Stelle, an der das Passwort landen kann.
+ *
+ * ── Warum das nicht die vorhandene SSoT benutzt ──────────────────────────
+ * `shared/ephemeral-db-target.ts` hält mit `dbHostOf`/`istLoopback` die
+ * gründlichere Fassung (Parser-Uneinigkeits-Riegel, alle Loopback-
+ * Schreibweisen). **Sie ist von hier aus nicht importierbar:** diese Datei ist
+ * `.mjs` und läuft im Release-Pfad unter blankem `node`, ohne
+ * TypeScript-Transformation. Das ist der Grund, und er steht hier, damit die
+ * Doppelung nicht wie Nachlässigkeit aussieht. Ein Paritäts-Wächter fehlt —
+ * als FINDING vermerkt.
+ */
+export function connectionHost(connectionString) {
+  try {
+    return new URL(connectionString).hostname.toLowerCase() || "(kein Host)";
+  } catch {
+    return "(unlesbarer Connection-String)";
+  }
+}
+
+/**
+ * Zeigen zwei Verbindungen auf dieselbe Datenbank?
+ *
+ * ── Warum das hier steht ─────────────────────────────────────────────────
+ * Der Detektor vergleicht ZWEI Schnappschüsse. Sind beide Connection-Strings
+ * dieselbe Datenbank — etwa weil die Dev-URL versehentlich auch als
+ * `PROD_DATABASE_URL` gesetzt wurde —, ist der Diff per Konstruktion leer, und
+ * „0 Drops" liest sich wie „nichts zu befürchten". **Das ist dieselbe Klasse
+ * wie der übersprungene Replica-Diff vom 17.09.2026**: eine Prüfung, die gar
+ * nichts verglichen hat, wird als bestanden ausgewiesen. Der Unterschied ist
+ * nur, dass sie diesmal sogar läuft.
+ *
+ * ── Was diese Prüfung NICHT fängt ────────────────────────────────────────
+ * Zwei VERSCHIEDENE Hostnamen auf dieselbe Datenbank (Neon-Pooler-Endpunkt vs.
+ * Direktverbindung, CNAME, Proxy) sehen hier verschieden aus und kommen durch.
+ * Das ist bewusst offen gelassen: eine belastbare Cluster-Identität
+ * (`system_identifier`) ist auf verwalteten Endpunkten nicht zuverlässig
+ * lesbar, und ein Riegel, der falsch anschlägt, würde den Publish blockieren.
+ * Gefangen wird der praktisch häufige Fall — zweimal derselbe String.
+ */
+export function isSameDatabase(a, b) {
+  return a.host === b.host && a.database === b.database;
+}
+
+/**
+ * Liest das öffentliche Schema (Tabellen + Spalten) UND die Identität der
+ * offenen Verbindung. Zwei Abfragen, mehr nicht — deshalb läuft dieses Modul
+ * auch gegen einen entfernten Prod-Endpunkt, an dem `drizzle-kit push` mit
+ * seiner 69-fachen Katalog-Auffächerung scheitert (Ticket 6hWvrJgff5xr9hfp).
+ *
  * SSL wird aus dem Connection-String abgeleitet (siehe `resolveSchemaSnapshotSsl`).
  */
-export async function fetchSchemaSnapshot(connectionString) {
+export async function fetchSchemaSnapshotWithIdentity(connectionString) {
   const client = new pg.Client({
     connectionString,
     ssl: resolveSchemaSnapshotSsl(connectionString),
   });
   await client.connect();
   try {
-    const { rows } = await client.query(
-      `SELECT table_name, column_name
-         FROM information_schema.columns
-        WHERE table_schema = 'public'
-        ORDER BY table_name, column_name`,
-    );
+    const [identityRes, columnsRes] = await Promise.all([
+      client.query("SELECT current_database() AS db"),
+      client.query(
+        `SELECT table_name, column_name
+           FROM information_schema.columns
+          WHERE table_schema = 'public'
+          ORDER BY table_name, column_name`,
+      ),
+    ]);
     const snapshot = {};
-    for (const row of rows) {
+    for (const row of columnsRes.rows) {
       (snapshot[row.table_name] ??= []).push(row.column_name);
     }
-    return snapshot;
+    return {
+      snapshot,
+      identity: {
+        host: connectionHost(connectionString),
+        database: String(identityRes.rows[0]?.db ?? "(unbekannt)"),
+      },
+    };
   } finally {
     await client.end();
   }
@@ -196,11 +302,26 @@ export async function detectDestructiveSchemaDiffAgainstProd({
   if (!targetUrl) {
     return { available: false, reason: "DATABASE_URL nicht gesetzt" };
   }
-  const [targetSnapshot, prodSnapshot] = await Promise.all([
-    fetchSchemaSnapshot(targetUrl),
-    fetchSchemaSnapshot(prodUrl),
+  const [target, prod] = await Promise.all([
+    fetchSchemaSnapshotWithIdentity(targetUrl),
+    fetchSchemaSnapshotWithIdentity(prodUrl),
   ]);
-  const diff = computeDestructiveSchemaDiff(targetSnapshot, prodSnapshot);
+
+  // Fail-closed VOR dem Diff: zeigen beide Verbindungen auf dieselbe Datenbank,
+  // ist das Ergebnis per Konstruktion leer und sagt nichts. `available:false`
+  // statt „0 Drops" — der Aufrufer behandelt es dann wie jede andere nicht
+  // durchgeführte Messung, und die Checkliste wird rot statt grün.
+  if (isSameDatabase(target.identity, prod.identity)) {
+    return {
+      available: false,
+      reason:
+        `Ziel und Prod sind dieselbe Datenbank (${prod.identity.host}/${prod.identity.database}) — `
+        + "es wurde nichts verglichen. Vermutlich steht in PROD_DATABASE_URL die Dev-URL.",
+      identity: { target: target.identity, prod: prod.identity },
+    };
+  }
+
+  const diff = computeDestructiveSchemaDiff(target.snapshot, prod.snapshot);
   const drops = flattenDestructiveDiff(diff);
   const contractViolations = checkExpandMigrateContract(drops);
   return {
@@ -208,5 +329,7 @@ export async function detectDestructiveSchemaDiffAgainstProd({
     ...diff,
     drops,
     contractViolations,
+    /** Was tatsächlich verglichen wurde — ohne Connection-String. */
+    identity: { target: target.identity, prod: prod.identity },
   };
 }

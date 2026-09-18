@@ -57,6 +57,36 @@ const hasDestructive = migrationDrops.length > 0 || replicaDrops.length > 0;
 // siehe CLAUDE.md). Ohne Replica-Diff ist also nicht „die Hälfte" der Evidenz
 // da, sondern keine. Deshalb nennt die Beschriftung jetzt die Quelle, die
 // tatsächlich gelaufen ist, statt beide aufzuzählen.
+// Was verglichen wurde, gehört auf den Schirm — nicht nur DASS verglichen wurde.
+// Host + `current_database()` aus der OFFENEN Verbindung, nie der
+// Connection-String (CLAUDE.md). Ohne diese Zeile ist „gemessen" eine
+// Behauptung, die der Operator nicht nachprüfen kann; mit ihr sieht er sofort,
+// wenn die Prod-Seite gar nicht Prod ist.
+if (replica.identity) {
+  record(
+    "Verglichen wurde",
+    replica.available ? "ok" : "fail",
+    `Ziel ${replica.identity.target.host}/${replica.identity.target.database}`
+      + ` gegen Prod ${replica.identity.prod.host}/${replica.identity.prod.database}`,
+  );
+} else {
+  // Alriks zweite Bedingung für den ersten Prod-Lauf (18.09.2026), wörtlich:
+  // „ein grünes Ergebnis ohne sichtbaren Vergleich gilt nicht als bestanden,
+  // sondern als ungeklärt."
+  //
+  // Ohne Identität wurde keine Verbindung geöffnet — dann gibt es nichts zu
+  // beurteilen. Der Riegel steht hier BEWUSST eigenständig und nicht als
+  // Folge der anderen Zweige: er hält auch dann, wenn jemand später einen
+  // dieser Zweige umbaut. Heute überlappt er mit dem „nicht gemessen"-Fall
+  // unten; das ist Absicht, nicht Redundanz aus Versehen.
+  record(
+    "Verglichen wurde — NICHTS",
+    "fail",
+    "Es liegt keine Verbindungs-Identität vor, es wurde also keine Prod-Verbindung "
+      + "geöffnet. Ein Ergebnis ohne sichtbaren Vergleich ist ungeklärt, nicht bestanden.",
+  );
+}
+
 if (!hasDestructive && replica.available) {
   record(
     "Keine destruktiven Schema-Änderungen erkannt (Migration-Grep + Prod-Replica-Diff)",

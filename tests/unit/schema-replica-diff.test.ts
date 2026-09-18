@@ -18,6 +18,9 @@ import {
   partitionAcknowledgedDrops,
   parseAckList,
   STARTUP_MIGRATION_REFERENCED_TABLES,
+  isSameDatabase,
+  connectionHost,
+  resolveSchemaSnapshotSsl,
 } from "../../script/schema-replica-diff.mjs";
 
 describe("Task #1339 — computeDestructiveSchemaDiff", () => {
@@ -116,5 +119,141 @@ describe("Task #1339 — Per-DROP-Bestätigung", () => {
     ]);
     expect(acknowledged).toEqual([{ table: "service_rates" }]);
     expect(unacknowledged).toEqual([{ table: "prices", column: "legacy_amount" }]);
+  });
+});
+
+/**
+ * Der Diff vergleicht ZWEI Schnappschüsse. Sind beide Verbindungen dieselbe
+ * Datenbank — etwa weil die Dev-URL versehentlich auch in `PROD_DATABASE_URL`
+ * steht —, ist das Ergebnis per Konstruktion leer, und „0 Drops" liest sich wie
+ * „nichts zu befürchten".
+ *
+ * **Das ist dieselbe Klasse wie der übersprungene Replica-Diff vom 17.09.2026**
+ * (`preflight-publish-fail-closed.test.ts`), nur eine Stufe subtiler: die
+ * Prüfung läuft diesmal sogar, sie vergleicht nur nichts.
+ */
+describe("Identität der zwei Verbindungen (6hWvMvpxpJFFjwQG)", () => {
+  it("ID-1 – gleicher Host UND gleiche Datenbank heisst: es wurde nichts verglichen", () => {
+    expect(
+      isSameDatabase(
+        { host: "ep-x.eu-central-1.aws.neon.tech", database: "neondb" },
+        { host: "ep-x.eu-central-1.aws.neon.tech", database: "neondb" },
+      ),
+    ).toBe(true);
+  });
+
+  it("ID-2 – gleicher Datenbank-NAME auf verschiedenen Hosts ist der Normalfall", () => {
+    // Dev und Prod heissen bei Neon beide `neondb`. Ein Riegel auf den Namen
+    // allein würde jeden echten Vergleich blockieren.
+    expect(
+      isSameDatabase(
+        { host: "ep-dev.eu-central-1.aws.neon.tech", database: "neondb" },
+        { host: "ep-prod.eu-central-1.aws.neon.tech", database: "neondb" },
+      ),
+    ).toBe(false);
+  });
+
+  it("ID-3 – gleicher Host, verschiedene Datenbanken ist ebenfalls ein echter Vergleich", () => {
+    expect(
+      isSameDatabase(
+        { host: "db.example.com:5432", database: "careconnect_dev" },
+        { host: "db.example.com:5432", database: "careconnect" },
+      ),
+    ).toBe(false);
+  });
+
+  it("ID-4 – der Host kommt ohne Benutzer, Passwort und PORT heraus", () => {
+    // Die Identität wird GEMELDET (CLAUDE.md: Host + current_database()), der
+    // Connection-String nie. Ein Host-Helfer, der das Passwort mitführt, würde
+    // es genau dorthin tragen, wo es nicht hingehört.
+    const host = connectionHost("postgres://nutzer:GEHEIM@db.example.com:5432/neondb?sslmode=require");
+    expect(host).toBe("db.example.com");
+    expect(host).not.toContain("GEHEIM");
+    expect(host).not.toContain("nutzer");
+    expect(host, "der Port gehört nicht in die Identität — siehe ID-6 und ID-7")
+      .not.toContain("5432");
+  });
+
+  it("ID-6 – ein unkodiertes `#` im Passwort darf NICHTS davon auf den Schirm bringen", () => {
+    // Gate-2-Fund S1 zu #154, gemessen: bei unkodierter userinfo wandert ein
+    // Stück des Passworts in das Host-Feld.
+    //
+    //   new URL("postgres://user:12345#x@prod.example.com/db").host === "user:12345"
+    //
+    // Die Checkliste hätte „Verglichen wurde … user:12345/neondb" gedruckt.
+    // Die erste Fassung dieses Tests konnte den Fall nicht sehen, weil sie den
+    // Port als Teil des Hosts FESTSCHRIEB — die Gegenprobe mit `.host` blieb
+    // deshalb grün. Jetzt fällt sie.
+    const host = connectionHost("postgres://user:12345#x@prod.example.com/db");
+    expect(host, "Passwort-Fragment in der Host-Angabe").not.toContain("12345");
+  });
+
+  it("ID-7 – zwei Schreibweisen desselben Ziels gelten NICHT als verschieden", () => {
+    // Die zweite Hälfte desselben Fundes, und die gefährlichere: mit Port
+    // verglichen wäre `host:5432` verschieden von `host`. Der Identitätsriegel
+    // hätte zwei Schreibweisen derselben Datenbank als echten Vergleich
+    // durchgehen lassen — leerer Diff, „keine Drops". Das ist die unsichere
+    // Richtung, anders als die im Code benannte Pooler-Lücke.
+    const mitPort = connectionHost("postgres://u:p@db.example.com:5432/neondb");
+    const ohnePort = connectionHost("postgres://u:p@db.example.com/neondb");
+    expect(mitPort).toBe(ohnePort);
+    expect(
+      isSameDatabase({ host: mitPort, database: "neondb" }, { host: ohnePort, database: "neondb" }),
+      "dieselbe DB, zwei Schreibweisen — als verschieden gewertet",
+    ).toBe(true);
+  });
+
+  it("ID-5 – ein unlesbarer Connection-String wird benannt, nicht verschluckt", () => {
+    expect(connectionHost("das ist keine url")).toMatch(/unlesbar/);
+  });
+});
+
+/**
+ * Die SSL-Entscheidung — und warum sie einen eigenen Waechter bekommt.
+ *
+ * Der Docblock der Funktion sagt seit jeher, sie mache „den echten
+ * DB-Fetch-Pfad integration-testbar". Tatsaechlich sah sie nur nach
+ * `sslmode=disable`, und weder `.env.test.local` noch der CI-`postgres:16`
+ * tragen diesen Parameter. Ergebnis: erzwungenes SSL gegen einen Server ohne
+ * SSL, `beforeAll` warf, und
+ * `tests/startup/schema-replica-diff-live.test.ts` uebersprang sich still —
+ * **5 von 5 Faellen skipped, ohne eine einzige rote Zeile** (gemessen
+ * 18.09.2026). Der einzige Test des echten DB-Lesepfads des
+ * Publish-Drop-Detektors lief also nie.
+ *
+ * Ein uebersprungener Test ist kein gruener Test. Diese Faelle halten die
+ * Bedingung fest, unter der er ueberhaupt laufen kann.
+ */
+describe("SSL-Entscheidung (schema-replica-diff)", () => {
+  it("SSL-1 – Prod-Neon mit sslmode=require bekommt tolerantes SSL", () => {
+    expect(
+      resolveSchemaSnapshotSsl("postgres://u:p@ep-prod.eu-central-1.aws.neon.tech/neondb?sslmode=require"),
+    ).toEqual({ rejectUnauthorized: false });
+  });
+
+  it("SSL-2 – ein entfernter Host OHNE sslmode bekommt weiterhin SSL", () => {
+    // Die konservative Seite bleibt unveraendert: nur der Loopback-Fall aendert
+    // sich. Faellt das hier, waere die Prod-Verbindung schwaecher geworden.
+    expect(
+      resolveSchemaSnapshotSsl("postgres://u:p@ep-prod.eu-central-1.aws.neon.tech/neondb"),
+    ).toEqual({ rejectUnauthorized: false });
+  });
+
+  it("SSL-3 – localhost ohne sslmode bekommt KEIN SSL (sonst skippt der Live-Test)", () => {
+    expect(resolveSchemaSnapshotSsl("postgres://postgres:postgres@localhost:5432/cc_test_x")).toBe(false);
+    expect(resolveSchemaSnapshotSsl("postgres://postgres:postgres@127.0.0.1:5432/cc_test_x")).toBe(false);
+  });
+
+  it("SSL-4 – ausdrueckliches sslmode schlaegt die Host-Regel", () => {
+    // Wer auf dem Loopback ausdruecklich TLS verlangt, bekommt es; wer
+    // ausdruecklich keins will, bekommt keins — auch entfernt.
+    expect(
+      resolveSchemaSnapshotSsl("postgres://u:p@localhost:5432/db?sslmode=require"),
+    ).toEqual({ rejectUnauthorized: false });
+    expect(resolveSchemaSnapshotSsl("postgres://u:p@ferner.example.com:5432/db?sslmode=disable")).toBe(false);
+  });
+
+  it("SSL-5 – ein unlesbarer String bleibt auf der sicheren Seite", () => {
+    expect(resolveSchemaSnapshotSsl("kein connection string")).toEqual({ rejectUnauthorized: false });
   });
 });
