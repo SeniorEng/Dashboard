@@ -52,6 +52,18 @@ Code (`scripts/release-verify.ts`, 6hHqw8c7).
   nicht freigegebenen `DROP COLUMN`/`DROP TABLE` ab — ebenso bei `SET NOT NULL`,
   `UNIQUE`, `CHECK` und verengenden Typänderungen, die den im Deploy-Fenster noch
   bedienenden alten Code genauso brechen.
+- **ABER: auf dem Replit-Pfad ist 0d kein Riegel, sondern eine Nachkontrolle.**
+  `migrate.sh` läuft dort im **Build** — Replits eigene Schema-Phase läuft
+  **davor** („Development database changes detected" → „Generated migrations to
+  apply to production", belegt im Deploy-Log vom 17.09.2026). Sie introspiziert
+  Dev- und Prod-DB direkt und warnt bei Destruktivem nur, statt zu blockieren
+  (Replit-Doku + Migrations-Blogpost, gelesen 18.09.2026); ein Abschalten ist
+  nicht dokumentiert. 0d kann also nur noch feststellen, was schon angewendet
+  ist. **Vollständig gilt die Zusage nur auf dem Coolify-Pfad**, wo `migrate.sh`
+  als Pre-Deployment-Command tatsächlich vor der Schema-Änderung läuft.
+  Tickets: `6hWvMvpxpJFFjwQG` (Reihenfolge) und `6hWvrJgff5xr9hfp` (0d kommt
+  gegen Prod gar nicht durch — dort steht auch, dass die `.replit`-Build-Zeile
+  deshalb derzeit ohne `migrate.sh` läuft).
 - **Freigabe über `docs/schema-change-manifest.json`, an den `schemaHash` gebunden.**
   ERSETZT `PUBLISH_ACK_DROPS` auf dem Deploy-Pfad: eine Plattform-Env bliebe
   gesetzt und genehmigte still jeden weiteren Deploy. Der Manifest-Eintrag trägt
