@@ -50,7 +50,9 @@ import {
   type PipelineAtomicUnit,
   type AgingBucket,
 } from "@shared/domain/billing-pipeline";
+import { deriveAppointmentDisplayStatus } from "@shared/domain/appointments";
 import type { AppointmentStatus } from "@shared/domain/appointments";
+import { istNachMonatsCutoff } from "@shared/utils/month-close-cutoff";
 import type {
   BillingPipelineResponse,
   BillingPipelineCard,
@@ -151,8 +153,29 @@ export async function readBillingPipeline(
     JOIN customers c ON c.id = ar.customer_id
   `);
 
+  // WEG A (Alrik, 18.09.2026): nach dem Cutoff des Monats zaehlt ein geplanter
+  // Termin nicht mehr zum erwarteten Kontoeingang.
+  //
+  // Der untere Block der Kachel folgt dieser Regel seit Weg B. Folgte der obere
+  // ihr nicht, saegte EINE Karte zwei Dinge ueber dasselbe Geld — genau das
+  // Problem, gegen das dieses Ticket angetreten ist, nur nach innen gewendet.
+  //
+  // Umgesetzt ueber `deriveAppointmentDisplayStatus`, NICHT ueber einen eigenen
+  // Filter: die Funktion beantwortet genau diese Frage („was zeigt ein Termin
+  // nach dem Monatsabschluss?") und war bisher ohne Aufrufer ausserhalb von
+  // Tests. Ein zweiter Weg daneben waere ein Zweitbegriff gewesen.
+  //
+  // Der Termin verschwindet dadurch NICHT, sein Geld wandert: `expired_unsigned`
+  // ist ein Seitenzustand („Nicht abgerechnet"), der nicht zum erwarteten Umsatz
+  // zaehlt und im Verlust-Block steht. Die Schlagzeile sinkt, der Betrag bleibt
+  // sichtbar — er ist ja nicht weg, er kommt nur nicht mehr.
+  const nachCutoff = istNachMonatsCutoff(asOfDate, billingYear, billingMonth);
+
   for (const raw of apptRows.rows as Record<string, unknown>[]) {
-    const status = String(raw.status) as AppointmentStatus;
+    const status = deriveAppointmentDisplayStatus(
+      String(raw.status) as AppointmentStatus,
+      { isMonthClosed: nachCutoff },
+    );
     const cents = num(raw.revenue_cents);
     const customerId = num(raw.customer_id);
     const customerName = String(raw.customer_name ?? "");
