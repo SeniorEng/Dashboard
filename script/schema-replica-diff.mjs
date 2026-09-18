@@ -132,8 +132,16 @@ export function parseAckList(raw) {
 }
 
 /**
- * Leitet die `pg`-SSL-Option aus dem Connection-String ab. Prod-Neon nutzt
- * `sslmode=require` ⇒ tolerantes SSL (Neon-Zertifikat, `rejectUnauthorized:false`).
+ * Leitet die `pg`-SSL-Option aus dem Connection-String ab.
+ *
+ * WICHTIG, gemessen (Gate-2-Notiz N5 zu #154): bei EXPLIZITEM `sslmode` im
+ * Connection-String erreicht dieser Rückgabewert den Socket gar nicht — `pg`
+ * baut seine Config als `Object.assign({}, config, parse(connectionString))`,
+ * der geparste Wert gewinnt also. Wirksam ist unsere Entscheidung nur dort, wo
+ * der String KEIN `sslmode` trägt; die Zweige mit `sslmode` beschreiben, was
+ * wir wollten, und stimmen mit dem überein, was `pg` daraus ohnehin macht.
+ * Der Rückgabewert ist trotzdem korrekt zu halten — er ist die Aussage dieses
+ * Moduls, und ein künftiger Aufrufer ausserhalb von `pg` läse sie.
  * Lokale/Proxy-DBs ohne TLS (`sslmode=disable`, z.B. die Wegwerf-Test-DBs auf
  * dem lokalen Postgres) DÜRFEN NICHT mit erzwungenem SSL verbunden werden —
  * `pg` bricht sonst gegen einen Server ohne SSL hart ab. Damit ist der echte
@@ -169,16 +177,43 @@ export function resolveSchemaSnapshotSsl(connectionString) {
 }
 
 /**
- * Host einer Verbindung — OHNE Benutzer, Passwort, Pfad.
+ * Host einer Verbindung — OHNE Benutzer, Passwort, Port, Pfad.
  *
- * Die `DATABASE_URL` wird nie ausgegeben (CLAUDE.md). Der Host allein ist kein
- * Geheimnis und ist die einzige Hälfte der Identität, die vor dem Verbinden
- * feststeht; die andere (`current_database()`) kommt aus der OFFENEN
+ * Die `DATABASE_URL` wird nie ausgegeben (CLAUDE.md). Der Hostname allein ist
+ * kein Geheimnis und ist die einzige Hälfte der Identität, die vor dem
+ * Verbinden feststeht; die andere (`current_database()`) kommt aus der OFFENEN
  * Verbindung — dieselbe Quelle, gegen die das Prod-Schreib-Gate vergleicht.
+ *
+ * ── `hostname`, NICHT `host` (Gate-2-Fund S1 zu #154) ────────────────────
+ * Die erste Fassung nahm `.host`. Das hatte zwei Fehler auf einmal, beide
+ * gemessen:
+ *
+ *  1. **Es konnte das Passwort auf den Schirm bringen.** `.host` trägt den
+ *     Port mit, und bei unkodiertem `#` in der userinfo wandert ein Stück des
+ *     Passworts genau dorthin:
+ *     `new URL("postgres://user:12345#x@prod.example.com/db").host === "user:12345"`.
+ *     Die Checkliste hätte „Verglichen wurde … user:12345/neondb" gedruckt.
+ *  2. **Es schwächte den Identitätsriegel.** Mit Port verglichen gilt
+ *     `host:5432` als verschieden von `host` — zwei Schreibweisen derselben
+ *     Datenbank wären als echter Vergleich durchgegangen, und der leere Diff
+ *     hätte wieder „keine Drops" geheißen. Das ist die unsichere Richtung.
+ *
+ * Beides verschwindet mit `hostname`. Der Port geht dabei absichtlich
+ * verloren: er unterscheidet keine zwei Datenbanken, die wir auseinanderhalten
+ * müssten, und er ist die Stelle, an der das Passwort landen kann.
+ *
+ * ── Warum das nicht die vorhandene SSoT benutzt ──────────────────────────
+ * `shared/ephemeral-db-target.ts` hält mit `dbHostOf`/`istLoopback` die
+ * gründlichere Fassung (Parser-Uneinigkeits-Riegel, alle Loopback-
+ * Schreibweisen). **Sie ist von hier aus nicht importierbar:** diese Datei ist
+ * `.mjs` und läuft im Release-Pfad unter blankem `node`, ohne
+ * TypeScript-Transformation. Das ist der Grund, und er steht hier, damit die
+ * Doppelung nicht wie Nachlässigkeit aussieht. Ein Paritäts-Wächter fehlt —
+ * als FINDING vermerkt.
  */
 export function connectionHost(connectionString) {
   try {
-    return new URL(connectionString).host || "(kein Host)";
+    return new URL(connectionString).hostname.toLowerCase() || "(kein Host)";
   } catch {
     return "(unlesbarer Connection-String)";
   }
@@ -246,16 +281,6 @@ export async function fetchSchemaSnapshotWithIdentity(connectionString) {
   } finally {
     await client.end();
   }
-}
-
-/**
- * Nur das Schema — für Aufrufer, die die Identität nicht brauchen.
- * Dünne Hülle um `fetchSchemaSnapshotWithIdentity`, damit es EINE Abfrage-
- * Stelle bleibt.
- */
-export async function fetchSchemaSnapshot(connectionString) {
-  const { snapshot } = await fetchSchemaSnapshotWithIdentity(connectionString);
-  return snapshot;
 }
 
 /**

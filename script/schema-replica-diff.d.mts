@@ -54,12 +54,42 @@ export function resolveSchemaSnapshotSsl(
   connectionString: string,
 ): false | { rejectUnauthorized: boolean };
 
-export function fetchSchemaSnapshot(connectionString: string): Promise<SchemaSnapshot>;
+/**
+ * Identität einer offenen Verbindung: Hostname (ohne Port, Benutzer, Passwort)
+ * + `current_database()`. Die einzige Form, in der eine Verbindung genannt
+ * werden darf — der Connection-String wird nie ausgegeben.
+ */
+export interface VerbindungsIdentitaet {
+  host: string;
+  database: string;
+}
+
+export function connectionHost(connectionString: string): string;
+
+export function isSameDatabase(
+  a: VerbindungsIdentitaet,
+  b: VerbindungsIdentitaet,
+): boolean;
+
+export function fetchSchemaSnapshotWithIdentity(connectionString: string): Promise<{
+  snapshot: SchemaSnapshot;
+  identity: VerbindungsIdentitaet;
+}>;
 
 export function detectDestructiveSchemaDiffAgainstProd(options?: {
   targetUrl?: string;
   prodUrl?: string;
 }): Promise<
-  | { available: false; reason: string }
-  | { available: true; drops: Drop[]; diff: DestructiveSchemaDiff }
+  /**
+   * `identity` fehlt nur, wenn gar keine Verbindung geöffnet wurde (fehlende
+   * URL, Verbindungsfehler). Steht sie da, ist sie belastbar — auch im
+   * `available:false`-Fall „beide Seiten sind dieselbe Datenbank".
+   */
+  | { available: false; reason: string; identity?: { target: VerbindungsIdentitaet; prod: VerbindungsIdentitaet } }
+  | {
+      available: true;
+      drops: Drop[];
+      diff: DestructiveSchemaDiff;
+      identity: { target: VerbindungsIdentitaet; prod: VerbindungsIdentitaet };
+    }
 >;

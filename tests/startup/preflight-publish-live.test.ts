@@ -123,11 +123,19 @@ afterAll(async () => {
 });
 
 describe("Publish-Checkliste, grüner Pfad gegen zwei echte DBs (6hWvMvpxpJFFjwQG)", () => {
-  it("PL-0 – die Fixture steht (sonst misst diese Datei nichts)", async (ctx) => {
+  it("PL-0 – die Fixture steht (sonst misst diese Datei nichts)", () => {
     // Ohne diese Zusage könnten alle folgenden Fälle aus dem falschen Grund
-    // grün sein. Der Live-Replica-Test hat genau so ein Jahr lang still
-    // übersprungen.
-    if (!ADMIN_URL) return ctx.skip();
+    // grün sein — und genau so hat `schema-replica-diff-live.test.ts` 5 von 5
+    // Fällen still übersprungen, bis dieser PR die Ursache fand.
+    //
+    // Deshalb hier bewusst KEIN `ctx.skip()` auf fehlende `DATABASE_URL`:
+    // Dateien unter `tests/startup/**` laufen ausschliesslich unter dem
+    // Orchestrator bzw. in CI, und dort ist sie gesetzt (nachgemessen). Fehlt
+    // sie, ist das ein Umgebungsfehler, den jemand sehen soll — nicht ein
+    // Grund, die Datei stumm durchzuwinken. Das ist der ganze Punkt dieses PRs,
+    // auf die eigene Testdatei angewandt.
+    expect(ADMIN_URL, "DATABASE_URL ist nicht gesetzt — diese Datei misst dann nichts")
+      .toBeTruthy();
     expect(ready, "zwei Wegwerf-DBs liessen sich nicht anlegen").toBe(true);
   });
 
@@ -140,6 +148,12 @@ describe("Publish-Checkliste, grüner Pfad gegen zwei echte DBs (6hWvMvpxpJFFjwQ
     });
 
     // Der Lauf muss durchgehen — sonst prüft der Rest den falschen Zweig.
+    //
+    // ABHÄNGIGKEIT AUSSERHALB DES GEGENSTANDS (Gate-2-Notiz N2): die Checkliste
+    // grept zusätzlich die jüngste Datei in `migrations/`. Enthielte die
+    // künftig ein `DROP COLUMN`/`DROP TABLE`, würde dieser Fall aus einem
+    // fremden Grund rot. Die Meldung unten nennt deshalb die volle Ausgabe,
+    // damit man das in zwei Sekunden auseinanderhält.
     expect(code, `Checkliste rot, obwohl nichts zu droppen ist:\n${text}`).toBe(0);
 
     // Bedingung 1: die Ausgabe zeigt, WAS verglichen wurde.
@@ -152,8 +166,17 @@ describe("Publish-Checkliste, grüner Pfad gegen zwei echte DBs (6hWvMvpxpJFFjwQ
     // oben geprüft), der Fall ist also nicht vakuum-wahr.
     expect(code === 0 && /Verglichen wurde/.test(text)).toBe(true);
 
-    // Und das Passwort darf dabei nirgends auftauchen.
-    expect(text).not.toContain(new URL(ADMIN_URL!).password);
+    // Und die Zugangsdaten dürfen nirgends auftauchen.
+    //
+    // Geprüft wird der ganze Connection-String, NICHT das Passwort allein: das
+    // lautet lokal und in CI schlicht `postgres` — eine Assertion darauf würde
+    // das Wort „postgres" in der Ausgabe verbieten und hinge damit an einer
+    // Zufälligkeit der Fixture statt an der Zusage. Bei leerem Passwort wäre
+    // sie sogar immer erfüllt, ohne etwas zu prüfen. (Gate-2-Notiz N3.)
+    expect(text, "der volle Connection-String steht in der Ausgabe")
+      .not.toContain(urlForDb(ZIEL_DB));
+    expect(text, "der volle Prod-Connection-String steht in der Ausgabe")
+      .not.toContain(urlForDb(PROD_DB));
   });
 
   it("PL-2 – dieselbe DB auf beiden Seiten ist ungeklärt, nicht bestanden", async (ctx) => {
@@ -178,6 +201,10 @@ describe("Publish-Checkliste, grüner Pfad gegen zwei echte DBs (6hWvMvpxpJFFjwQ
 
     // Gegenrichtung zu PL-1: die Checkliste muss auch das Gegenteil können.
     // Prod hat hier eine Tabelle und eine Spalte, die das Ziel nicht mehr hat.
+    //
+    // ACHTUNG für den Nächsten (Gate-2-Notiz N6): dieser Fall VERÄNDERT
+    // `PROD_DB` und lässt sie so stehen. Heute harmlos, weil er der letzte
+    // ist — wer einen Fall anhängt, sieht eine andere Fixture als PL-1/PL-2.
     await runSql(urlForDb(PROD_DB), [
       `CREATE TABLE alte_tabelle (id integer PRIMARY KEY)`,
       `ALTER TABLE kunden ADD COLUMN alte_spalte text`,

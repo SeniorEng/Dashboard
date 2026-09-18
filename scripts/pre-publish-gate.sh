@@ -107,8 +107,17 @@ echo "      HEAD == origin/main ($(git rev-parse --short HEAD))."
 # Build-Zeile bewusst ohne `migrate.sh`, weil Schritt 0d gegen Prod nicht
 # durchkommt (6hWvrJgff5xr9hfp). Würde dieser Riegel deshalb blockieren, wäre
 # er genau dann unbenutzbar, wenn er am meisten gebraucht wird.
+#
+# Der Grep ist auf die BUILD-ZEILE verankert, nicht auf die Datei. Die erste
+# Fassung suchte nur nach „migrate.sh" irgendwo in `.replit` — und das
+# eingecheckte `.replit` nennt `scripts/migrate.sh` vier Zeilen ueber der
+# Build-Zeile im Begruendungs-Kommentar. Genau im beschriebenen Zustand
+# (Build-Zeile entschaerft, Kommentarblock bleibt stehen) haette der Check
+# „Release-Step ist verdrahtet" gemeldet und die Warnung waere NIE erschienen.
+# Eine Warnung, die still das Gegenteil behauptet, ist schlechter als keine.
+# (Gate-2-Fund S5 zu #154.)
 echo "[3/4] .replit-Build-Zeile …"
-if grep -q "migrate.sh" .replit 2>/dev/null; then
+if grep -qE '^[[:space:]]*build[[:space:]]*=.*migrate\.sh' .replit 2>/dev/null; then
   echo "      Release-Step ist verdrahtet."
 else
   # Einfache Quotes: in doppelten wären die Backticks um migrate.sh eine

@@ -25,7 +25,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const REPO = path.resolve(__dirname, "../..");
@@ -114,6 +115,48 @@ describe("Pre-Publish-Gate (6hWvMvpxpJFFjwQG, Frage 2)", () => {
       treffer.map(({ nr, z }) => `${nr}: ${z.trim()}`),
       "Backtick in doppelten Quotes — das führt aus, statt zu zitieren",
     ).toEqual([]);
+  });
+
+  it("G-6 – „Release-Step ist verdrahtet“ hängt an der BUILD-Zeile, nicht an der Datei", async () => {
+    // Gate-2-Fund S5: die erste Fassung grepte nur nach „migrate.sh" irgendwo
+    // in `.replit`. Das eingecheckte `.replit` nennt `scripts/migrate.sh` vier
+    // Zeilen über der Build-Zeile im Begründungs-Kommentar — im beschriebenen
+    // Zustand (Build-Zeile entschärft, Kommentar bleibt) hätte der Check
+    // „verdrahtet" gemeldet und die Warnung wäre nie erschienen.
+    //
+    // Geprüft wird das MUSTER AUS DEM SKRIPT, nicht eine Kopie davon: es wird
+    // aus der Datei gelesen und mit demselben `grep` gefahren. Eine Kopie im
+    // Test würde grün bleiben, wenn jemand das Skript wieder aufweicht.
+    const quelle = readFileSync(path.join(REPO, SKRIPT), "utf8");
+    const treffer = quelle.match(/grep -qE '([^']+)' \.replit/);
+    expect(treffer, "der Build-Zeilen-Check ist nicht mehr auffindbar").not.toBeNull();
+    const muster = treffer![1];
+
+    const dir = mkdtempSync(path.join(tmpdir(), "replit-"));
+    const echt = readFileSync(path.join(REPO, ".replit"), "utf8");
+    const entschaerft = echt.replace(
+      /^build = .*$/m,
+      'build = ["sh", "-c", "npm run build"]',
+    );
+    // Vorbedingung: die Entschärfung hat wirklich gegriffen UND der Kommentar
+    // steht noch da. Ohne beides prüfte der Fall nichts.
+    expect(entschaerft, "Build-Zeile nicht entschärft").not.toMatch(/^build = .*migrate\.sh/m);
+    expect(entschaerft, "der Kommentar, der den alten Grep täuschte, fehlt").toMatch(/migrate\.sh/);
+
+    const mitGate = path.join(dir, "mit");
+    const ohneGate = path.join(dir, "ohne");
+    writeFileSync(mitGate, echt);
+    writeFileSync(ohneGate, entschaerft);
+
+    const greppe = (datei: string) =>
+      new Promise<number>((resolve) => {
+        execFile("grep", ["-qE", muster, datei], (err) => {
+          resolve(err && typeof err.code === "number" ? err.code : 0);
+        });
+      });
+
+    expect(await greppe(mitGate), "erkennt die echte Build-Zeile nicht").toBe(0);
+    expect(await greppe(ohneGate), "meldet „verdrahtet“ für eine entschärfte Build-Zeile").not.toBe(0);
   });
 
   it("G-5 – es prüft den Workspace-Stand, bevor es misst", async () => {
