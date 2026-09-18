@@ -425,10 +425,16 @@ describe("Umsatz-Kachel, unterer Block — Kosten aufgefächert", () => {
 
   it("PO-6 – im ABGESCHLOSSENEN Monat faellt das Potenzial auf das Ist zurueck", async () => {
     // Weg B (Alrik, 17.09.2026). Die Spalte beantwortet „was kommt noch" — und
-    // nach dem Monatsabschluss kommt nichts mehr. Ein `scheduled`-Termin in
-    // einem geschlossenen Monat wird ueberall sonst als „Nicht abgerechnet"
-    // ausgewiesen; ihn hier weiter als Erloespotenzial zu fuehren, behauptete
-    // Geld, das das System selbst schon abgeschrieben hat.
+    // nach dem Cutoff ist die Erwartung, dass nichts mehr kommt.
+    //
+    // Eine erste Fassung dieses Kommentars berief sich darauf, ein solcher
+    // Termin werde „ueberall sonst als ,Nicht abgerechnet' ausgewiesen". Das
+    // war unbelegt: `deriveAppointmentDisplayStatus` hatte damals keinen
+    // Aufrufer ausserhalb von Tests. Seit Weg A hat sie einen (den
+    // Pipeline-Reader) — aber „ueberall sonst" bleibt falsch, die Termine-Liste
+    // und die Umsatz-Statistik kennen den Cutoff weiterhin nicht.
+    //
+    // Was traegt, ist allein Alriks Entscheidung, was die Spalte BEDEUTEN soll.
     //
     // Der Stichtag kommt als Parameter, nicht aus der Wanduhr — sonst waere
     // dieser Test nur an einem bestimmten Kalendertag gruen.

@@ -263,12 +263,16 @@ export async function readBillingEconomics(
   // Was traegt, ist allein Alriks Entscheidung, was die Spalte BEDEUTEN soll
   // („was noch kommt", nicht „was der Monat haette sein koennen").
   //
-  // OFFEN und Alrik gemeldet: der OBERE Block derselben Karte zaehlt denselben
-  // Termin nach dem Cutoff unveraendert unter „noch geplant" — der
-  // Pipeline-Reader kennt keinen Monatsabschluss. Solange das so ist, sagen die
-  // zwei Bloecke ueber denselben Termin etwas Verschiedenes. Das hier zu
-  // beheben, hiesse die Schlagzeile „Erwarteter Kontoeingang" zu aendern; das
-  // ist eine eigene Entscheidung.
+  // ERLEDIGT (Weg A, Alrik 18.09.2026): der OBERE Block folgt derselben Regel.
+  // Bis dahin zaehlte er denselben Termin nach dem Cutoff unveraendert unter
+  // „noch geplant" — eine Karte, zwei Aussagen ueber dasselbe Geld. Der
+  // Pipeline-Reader leitet den Status jetzt ueber
+  // `deriveAppointmentDisplayStatus` ab; die Schlagzeile „Erwarteter
+  // Kontoeingang" sinkt entsprechend, und der Betrag wandert nach „Nicht
+  // abgerechnet" statt zu verschwinden.
+  //
+  // Festgenagelt in `tests/billing/kachel-cutoff-beide-bloecke.test.ts`: der
+  // Test misst BEIDE Reader am selben Termin mit demselben Stichtag.
   const nachCutoff = istNachMonatsCutoff(heute, billingYear, billingMonth);
   // `sql.join` statt `= ANY(${liste})`: das `sql`-Template expandiert ein Array
   // als TUPEL, nicht als Array-Literal — `ANY((...))` scheitert dann mit 42809.

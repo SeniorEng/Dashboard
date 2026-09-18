@@ -6,7 +6,11 @@
  *  - Termin-Umsatz: dieselbe `prices`-/`unit_type='hours'`-Formel wie die
  *    Umsatz-Statistik (`server/storage/statistics/revenue.ts`), damit die
  *    Pipeline-Stufen-Summe auf einem sauberen Monat exakt dem
- *    `planned`-Umsatz entspricht (€-Konservierung, Q1).
+ *    `planned`-Umsatz entspricht (€-Konservierung, Q1). SEIT WEG A gilt das
+ *    nur noch VOR dem Monats-Cutoff: danach fallen geplante Termine hier in
+ *    den Seitenzustand „Nicht abgerechnet", waehrend `revenue.ts` sie
+ *    unbedingt als `planned` zaehlt. Die Abweichung ist gewollt — die beiden
+ *    beantworten ab da verschiedene Fragen.
  *  - „dokumentiert & unterschrieben": `documentedAndSignedSqlRaw`
  *    (= SQL-Spiegel von `isAppointmentDocumentedAndSigned`).
  *  - „Termin liegt auf einer aktiven Rechnung":
@@ -169,13 +173,37 @@ export async function readBillingPipeline(
   // ist ein Seitenzustand („Nicht abgerechnet"), der nicht zum erwarteten Umsatz
   // zaehlt und im Verlust-Block steht. Die Schlagzeile sinkt, der Betrag bleibt
   // sichtbar — er ist ja nicht weg, er kommt nur nicht mehr.
+  // Die Naeherung ausdruecklich benannt: `deriveAppointmentDisplayStatus`
+  // nimmt ein `isMonthClosed` entgegen — das ist der ZUSTANDS-Begriff
+  // (`employee_month_closings`, kennt `reopened_at`, gilt pro Mitarbeiter).
+  // Hier geht der KALENDER hinein. Fuer eine Firmen-Sicht ist das vertretbar,
+  // weil der Zustand pro Person gilt und die Kachel eine Gesamtzahl zeigt —
+  // aber es ist eine Naeherung, keine Gleichheit. Die Entscheidung
+  // kalendarisch vs. zustandsbasiert ist offen (Ticket 6hX3MM8w6PfC2HgG).
   const nachCutoff = istNachMonatsCutoff(asOfDate, billingYear, billingMonth);
 
   for (const raw of apptRows.rows as Record<string, unknown>[]) {
-    const status = deriveAppointmentDisplayStatus(
-      String(raw.status) as AppointmentStatus,
-      { isMonthClosed: nachCutoff },
-    );
+    const rohStatus = String(raw.status) as AppointmentStatus;
+    const istAbgerechnet = raw.is_invoiced === true;
+    // Ein ABGERECHNETER Termin wird nicht abgeleitet.
+    //
+    // `assignAppointmentStage` prueft die Seitenzustaende VOR `isInvoiced`
+    // (damit ein stornierter Termin nie als Umsatz erscheint). Solange
+    // `expired_unsigned` keinen Produzenten hatte, war das folgenlos. Jetzt
+    // haengt daran eine Invariante: laege ein `scheduled`-Termin auf einer
+    // aktiven Rechnung (Entwuerfe eingeschlossen), fiele er nach dem Cutoff in
+    // `nicht_abgerechnet` STATT in `excluded: invoiced` — derselbe Euro stuende
+    // zweimal in `grandTotalCents`, und der Verlust-Block behauptete „nicht
+    // abgerechnet" fuer einen abgerechneten Termin.
+    //
+    // Ueber die heutigen App-Pfade ist das nicht erreichbar (Leistungsnachweise
+    // enthalten nur `completed`, alle Rueckdreh-Pfade blockieren bei aktiver
+    // Rechnung). Ueber Alt-/Importdaten oder ein Reparaturskript schon. Eine
+    // Zeile ist billiger, als sich auf eine Invariante zu verlassen, die dieser
+    // Code nicht selbst erzwingt.
+    const status = istAbgerechnet
+      ? rohStatus
+      : deriveAppointmentDisplayStatus(rohStatus, { isMonthClosed: nachCutoff });
     const cents = num(raw.revenue_cents);
     const customerId = num(raw.customer_id);
     const customerName = String(raw.customer_name ?? "");
@@ -185,7 +213,7 @@ export async function readBillingPipeline(
       hasDirectSignature: raw.has_direct_signature === true,
       hasCompletedServiceRecord: raw.has_completed_ln === true,
       hasEmployeeSignedServiceRecord: raw.has_employee_signed_ln === true,
-      isInvoiced: raw.is_invoiced === true,
+      isInvoiced: istAbgerechnet,
     });
     units.push({ assignment, cents });
 

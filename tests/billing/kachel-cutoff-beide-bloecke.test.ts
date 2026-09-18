@@ -30,6 +30,13 @@ import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
  * Kalendertagen gruen — und die Zeit zu manipulieren waere der schlechtere
  * Tausch.
  */
+/**
+ * Jahr/Monat als eigenes Fenster. `obenGeplantCents` und CB-3 messen ueber den
+ * GESAMTEN Monat (der Pipeline-Reader kennt keinen Mitarbeiter-Filter), sind
+ * also kontaminationsempfindlich.
+ *
+ * Geprueft: `grep -rn "2051" tests/` findet nichts ausser diesem Fenster.
+ */
 const YEAR = 2051;
 const MONTH = 3;
 const MINUTEN = 60;
@@ -64,23 +71,33 @@ beforeAll(async () => {
 
   // EIN geplanter Termin. Mehr braucht die Zusage nicht — und weniger Fixture
   // heisst weniger, das den Befund erklaeren koennte.
-  const r = await db.execute(sql`
-    INSERT INTO appointments (
-      customer_id, created_by_user_id, assigned_employee_id, performed_by_employee_id,
-      appointment_type, date, scheduled_start, scheduled_end, duration_promised,
-      status, travel_origin_type, travel_kilometers, travel_minutes, customer_kilometers
-    ) VALUES (
-      ${customerId}, ${userId}, ${userId}, NULL,
-      'Kundentermin', ${`${YEAR}-${String(MONTH).padStart(2, "0")}-15`},
-      '09:00', '10:00', ${MINUTEN}, 'scheduled', 'home', 0, 0, 0
-    ) RETURNING id
-  `);
-  const apptId = Number((r.rows[0] as Record<string, unknown>).id);
-  await db.execute(sql`
-    INSERT INTO appointment_services
-      (appointment_id, service_id, planned_duration_minutes, actual_duration_minutes)
-    VALUES (${apptId}, ${serviceId}, ${MINUTEN}, NULL)
-  `);
+  const termin = async (status: string, tagImMonat: string) => {
+    const r = await db.execute(sql`
+      INSERT INTO appointments (
+        customer_id, created_by_user_id, assigned_employee_id, performed_by_employee_id,
+        appointment_type, date, scheduled_start, scheduled_end, duration_promised,
+        status, travel_origin_type, travel_kilometers, travel_minutes, customer_kilometers
+      ) VALUES (
+        ${customerId}, ${userId}, ${userId},
+        ${status === "completed" ? userId : null},
+        'Kundentermin', ${`${YEAR}-${String(MONTH).padStart(2, "0")}-${tagImMonat}`},
+        '09:00', '10:00', ${MINUTEN}, ${status}, 'home', 0, 0, 0
+      ) RETURNING id
+    `);
+    const apptId = Number((r.rows[0] as Record<string, unknown>).id);
+    await db.execute(sql`
+      INSERT INTO appointment_services
+        (appointment_id, service_id, planned_duration_minutes, actual_duration_minutes)
+      VALUES (${apptId}, ${serviceId}, ${MINUTEN},
+        ${status === "completed" ? MINUTEN : null})
+    `);
+  };
+
+  // Der GEPLANTE Termin — die Regel.
+  await termin("scheduled", "15");
+  // Der DOKUMENTIERTE — die Grenze der Regel. Ohne ihn vergleicht CB-5 nur
+  // 0 mit 0 und bliebe auch dann gruen, wenn der Cutoff das Ist mitrisse.
+  await termin("completed", "16");
 });
 
 afterAll(async () => {
@@ -102,6 +119,13 @@ async function untenNochErwartetCents(asOf: string): Promise<number> {
 }
 
 describe("Umsatz-Kachel — beide Bloecke folgen dem Monats-Cutoff (Weg A + B)", () => {
+  it("CB-0 – die Fixture steht (Vorbedingung der uebrigen Faelle)", async () => {
+    const b = await readBillingPipeline(YEAR, MONTH, CUTOFF);
+    const dok = b.stages.find((s) => s.stage === "dokumentiert")!;
+    expect(dok.itemCount, "dokumentierter Termin fehlt").toBe(1);
+    expect(dok.totalCents).toBeGreaterThan(0);
+  });
+
   it("CB-1 – VOR dem Cutoff zaehlen BEIDE Bloecke den geplanten Termin", async () => {
     // Die Gegenrichtung, ohne die der Test auch dann gruen waere, wenn nie
     // etwas gezaehlt wuerde.
@@ -151,20 +175,45 @@ describe("Umsatz-Kachel — beide Bloecke folgen dem Monats-Cutoff (Weg A + B)",
   });
 
   it("CB-5 – ein DOKUMENTIERTER Termin bleibt vom Cutoff unberuehrt", async () => {
-    // Die Grenze der Regel. Der Cutoff ist eine Aussage ueber die Zukunft; was
-    // geleistet UND dokumentiert ist, faellt nicht heraus. Ohne diesen Test
-    // waere „alles nach dem Cutoff auf 0" genauso gruen.
-    const e = await readBillingEconomics(YEAR, MONTH, {
-      employeeId: userId, asOfDate: NACH_CUTOFF,
-    });
-    const hw = e.byService.find((r) => r.key === "hauswirtschaft")!;
-    // In dieser Fixture gibt es kein Ist — geprueft wird, dass der Cutoff das
-    // Ist NICHT nach unten zieht (es bleibt, was es vor dem Cutoff war).
+    // Die Grenze der Regel, und der teuerste Mutationsfall: faellt sie, verliert
+    // die Kachel dokumentierte, abrechnungsreife Arbeit aus dem erwarteten
+    // Umsatz.
+    //
+    // Eine erste Fassung dieses Tests hatte KEINEN dokumentierten Termin in der
+    // Fixture — er verglich 0 mit 0 und trug trotzdem die Garantie im Namen.
+    // Geprueft wird jetzt die PIPELINE-Seite: der dokumentierte Termin bleibt
+    // nach dem Cutoff in seiner Stufe und faellt NICHT in „Nicht abgerechnet".
+    // Beide Messpunkte selbst holen — keine Variable, die ein anderer Test
+    // fuellen muesste. Eine Reihenfolge-Kopplung waere hier unnoetig.
+    const vorCutoff = await readBillingPipeline(YEAR, MONTH, CUTOFF);
+    const nachher = await readBillingPipeline(YEAR, MONTH, NACH_CUTOFF);
+    const dokVorher = vorCutoff.stages.find((s) => s.stage === "dokumentiert")!;
+
+    const dokumentiert = nachher.stages.find((s) => s.stage === "dokumentiert")!;
+    expect(
+      dokumentiert.itemCount,
+      "der dokumentierte Termin ist aus seiner Stufe gefallen",
+    ).toBe(1);
+    expect(dokumentiert.totalCents).toBe(dokVorher.totalCents);
+
+    // Und er ist NICHT zusaetzlich im Verlust-Block gelandet: dort steht nur
+    // der geplante.
+    const nichtAbgerechnet = nachher.sides.find((s) => s.state === "nicht_abgerechnet")!;
+    expect(nichtAbgerechnet.itemCount, "der dokumentierte Termin wurde mitgerissen").toBe(1);
+
+    // Gegenrichtung ueber den unteren Block: das Ist ist nach dem Cutoff
+    // dasselbe wie davor.
     const vorher = await readBillingEconomics(YEAR, MONTH, {
       employeeId: userId, asOfDate: CUTOFF,
     });
-    const hwVorher = vorher.byService.find((r) => r.key === "hauswirtschaft")!;
-    expect(hw.revenueCents).toBe(hwVorher.revenueCents);
-    expect(hw.costCents).toBe(hwVorher.costCents);
+    const danach = await readBillingEconomics(YEAR, MONTH, {
+      employeeId: userId, asOfDate: NACH_CUTOFF,
+    });
+    const hwVor = vorher.byService.find((r) => r.key === "hauswirtschaft")!;
+    const hwNach = danach.byService.find((r) => r.key === "hauswirtschaft")!;
+    expect(hwNach.revenueCents, "das Ist muss > 0 sein, sonst misst der Test nichts")
+      .toBeGreaterThan(0);
+    expect(hwNach.revenueCents).toBe(hwVor.revenueCents);
+    expect(hwNach.costCents).toBe(hwVor.costCents);
   });
 });

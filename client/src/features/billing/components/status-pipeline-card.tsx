@@ -168,7 +168,20 @@ export function StatusPipelineCard({
           label: side.label,
           cents: side.totalCents,
           count: side.itemCount,
-          lohnHinweis: "Lohn fällt an",
+          // „kein Lohn", NICHT „Lohn fällt an" — das stand hier zuerst und war
+          // für JEDEN Termin falsch, den Weg A in diese Zeile bringt.
+          //
+          // `deriveAppointmentDisplayStatus` erzeugt `expired_unsigned`
+          // ausschliesslich für NICHT-dokumentierte Termine, und die Lohn-SSoT
+          // (`payroll-hours.ts`) rechnet über `documentedSqlRaw` = `completed`.
+          // Die Menge, die hier landet, ist also genau die, für die kein Lohn
+          // anfällt.
+          //
+          // Folgenlos war das nur, solange die Zeile nie erschien: vor Weg A
+          // hatte `expired_unsigned` keinen Produzenten. Sie erscheint jetzt
+          // zum ersten Mal — und wäre zu 100 % mit Fällen gefüllt gewesen, für
+          // die ihr Hinweis nicht stimmt.
+          lohnHinweis: "kein Lohn",
         });
       }
     }
