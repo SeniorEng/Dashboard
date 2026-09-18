@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useCustomerAmounts } from "../hooks/use-billing-queries";
-import { ZAEHLWEISE_RECHNUNGSLISTE } from "@shared/domain/billing-zaehlweise";
+import { ZaehlweiseHinweis } from "./zaehlweise-hinweis";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -730,13 +730,11 @@ export function PendingInvoicesCard({
               nur dann etwas wert, wenn sie da steht, wo jemand die Betraege
               mit der Umsatz-Kachel vergleicht. Beide Saetze kommen aus EINER
               Quelle (`shared/domain/billing-zaehlweise.ts`), damit sie nicht
-              auseinanderlaufen und das Problem eine Ebene hoeher entsteht. */}
-          <div
-            className="mt-0.5 pl-9 text-xs font-normal text-gray-400"
-            data-testid="text-pending-zaehlweise"
-          >
-            {ZAEHLWEISE_RECHNUNGSLISTE}
-          </div>
+              auseinanderlaufen und das Problem eine Ebene hoeher entsteht.
+              Seit S-1 (18.09.) steht dort auch, dass diese Liste dem
+              Monatsabschluss NICHT folgt — hier bleibt stehen, was noch zu tun
+              ist, auch wenn die Kachel es nicht mehr als Geld zaehlt. */}
+          <ZaehlweiseHinweis sicht="rechnungenListe" className="mt-0.5 pl-9" />
         </CardTitle>
       </CardHeader>
       {/* Task #1501: weiches Ein-/Ausklappen via grid-rows-Transition — Inhalt

@@ -3,6 +3,8 @@ import { sql } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { readBillingPipeline } from "../../server/storage/billing/pipeline-reader";
 import { readBillingEconomics } from "../../server/storage/billing/economics-reader";
+import { readBillingTermine } from "../../server/storage/billing/termine-reader";
+import { computeCustomerAmounts } from "../../server/services/billing-customer-amounts";
 import { computeMonthCloseCutoff } from "@shared/utils/month-close-cutoff";
 import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
 
@@ -31,13 +33,35 @@ import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
  * Tausch.
  */
 /**
- * Jahr/Monat als eigenes Fenster. `obenGeplantCents` und CB-3 messen ueber den
- * GESAMTEN Monat (der Pipeline-Reader kennt keinen Mitarbeiter-Filter), sind
- * also kontaminationsempfindlich.
+ * Jahr/Monat als eigenes Fenster — und zwar in der VERGANGENHEIT.
  *
- * Geprueft: `grep -rn "2051" tests/` findet nichts ausser diesem Fenster.
+ * ── Warum das die tragende Eigenschaft ist (Gate-2-Fund zu #152) ─────────
+ * Das Fenster lag zuerst in der ZUKUNFT (2051-03). Fuer die zwei Geld-Sichten
+ * war das gleichgueltig: sie nehmen einen Stichtag entgegen, CB-1/CB-2 setzen
+ * ihn selbst. Fuer die zwei ARBEITSLISTEN war es fatal — die haben keinen
+ * Stichtag-Parameter und lesen das implizite Heute. In einem Zukunftsmonat ist
+ * „nach dem Cutoff" damit NIE wahr, und CB-6/CB-7 konnten fuer den Regress,
+ * den sie im Namen tragen, gar nicht rot werden.
+ *
+ * Der Reviewer hat das nicht hergeleitet, sondern ausgefuehrt: eine Mutation,
+ * die den Termine-Reader dem Cutoff folgen laesst (ueber
+ * `computeMonthCloseCutoff(...) < todayBerlinIso()`, also OHNE den kanonischen
+ * Aufruf, den ZW-9 sucht), lief mit dem Zukunftsfenster **18/18 gruen**. Die
+ * Beschriftung „noch nicht Dokumentiertes bleibt auch nach dem Abschluss
+ * stehen" waere zur Falschaussage geworden, ohne dass ein Test es meldet.
+ *
+ * Mit einem Vergangenheitsfenster ist „heute" unvermeidlich nach dem Cutoff.
+ * Dieselbe Mutation laesst CB-6 dann fallen — vom Reviewer gegengeprueft.
+ *
+ * ── Warum 2017-03 ───────────────────────────────────────────────────────
+ * `obenGeplantCents` und CB-3 messen ueber den GESAMTEN Monat (der
+ * Pipeline-Reader kennt keinen Mitarbeiter-Filter), sind also
+ * kontaminationsempfindlich; in CI teilen sich die Dateien eines Shard-Legs
+ * eine DB. Geprueft: `grep -rn "2017-" tests/` findet nichts, und die einzige
+ * Erwaehnung von „2017" ueberhaupt ist eine EN16931-URN, kein Datum.
+ * 2021 waere NICHT frei gewesen (zwei Statistik-Dateien nutzen es).
  */
-const YEAR = 2051;
+const YEAR = 2017;
 const MONTH = 3;
 const MINUTEN = 60;
 
@@ -215,5 +239,59 @@ describe("Umsatz-Kachel — beide Bloecke folgen dem Monats-Cutoff (Weg A + B)",
       .toBeGreaterThan(0);
     expect(hwNach.revenueCents).toBe(hwVor.revenueCents);
     expect(hwNach.costCents).toBe(hwVor.costCents);
+  });
+
+  /**
+   * ── S-1 (Alrik, 18.09.2026): die andere Hälfte der Zusage ────────────────
+   *
+   * Weg A gilt für die zwei KACHEL-Blöcke. Die zwei ARBEITSLISTEN folgen dem
+   * Cutoff ausdrücklich NICHT — sonst verschwände die Arbeit eines
+   * Mitarbeiters, der ausschließlich geplante Termine hat, aus genau der
+   * Ansicht, in der sie noch zu erledigen ist. (Der Auto-Abschluss läuft nur
+   * am Cutoff-Tag und nur bei Aktivität; diese Person wird nie abgeschlossen
+   * und darf weiter dokumentieren.)
+   *
+   * Beschriftet ist das über `ZAEHLWEISE` (`art: "arbeitsliste"`). Die
+   * Beschriftung ist aber nur so viel wert wie das Verhalten dahinter —
+   * deshalb messen CB-6/CB-7 es an DEMSELBEN geplanten Termin, den CB-2 in den
+   * Geld-Sichten verschwinden sieht.
+   *
+   * **Was diese zwei Fälle NICHT zeigen können:** die Listen-Reader nehmen
+   * keinen Stichtag entgegen — es gibt für sie kein „vorher/nachher". Dass sie
+   * den Cutoff nicht anwenden KÖNNEN, ist deshalb eine Struktur-Aussage und
+   * steht als ZW-9 in `tests/unit/billing-zaehlweise.test.ts`. Hier steht die
+   * Verhaltens-Hälfte: der Termin ist wirklich da. Beide zusammen tragen die
+   * Beschriftung, eine allein nicht.
+   */
+  it("CB-6 – der geplante Termin steht in der Termine-Liste (Arbeitsliste, kein Cutoff)", async () => {
+    const t = await readBillingTermine(YEAR, MONTH, { employeeId: userId });
+    const gruppe = t.employees.find((e) => e.employeeId === userId);
+    expect(gruppe, "die Mitarbeiter-Gruppe fehlt ganz").toBeDefined();
+
+    const geplante = gruppe!.appointments.filter((a) => a.stage === "offen");
+    expect(geplante.length, "der geplante Termin fehlt in der Arbeitsliste").toBe(1);
+    expect(gruppe!.countsByStage.offen).toBe(1);
+
+    // Gegenrichtung am selben Datensatz: die Geld-Sicht zählt ihn nach dem
+    // Cutoff nicht mehr. Ohne diese Zeile wäre CB-6 auch dann grün, wenn gar
+    // kein Cutoff existierte — und die zwei Beschriftungen sagten dasselbe.
+    expect(await obenGeplantCents(NACH_CUTOFF), "die Geld-Sicht zählt ihn doch noch")
+      .toBe(0);
+  });
+
+  it("CB-7 – und er steckt im PLAN-Anteil der Rechnungen-Liste", async () => {
+    const betraege = await computeCustomerAmounts([customerId], { year: YEAR, month: MONTH });
+    const kunde = betraege.get(customerId);
+    expect(kunde, "der Kunde fehlt in den Listen-Beträgen").toBeDefined();
+
+    // `null` hiesse „nicht berechenbar" (fehlender Katalogpreis) — das wäre ein
+    // Fixture-Problem und keine Aussage über den Cutoff. Deshalb getrennt
+    // geprüft, bevor der Betrag beurteilt wird.
+    expect(kunde!.plannedAmountCents, "PLAN-Anteil nicht berechenbar — Fixture prüfen")
+      .not.toBeNull();
+    expect(
+      kunde!.plannedAmountCents!,
+      "der geplante Termin ist aus dem PLAN-Anteil der Arbeitsliste gefallen",
+    ).toBeGreaterThan(0);
   });
 });
