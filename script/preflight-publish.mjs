@@ -69,6 +69,22 @@ if (replica.identity) {
     `Ziel ${replica.identity.target.host}/${replica.identity.target.database}`
       + ` gegen Prod ${replica.identity.prod.host}/${replica.identity.prod.database}`,
   );
+} else {
+  // Alriks zweite Bedingung für den ersten Prod-Lauf (18.09.2026), wörtlich:
+  // „ein grünes Ergebnis ohne sichtbaren Vergleich gilt nicht als bestanden,
+  // sondern als ungeklärt."
+  //
+  // Ohne Identität wurde keine Verbindung geöffnet — dann gibt es nichts zu
+  // beurteilen. Der Riegel steht hier BEWUSST eigenständig und nicht als
+  // Folge der anderen Zweige: er hält auch dann, wenn jemand später einen
+  // dieser Zweige umbaut. Heute überlappt er mit dem „nicht gemessen"-Fall
+  // unten; das ist Absicht, nicht Redundanz aus Versehen.
+  record(
+    "Verglichen wurde — NICHTS",
+    "fail",
+    "Es liegt keine Verbindungs-Identität vor, es wurde also keine Prod-Verbindung "
+      + "geöffnet. Ein Ergebnis ohne sichtbaren Vergleich ist ungeklärt, nicht bestanden.",
+  );
 }
 
 if (!hasDestructive && replica.available) {
