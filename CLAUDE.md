@@ -185,6 +185,43 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   zu tun hat. Beim Lesen also immer den SCHRITT ansehen, nicht nur die
   Job-Farbe.
 
+## Was wohin gehört: Ticket-Beschreibung, Ticket-Kommentar, Chat
+
+**Faustregel: was nach dem Schließen des Chatfensters noch gebraucht wird,
+steht nicht im Chat.**
+
+| Ort | Zweck | Eigenschaft |
+|-----|-------|-------------|
+| **Ticket-Beschreibung** | der aktuelle **Stand** der Sache | wird überschrieben |
+| **Ticket-Kommentar** | **was wann passiert ist** | wird nie überschrieben |
+| **Chat** | nur für diesen Moment | verschwindet |
+
+- **Beschreibung = Zustand.** Was jemand wissen muss, der das Ticket zum ERSTEN
+  Mal öffnet — kein Verlauf, keine Begründungskette. Bei jeder Änderung des
+  Sachverhalts **aktualisieren, nicht anhängen**. Eine Beschreibung, die einen
+  überholten Zustand behauptet, ist schlimmer als keine: sie wird als Beleg
+  gelesen. Lange Tickets bekommen einen **Stand-Kopf** (Stand / Offen mit
+  Ticket-IDs / letzte Entscheidung / nächster Schritt) — ein Abruf statt drei.
+- **Kommentar = Ereignis.** Befunde, Messungen, Entscheidungen, Fehlschläge,
+  Begründungen. **Auch dann unverändert stehenlassen, wenn sie sich als falsch
+  erweisen** — ein widerlegter Befund ist Teil der Kette, nicht Müll.
+- **Chat = nichts Dauerhaftes.** Rückfragen, Zwischenstand, „ich fange an".
+  Sobald ein Ergebnis entsteht, gehört es ins Ticket — **vor** der Chat-Meldung,
+  nicht danach.
+
+**Zwei Zusätze:**
+
+- **Absender-Kennung.** Cowork und diese Instanz schreiben unter derselben
+  Todoist-UID; am Kommentar ist sonst nicht erkennbar, von wem er stammt. Jeder
+  Kommentar beginnt mit `CC:` bzw. `COWORK:`.
+- **Neue Ticket-IDs ins Ursprungsticket.** Wer aus einem Ticket heraus ein neues
+  anlegt, meldet dessen ID dort. Sonst muss der Nächste den Backlog durchblättern
+  oder Alrik trägt das Ergebnis.
+
+**Warum das asymmetrisch wiegt:** diese Instanz hat Repo, Tests und Code —
+Cowork hat nur Todoist. Was nicht im Ticket steht, existiert dort nicht und ist
+beim nächsten Start weg.
+
 ## Arbeitsmodus: autonom bis zur PR, Mensch an 4 Gates
 
 Der volle Loop (read → plan → implement → tsc/lint/test → commit → push → PR →
