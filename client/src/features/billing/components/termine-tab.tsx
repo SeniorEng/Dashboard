@@ -11,6 +11,7 @@ import type {
 import { PIPELINE_STAGE_LABELS } from "@shared/domain/billing-pipeline";
 import { formatDate } from "../utils";
 import type { BillingStatusFilter } from "./status-pipeline-card";
+import { ZaehlweiseHinweis } from "./zaehlweise-hinweis";
 
 interface TermineTabProps {
   termine: BillingTermineResponse | undefined;
@@ -213,6 +214,13 @@ export function TermineTab({
           </button>
         ))}
       </div>
+
+      {/* S-1 (Alrik, 18.09.2026). Der wichtigere der beiden Saetze ist hier der
+          zweite: diese Liste folgt dem Monatsabschluss NICHT. Wer sie mit der
+          Umsatz-Kachel vergleicht, sieht nach dem Cutoff Termine, die dort kein
+          Geld mehr sind — das ist Absicht und kein Widerspruch, aber ohne den
+          Hinweis liest es sich wie einer. */}
+      <ZaehlweiseHinweis sicht="termineListe" />
 
       {visibleEmployees.length === 0 ? (
         <Card>

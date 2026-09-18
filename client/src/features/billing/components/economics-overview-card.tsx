@@ -16,6 +16,7 @@ import {
 } from "../utils";
 import { MONTH_NAMES } from "../constants";
 import { CollapsibleCard } from "./collapsible-card";
+import { ZaehlweiseHinweis } from "./zaehlweise-hinweis";
 
 interface EconomicsOverviewCardProps {
   economics: BillingEconomicsResponse | undefined;
@@ -500,6 +501,12 @@ export function EconomicsOverviewCard({
                 valueClassName={marginHealthTextColor(economics.totals.marginPercent)}
               />
             </div>
+
+            {/* S-1 (Alrik, 18.09.2026): auch dieser Block sagt jetzt, was er
+                zaehlt. Er steht UNTER den KPI-Kacheln, weil er sie miterklaert
+                — die Ist/Potenzial-Spalten der Tabelle sind dieselbe Frage wie
+                die vier Zahlen darueber, nur aufgeschluesselt. */}
+            <ZaehlweiseHinweis sicht="kostenTabelle" />
 
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
               <button

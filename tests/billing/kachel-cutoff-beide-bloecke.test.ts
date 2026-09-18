@@ -3,6 +3,8 @@ import { sql } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { readBillingPipeline } from "../../server/storage/billing/pipeline-reader";
 import { readBillingEconomics } from "../../server/storage/billing/economics-reader";
+import { readBillingTermine } from "../../server/storage/billing/termine-reader";
+import { computeCustomerAmounts } from "../../server/services/billing-customer-amounts";
 import { computeMonthCloseCutoff } from "@shared/utils/month-close-cutoff";
 import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
 
@@ -215,5 +217,59 @@ describe("Umsatz-Kachel — beide Bloecke folgen dem Monats-Cutoff (Weg A + B)",
       .toBeGreaterThan(0);
     expect(hwNach.revenueCents).toBe(hwVor.revenueCents);
     expect(hwNach.costCents).toBe(hwVor.costCents);
+  });
+
+  /**
+   * ── S-1 (Alrik, 18.09.2026): die andere Hälfte der Zusage ────────────────
+   *
+   * Weg A gilt für die zwei KACHEL-Blöcke. Die zwei ARBEITSLISTEN folgen dem
+   * Cutoff ausdrücklich NICHT — sonst verschwände die Arbeit eines
+   * Mitarbeiters, der ausschließlich geplante Termine hat, aus genau der
+   * Ansicht, in der sie noch zu erledigen ist. (Der Auto-Abschluss läuft nur
+   * am Cutoff-Tag und nur bei Aktivität; diese Person wird nie abgeschlossen
+   * und darf weiter dokumentieren.)
+   *
+   * Beschriftet ist das über `ZAEHLWEISE` (`art: "arbeitsliste"`). Die
+   * Beschriftung ist aber nur so viel wert wie das Verhalten dahinter —
+   * deshalb messen CB-6/CB-7 es an DEMSELBEN geplanten Termin, den CB-2 in den
+   * Geld-Sichten verschwinden sieht.
+   *
+   * **Was diese zwei Fälle NICHT zeigen können:** die Listen-Reader nehmen
+   * keinen Stichtag entgegen — es gibt für sie kein „vorher/nachher". Dass sie
+   * den Cutoff nicht anwenden KÖNNEN, ist deshalb eine Struktur-Aussage und
+   * steht als ZW-9 in `tests/unit/billing-zaehlweise.test.ts`. Hier steht die
+   * Verhaltens-Hälfte: der Termin ist wirklich da. Beide zusammen tragen die
+   * Beschriftung, eine allein nicht.
+   */
+  it("CB-6 – der geplante Termin steht in der Termine-Liste (Arbeitsliste, kein Cutoff)", async () => {
+    const t = await readBillingTermine(YEAR, MONTH, { employeeId: userId });
+    const gruppe = t.employees.find((e) => e.employeeId === userId);
+    expect(gruppe, "die Mitarbeiter-Gruppe fehlt ganz").toBeDefined();
+
+    const geplante = gruppe!.appointments.filter((a) => a.stage === "offen");
+    expect(geplante.length, "der geplante Termin fehlt in der Arbeitsliste").toBe(1);
+    expect(gruppe!.countsByStage.offen).toBe(1);
+
+    // Gegenrichtung am selben Datensatz: die Geld-Sicht zählt ihn nach dem
+    // Cutoff nicht mehr. Ohne diese Zeile wäre CB-6 auch dann grün, wenn gar
+    // kein Cutoff existierte — und die zwei Beschriftungen sagten dasselbe.
+    expect(await obenGeplantCents(NACH_CUTOFF), "die Geld-Sicht zählt ihn doch noch")
+      .toBe(0);
+  });
+
+  it("CB-7 – und er steckt im PLAN-Anteil der Rechnungen-Liste", async () => {
+    const betraege = await computeCustomerAmounts([customerId], { year: YEAR, month: MONTH });
+    const kunde = betraege.get(customerId);
+    expect(kunde, "der Kunde fehlt in den Listen-Beträgen").toBeDefined();
+
+    // `null` hiesse „nicht berechenbar" (fehlender Katalogpreis) — das wäre ein
+    // Fixture-Problem und keine Aussage über den Cutoff. Deshalb getrennt
+    // geprüft, bevor der Betrag beurteilt wird.
+    expect(kunde!.plannedAmountCents, "PLAN-Anteil nicht berechenbar — Fixture prüfen")
+      .not.toBeNull();
+    expect(
+      kunde!.plannedAmountCents!,
+      "der geplante Termin ist aus dem PLAN-Anteil der Arbeitsliste gefallen",
+    ).toBeGreaterThan(0);
   });
 });
