@@ -7,9 +7,14 @@
  * Funktion, die im Ernstfall Schema anwendet. Ein Skript, das dabei
  * versehentlich `apply()` aufruft, wäre ein DDL-Lauf gegen Prod ohne Gate.
  *
- * Und es fasst die Prod-URL an, um den Pooler-Host abzuleiten. Genau dieser
- * Griff — Zugangsdaten in einer Kommandozeile bearbeiten — hat am 17.09.2026
- * dazu geführt, dass ein Platzhalter unersetzt durchlief (`ENOTFOUND base`).
+ * Und es benennt das Ziel: ohne Host in der Kopfzeile weiss hinterher niemand,
+ * wogegen gemessen wurde — mit der URL darin wäre das Passwort im Log. Beides
+ * ist hier festgenagelt.
+ *
+ * Der Host kommt aus der SSoT (`dbHostOf`), nicht aus einer eigenen
+ * URL-Zerlegung. Die erste Fassung zog ihn selbst heraus und wurde in CI von
+ * `tests/architecture/dev-db-guard-parity.test.ts` gefangen — zweite Antwort
+ * auf „welcher Host?". Der Waechter hatte recht.
  */
 import { describe, it, expect } from "vitest";
 import { execFile } from "node:child_process";
@@ -67,29 +72,54 @@ describe("Messwerkzeug Schritt 0d (6hWvrJgff5xr9hfp)", () => {
     expect(text, "es sagt nicht, wie man sie ablegt").toMatch(/cat > \.prod-url\.txt/);
   });
 
-  it("M-3 – `--pooler` schreibt den Host um und gibt die URL NICHT aus", async () => {
-    // Die Umschreibung gehört ins Skript, nicht in Alriks Kommandozeile: den
-    // Host von Hand zu ändern heisst, die Zugangsdaten anzufassen.
+  it("M-3 – es nennt den Host, gibt aber die URL NICHT aus", async () => {
+    // Die Kopfzeile ist die einzige Stelle, an der das Ziel benannt wird — und
+    // sie muss es benennen, sonst weiss hinterher niemand, wogegen gemessen
+    // wurde. Der Host kommt über `dbHostOf` aus der SSoT, nicht aus einer
+    // eigenen URL-Zerlegung: `tests/architecture/dev-db-guard-parity.test.ts`
+    // hat genau die in CI gefangen.
     const GEHEIM = "postgres://nutzer:GEHEIMES-PASSWORT@ep-abc-xyz.c-3.us-west-2.aws.neon.tech/neondb";
-    const { text } = await fahre(["--pooler"], {
-      PROD_DATABASE_URL: GEHEIM,
-      // Verbindungsversuch läuft ins Leere — der Host steht vorher auf dem Schirm.
-    });
+    const { text } = await fahre([], { PROD_DATABASE_URL: GEHEIM });
 
-    expect(text, "der umgeschriebene Host fehlt").toContain(
-      "ep-abc-xyz-pooler.c-3.us-west-2.aws.neon.tech",
+    expect(text, "der Host fehlt in der Kopfzeile").toContain(
+      "ep-abc-xyz.c-3.us-west-2.aws.neon.tech",
     );
     expect(text, "die Prod-URL steht in der Ausgabe").not.toContain(GEHEIM);
     expect(text, "das Passwort steht in der Ausgabe").not.toContain("GEHEIMES-PASSWORT");
     expect(text, "der Benutzername steht in der Ausgabe").not.toContain("nutzer");
   });
 
-  it("M-4 – ein bereits gepoolter Host wird nicht doppelt umgeschrieben", async () => {
-    const { text } = await fahre(["--pooler"], {
+  it("M-4 – es sagt an, welcher Host für den Pooler-Lauf gebraucht wird", async () => {
+    // Das Skript schreibt die URL bewusst NICHT selbst um (das wäre eine zweite
+    // Antwort auf „welcher Host?"). Es nennt den Host, den man hinterlegen
+    // muss — und meldet in der Kopfzeile, welchen es dann tatsächlich gemessen
+    // hat. Ein Vertipper scheitert damit laut, statt still das Falsche zu messen.
+    const { text } = await fahre([], {
+      PROD_DATABASE_URL: "postgres://u:p@ep-abc-xyz.c-3.us-west-2.aws.neon.tech/neondb",
+    });
+    expect(text).toContain("ep-abc-xyz-pooler.c-3.us-west-2.aws.neon.tech");
+  });
+
+  it("M-5 – bei einem bereits gepoolten Host gibt es nichts anzusagen", async () => {
+    const { text } = await fahre([], {
       PROD_DATABASE_URL: "postgres://u:p@ep-abc-pooler.c-3.us-west-2.aws.neon.tech/neondb",
     });
-    expect(text).toContain("ep-abc-pooler.c-3");
-    expect(text, "„-pooler-pooler“ — die Umschreibung ist nicht idempotent")
+    expect(text, "„-pooler-pooler“ — der Hinweis ist nicht idempotent")
       .not.toContain("-pooler-pooler");
+    expect(text, "der Hinweis steht da, obwohl schon gepoolt wird")
+      .not.toMatch(/Fuer den Pooler-Lauf/);
+  });
+
+  it("M-6 – uneindeutiger Host ist ein Abbruch, keine Randnotiz", async () => {
+    // Unkodiertes `#` im Passwort: die beiden Parser dieses Repos lesen
+    // verschiedene Hosts. `dbHostOf` liefert dann `null` — und eine Messung
+    // gegen ein unklares Ziel ist keine. Dieselbe Klasse wie der
+    // Passwort-Leck-Fund des Gate-2-Reviewers, nur eine Ebene früher.
+    const { code, text } = await fahre([], {
+      PROD_DATABASE_URL: "postgres://user:12345#x@prod.example.invalid/db",
+    });
+    expect(code, "uneindeutiger Host darf nicht gemessen werden").not.toBe(0);
+    expect(text).toMatch(/nicht eindeutig bestimmbar/);
+    expect(text, "Passwort-Fragment in der Ausgabe").not.toContain("12345");
   });
 });

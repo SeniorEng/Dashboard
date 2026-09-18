@@ -37,22 +37,27 @@
  * ── Aufruf ───────────────────────────────────────────────────────────────
  *
  *   npx tsx scripts/messe-0d.ts                      # wie der Release-Step
- *   npx tsx scripts/messe-0d.ts --pooler             # dieselbe DB, Pooler-Host
  *   npx tsx scripts/messe-0d.ts --gleichzeitig=4     # Auffaecherung gedeckelt
  *   npx tsx scripts/messe-0d.ts --pool-max=5
+ *
+ * Fuer den Pooler-Lauf wird die URL AUSGETAUSCHT, nicht vom Skript
+ * umgeschrieben — Begruendung unten bei `poolerHostHinweis`. Das Skript nennt
+ * den Host, den man dafuer braucht, und meldet hinterher, welchen es
+ * tatsaechlich gemessen hat.
  *
  * Die Prod-URL kommt aus `.prod-url.txt` (gitignored) oder aus
  * `PROD_DATABASE_URL`. **Sie wird nie ausgegeben** — gemeldet werden Host und
  * `current_database()` aus der offenen Verbindung.
  *
  * Empfohlene Reihenfolge, je ein Lauf: ohne Flags (Grundlinie, holt die
- * Fehlermeldung), dann `--pooler`, dann `--gleichzeitig=4`. Drei Laeufe
- * trennen A, B und „keins von beiden" voneinander.
+ * Fehlermeldung), dann derselbe Lauf mit der Pooler-URL, dann
+ * `--gleichzeitig=4`. Drei Laeufe trennen A, B und „keins von beiden".
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { dbHostOf } from "@shared/ephemeral-db-target";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { pushSchema } from "drizzle-kit/api";
 import * as schema from "@shared/schema";
@@ -73,7 +78,6 @@ const flagWert = (name: string): number | null => {
   if (!Number.isFinite(n) || n < 1) fehler(`--${name} braucht eine Zahl >= 1.`);
   return n;
 };
-const mitPooler = argv.includes("--pooler");
 const gleichzeitigMax = flagWert("gleichzeitig");
 const poolMax = flagWert("pool-max") ?? 20;
 
@@ -97,29 +101,55 @@ function urlHolen(): string {
   fehler("keine Prod-URL.");
 }
 
+const zielUrl = urlHolen();
+
 /**
- * Neons Pooler-Host: `-pooler` wird an das ERSTE Host-Label angehaengt
- * (`ep-xyz.region.neon.tech` → `ep-xyz-pooler.region.neon.tech`), so wie es
- * Replits Doku beschreibt.
+ * Welcher Host ist das? — ueber die SSoT, nicht selbst geparst.
  *
- * Bewusst hier und nicht von Hand: den Host in einer Kommandozeile zu
- * bearbeiten heisst, die Zugangsdaten anzufassen — und genau dabei ist am
- * 17.09. ein Platzhalter unersetzt durchgelaufen. Das Skript meldet den
- * umgeschriebenen Host (ohne den Rest der URL), damit er trotzdem
- * nachpruefbar ist.
+ * `dbHostOf` liefert `null`, wenn die beiden Parser dieses Repos sich ueber die
+ * Host-Grenze uneinig sind (unkodiertes `@`, `#`, `?` in der userinfo). Das ist
+ * hier ein ABBRUCH und keine Randnotiz: uneinige Parser heissen, dass unklar
+ * ist, wogegen gemessen wird — und eine Messung gegen ein unklares Ziel ist
+ * keine.
+ *
+ * Die erste Fassung zog den Host mit `new URL(...).hostname` selbst heraus.
+ * `tests/architecture/dev-db-guard-parity.test.ts` hat das in CI gefangen: es
+ * war eine zweite Antwort auf „welcher Host?", und genau dafuer gibt es den
+ * Waechter. Der Gate-2-Reviewer hatte dieselbe Doppelung einen Commit vorher
+ * in `script/schema-replica-diff.mjs` angemeldet — dort ist sie unvermeidbar
+ * (`.mjs` unter blankem node), hier war sie es nicht.
  */
-function poolerUrl(roh: string): string {
-  const u = new URL(roh);
-  const teile = u.hostname.split(".");
-  if (teile.length < 2) fehler(`Host „${u.hostname}“ sieht nicht nach einem Neon-Endpunkt aus.`);
-  if (teile[0].endsWith("-pooler")) return roh;
-  teile[0] = `${teile[0]}-pooler`;
-  u.hostname = teile.join(".");
-  return u.toString();
+const anzeigeHost = dbHostOf(zielUrl);
+if (!anzeigeHost) {
+  fehler(
+    "Der Host der Ziel-URL ist nicht eindeutig bestimmbar (uneinige Parser — "
+      + "vermutlich ein unkodiertes @, # oder ? im Passwort). Ohne eindeutiges "
+      + "Ziel ist die Messung wertlos.",
+  );
 }
 
-const zielUrl = mitPooler ? poolerUrl(urlHolen()) : urlHolen();
-const anzeigeHost = new URL(zielUrl).hostname;
+/**
+ * Wie hiesse derselbe Endpunkt als Pooler? — reine Zeichenkettenarbeit auf
+ * einem bereits aufgeloesten Hostnamen, keine zweite URL-Zerlegung.
+ *
+ * ── Warum das Skript die URL NICHT selbst umschreibt ─────────────────────
+ * Die erste Fassung tat es (`--pooler`), mit dem Argument: den Host von Hand
+ * zu aendern heisst, die Zugangsdaten anzufassen. Das Argument stimmt — aber
+ * der Preis war eine URL-Operation auf dem Host, also die Doppelung, die der
+ * Waechter verbietet. Und die Gefahr ist hier kleiner als gedacht: ein Vertipper
+ * im Host scheitert LAUT (`ENOTFOUND`), er misst nicht still das Falsche.
+ *
+ * Stattdessen: das Skript sagt den Host an, den der Pooler-Lauf braucht, und
+ * meldet oben, welchen es tatsaechlich gemessen hat. Wer die falsche URL
+ * hinterlegt, sieht es in der Kopfzeile.
+ */
+function poolerHostHinweis(host: string): string | null {
+  const teile = host.split(".");
+  if (teile.length < 2) return null;
+  if (teile[0].endsWith("-pooler")) return null;
+  teile[0] = `${teile[0]}-pooler`;
+  return teile.join(".");
+}
 
 // ── Semaphor: deckelt, wie viele Abfragen gleichzeitig unterwegs sind ─────
 function semaphor(max: number) {
@@ -157,9 +187,15 @@ const db = drizzle(pool, { schema });
 
 console.log("Messung Schritt 0d");
 console.log("==================");
-console.log(`Host          : ${anzeigeHost}${mitPooler ? "   (Pooler-Variante)" : ""}`);
+console.log(`Host          : ${anzeigeHost}${anzeigeHost.includes("-pooler") ? "   (Pooler-Variante)" : ""}`);
 console.log(`Pool-Max      : ${poolMax}`);
 console.log(`Gleichzeitig  : ${gleichzeitigMax ?? "unbegrenzt (wie im Release-Step)"}`);
+const hinweis = poolerHostHinweis(anzeigeHost);
+if (hinweis) {
+  console.log("");
+  console.log("Fuer den Pooler-Lauf dieselbe URL mit diesem Host hinterlegen:");
+  console.log(`  ${hinweis}`);
+}
 console.log("");
 
 const drossel = gleichzeitigMax ? semaphor(gleichzeitigMax) : null;
