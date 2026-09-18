@@ -8,11 +8,17 @@
  * Mengen je Mitarbeiter und füttert sie pro Mitarbeiter UND als Summe in
  * `buildEconomics`.
  *
- * Itemisierung (Vertrag `shared/api/billing-economics.ts`): produktive
- * Leistungen (Hauswirtschaft, Alltagsbegleitung) + EINE Kilometer-Zeile + EINE
- * Gemeinkosten-Restzeile (nicht-abrechenbarer Overhead zum HW-Satz). Damit gilt
- * Σ(Zeilen) === Headline-KPI exakt, weil Headline und Zeilen aus DEMSELBEN
- * `buildEconomics`-Aufruf stammen.
+ * Itemisierung (Vertrag `shared/api/billing-economics.ts`), zwei Blöcke:
+ *  - `leistung`: Hauswirtschaft, Alltagsbegleitung, Kilometer aus Terminen.
+ *  - `kosten_ohne_umsatz`: Kilometer aus der Zeiterfassung sowie die sechs
+ *    Overhead-Kategorien EINZELN (Büroarbeit, Vertrieb, Sonstiges, Krankheit,
+ *    Urlaub, Erstberatung).
+ *
+ * Σ(Zeilen) === Headline-KPI gilt exakt, weil Headline und Zeilen aus DEMSELBEN
+ * `buildEconomics`-Aufruf stammen — die Auffächerung ändert nur, wie fein
+ * dieselben Beträge dargestellt werden (Ticket 6hWgVqw2C8442hcG). Sie ERSETZT
+ * eine km-Sammelzeile über alle drei km-Arten und eine Gemeinkosten-Restzeile
+ * über alle sechs Kategorien; kein Betrag wird neu berechnet.
  *
  * Scope-Semantik:
  *  - `employeeId`   filtert die Termin-Zurechnung (COALESCE(performed, assigned))
@@ -26,7 +32,7 @@
  */
 import { insuranceValidAtSqlRaw } from "../../lib/insurance-period";
 import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { num } from "../statistics/common";
 import {
@@ -41,9 +47,12 @@ import type {
 } from "@shared/statistics";
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 import { documentedSqlRaw } from "../../lib/appointment-signed";
+import { POTENTIAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
+import { istNachMonatsCutoff, todayBerlinIso } from "@shared/utils/month-close-cutoff";
 import type {
   BillingEconomicsResponse,
   BillingEconomicsRow,
+  BillingEconomicsRowGroup,
   BillingEconomicsEmployeeRow,
   BillingEconomicsUnit,
 } from "@shared/api/billing-economics";
@@ -55,8 +64,8 @@ const NON_BILLABLE_TYPES = ["bueroarbeit", "vertrieb", "sonstiges", "krankheit",
  * Task #1765: Overhead-Schlüssel für die (unberechnete, aber bezahlte)
  * Erstberatungs-Arbeitszeit. Erstberatung ist im billing-scoped Überblick KEINE
  * produktive Erlös-/Zeilen-Größe, sondern fließt als Gemeinkosten (Overhead) in
- * `nonBillableCostCents` → die einzelne Gemeinkosten-Zeile und die Headline-
- * Lohnkosten. Sie wird über denselben `nonBillable`/`nonBillableCost`-Kanal wie
+ * `nonBillableCostCents` → ihre eigene `overhead_erstberatung`-Zeile im Block
+ * `kosten_ohne_umsatz` und die Headline-Lohnkosten. Sie wird über denselben `nonBillable`/`nonBillableCost`-Kanal wie
  * die Zeiterfassungs-Overhead-Typen geführt und folgt demselben
  * `includeOverhead`-Gate (bei gesetztem Kassen-Filter nicht zurechenbar).
  */
@@ -64,6 +73,33 @@ const ERSTBERATUNG_OVERHEAD_CATEGORY = "erstberatung";
 
 /** Overhead-Kategorien, die in `buildEconomics` in die Gemeinkosten fließen. */
 const OVERHEAD_CATEGORIES = [...NON_BILLABLE_TYPES, ERSTBERATUNG_OVERHEAD_CATEGORY] as const;
+
+/**
+ * Beschriftung des Overhead-Schlüssels, den DIESER Reader einführt.
+ *
+ * `erstberatung` ist kein Zeiterfassungs-Typ, sondern ein hier erfundener
+ * Kanal-Schlüssel (#1765) — `getEntryTypeLabel` kennt ihn nicht und gäbe den
+ * Rohschlüssel zurück. Solange alle sechs Kategorien zu EINER
+ * „Gemeinkosten"-Zeile summiert wurden, fiel das nicht auf: kein Label wurde
+ * je angezeigt. Mit der Auffächerung stünde dort kleingeschrieben
+ * „erstberatung" zwischen fünf sauber benannten Zeilen.
+ *
+ * Die Beschriftung wird deshalb DORT mitgegeben, wo der Schlüssel entsteht
+ * (`inputFor`), und `buildEconomics` legt sie in `byCategory[].label` — die
+ * eine Antwort auf „wie heißt diese Kategorie?".
+ *
+ * Das ERSETZT eine erste Fassung, die das Label in der Sicht-Schicht noch
+ * einmal ableitete. Die war ein Zweitbegriff und WIDERSPRACH der SSoT: dort
+ * stand für dieselbe Kategorie weiter „erstberatung", hier „Erstberatung" —
+ * zwei Namen für einen Betrag, sobald irgendein anderer Pfad `byCategory`
+ * anzeigt.
+ *
+ * `ENTRY_TYPE_LABELS` nachzutragen wäre der falsche Ort: das behauptete einen
+ * buchbaren Zeiterfassungs-Typ „Erstberatung", den es nicht gibt.
+ */
+function overheadCategoryLabel(category: string): string | undefined {
+  return category === ERSTBERATUNG_OVERHEAD_CATEGORY ? "Erstberatung" : undefined;
+}
 
 type Rows = Record<string, unknown>[];
 
@@ -168,9 +204,22 @@ function emptyAgg(): EmpAgg {
 export async function readBillingEconomics(
   billingYear: number,
   billingMonth: number,
-  opts: { employeeId?: number; insuranceProviderId?: number } = {},
+  opts: {
+    employeeId?: number;
+    insuranceProviderId?: number;
+    /**
+     * Welcher Tag ist heute? Nur fuer die Frage „ist der Monat schon
+     * abgeschlossen?" (Potenzial-Spalte, siehe unten). Default = heute.
+     *
+     * Parameter statt `todayISO()` im Rumpf: die Frage haengt hier wirklich an
+     * der Wanduhr und nicht an einem Stichtag — aber sie muss pruefbar
+     * bleiben, ohne die Zeit zu manipulieren.
+     */
+    asOfDate?: string;
+  } = {},
 ): Promise<BillingEconomicsResponse> {
   const { employeeId, insuranceProviderId } = opts;
+  const heute = opts.asOfDate ?? todayBerlinIso();
   // Overhead + Zeiterfassungs-km sind nicht kassenspezifisch zurechenbar.
   const includeOverhead = insuranceProviderId === undefined;
 
@@ -191,6 +240,54 @@ export async function readBillingEconomics(
 
   const rates = await resolveRates();
 
+  // Der Status-Filter ist der EINZIGE Unterschied zwischen der Ist- und der
+  // Potenzial-Messung. Er wird deshalb hier gebunden und in dieselben zwei
+  // Abfragen eingesetzt, statt sie zu duplizieren: die Frage „was ist diese
+  // Leistung wert?" hat eine Formel, und zwei Kopien davon wuerden beim
+  // naechsten Preis-Detail auseinanderdriften (Ticket 6hWgVqw2C8442hcG).
+  const istFilter = documentedSqlRaw("a");
+
+  // WEG B (Alrik, 17.09.2026): in einem ABGESCHLOSSENEN Monat faellt das
+  // Potenzial auf das Ist zurueck.
+  //
+  // Die Spalte beantwortet „was kommt noch" — und nach dem Cutoff des Monats
+  // ist die Erwartung, dass nichts mehr kommt.
+  //
+  // KORREKTUR einer ersten Begruendung, die hier stand: sie berief sich darauf,
+  // ein `scheduled`-Termin werde „ueberall sonst als ,Nicht abgerechnet'
+  // ausgewiesen (`deriveAppointmentDisplayStatus`)". Das trifft NICHT zu —
+  // diese Funktion hat im ganzen Repo keinen einzigen Aufrufer ausserhalb von
+  // Tests. „Nicht abgerechnet" erscheint heute nirgends. Die Aussage, das
+  // System habe das Geld „selbst schon abgeschrieben", war also unbelegt.
+  //
+  // Was traegt, ist allein Alriks Entscheidung, was die Spalte BEDEUTEN soll
+  // („was noch kommt", nicht „was der Monat haette sein koennen").
+  //
+  // ERLEDIGT (Weg A, Alrik 18.09.2026): der OBERE Block folgt derselben Regel.
+  // Bis dahin zaehlte er denselben Termin nach dem Cutoff unveraendert unter
+  // „noch geplant" — eine Karte, zwei Aussagen ueber dasselbe Geld. Der
+  // Pipeline-Reader leitet den Status jetzt ueber
+  // `deriveAppointmentDisplayStatus` ab; die Schlagzeile „Erwarteter
+  // Kontoeingang" sinkt entsprechend, und der Betrag wandert nach „Nicht
+  // abgerechnet" statt zu verschwinden.
+  //
+  // Festgenagelt in `tests/billing/kachel-cutoff-beide-bloecke.test.ts`: der
+  // Test misst BEIDE Reader am selben Termin mit demselben Stichtag.
+  const nachCutoff = istNachMonatsCutoff(heute, billingYear, billingMonth);
+  // `sql.join` statt `= ANY(${liste})`: das `sql`-Template expandiert ein Array
+  // als TUPEL, nicht als Array-Literal — `ANY((...))` scheitert dann mit 42809.
+  // Die Liste kommt weiter aus der SSoT, nur die Einsetzung ist explizit.
+  //
+  // Eine LEERE Liste ergaebe `IN ()` und damit 42601 auf dem ganzen Endpunkt.
+  // Heute unerreichbar (`POTENTIAL_APPOINTMENT_STATUSES` enthaelt mindestens
+  // `completed`), und ein lauter Abbruch waere hier auch das Richtige — eine
+  // Potenzial-Spalte ohne Status waere keine Messung. Festgehalten, damit es
+  // beim naechsten Lesen nicht wie ein uebersehener Fall aussieht.
+  const potenzialFilter = nachCutoff ? istFilter : sql`(a.status IN (${sql.join(
+    POTENTIAL_APPOINTMENT_STATUSES.map((st) => sql`${st}`),
+    sql`, `,
+  )}))`;
+
   // --- 1) HW/AB-Minuten + rollenbasierte Kosten je Mitarbeiter (appt-Ebene). ---
   // Task #1503: Kosten je Termin über `wageFor` (Rolle des leistenden
   // Mitarbeiters × kanonische Kategorie-Leistung × Termin-Datum), pro Termin
@@ -202,7 +299,7 @@ export async function readBillingEconomics(
   // HW- UND AB-Minuten jeweils der richtigen Kategorie bei. Kosten pro Leistung
   // gerundet (`ROUND(min/60 × Lohnsatz)`), dann je Mitarbeiter × Kategorie
   // summiert (Spiegel des per-Zeile-Rundens in der Lohn-Aufschlüsselung).
-  const minutesRes = await db.execute(sql`
+  const minutenUndKosten = (statusFilter: SQL, mitUnzugeordneten = false) => db.execute(sql`
     WITH svc AS (
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
@@ -212,7 +309,7 @@ export async function readBillingEconomics(
       FROM appointments a
       JOIN appointment_services asvc ON asvc.appointment_id = a.id
       JOIN services s ON s.id = asvc.service_id
-      WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')}
+      WHERE a.deleted_at IS NULL AND ${statusFilter}
         AND s.unit_type = 'hours'
         AND s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
         AND a.appointment_type <> 'Erstberatung'
@@ -231,12 +328,13 @@ export async function readBillingEconomics(
       COALESCE(SUM(CASE WHEN category = 'hauswirtschaft' THEN cost_cents END), 0)::bigint AS hw_cost,
       COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN cost_cents END), 0)::bigint AS ab_cost
     FROM priced
-    WHERE employee_id IS NOT NULL
+    ${mitUnzugeordneten ? sql`` : sql`WHERE employee_id IS NOT NULL`}
     GROUP BY employee_id
   `);
+  const minutesResP = minutenUndKosten(istFilter);
 
   // --- 2) HW/AB-Erlös je Mitarbeiter (Kunden-Preis ODER Katalog, wie SSoT). ----
-  const revenueRes = await db.execute(sql`
+  const erloes = (statusFilter: SQL, mitUnzugeordneten = false) => db.execute(sql`
     WITH appt_rev AS (
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
@@ -256,7 +354,7 @@ export async function readBillingEconomics(
       FROM appointments a
       JOIN appointment_services asvc ON asvc.appointment_id = a.id
       JOIN services s ON s.id = asvc.service_id
-      WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')} AND s.unit_type = 'hours'
+      WHERE a.deleted_at IS NULL AND ${statusFilter} AND s.unit_type = 'hours'
         AND s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
         AND a.appointment_type <> 'Erstberatung'
         ${dApptFilter} ${empApptFilter} ${insApptFilter}
@@ -266,9 +364,34 @@ export async function readBillingEconomics(
       COALESCE(SUM(CASE WHEN cat = 'hauswirtschaft' THEN revenue_cents END), 0)::bigint AS hw_rev,
       COALESCE(SUM(CASE WHEN cat = 'alltagsbegleitung' THEN revenue_cents END), 0)::bigint AS ab_rev
     FROM appt_rev
-    WHERE employee_id IS NOT NULL
+    ${mitUnzugeordneten ? sql`` : sql`WHERE employee_id IS NOT NULL`}
     GROUP BY employee_id
   `);
+  // Ist- und Potenzial-Lauf sind voneinander unabhaengig — sequenziell
+  // `await`-et haetten sich die vier Abfragen auf einem echten Monat addiert.
+  const revenueRes = await erloes(istFilter);
+  const minutesRes = await minutesResP;
+
+  // Dieselben zwei Abfragen ein zweites Mal — nur der Status-Filter ist weiter.
+  // MIT den unzugeordneten Terminen. `assigned_employee_id` ist nullable, und
+  // bei einem geplanten Termin ist `performed_by_employee_id` per Definition
+  // leer — ein noch niemandem zugewiesener Termin haette sonst `employee_id
+  // IS NULL` und fiele lautlos aus dem Potenzial.
+  //
+  // Das waere ein WIDERSPRUCH AUF DERSELBEN KARTE: der obere Block zaehlt ihn
+  // unter „noch geplant" (der Pipeline-Reader aggregiert pro Termin, ohne
+  // Mitarbeiter-Bezug), die Spalte hier heisst „Potenzial (GANZER Monat)" und
+  // liesse ihn weg. Die Ist-Seite ist davon nicht betroffen: ein
+  // dokumentierter Termin hat immer einen leistenden Mitarbeiter.
+  // `mitUnzugeordneten` folgt dem Filter: nach dem Cutoff IST der Potenzial-Lauf
+  // der Ist-Lauf, und der hat `WHERE employee_id IS NOT NULL`. Liefe er weiter
+  // mit `true`, koennte ein dokumentierter Termin OHNE Mitarbeiter im Potenzial
+  // stehen und im Ist fehlen — „faellt auf Ist" waere dann falsch, und PO-2
+  // (`>=`) haette es verdeckt.
+  const [potenzialMinutenRes, potenzialErloesRes] = await Promise.all([
+    minutenUndKosten(potenzialFilter, !nachCutoff),
+    erloes(potenzialFilter, !nachCutoff),
+  ]);
 
   // --- 3) Termin-km (Anfahrt + Kunden-km) + rollenbasierte km-Kosten je MA. ----
   // km je Termin auf 2 NK quantisiert (km-SSoT) × `wageFor`-km-Lohnsatz, pro
@@ -398,6 +521,54 @@ export async function readBillingEconomics(
     e.hwRevenueCents += num(row.hw_rev);
     e.abRevenueCents += num(row.ab_rev);
   }
+  // Potenzial je Mitarbeiter x Kategorie. Eigene Struktur statt `EmpAgg`: das
+  // Potenzial fliesst NICHT in `buildEconomics` — es ist keine Groesse der
+  // Wirtschaftlichkeits-Rechnung, sondern eine Vergleichsspalte daneben. Es in
+  // den Aggregator zu legen wuerde die Headline-KPIs stillschweigend auf
+  // geplante Termine ausweiten.
+  const potenzialProMa = new Map<number, {
+    hwRevenueCents: number; abRevenueCents: number;
+    hwCostCents: number; abCostCents: number;
+  }>();
+  // Termine ohne Zuordnung: sie gehoeren ins Gesamt-Potenzial, koennen aber
+  // keinem Drilldown zugeschlagen werden. Eigener Topf statt stillem Verwerfen.
+  const potenzialOhneZuordnung = {
+    hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0,
+  };
+  const potenzial = (id: number) => {
+    let p = potenzialProMa.get(id);
+    if (!p) {
+      p = { hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0 };
+      potenzialProMa.set(id, p);
+    }
+    return p;
+  };
+  for (const row of potenzialMinutenRes.rows as Rows) {
+    const id = num(row.employee_id);
+    const p = id ? potenzial(id) : potenzialOhneZuordnung;
+    p.hwCostCents += num(row.hw_cost);
+    p.abCostCents += num(row.ab_cost);
+  }
+  for (const row of potenzialErloesRes.rows as Rows) {
+    const id = num(row.employee_id);
+    const p = id ? potenzial(id) : potenzialOhneZuordnung;
+    p.hwRevenueCents += num(row.hw_rev);
+    p.abRevenueCents += num(row.ab_rev);
+  }
+
+  // Wer NUR geplante Arbeit hat, steht bisher in keinem Aggregat — seine
+  // Ist-Zahlen sind alle 0. Ohne diese Zeile fehlte er in `byEmployee`, sein
+  // Potenzial steckte aber in der Gesamtsumme: Σ(Drilldown) < Gesamt, und zwar
+  // genau in dem Monat, in dem man am ehesten hinsieht (laufender Monat, viel
+  // geplant, wenig dokumentiert).
+  //
+  // Folge, bewusst in Kauf genommen: die Mitarbeiter-Tabelle zeigt solche
+  // Personen jetzt mit einer Ist-Zeile aus lauter Nullen. Das ist die richtige
+  // Information — „diese Person hat diesen Monat geplante Arbeit im Wert von X
+  // und bisher nichts davon dokumentiert" —, aber es ist eine sichtbare
+  // Aenderung an einer Tabelle, die es vorher schon gab.
+  for (const id of potenzialProMa.keys()) ensure(id);
+
   for (const row of kmRes.rows as Rows) {
     const id = num(row.employee_id);
     if (!id) continue;
@@ -465,6 +636,7 @@ export async function readBillingEconomics(
     nonBillable: OVERHEAD_CATEGORIES.map((category) => ({
       category,
       minutes: agg.nonBillable.get(category) ?? 0,
+      label: overheadCategoryLabel(category),
     })),
     travelKm: agg.travelKm,
     customerKm: agg.customerKm,
@@ -484,16 +656,48 @@ export async function readBillingEconomics(
     quantity: number,
     revenueCents: number,
     costCents: number,
-    // Task #1752: Optionale Satz-Basis (Menge + Geld) für das Satz-LABEL, falls
-    // sie von den angezeigten Spalten abweicht. Die km-Zeile zeigt die GESAMT-km
-    // (inkl. nicht-abrechenbarer Zeiterfassungs-km), aber ihr €/km-Satz muss auf
-    // den ABRECHENBAREN Termin-km beruhen (sonst driftet 0,35 → 0,33 €/km).
-    rateBasis?: { quantity: number; revenueCents: number; costCents: number },
+    group: BillingEconomicsRowGroup = "leistung",
+    // `null` heisst „fuer diese Zeile ist die Frage nicht gestellt" — km und
+    // Overhead werden nicht geplant. Bewusst NICHT 0: eine 0 laese sich als
+    // Messung („nichts geplant"), und die Karte zeigt sie dann als Strich.
+    potential: { revenueCents: number; costCents: number } | null = null,
   ): BillingEconomicsRow => {
+    // `kosten_ohne_umsatz` ist keine Beschreibung, sondern eine Zusage: die
+    // Karte zeigt für diese Zeilen in Umsatz/Marge/% einen Gedankenstrich und
+    // rechnet sie aus der Marge-Ampel heraus. Träge eine solche Zeile Erlös,
+    // wäre er auf dem Bildschirm UNSICHTBAR und läge trotzdem in
+    // `totals.revenueCents` — die Kopfzeile stünde höher als die Summe ihrer
+    // Zeilen, und der Selbsttest bemerkte es nicht, weil er die Kosten-Spalte
+    // prüft. Genau die Fehlerklasse aus #146: jede Stelle einzeln plausibel.
+    //
+    // Deshalb hier fail-closed statt einer Doku-Zeile.
+    //
+    // BLAST-RADIUS, bewusst in Kauf genommen: `buildRow` ist die gemeinsame
+    // Closure für `byService` UND jede `byEmployee`-Zeile. Feuerte der Riegel,
+    // wäre nicht eine Zeile kaputt, sondern der ganze Endpunkt — inklusive der
+    // Kopf-Kacheln —, und zwar daten-abhängig (ein Monat, ein Mitarbeiter).
+    // Das ist vertretbar, weil er auf keinem realen Pfad erreichbar ist: alle
+    // fünf Aufrufe übergeben für diesen Block entweder ein Literal 0 oder
+    // `km.timeEntry.chargedCents`, und das ist in der SSoT selbst ein Literal 0
+    // ausserhalb jedes Override-Zweigs. Träfe die Annahme nicht mehr zu, ist
+    // ein lauter Abbruch immer noch besser als ein unsichtbarer Betrag — aber
+    // dann gehört der Riegel auf die Zeile statt auf die Antwort.
+    //
+    // Die Meldung nennt Jahr und Monat: ohne sie wäre der Fall im Log nicht
+    // reproduzierbar, weil er nur für bestimmte Daten auftritt.
+    if (group === "kosten_ohne_umsatz" && revenueCents !== 0) {
+      throw new Error(
+        `Zeile "${key}" (${billingMonth}/${billingYear}) ist als `
+        + `\`kosten_ohne_umsatz\` ausgewiesen, trägt aber ${revenueCents} Cent `
+        + "Erlös. Entweder gehört sie in den Block `leistung`, oder der Erlös "
+        + "ist falsch zugeordnet — beides muss entschieden werden, nicht auf "
+        + "dem Bildschirm verschwinden.",
+      );
+    }
     const marginCents = revenueCents - costCents;
-    const rb = rateBasis ?? { quantity, revenueCents, costCents };
     return {
       key,
+      group,
       label,
       unit,
       quantity,
@@ -501,8 +705,10 @@ export async function readBillingEconomics(
       costCents,
       marginCents,
       marginPercent: marginPercent(revenueCents, marginCents),
-      revenueRateCents: effectiveRateCents(unit, rb.quantity, rb.revenueCents),
-      costRateCents: effectiveRateCents(unit, rb.quantity, rb.costCents),
+      revenueRateCents: effectiveRateCents(unit, quantity, revenueCents),
+      costRateCents: effectiveRateCents(unit, quantity, costCents),
+      potentialRevenueCents: potential?.revenueCents ?? null,
+      potentialCostCents: potential?.costCents ?? null,
     };
   };
 
@@ -510,16 +716,34 @@ export async function readBillingEconomics(
     econ: EconomicsBreakdown,
     hwRevenueCents: number,
     abRevenueCents: number,
+    pot: { hwRevenueCents: number; abRevenueCents: number;
+           hwCostCents: number; abCostCents: number },
   ): BillingEconomicsRow[] => {
-    const kmQuantity = econ.km.travel.km + econ.km.customer.km + econ.km.timeEntry.km;
-    // Task #1752: Satz-Basis der km-Zeile = NUR abrechenbare Termin-km
-    // (Anfahrt + Kunden-km) und deren Geld. Der berechnete km-Erlös entsteht
-    // ausschließlich aus diesen (Zeiterfassungs-km werden nie berechnet), und der
-    // ausgezahlte km-Lohn wird auf diese Basis bezogen, damit €/km === Katalog-
-    // km-Satz gilt statt durch die nicht-abrechenbaren Zeiterfassungs-km verdünnt.
+    // ── km: berechenbar vs. nicht berechenbar ───────────────────────────────
+    // Ticket 6hWgVqw2C8442hcG. Alriks Satz dazu: „Nur für Termine bekomme ich
+    // Geld, also auch nur für die dort anfallenden km. Km die bei Vertrieb,
+    // Erstberatungen anfallen bekomme ich logischerweise nicht bezahlt, die
+    // fallen nur als Kosten an."
+    //
+    // ERSETZT die EINE `kilometer`-Zeile, die alle drei km-Arten in Menge und
+    // Geld mischte. Weil die Zeiterfassungs-km nie berechnet werden
+    // (`km.timeEntry.chargedCents` ist per Konstruktion 0), stand in ihrer
+    // Kosten-Spalte Geld ohne Gegenstück in der Umsatz-Spalte — die
+    // ausgewiesene MARGE war dadurch verdünnt. Gemessen ist der Effekt klein
+    // (8,5 von 1.282,6 km = 0,66 %), aber die Zeile behauptete eine Marge, die
+    // sie nicht hatte.
+    //
+    // Damit entfällt auch die `rateBasis`-Sonderbehandlung aus #1752: die
+    // existierte NUR, um das Satz-Label gegen genau diese Mischung zu
+    // schützen (€/km driftete sonst 0,35 → 0,33). Trägt die Zeile nur noch die
+    // berechenbaren km, sind angezeigte Menge und Satz-Basis dasselbe — die
+    // Ausnahme hat kein Problem mehr zu lösen. Die Zusage von #1752
+    // (€/km === Katalog-km-Satz) gilt unverändert, sie ergibt sich jetzt aus
+    // dem Zuschnitt statt aus einem Zusatzparameter.
     const billableKm = econ.km.travel.km + econ.km.customer.km;
     const billableChargedCents = econ.km.travel.chargedCents + econ.km.customer.chargedCents;
     const billablePaidCents = econ.km.travel.paidCents + econ.km.customer.paidCents;
+
     return [
       buildRow(
         "hauswirtschaft",
@@ -528,6 +752,8 @@ export async function readBillingEconomics(
         econ.personnel.hauswirtschaft.minutes,
         hwRevenueCents,
         econ.personnel.hauswirtschaft.costCents,
+        "leistung",
+        { revenueCents: pot.hwRevenueCents, costCents: pot.hwCostCents },
       ),
       buildRow(
         "alltagsbegleitung",
@@ -536,23 +762,54 @@ export async function readBillingEconomics(
         econ.personnel.alltagsbegleitung.minutes,
         abRevenueCents,
         econ.personnel.alltagsbegleitung.costCents,
+        "leistung",
+        { revenueCents: pot.abRevenueCents, costCents: pot.abCostCents },
       ),
       buildRow(
         "kilometer",
-        "Kilometer",
+        "Kilometer (aus Terminen)",
         "km",
-        kmQuantity,
-        econ.km.totalChargedCents,
-        econ.km.totalPaidCents,
-        { quantity: billableKm, revenueCents: billableChargedCents, costCents: billablePaidCents },
+        billableKm,
+        billableChargedCents,
+        billablePaidCents,
       ),
       buildRow(
-        "gemeinkosten",
-        "Gemeinkosten",
-        "none",
-        0,
-        0,
-        econ.result.nonBillableCostCents,
+        "kilometer_zeiterfassung",
+        "Kilometer (Zeiterfassung)",
+        "km",
+        econ.km.timeEntry.km,
+        // BEWUSST der echte Wert, nicht das Literal 0. Er IST heute 0
+        // (`chargedCents: 0` in der SSoT, weil ohne Termin-Bezug niemand
+        // existiert, dem man die km berechnen könnte) — aber eine 0 von Hand
+        // hinzuschreiben verschweigt jede künftige Änderung daran: der Betrag
+        // wäre in `totals.revenueCents` und fehlte in der Zeilenmenge.
+        // Den Widerspruch fängt jetzt `buildRow` ab, statt ihn zu verstecken.
+        econ.km.timeEntry.chargedCents,
+        econ.km.timeEntry.paidCents,
+        "kosten_ohne_umsatz",
+      ),
+      // ── Gemeinkosten: je Kategorie einzeln ────────────────────────────────
+      // ERSETZT die EINE `gemeinkosten`-Restzeile. Sie war die Summe über
+      // sechs Kategorien und ließ damit genau die Frage offen, für die Alrik
+      // den Block haben will: wofür zahle ich, ohne dafür Geld zu bekommen?
+      //
+      // `buildEconomics` liefert die Aufschlüsselung längst
+      // (`personnel.nonBillable.byCategory`) — sie wurde hier nur wieder
+      // eingeschmolzen. Σ der Kategorien === `nonBillableCostCents` gilt per
+      // Konstruktion in der SSoT, die Σ === KPI-Invariante bleibt also
+      // unberührt. Menge 0: die Kategorien tragen Minuten, aber keine für den
+      // Kunden abrechenbare Menge — ein Stunden-„Satz" auf Overhead wäre eine
+      // Zahl ohne fachliche Bedeutung.
+      ...econ.personnel.nonBillable.byCategory.map((c) =>
+        buildRow(
+          `overhead_${c.category}`,
+          c.label,
+          "none",
+          0,
+          0,
+          c.costCents,
+          "kosten_ohne_umsatz",
+        ),
       ),
     ];
   };
@@ -580,7 +837,18 @@ export async function readBillingEconomics(
     }
   }
   const totalEcon = buildEconomics(inputFor(totalAgg));
-  const byService = buildServiceRows(totalEcon, totalAgg.hwRevenueCents, totalAgg.abRevenueCents);
+  // Potenzial-Summe ueber alle Mitarbeiter — dieselbe Zerlegung wie `totalAgg`,
+  // damit Gesamt-Sicht und Drilldown auf derselben Menge stehen.
+  const potenzialGesamt = { hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0 };
+  for (const p of [...potenzialProMa.values(), potenzialOhneZuordnung]) {
+    potenzialGesamt.hwRevenueCents += p.hwRevenueCents;
+    potenzialGesamt.abRevenueCents += p.abRevenueCents;
+    potenzialGesamt.hwCostCents += p.hwCostCents;
+    potenzialGesamt.abCostCents += p.abCostCents;
+  }
+  const byService = buildServiceRows(
+    totalEcon, totalAgg.hwRevenueCents, totalAgg.abRevenueCents, potenzialGesamt,
+  );
 
   // --- Mitarbeiter-Namen für die „Nach Mitarbeiter"-Zeilen. -------------------
   const empIds = Array.from(byEmp.keys());
@@ -608,7 +876,11 @@ export async function readBillingEconomics(
         costCents: econ.result.totalCostCents,
         marginCents: econ.result.marginCents,
         marginPercent: econ.result.marginPercent,
-        services: buildServiceRows(econ, agg.hwRevenueCents, agg.abRevenueCents),
+        services: buildServiceRows(
+          econ, agg.hwRevenueCents, agg.abRevenueCents,
+          potenzialProMa.get(id)
+            ?? { hwRevenueCents: 0, abRevenueCents: 0, hwCostCents: 0, abCostCents: 0 },
+        ),
       };
     })
     .sort((a, b) => b.revenueCents - a.revenueCents);

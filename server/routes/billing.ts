@@ -47,6 +47,7 @@ import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc, sql }
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
+import { todayBerlinIso } from "@shared/utils/month-close-cutoff";
 import { storage } from "../storage";
 import { qontoStorage } from "../storage/qonto";
 import { classifyPaymentDifference } from "@shared/domain/qonto/payment-difference";
@@ -368,9 +369,14 @@ router.get("/pipeline", asyncHandler("Abrechnungs-Pipeline konnte nicht geladen 
     throw badRequest("Monat ist erforderlich (1–12).");
   }
   const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  // `todayBerlinIso` statt `todayISO`: seit Weg A haengt an diesem Datum die
+  // Frage „ist der Cutoff vorbei?", und der Monatsabschluss rechnet Berliner
+  // Zeit. Mit Server-Lokalzeit laegen obere und untere Kachel-Haelfte am
+  // Cutoff-Tag je nach Container-Zeitzone einen Tag auseinander — genau der
+  // Widerspruch, den Weg A beseitigen soll.
   const asOfDate = typeof req.query.date === "string" && isoDate.test(req.query.date)
     ? req.query.date
-    : todayISO();
+    : todayBerlinIso();
   const result = await readBillingPipeline(year, month, asOfDate);
   res.json(result);
 }));

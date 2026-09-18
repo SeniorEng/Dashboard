@@ -1,8 +1,10 @@
+import { Fragment } from "react";
 import { Loader2, GitBranch } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { BillingPipelineResponse } from "@shared/api";
 import type { PipelineStage } from "@shared/domain/billing-pipeline";
 import { PIPELINE_CASCADE_ORDER } from "@shared/domain/billing-pipeline";
+import { ZAEHLWEISE_UMSATZ_KACHEL } from "@shared/domain/billing-zaehlweise";
 import type { BillingTermineStage } from "@shared/api";
 import { formatAmount } from "../utils";
 import { MONTH_NAMES } from "../constants";
@@ -87,13 +89,18 @@ export function StatusPipelineCard({
       (x) => x.state === "wartet_auf_kundenunterschrift",
     );
     if (!side || side.itemCount === 0) return null;
+    // Dasselbe Segment-Format wie die Stufen — er steht in der Leiste an der
+    // Stelle, an der er fachlich sitzt: der Nachweis ist da, die Unterschrift
+    // fehlt, also zwischen „Nachweis zu erstellen" und „abrechnungsreif".
     return (
       <div
-        className="flex items-baseline gap-3 rounded-md border border-transparent bg-gray-50 px-3 py-1.5"
+        className="flex min-w-[7.5rem] flex-1 flex-col gap-0.5 rounded-md border border-transparent bg-gray-50 px-2.5 py-2"
         data-testid="pipeline-stage-wartet_auf_kundenunterschrift"
       >
-        <span className="w-44 shrink-0 truncate text-xs text-gray-600">{side.label}</span>
-        <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums text-gray-900">
+        <span className="truncate text-xs text-gray-500" title={side.label}>
+          {side.label}
+        </span>
+        <span className="text-sm font-semibold tabular-nums text-gray-900">
           {formatAmount(side.totalCents)}
         </span>
         <span className="text-xs text-gray-400">
@@ -161,12 +168,36 @@ export function StatusPipelineCard({
           label: side.label,
           cents: side.totalCents,
           count: side.itemCount,
-          lohnHinweis: "Lohn fällt an",
+          // „kein Lohn", NICHT „Lohn fällt an" — das stand hier zuerst und war
+          // für JEDEN Termin falsch, den Weg A in diese Zeile bringt.
+          //
+          // `deriveAppointmentDisplayStatus` erzeugt `expired_unsigned`
+          // ausschliesslich für NICHT-dokumentierte Termine, und die Lohn-SSoT
+          // (`payroll-hours.ts`) rechnet über `documentedSqlRaw` = `completed`.
+          // Die Menge, die hier landet, ist also genau die, für die kein Lohn
+          // anfällt.
+          //
+          // Folgenlos war das nur, solange die Zeile nie erschien: vor Weg A
+          // hatte `expired_unsigned` keinen Produzenten. Sie erscheint jetzt
+          // zum ersten Mal — und wäre zu 100 % mit Fällen gefüllt gewesen, für
+          // die ihr Hinweis nicht stimmt.
+          lohnHinweis: "kein Lohn",
         });
       }
     }
   }
 
+  /**
+   * Eine Stufe als SEGMENT einer waagerechten Leiste.
+   *
+   * ERSETZT die senkrechte Zeile (Beschriftung links, Betrag rechts). Alriks
+   * Vorgabe nach dem Prod-Gang: kompakter, und die Leserichtung soll die
+   * Bewegung tragen — links „noch geplant", rechts „bezahlt". Die Beträge
+   * wandern im Monatsverlauf nach rechts; das muss man dann nicht erklären.
+   *
+   * Der Betrag steht groß, Beschriftung und Anzahl klein darüber und darunter:
+   * waagerecht ist die ZAHL das, was man vergleicht, nicht die Zeile.
+   */
   const renderStage = (stage: PipelineStage) => {
     const group = stageByKey.get(stage);
     if (!group) return null;
@@ -176,16 +207,18 @@ export function StatusPipelineCard({
         key={stage}
         type="button"
         onClick={() => onStageSelect(selectionForStage(stage))}
-        className={`flex items-baseline gap-3 rounded-md border px-3 py-1.5 text-left transition-colors ${
+        className={`flex min-w-[7.5rem] flex-1 flex-col gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors ${
           isActive
             ? "border-teal-400 bg-teal-50"
             : "border-transparent bg-gray-50 hover:bg-gray-100"
         }`}
         data-testid={`pipeline-stage-${stage}`}
       >
-        <span className="w-44 shrink-0 truncate text-xs text-gray-600">{group.label}</span>
+        <span className="truncate text-xs text-gray-500" title={group.label}>
+          {group.label}
+        </span>
         <span
-          className={`w-28 shrink-0 text-right text-sm font-medium tabular-nums ${
+          className={`text-sm font-semibold tabular-nums ${
             group.totalCents < 0 ? "text-rose-700" : "text-gray-900"
           }`}
           data-testid={`pipeline-stage-sum-${stage}`}
@@ -241,6 +274,12 @@ export function StatusPipelineCard({
               ? "—"
               : formatAmount(pipeline.totals.expectedRevenueTotalCents)}
           </div>
+          {/* Weg 3 (Alrik, 17.09.2026): sichtbar machen statt angleichen.
+              Der Hinweis steht DORT, wo die Zahl steht — der Moment, in dem
+              jemand sie mit der Rechnungsliste vergleicht, ist genau dieser. */}
+          <div className="text-xs text-gray-400" data-testid="text-pipeline-zaehlweise">
+            {ZAEHLWEISE_UMSATZ_KACHEL}
+          </div>
           {!isLoading && pipeline && (
             <div className="text-xs text-gray-500" data-testid="text-pipeline-received">
               davon bereits eingegangen{" "}
@@ -293,9 +332,24 @@ export function StatusPipelineCard({
                       )}`}
                 </span>
               </div>
-              <div className="flex flex-col gap-1.5">
-                {PIPELINE_CASCADE_ORDER.map(renderStage)}
-                {renderWartetAufUnterschrift()}
+              {/* WAAGERECHT statt senkrecht (Alrik, 17.09.2026). `overflow-x-auto`
+                  ist Absicht: auf einem schmalen Fenster scrollt die Leiste in
+                  sich, statt die Seite zu sprengen oder umzubrechen — eine
+                  umgebrochene Kaskade waere keine Leserichtung mehr.
+
+                  „wartet auf Unterschrift" steht an seiner fachlichen Stelle:
+                  der Nachweis ist da, es fehlt die Unterschrift. */}
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {PIPELINE_CASCADE_ORDER.map((stage) => (
+                  <Fragment key={stage}>
+                    {renderStage(stage)}
+                    {stage === "dokumentiert" && renderWartetAufUnterschrift()}
+                  </Fragment>
+                ))}
+              </div>
+              <div className="mt-1 flex justify-between text-xs uppercase tracking-wide text-gray-500">
+                <span>← unsicher</span>
+                <span>auf dem Konto →</span>
               </div>
             </div>
 

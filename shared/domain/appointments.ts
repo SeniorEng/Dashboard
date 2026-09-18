@@ -169,6 +169,46 @@ export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = PERSISTED_APPOINTMENT_
   (s) => !(FINAL_APPOINTMENT_STATUSES as readonly AppointmentStatus[]).includes(s),
 );
 
+/**
+ * Ticket 6hWgVqw2C8442hcG — Status, die zum POTENZIAL eines Monats zählen:
+ * alles, was bereits geleistet ist ODER noch geleistet werden kann.
+ *
+ * Beantwortet Alriks erste Zielfrage — *„wie viel abrechenbaren Umsatz mache
+ * ich potentiell diesen Monat (inkl. geplante Termine)?"* — und ist bewusst
+ * ABGELEITET statt aufgezählt: `completed` (das Ist) plus
+ * `UNDOCUMENTED_STATUSES` (was noch offen ist). Damit ist es exakt das
+ * Komplement von „abgesagt" und „Kunde nicht angetroffen" — den beiden
+ * persistierten Status, aus denen kein Umsatz mehr wird.
+ *
+ * WIRKLICH konstruiert, nicht bloß so genannt: Die erste Fassung schrieb
+ * `["completed", ...UNDOCUMENTED_STATUSES]` und nannte das im Docblock „exakt
+ * das Komplement von cancelled und customer_no_show". Das war es formal NICHT
+ * — `completed` stand von Hand da, abgeleitet war nur der Rest. Konkreter
+ * Drift-Fall: käme ein vierter terminaler Status dazu (etwa
+ * „abgerechnet/archiviert"), verschwände er still aus dem Potenzial, während
+ * die Ist-Seite ihn über `documentedSqlRaw` womöglich weiter sähe — dann wäre
+ * `Potenzial < Ist` möglich, also genau die Zusage kaputt, die die
+ * Kosten-Tabelle gibt.
+ *
+ * Jetzt ist das Komplement gebildet, nicht behauptet: alles Persistierte außer
+ * den Status, aus denen kein Umsatz mehr wird.
+ *
+ * NICHT zu verwechseln mit der Kaskaden-Stufe „noch geplant" (oberer Block der
+ * Umsatz-Kachel): die meint NUR die offenen Termine. Das Potenzial enthält
+ * beides. Deshalb heißt die Spalte in der Kosten-Tabelle „Potenzial" und nicht
+ * „Geplant" — zwei Namen für dieselbe Frage sind genau das, wogegen dieses
+ * Ticket antritt.
+ */
+export const NO_REVENUE_STATUSES = [
+  "cancelled",
+  "customer_no_show",
+] as const satisfies readonly AppointmentStatus[];
+
+export const POTENTIAL_APPOINTMENT_STATUSES: AppointmentStatus[] =
+  PERSISTED_APPOINTMENT_STATUSES.filter(
+    (s) => !(NO_REVENUE_STATUSES as readonly AppointmentStatus[]).includes(s),
+  );
+
 
 export const PFLEGEGRAD_OPTIONS = [1, 2, 3, 4, 5] as const;
 

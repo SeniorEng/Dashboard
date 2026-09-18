@@ -128,7 +128,26 @@ describe("GET /api/billing/pipeline — Pipeline-Reader (Task #1405)", () => {
       0,
     );
 
-    const res = await apiGet<BillingPipelineResponse>(`/api/billing/pipeline?year=${year}&month=${month}`);
+    // Stichtag INNERHALB des Fixture-Monats.
+    //
+    // Seit Weg A (Ticket 6hWgVqw2C8442hcG) folgt die Pipeline dem
+    // Monats-Cutoff: ein `scheduled`-Termin in einem abgeschlossenen Monat
+    // zaehlt nicht mehr als „offen", sondern als „nicht abgerechnet". Die
+    // Fixture liegt bewusst in einem VERGANGENEN Monat (`pastMonth()`), dessen
+    // Cutoff laengst vorbei ist — ohne Stichtag pruefte dieser Test also ab
+    // sofort einen Seitenzustand statt der Stufe „Offen".
+    //
+    // Der Test misst die STUFEN-ZUORDNUNG und die €-Konservierung, nicht den
+    // Cutoff. Deshalb bekommt er einen Tag aus seinem eigenen Monat, statt die
+    // Fixture in die Gegenwart zu ziehen — das haette ihn von „heute" abhaengig
+    // gemacht. Die Cutoff-Regel selbst ist in
+    // `tests/billing/kachel-cutoff-beide-bloecke.test.ts` festgenagelt.
+    const stichtag = `${year}-${String(month).padStart(2, "0")}-${String(
+      new Date(year, month, 0).getDate(),
+    ).padStart(2, "0")}`;
+    const res = await apiGet<BillingPipelineResponse>(
+      `/api/billing/pipeline?year=${year}&month=${month}&date=${stichtag}`,
+    );
     expect(res.status).toBe(200);
     const body = res.data;
 
