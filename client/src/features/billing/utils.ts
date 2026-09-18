@@ -1,5 +1,5 @@
 import { formatEuroDE } from "@shared/utils/money";
-import type { BillingCustomerItem, InvoiceItem } from "@shared/api";
+import type { BillingCustomerItem, BillingEconomicsRow, InvoiceItem } from "@shared/api";
 import {
   agingModelForBillingType,
   assignInvoiceActionCluster,
@@ -161,4 +161,75 @@ export function paymentBadgeTitle(inv: InvoiceItem): string {
     default:
       return "Eine Zahlung ist dieser Rechnung zugeordnet.";
   }
+}
+
+/**
+ * Teilt die Economics-Zeilen in die zwei Blöcke der Kosten-Tabelle und
+ * beantwortet, ob der untere Block überhaupt gezeigt werden darf.
+ *
+ * ── Warum das eine eigene Funktion ist ──────────────────────────────────
+ * Weil sie eine Aussage trifft, die falsch sein kann, und die im JSX niemand
+ * prüfen könnte. Der obere Block der Kachel hat mit
+ * `summarizePipelineCents` eine reine Funktion, die seine Zusage trägt und
+ * getestet ist; der untere hatte seine Logik nur im `.tsx`.
+ *
+ * ── `zeigeOhneUmsatz`: der Punkt, um den es geht ────────────────────────
+ * Bei gesetztem Kassen-Filter wird Overhead GAR NICHT GEMESSEN — er ist
+ * keiner Kasse zurechenbar (`includeOverhead = false` im Reader). Der Reader
+ * liefert die sechs Kategorien plus die Zeiterfassungs-km trotzdem, dann eben
+ * mit 0. Ungeprüft stünde auf dem Bildschirm eine Rubrik „Kosten ohne
+ * Umsatz" mit „Urlaub 0,00 €", „Krankheit 0,00 €" … „zusammen 0,00 €" —
+ * sieben Zeilen, die eine Messung behaupten, die nicht stattgefunden hat.
+ *
+ * Das ist genau das Argument, mit dem die Umsatz-Spalte dieser Zeilen einen
+ * Gedankenstrich bekommt („eine 0 läse sich wie eine Messung"), nur auf die
+ * Kosten-Spalte angewandt. Dasselbe gilt für einen leeren Monat und für jede
+ * Person ohne Zeiterfassung im Mitarbeiter-Drilldown.
+ *
+ * Geprüft wird auf Geld UND Menge — aber mit einem Geltungsbereich, der heute
+ * kleiner ist, als die Bedingung aussieht:
+ *
+ * Die sechs Overhead-Zeilen tragen `quantity: 0` per Konstruktion (der Reader
+ * setzt es hart, `unit: "none"`; die Minuten je Kategorie liegen zwar in der
+ * SSoT, erreichen die Zeile aber nicht — FINDING [P3] im PR). Für sie ist der
+ * Mengen-Zweig deshalb WIRKUNGSLOS, und ein Monat mit gebuchten Gemeinkosten
+ * zum Lohnsatz 0 blendet den Block aus, obwohl gemessen wurde.
+ *
+ * Wirksam ist er heute nur für `kilometer_zeiterfassung`: gefahrene km bei
+ * km-Lohnsatz 0 sind eine echte Messung und bleiben sichtbar.
+ *
+ * Die Bedingung steht trotzdem so da, weil sie die richtige ist — sobald die
+ * Overhead-Zeilen ihre Minuten tragen, greift sie von selbst. Beide Punkte
+ * gehören zusammen angefasst, nicht als zwei unabhängige Änderungen.
+ */
+export function splitEconomicsRows(rows: BillingEconomicsRow[]): {
+  leistung: BillingEconomicsRow[];
+  ohneUmsatz: BillingEconomicsRow[];
+  ohneUmsatzCents: number;
+  /**
+   * Σ der MARGEN des unteren Blocks (also negativ).
+   *
+   * Nicht `−ohneUmsatzCents`: das wäre dieselbe Zahl nur, solange keine Zeile
+   * des Blocks Erlös trägt. Genau dafür gibt es pro Zeile schon einen Riegel
+   * (`ServiceRow` prüft `revenueCents === 0`) — die Summenzeile hatte ihn
+   * nicht. Über die echten Margen zu gehen schliesst ihn, erspart das
+   * handgesetzte Minuszeichen und kann nicht doppelt-negativ werden.
+   */
+  ohneUmsatzMargeCents: number;
+  summeCents: number;
+  zeigeOhneUmsatz: boolean;
+} {
+  const leistung = rows.filter((r) => r.group !== "kosten_ohne_umsatz");
+  const ohneUmsatz = rows.filter((r) => r.group === "kosten_ohne_umsatz");
+  const ohneUmsatzCents = ohneUmsatz.reduce((s, r) => s + r.costCents, 0);
+  return {
+    leistung,
+    ohneUmsatz,
+    ohneUmsatzCents,
+    ohneUmsatzMargeCents: ohneUmsatz.reduce((s, r) => s + r.marginCents, 0),
+    summeCents: rows.reduce((s, r) => s + r.costCents, 0),
+    zeigeOhneUmsatz:
+      ohneUmsatz.length > 0
+      && (ohneUmsatzCents !== 0 || ohneUmsatz.some((r) => r.quantity !== 0)),
+  };
 }

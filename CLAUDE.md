@@ -52,6 +52,18 @@ Code (`scripts/release-verify.ts`, 6hHqw8c7).
   nicht freigegebenen `DROP COLUMN`/`DROP TABLE` ab — ebenso bei `SET NOT NULL`,
   `UNIQUE`, `CHECK` und verengenden Typänderungen, die den im Deploy-Fenster noch
   bedienenden alten Code genauso brechen.
+- **ABER: auf dem Replit-Pfad ist 0d kein Riegel, sondern eine Nachkontrolle.**
+  `migrate.sh` läuft dort im **Build** — Replits eigene Schema-Phase läuft
+  **davor** („Development database changes detected" → „Generated migrations to
+  apply to production", belegt im Deploy-Log vom 17.09.2026). Sie introspiziert
+  Dev- und Prod-DB direkt und warnt bei Destruktivem nur, statt zu blockieren
+  (Replit-Doku + Migrations-Blogpost, gelesen 18.09.2026); ein Abschalten ist
+  nicht dokumentiert. 0d kann also nur noch feststellen, was schon angewendet
+  ist. **Vollständig gilt die Zusage nur auf dem Coolify-Pfad**, wo `migrate.sh`
+  als Pre-Deployment-Command tatsächlich vor der Schema-Änderung läuft.
+  Tickets: `6hWvMvpxpJFFjwQG` (Reihenfolge) und `6hWvrJgff5xr9hfp` (0d kommt
+  gegen Prod gar nicht durch — dort steht auch, dass die `.replit`-Build-Zeile
+  deshalb derzeit ohne `migrate.sh` läuft).
 - **Freigabe über `docs/schema-change-manifest.json`, an den `schemaHash` gebunden.**
   ERSETZT `PUBLISH_ACK_DROPS` auf dem Deploy-Pfad: eine Plattform-Env bliebe
   gesetzt und genehmigte still jeden weiteren Deploy. Der Manifest-Eintrag trägt
@@ -184,6 +196,43 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   bricht derzeit am Coverage-Gate `qonto` (Schritt 16), das mit den Tests nichts
   zu tun hat. Beim Lesen also immer den SCHRITT ansehen, nicht nur die
   Job-Farbe.
+
+## Was wohin gehört: Ticket-Beschreibung, Ticket-Kommentar, Chat
+
+**Faustregel: was nach dem Schließen des Chatfensters noch gebraucht wird,
+steht nicht im Chat.**
+
+| Ort | Zweck | Eigenschaft |
+|-----|-------|-------------|
+| **Ticket-Beschreibung** | der aktuelle **Stand** der Sache | wird überschrieben |
+| **Ticket-Kommentar** | **was wann passiert ist** | wird nie überschrieben |
+| **Chat** | nur für diesen Moment | verschwindet |
+
+- **Beschreibung = Zustand.** Was jemand wissen muss, der das Ticket zum ERSTEN
+  Mal öffnet — kein Verlauf, keine Begründungskette. Bei jeder Änderung des
+  Sachverhalts **aktualisieren, nicht anhängen**. Eine Beschreibung, die einen
+  überholten Zustand behauptet, ist schlimmer als keine: sie wird als Beleg
+  gelesen. Lange Tickets bekommen einen **Stand-Kopf** (Stand / Offen mit
+  Ticket-IDs / letzte Entscheidung / nächster Schritt) — ein Abruf statt drei.
+- **Kommentar = Ereignis.** Befunde, Messungen, Entscheidungen, Fehlschläge,
+  Begründungen. **Auch dann unverändert stehenlassen, wenn sie sich als falsch
+  erweisen** — ein widerlegter Befund ist Teil der Kette, nicht Müll.
+- **Chat = nichts Dauerhaftes.** Rückfragen, Zwischenstand, „ich fange an".
+  Sobald ein Ergebnis entsteht, gehört es ins Ticket — **vor** der Chat-Meldung,
+  nicht danach.
+
+**Zwei Zusätze:**
+
+- **Absender-Kennung.** Cowork und diese Instanz schreiben unter derselben
+  Todoist-UID; am Kommentar ist sonst nicht erkennbar, von wem er stammt. Jeder
+  Kommentar beginnt mit `CC:` bzw. `COWORK:`.
+- **Neue Ticket-IDs ins Ursprungsticket.** Wer aus einem Ticket heraus ein neues
+  anlegt, meldet dessen ID dort. Sonst muss der Nächste den Backlog durchblättern
+  oder Alrik trägt das Ergebnis.
+
+**Warum das asymmetrisch wiegt:** diese Instanz hat Repo, Tests und Code —
+Cowork hat nur Todoist. Was nicht im Ticket steht, existiert dort nicht und ist
+beim nächsten Start weg.
 
 ## Arbeitsmodus: autonom bis zur PR, Mensch an 4 Gates
 

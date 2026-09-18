@@ -5,6 +5,7 @@ import {
   PIPELINE_STAGE_LABELS,
   EXPECTED_REVENUE_SIDE_STATES,
   summarizePipelineCents,
+  assignAppointmentStage,
   type PipelineAtomicUnit,
 } from "@shared/domain/billing-pipeline";
 
@@ -101,16 +102,33 @@ describe("Umsatz-Kachel — die Kaskade geht auf", () => {
     expect([...PIPELINE_CASCADE_ORDER].sort()).toEqual([...PIPELINE_STAGES].sort());
   });
 
-  it("KA-6 – die Reihenfolge ist sicherstes zuerst, nicht die Durchlauf-Folge", () => {
-    expect(PIPELINE_CASCADE_ORDER[0], "oben steht, was am nächsten am Konto ist").toBe("bezahlt");
+  it("KA-6 – die Leserichtung ist links unsicher, rechts das Geld", () => {
+    // GEDREHT gegenüber der ersten Fassung (Alrik, 17.09.2026): die Kaskade ist
+    // waagerecht, und dann soll die Bewegung im Monatsverlauf — Beträge wandern
+    // von „noch geplant" nach „bezahlt" — die natürliche Leserichtung sein
+    // statt eine Aufwärtsbewegung, die man erklären muss.
+    expect(PIPELINE_CASCADE_ORDER[0], "links das Unsicherste").toBe("offen");
     expect(
       PIPELINE_CASCADE_ORDER[PIPELINE_CASCADE_ORDER.length - 1],
-      "unten das Unsicherste",
-    ).toBe("offen");
+      "rechts das, was auf dem Konto ist",
+    ).toBe("bezahlt");
+
+    // Die GANZE Ordnung als Literal — nicht nur erste und letzte Position.
+    // Beide erfüllt `PIPELINE_STAGES` selbst, und KA-5 prüft nur die sortierte
+    // MENGE: ein Vertauschen von `unterschrieben` ↔ `rechnung_erstellt` wäre
+    // an beiden vorbeigelaufen und hätte genau das gebrochen, wofür es diese
+    // Reihenfolge gibt — die Leserichtung „Beträge wandern nach rechts".
+    expect([...PIPELINE_CASCADE_ORDER]).toEqual([
+      "offen", "dokumentiert", "unterschrieben", "rechnung_erstellt", "versendet", "bezahlt",
+    ]);
+
+    // Sie ist damit wieder elementgleich mit der fachlichen Durchlauf-Folge —
+    // aber BEWUSST eine eigene Konstante. Fielen sie zusammen, wäre die
+    // nächste Layout-Entscheidung eine Änderung an der Domäne.
     expect(
       PIPELINE_CASCADE_ORDER,
-      "bewusst NICHT die fachliche Durchlauf-Reihenfolge",
-    ).not.toEqual(PIPELINE_STAGES);
+      "Anzeige-Reihenfolge und Durchlauf-Folge sind zwei Fragen",
+    ).not.toBe(PIPELINE_STAGES);
   });
 
   it("KA-7 – `wartet auf Kundenunterschrift` ist erwarteter Umsatz und gehört in die Kaskade", () => {
@@ -121,6 +139,71 @@ describe("Umsatz-Kachel — die Kaskade geht auf", () => {
     expect(EXPECTED_REVENUE_SIDE_STATES).not.toContain("kunde_nicht_angetroffen");
     expect(EXPECTED_REVENUE_SIDE_STATES).not.toContain("nicht_abgerechnet");
     expect(EXPECTED_REVENUE_SIDE_STATES).not.toContain("storniert");
+  });
+
+  it("KA-9 – „Nachweis zu erstellen“ und „Leistungsnachweis fehlt“ sind DISJUNKT", () => {
+    // Alriks Verdacht vom 17.09.2026 (August-Zahlen): beide Zeilen zeigten
+    // 57,00 €, die eine mit 1 Termin, die andere mit 2. Liegt derselbe Termin
+    // in beiden, zaehlt die Schlagzeile ihn doppelt — und der sichtbare
+    // Selbsttest merkt es NICHT, weil er die gezeigten Zeilen addiert: eine
+    // doppelt gezaehlte Zeile geht genauso auf wie eine echte.
+    //
+    // Hier wird die Frage als MENGEN-Aussage entschieden, nicht an einer
+    // Fixture: ueber alle Eingabe-Kombinationen darf keine einzige in beiden
+    // Ausgaengen landen. `assignAppointmentStage` gibt genau einen Ausgang
+    // zurueck (frueher Return), die Partition ist also strukturell — dieser
+    // Test haelt sie fest, falls jemand den Rueckgabewert je zu einer Liste
+    // macht oder die Reihenfolge der Zweige aendert.
+    const stati = ["scheduled", "documenting", "completed",
+      "cancelled", "expired_unsigned", "customer_no_show"] as const;
+    // Die ECHTEN Werte — "pflegekasse" gibt es nicht, der Seitenzustand haengt
+    // an `isPflegekasseBillingType` (gesetzlich ODER privat). Die
+    // Erreichbarkeits-Pruefung unten hat genau diesen Tippfehler gefangen.
+    const zahler = [null, "selbstzahler", "privat",
+      "pflegekasse_gesetzlich", "pflegekasse_privat"] as const;
+    const boolsch = [false, true] as const;
+
+    const inDokumentiert: string[] = [];
+    const inWartet: string[] = [];
+
+    for (const status of stati) {
+      for (const billingType of zahler) {
+        for (const hasDirectSignature of boolsch) {
+          for (const hasCompletedServiceRecord of boolsch) {
+            for (const hasEmployeeSignedServiceRecord of boolsch) {
+              for (const isInvoiced of boolsch) {
+                const key = [status, billingType, hasDirectSignature,
+                  hasCompletedServiceRecord, hasEmployeeSignedServiceRecord,
+                  isInvoiced].join("|");
+                const a = assignAppointmentStage({
+                  status: status as never,
+                  billingType,
+                  hasDirectSignature,
+                  hasCompletedServiceRecord,
+                  hasEmployeeSignedServiceRecord,
+                  isInvoiced,
+                });
+                if (a.kind === "stage" && a.stage === "dokumentiert") inDokumentiert.push(key);
+                if (a.kind === "side" && a.state === "wartet_auf_kundenunterschrift") {
+                  inWartet.push(key);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Beide Ausgaenge muessen ueberhaupt erreichbar sein — sonst prueft der
+    // Schnittmengen-Test nichts.
+    expect(inDokumentiert.length, "Stufe `dokumentiert` unerreichbar").toBeGreaterThan(0);
+    expect(inWartet.length, "Seitenzustand `wartet…` unerreichbar").toBeGreaterThan(0);
+
+    const schnitt = inDokumentiert.filter((k) => inWartet.includes(k));
+    expect(
+      schnitt,
+      "dieselbe Eingabe landet in BEIDEN Zeilen — die Schlagzeile zaehlt doppelt",
+    ).toEqual([]);
   });
 
   it("KA-8 – `dokumentiert` heißt nicht „Doku fehlt“", () => {
