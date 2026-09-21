@@ -325,3 +325,82 @@ describe("Avis-Dateien aus der Praxis — Verpackung, Spalten, Fremddateien", ()
     expect(() => parseAvisCsv("")).toThrow();
   });
 });
+
+/**
+ * Gate 2, zweiter Durchgang (S1/S6). Die Frage war: bricht die Bauform bei
+ * einer abweichenden Datei LAUT ab, oder liest sie still etwas Falsches?
+ *
+ * Die Antwort war „still" — und das ist der gefährlichere Ausgang. Ein
+ * vollständig falsch gelesenes Avis wäre mit lauter Nullposten angelegt
+ * worden, der datei-interne Hinweis hätte grün gemeldet (0 gegen 0), und der
+ * Rechnungsabgleich hätte `unterzahlung` gesagt — die blockiert bewusst nicht.
+ * „66 von 66 unterzahlt" wäre von echten Kürzungen nur durch Hinsehen zu
+ * unterscheiden gewesen.
+ */
+describe("DAVASO — eine abweichende Datei bricht ab, statt still zu lügen", () => {
+  it("AP-21 – eine fehlende Pflichtspalte ist ein Abbruch", () => {
+    // `getField` liefert für eine unbekannte Spalte `""` — und `""` ist von
+    // einem echten Leerwert nicht zu unterscheiden. Der Riegel steht deshalb
+    // am Header, wo der Fehler entsteht.
+    const umbenannt = DAVASO_1ZU1.replace("KTR_BTR_Zahlg", "KTR_BTR_Zahlung");
+    expect(() => parseAvisCsv(umbenannt)).toThrow(/Pflichtspalten/);
+
+    const ohneBeleg = DAVASO_1ZU1.replace("ZEM_BelegNr", "ZEM_Beleg_Nr");
+    expect(() => parseAvisCsv(ohneBeleg)).toThrow(/Pflichtspalten/);
+  });
+
+  it("AP-22 – eine Kopfzeile ohne Zahlbetrag ist ein Abbruch, kein 0-ct-Posten", () => {
+    const leer = datei(
+      kopf("RE-2026-9001", "70.00", ""),
+      beleg("RE-2026-9001", "B-1", "70.00"),
+    );
+    expect(() => parseAvisCsv(leer)).toThrow(/KTR_BTR_Zahlg/);
+  });
+
+  it("AP-23 – unlesbar bricht ab, `0.00` bleibt erlaubt", () => {
+    // Die Unterscheidung, die `parseBetragCents` nicht treffen konnte: es
+    // bildet `""` UND `NaN` auf 0 ab. Ein Avis über 0,00 € ist denkbar; ein
+    // Avis, dessen Betrag niemand lesen konnte, ist es nicht.
+    const muell = datei(
+      kopf("RE-2026-9001", "70.00", "n.a."),
+      beleg("RE-2026-9001", "B-1", "70.00"),
+    );
+    expect(() => parseAvisCsv(muell)).toThrow(/kein Betrag/);
+
+    const null_euro = datei(
+      kopf("RE-2026-9001", "0.00", "0.00"),
+      beleg("RE-2026-9001", "B-1", "0.00"),
+    );
+    expect(parseAvisCsv(null_euro).items[0].betragCents).toBe(0);
+  });
+
+  it("AP-24 – eine Belegzeile im falschen Block bricht ab", () => {
+    // Die gemessene Invariante (114 von 114: Belegzeile trägt dieselbe
+    // `ZEM_RecNr` wie ihre Kopfzeile) lag gratis da und wurde nicht geprüft.
+    // Sie ist der einzige Weg, einen falschen Block-Zuschlag zu bemerken —
+    // betragsneutral, aber die Belegnummern stünden danach persistiert an der
+    // falschen Rechnung.
+    const falschZugeordnet = datei(
+      kopf("RE-2026-9001", "70.00", "70.00"),
+      beleg("RE-2026-9002", "B-1", "70.00"),      // gehört zu einem anderen Block
+    );
+    expect(() => parseAvisCsv(falschZugeordnet)).toThrow(/Block-Zuordnung/);
+  });
+
+  it("AP-25 – die Prüfsumme je Block hebt sich nicht mehr auf", () => {
+    // Global summiert glichen sich zwei entgegengesetzte Fehler aus: ein Block
+    // mit einem Beleg zu viel, einer mit einem zu wenig, Differenz 0. Der
+    // Docblock versprach, ein verlorener Posten falle auf — global tat er das
+    // nicht.
+    const gegenlaeufig = datei(
+      kopf("RE-2026-9001", "100.00", "100.00"),
+      beleg("RE-2026-9001", "B-1", "110.00"),     // 10,00 € zu viel
+      kopf("RE-2026-9002", "100.00", "100.00"),
+      beleg("RE-2026-9002", "B-2", "90.00"),      // 10,00 € zu wenig
+    );
+    const { pruefsumme } = parseAvisCsv(gegenlaeufig);
+    expect(pruefsumme.ausPostenCents, "global gleichen sich die Fehler aus").toBe(20000);
+    expect(pruefsumme.ausgewiesenCents).toBe(20000);
+    expect(pruefsumme.abweichungCents, "die Fehler gleichen sich wieder aus").toBe(2000);
+  });
+});

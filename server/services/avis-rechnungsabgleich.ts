@@ -33,11 +33,10 @@
  * werden als `ungeprueft` ausgewiesen — NICHT als bestanden. Wie viele das
  * sind, sagt der Vorschau-Lauf, statt dass wir es jetzt raten.
  */
-import { and, eq, ilike, inArray } from "drizzle-orm";
+import { eq, ilike } from "drizzle-orm";
 import { db } from "../lib/db";
 import { invoices } from "../../shared/schema";
 import { resolveUniqueMatch } from "../../shared/domain/qonto/avis-match";
-import { statusesAllowedToTransitionTo } from "../../shared/domain/invoice-status";
 import {
   classifyPaymentDifference,
   isPaymentFullyCovered,
@@ -94,8 +93,16 @@ export interface AbgleichBefund {
   avisCents: number;
   /** `null`, solange keine Rechnung aufgeloest werden konnte. */
   rechnungCents: number | null;
-  /** Skonto + Kuerzung dieses Postens — die benennbaren Gruende fuer eine Differenz. */
+  /** Skonto dieses Postens — ein GEWAEHRTER Nachlass, der die Forderung legitim mindert. */
   abzugCents: number;
+  /**
+   * Kuerzung dieses Postens — ein AUFERLEGTER Abzug.
+   *
+   * Bewusst NICHT in `abzugCents` und nicht in die SSoT gegeben: Skonto ist ein
+   * Rabatt, eine Kuerzung ist ein Streitfall. Sie erklaert eine Unterzahlung,
+   * sie hebt sie nicht auf.
+   */
+  kuerzungCents: number;
   /**
    * `rechnung − abzug − avis` aus `classifyPaymentDifference`.
    * POSITIV = Unterzahlung, NEGATIV = Ueberzahlung. `null` ohne Rechnung.
@@ -166,30 +173,70 @@ export async function findeRechnungUeberNummer(nummer: string | null): Promise<R
 }
 
 /**
- * Betrags-Fallback: genau EINE offene Rechnung mit exakt passendem Brutto.
+ * ── ENTFERNT: der Betrags-Fallback ─────────────────────────────────────
  *
- * Nur fuer die ZUORDNUNG nach dem Import, nie fuer die Pruefung davor (siehe
- * `findeRechnungUeberNummer`).
+ * Hier stand `findeRechnungUeberBetrag` — „genau EINE offene Rechnung mit
+ * exakt passendem Brutto". Er war bewusst von `findeRechnungUeberNummer`
+ * getrennt, damit der RIEGEL ihn nicht benutzen kann. Gate 2 (2. Durchgang,
+ * S2) hat gezeigt, dass die Trennung im Riegel haelt, aber nicht im Lauf:
+ *
+ *   1. Ein Posten ohne aufloesbare Nummer wird `ungeprueft` gemeldet und
+ *      laeuft durch — so gewollt.
+ *   2. Zwei Zeilen spaeter band `autoMatchAvisItems` genau diesen Posten
+ *      ueber den Betrag. Die so gebundene Rechnung hat per Konstruktion
+ *      `gross == betragCents`.
+ *   3. `mark-paid` klassifiziert sie damit als `exact`, und
+ *      `autoCloseAdviceFromTransactions` kann sie schon beim Import auf
+ *      `bezahlt` heben — dessen Triple-Equality ist fuer betrags-gebundene
+ *      Posten ebenfalls per Konstruktion erfuellt.
+ *
+ * **Der Zirkelschluss, den der Riegel an der Vordertuer verbietet, stand an
+ * der Hintertuer.** Und dieser PR macht ihn erst scharf: der Postenbetrag ist
+ * jetzt eine volle Rechnungssumme statt einer Teil-Forderung, und
+ * `gesamtBetragCents` ist erstmals der echte Bankbetrag.
+ *
+ * Entscheidung (Alrik, 22.09.2026): **ein Posten, dessen Betrag nie
+ * unabhaengig geprueft wurde, darf sich nicht ueber genau diesen Betrag
+ * selbst binden.** Die Kosten sind beziffert und liegen in der Altlast —
+ * 41 von 66 Kopfzeilen ohne aufloesbare Nummer, alle vor Juli 2026, aus der
+ * Zeit der manuellen Abrechnung. Der aktuelle Rueckstand ist nicht betroffen
+ * (15 von 15 mit kanonischer Nummer). Diese Posten bleiben `ungeprueft` und
+ * werden von Hand zugeordnet.
  */
-export async function findeRechnungUeberBetrag(betragCents: number): Promise<RechnungTreffer | null> {
-  if (betragCents <= 0) return null;
-  const treffer = await db.select({
-    id: invoices.id,
-    invoiceNumber: invoices.invoiceNumber,
-    grossAmountCents: invoices.grossAmountCents,
-  }).from(invoices).where(and(
-    eq(invoices.grossAmountCents, betragCents),
-    inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
-  )).limit(2);
-  return resolveUniqueMatch(treffer);
-}
 
 export async function pruefeGegenRechnungen(posten: AbgleichPosten[]): Promise<AbgleichErgebnis> {
   const befunde: AbgleichBefund[] = [];
 
   for (const p of posten) {
     const rechnung = await findeRechnungUeberNummer(p.rechnungsNummer);
-    const abzugCents = p.skontoCents + p.kuerzungCents;
+    const abzugCents = p.skontoCents;
+
+    /**
+     * Eine Rechnung mit Brutto <= 0 ist eine Gutschrift/ein Storno.
+     *
+     * Ein Zahlbetrag dagegen zu vergleichen ergibt IMMER `overpaid` — und weil
+     * `ueberzahlung` blockiert, wuerde eine einzige solche Referenz die ganze
+     * Datei ablehnen (Gate 2, 2. Durchgang, S4). Das ist kein Befund, sondern
+     * ein Vergleich, der keinen Sinn hat: hier steht keine Forderung, gegen
+     * die etwas gezahlt worden sein koennte.
+     *
+     * Also `ungeprueft` mit Grund — sichtbar in der Vorschau, ohne den Rest
+     * der Datei mitzureissen.
+     */
+    if (rechnung && rechnung.grossAmountCents <= 0) {
+      befunde.push({
+        rechnungsNummer: rechnung.invoiceNumber,
+        avisCents: p.betragCents,
+        rechnungCents: rechnung.grossAmountCents,
+        abzugCents: p.skontoCents,
+        kuerzungCents: p.kuerzungCents,
+        differenzCents: null,
+        status: "ungeprueft",
+        grund: `${rechnung.invoiceNumber} ist eine Gutschrift/ein Storno `
+          + `(Brutto ${rechnung.grossAmountCents} ct) — ein Zahlungsvergleich ist hier ohne Aussage`,
+      });
+      continue;
+    }
 
     if (!rechnung) {
       befunde.push({
@@ -197,6 +244,7 @@ export async function pruefeGegenRechnungen(posten: AbgleichPosten[]): Promise<A
         avisCents: p.betragCents,
         rechnungCents: null,
         abzugCents,
+        kuerzungCents: p.kuerzungCents,
         differenzCents: null,
         status: "ungeprueft",
         grund: p.rechnungsNummer
@@ -206,11 +254,25 @@ export async function pruefeGegenRechnungen(posten: AbgleichPosten[]): Promise<A
       continue;
     }
 
-    // Skonto und Kuerzung mindern die Forderung legitim — genau das, was die
-    // SSoT unter `skontoCents` versteht. Ihre Differenz ist
-    // `gross − abzug − gezahlt`, also POSITIV bei Unterzahlung.
-    //
-    // ── Und sie sind in den echten Dateien LEER ───────────────────────────
+    /**
+     * Nur das SKONTO geht in die SSoT — die Kuerzung ausdruecklich nicht.
+     *
+     * Gate 2 (2. Durchgang, S3): `skontoCents = skonto + kuerzung` geht
+     * rechnerisch auf, ueberlaedt aber den Begriff. Die SSoT versteht unter
+     * `skontoCents` „bekanntes Skonto, das die Forderung LEGITIM mindert" —
+     * einen gewaehrten Nachlass. Eine Kassen-Kuerzung ist das Gegenteil: ein
+     * auferlegter Abzug, also ein Streitfall.
+     *
+     * Beides zusammenzuwerfen haette eine ausgewiesene Kuerzung zu
+     * `bestaetigt` gemacht — eine Rechnung gilt als gedeckt, obwohl Geld
+     * fehlt. Das ist genau der ICL01267-Fall, nur mit Begruendung in der
+     * Datei, und er waere damit unsichtbar geworden: das Gegenteil dessen,
+     * was `AV-6` zusagt.
+     *
+     * Die Kuerzung wird stattdessen SEPARAT ausgewiesen. Sie erklaert die
+     * Unterzahlung, sie hebt sie nicht auf.
+     */
+    // ── Heute sind beide Spalten leer, und das aendert nichts ──────────
     // Gemessen ueber alle 66 Kopfzeilen der DAVASO-Dateien: `KTR_BTR_Skonto`
     // ungleich 0 in NULL Faellen, `KTR_BTR_DTA_Kuerzg` ebenso — auch in der
     // einen Zeile, die nachweislich gekuerzt wurde (RE-2026-0213: 117,19 EUR
@@ -218,7 +280,8 @@ export async function pruefeGegenRechnungen(posten: AbgleichPosten[]): Promise<A
     //
     // Das Format sieht die Spalten vor, die Daten fuellen sie nicht. `abzugCents`
     // ist hier also praktisch immer 0, und eine Kuerzung ist aus der Datei
-    // heraus NICHT von einem Parse-Fehler zu unterscheiden.
+    // heraus NICHT von einem Parse-Fehler zu unterscheiden. Die Regel steht
+    // trotzdem richtig da — sie greift, sobald die Spalte einmal gefuellt kommt.
     //
     // Genau deshalb blockiert die Unterzahlung nicht und wird auch nicht
     // stillschweigend als in Ordnung gebucht: sie wird EINZELN gemeldet. Ein
@@ -238,12 +301,15 @@ export async function pruefeGegenRechnungen(posten: AbgleichPosten[]): Promise<A
       : klassifikation.result === "overpaid" ? "ueberzahlung"
       : "unterzahlung";
 
-    const gezahlt = `${p.betragCents} ct${abzugCents ? ` (+ ${abzugCents} ct Abzug)` : ""}`;
+    const gezahlt = `${p.betragCents} ct`
+      + (abzugCents ? ` (+ ${abzugCents} ct Skonto)` : "")
+      + (p.kuerzungCents ? ` (+ ${p.kuerzungCents} ct ausgewiesene Kuerzung)` : "");
     befunde.push({
       rechnungsNummer: rechnung.invoiceNumber,
       avisCents: p.betragCents,
       rechnungCents: rechnung.grossAmountCents,
       abzugCents,
+      kuerzungCents: p.kuerzungCents,
       differenzCents,
       status,
       grund:

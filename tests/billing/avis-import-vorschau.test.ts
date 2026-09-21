@@ -73,6 +73,27 @@ function kassenCsv(posten: Array<{ nummer: string; euro: string }>, summeEuro: s
   ].join("\n");
 }
 
+/**
+ * Die Avise DIESES Laufs — nicht `count(*)` ueber die Tabelle.
+ *
+ * Gate 2 (2. Durchgang, S7): die erste Fassung zaehlte alle `payment_advices`
+ * vor und nach der Vorschau. Unter dem Orchestrator und in CI teilen sich
+ * Testdateien eine DB; eine parallel laufende Datei, die ein Avis anlegt, hebt
+ * den Zaehler zwischen den beiden Lesungen — und zwar als ROT, mit der Meldung
+ * „die Vorschau hat einen Avis angelegt".
+ *
+ * Das ist derselbe Messfehler, den dieser PR bei `TL-1` abraeumt und
+ * ausfuehrlich beschreibt — hier zwei Dateien weiter selbst eingebaut.
+ * Gefunden hat ihn der Review, nicht ich: eine Fehlerklasse zu kennen schuetzt
+ * nicht davor, sie zu wiederholen. Die Absicherung liegt im Review, nicht im
+ * Bewusstsein des Schreibenden.
+ */
+async function eigeneAvise() {
+  return db.select({ id: paymentAdvices.id })
+    .from(paymentAdvices)
+    .where(like(paymentAdvices.fileName, `${TAG}%`));
+}
+
 async function sende(csvContent: string, extra: Record<string, unknown> = {}) {
   return apiPost<Record<string, unknown>>("/api/admin/qonto/payment-advices", {
     fileName: `${TAG}-${Math.random().toString(36).slice(2, 8)}.csv`,
@@ -275,13 +296,71 @@ describe("Avis-Import — der Riegel hängt an der Rechnung", () => {
     expect(abgleich.bestaetigt, JSON.stringify(abgleich)).toBe(1);
     expect(abgleich.ueberzahlungen).toBe(0);
   });
+
+  it("AV-14 – eine ausgewiesene Kürzung hebt die Unterzahlung NICHT auf", async () => {
+    // Gate 2 (2. Durchgang, S3): `skontoCents = skonto + kuerzung` geht
+    // rechnerisch auf, überlädt aber den Begriff. Die SSoT versteht unter
+    // `skontoCents` einen GEWÄHRTEN Nachlass; eine Kassen-Kürzung ist ein
+    // AUFERLEGTER Abzug — ein Streitfall, kein Rabatt.
+    //
+    // Zusammengeworfen wäre eine ausgewiesene Kürzung zu `bestaetigt`
+    // geworden: die Rechnung gälte als gedeckt, obwohl Geld fehlt. Genau der
+    // ICL01267-Fall, nur mit Begründung in der Datei — und er wäre damit
+    // unsichtbar geworden.
+    const nummer = naechsteNummer();
+    await legeRechnungAn(nummer, 10000);                      // Forderung 100,00 €
+    const davaso = [
+      "LfdNr,AVISNr,KTR_IK,KTR_Name,ZEM_IK,ZEM_IBAN,ZEM_BelegNr,ZEM_VorgangsNr,ZEM_RecNr,ZEM_RecDatum,ZEM_BTR_Forderg,KTR_BTR_Zahlg,KTR_BTR_Skonto,KTR_BTR_DTA_Kuerzg,Datum_ZahlungAusfuehrg",
+      `1,TST,100000000,Testkasse,200000000,DE00,,V-1,${nummer},01.08.2017,100.00,80.00,0.00,20.00,15.09.2017`,
+      `2,TST,100000000,Testkasse,200000000,DE00,B-1,V-1,${nummer},01.08.2017,100.00,,0.00,,`,
+    ].join("\n");
+
+    const res = await sende(davaso, { dryRun: true });
+    expect(res.status, JSON.stringify(res.data)).toBe(200);
+
+    const abgleich = res.data.abgleich as Record<string, unknown>;
+    expect(abgleich.unterzahlungen, "die Kürzung wurde als Nachlass verrechnet").toBe(1);
+    expect(abgleich.bestaetigt).toBe(0);
+
+    const befund = (abgleich.befunde as Array<Record<string, unknown>>)[0];
+    expect(befund.kuerzungCents, "die Kürzung wird nicht ausgewiesen").toBe(2000);
+    expect(befund.abzugCents, "die Kürzung steckt im Skonto-Feld").toBe(0);
+    expect(befund.differenzCents).toBe(2000);
+  });
+
+  it("AV-15 – eine Gutschrift reißt nicht die ganze Datei mit", async () => {
+    // Gate 2 (2. Durchgang, S4): Storno-Rechnungen tragen negatives Brutto.
+    // Ein Zahlbetrag dagegen ergibt IMMER `overpaid` — und weil `ueberzahlung`
+    // blockiert, hätte eine einzige solche Referenz die ganze Datei abgelehnt.
+    //
+    // Das ist kein Befund, sondern ein Vergleich ohne Aussage: hier steht
+    // keine Forderung, gegen die etwas gezahlt worden sein könnte.
+    const nummer = naechsteNummer();
+    await legeRechnungAn(nummer, -5000);                      // Gutschrift −50,00 €
+    const ok = naechsteNummer();
+    await legeRechnungAn(ok, 15000);
+
+    const res = await sende(kassenCsv(
+      [{ nummer, euro: "50,00" }, { nummer: ok, euro: "150,00" }], "200,00",
+    ), { dryRun: true });
+
+    expect(res.status, JSON.stringify(res.data)).toBe(200);
+    const abgleich = res.data.abgleich as Record<string, unknown>;
+    expect(abgleich.ueberzahlungen, "die Gutschrift hat die Datei abgelehnt").toBe(0);
+    expect(abgleich.ungeprueft).toBe(1);
+    expect(abgleich.bestaetigt, "der stimmige Posten fiel mit").toBe(1);
+
+    const gutschrift = (abgleich.befunde as Array<Record<string, unknown>>)
+      .find(b => b.status === "ungeprueft");
+    expect(String(gutschrift?.grund)).toMatch(/Gutschrift|Storno/);
+  });
 });
 
 describe("Avis-Import — die Vorschau", () => {
   it("AV-7 – die Vorschau parst und schreibt NICHTS", async () => {
     const nummer = naechsteNummer();
     await legeRechnungAn(nummer, 15000);
-    const vorher = await db.select({ id: paymentAdvices.id }).from(paymentAdvices);
+    const vorher = await eigeneAvise();
 
     const res = await sende(kassenCsv([{ nummer, euro: "150,00" }], "150,00"), { dryRun: true });
 
@@ -289,7 +368,7 @@ describe("Avis-Import — die Vorschau", () => {
     expect(res.data.dryRun).toBe(true);
     expect(res.data.itemCount).toBe(1);
 
-    const nachher = await db.select({ id: paymentAdvices.id }).from(paymentAdvices);
+    const nachher = await eigeneAvise();
     expect(nachher.length, "die Vorschau hat einen Avis angelegt").toBe(vorher.length);
   });
 
@@ -330,7 +409,7 @@ describe("Avis-Import — die Vorschau", () => {
     // legte einen echten Avis an. Eine Vorschau, die schreibt, ist die
     // gefährlichste Zusage von allen — man prüft im Vertrauen darauf, dass
     // nichts passiert.
-    const vorher = await db.select({ id: paymentAdvices.id }).from(paymentAdvices);
+    const vorher = await eigeneAvise();
 
     const res = await apiPost<Record<string, unknown>>("/api/admin/qonto/payment-advices", {
       fileName: `${TAG}-ohne-inhalt.csv`,
@@ -341,7 +420,7 @@ describe("Avis-Import — die Vorschau", () => {
     expect(res.status).toBe(400);
     expect(res.data.code).toBe("AVIS_VORSCHAU_OHNE_INHALT");
 
-    const nachher = await db.select({ id: paymentAdvices.id }).from(paymentAdvices);
+    const nachher = await eigeneAvise();
     expect(nachher.length, "die Vorschau hat einen Avis angelegt").toBe(vorher.length);
   });
 

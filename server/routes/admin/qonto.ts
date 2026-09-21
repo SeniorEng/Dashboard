@@ -8,7 +8,6 @@ import { parseAvisCsv, AvisParseUncertainError } from "../../services/avis-parse
 import {
   pruefeGegenRechnungen,
   findeRechnungUeberNummer,
-  findeRechnungUeberBetrag,
 } from "../../services/avis-rechnungsabgleich";
 import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
@@ -1371,16 +1370,24 @@ async function autoMatchAvisItems(
     const ueberNummer = await findeRechnungUeberNummer(searchNum);
     if (ueberNummer) matchedId = ueberNummer.id;
 
-    // 3) Betrags-Fallback: genau EINE offene Rechnung mit passendem Brutto.
+    // ── ENTFERNT: der Betrags-Fallback (Gate 2, 2. Durchgang, S2) ──
     //
-    // Bewusst eine EIGENE Funktion und kein Schalter an der obigen: der
-    // Riegel darf ihn nie benutzen. Eine Rechnung zu finden, WEIL der Betrag
-    // passt, und dann den Betrag zu bestaetigen, koennte per Konstruktion nie
-    // eine Abweichung melden.
-    if (matchedId === null) {
-      const ueberBetrag = await findeRechnungUeberBetrag(item.betragCents);
-      if (ueberBetrag) matchedId = ueberBetrag.id;
-    }
+    // Hier stand: „keine Referenz-Zuordnung ⇒ genau EINE offene Rechnung mit
+    // exakt passendem Bruttobetrag". Ein Posten, den der Riegel mangels
+    // auflösbarer Nummer als `ungeprueft` gemeldet hat, wurde zwei Zeilen
+    // später über genau den Betrag gebunden, dessen Richtigkeit niemand
+    // geprüft hatte — und die so gebundene Rechnung ist per Konstruktion
+    // betragsgleich, weshalb `mark-paid` sie als `exact` und
+    // `autoCloseAdviceFromTransactions` sie beim Import als bezahlbar sieht.
+    //
+    // Derselbe Zirkelschluss, den `pruefeGegenRechnungen` an der Vordertür
+    // ausschließt. Die Begründung dort gilt hier unverändert und steht
+    // ausführlich in `avis-rechnungsabgleich.ts`.
+    //
+    // Was das kostet, ist gemessen: 41 von 66 DAVASO-Kopfzeilen nennen keine
+    // auflösbare Rechnungsnummer — alle aus dem Bestand vor Juli 2026. Die
+    // bleiben jetzt unzugeordnet und werden von Hand verknüpft. Der aktuelle
+    // Rückstand trägt 15 von 15 kanonische Nummern und ist nicht betroffen.
 
     if (matchedId !== null) {
       const invoiceId = matchedId;

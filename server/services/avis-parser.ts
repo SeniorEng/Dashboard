@@ -187,6 +187,42 @@ export function parseBetragCents(value: string, konvention: Dezimalkonvention): 
   return Math.round(num * 100);
 }
 
+/**
+ * Wie `parseBetragCents`, aber „nicht lesbar" ist ein FEHLER, kein 0.
+ *
+ * `parseBetragCents` bildet `""` und `NaN` beide auf `0` ab — bequem fuer
+ * optionale Felder, toedlich fuer Pflichtfelder. Gate 2 (2. Durchgang, S1) hat
+ * es ausgefuehrt: benennt DAVASO die Spalte `KTR_BTR_Zahlg` um, liefert
+ * `getField` `""`, jeder Posten bekommt 0 ct, die Pruefsumme steht auf 0 und
+ * meldet gruen, und der Rechnungsabgleich sagt `unterzahlung` — die blockiert
+ * bewusst nicht. Eine vollstaendig falsch gelesene Datei waere als Avis mit
+ * lauter Nullposten angelegt worden.
+ *
+ * Fuer die Felder, ohne die ein Posten keinen Sinn hat, wird deshalb hier
+ * abgebrochen. Ein `0.00` in der Datei ist ausdruecklich ERLAUBT — nur das
+ * fehlende oder unlesbare Feld nicht. Genau diese Unterscheidung konnte die
+ * alte Fassung nicht treffen.
+ */
+function parseBetragCentsStrikt(value: string, konvention: Dezimalkonvention, feld: string): number {
+  const roh = value.trim().replace(/\s/g, "").replace(/€/g, "");
+  if (!roh) {
+    throw new Error(
+      `Pflichtfeld ${feld} ist leer. Dateiaufbau nicht erkannt, Import abgelehnt.`,
+    );
+  }
+  const cleaned = konvention === "komma"
+    ? roh.replace(/\./g, "").replace(",", ".")
+    : roh.replace(/,/g, "");
+  const num = parseFloat(cleaned);
+  if (isNaN(num)) {
+    throw new Error(
+      `Pflichtfeld ${feld} ist kein Betrag: „${value.trim()}". `
+      + "Dateiaufbau nicht erkannt, Import abgelehnt.",
+    );
+  }
+  return Math.round(num * 100);
+}
+
 function detectDelimiter(headerLine: string): string {
   const semicolons = (headerLine.match(/;/g) || []).length;
   const commas = (headerLine.match(/,/g) || []).length;
@@ -243,6 +279,25 @@ function parseDavaso(csvContent: string): ParsedAvis {
     if (idx === undefined || idx >= row.length) return "";
     return row[idx]?.trim() || "";
   };
+
+  /**
+   * Die Spalten, ohne die dieser Parser nichts Sinnvolles sagen kann.
+   *
+   * Fehlt eine, liefert `getField` still `""` — und `""` ist von einem echten
+   * Leerwert nicht zu unterscheiden. Gate 2 (S1, ausgefuehrt): eine umbenannte
+   * `ZEM_BelegNr` macht JEDE Zeile zur Kopfzeile, eine umbenannte
+   * `KTR_BTR_Zahlg` macht jeden Posten zu 0 ct. Beides lief ohne einen Laut
+   * durch. Der Riegel steht deshalb am Header, wo der Fehler entsteht, nicht
+   * drei Ebenen weiter unten, wo er nur noch wie ein Datenproblem aussieht.
+   */
+  const PFLICHTSPALTEN = ["ZEM_BelegNr", "ZEM_RecNr", "ZEM_BTR_Forderg", "KTR_BTR_Zahlg"] as const;
+  const fehlend = PFLICHTSPALTEN.filter(c => colIdx[c] === undefined);
+  if (fehlend.length > 0) {
+    throw new Error(
+      `DAVASO-Datei ohne Pflichtspalten: ${fehlend.join(", ")}. `
+      + `Gefunden: ${columns.join(", ")}. Import abgelehnt.`,
+    );
+  }
 
   const dataRows = lines.slice(1).filter(l => l.trim()).map(l => splitCsvLine(l, delimiter));
 
@@ -354,7 +409,9 @@ function parseDavaso(csvContent: string): ParsedAvis {
       ?? (getField(b.kopf, "ZEM_RecNr") || null),
     rechnungsDatum: toIsoDate(getField(b.kopf, "ZEM_RecDatum") || null),
     verwendungszweck: null,
-    betragCents: parseBetragCents(getField(b.kopf, "KTR_BTR_Zahlg"), "punkt"),
+    // Strikt: eine Kopfzeile OHNE Zahlbetrag ist keine Kopfzeile, sondern ein
+    // nicht erkannter Dateiaufbau. `0.00` bleibt erlaubt.
+    betragCents: parseBetragCentsStrikt(getField(b.kopf, "KTR_BTR_Zahlg"), "punkt", "KTR_BTR_Zahlg"),
     skontoCents: parseBetragCents(getField(b.kopf, "KTR_BTR_Skonto"), "punkt"),
     kuerzungCents: parseBetragCents(getField(b.kopf, "KTR_BTR_DTA_Kuerzg"), "punkt"),
     buchungsDatum: null,
@@ -366,6 +423,29 @@ function parseDavaso(csvContent: string): ParsedAvis {
    * auf den Posten: die Belegnummer ist der Schluessel der Datei, ein Posten
    * fasst inzwischen einen ganzen Block zusammen.
    */
+  /**
+   * Die gemessene Invariante als Riegel: jede Belegzeile traegt dieselbe
+   * `ZEM_RecNr` wie ihre Kopfzeile (114 von 114, 0 Abweichungen).
+   *
+   * Sie lag gratis da und wurde nicht geprueft (Gate 2, S6). Sie ist der
+   * einzige Weg, einen falschen Block-Zuschlag zu bemerken: laufen zwei
+   * Kopfzeilen hintereinander, landen die folgenden Belege alle im zweiten
+   * Block — betragsneutral, aber die Belegnummern stehen danach persistiert
+   * an der falschen Rechnung.
+   */
+  for (const b of bloecke) {
+    const kopfRec = getField(b.kopf, "ZEM_RecNr");
+    for (const r of b.posten) {
+      const postenRec = getField(r, "ZEM_RecNr");
+      if (postenRec !== kopfRec) {
+        throw new Error(
+          `Belegzeile ${getField(r, "ZEM_BelegNr")} nennt ZEM_RecNr „${postenRec}", `
+          + `ihre Kopfzeile „${kopfRec}". Block-Zuordnung nicht erkannt, Import abgelehnt.`,
+        );
+      }
+    }
+  }
+
   const alleBelege = bloecke.flatMap(b => b.posten.map(r => getField(r, "ZEM_BelegNr")));
   const dubletten = alleBelege.filter((b, i) => alleBelege.indexOf(b) !== i);
   if (dubletten.length > 0) {
@@ -396,11 +476,32 @@ function parseDavaso(csvContent: string): ParsedAvis {
    * Und weiterhin blind gegen einen SKALENFEHLER — beide Zahlen kommen durch
    * denselben `parseBetragCents`-Aufruf. Dafuer ist der Rechnungsabgleich da.
    */
+  /**
+   * JE BLOCK vergleichen, nicht global.
+   *
+   * Gate 2 (S6, ausgefuehrt): globale Summen heben sich auf. Bei der
+   * Zeilenfolge Kopf/Kopf/Beleg/Beleg landen beide Belege im zweiten Block —
+   * der erste ist dann belegfrei, der zweite hat einen zu viel, und die
+   * globale Differenz bleibt 0. Der Docblock versprach, ein verlorener oder
+   * verdoppelter Posten falle auf; global tat er das nicht.
+   *
+   * Summiert werden deshalb die BETRAEGE der Einzeldifferenzen. 0 heisst dann
+   * „jeder Block geht auf" und nicht „die Fehler gleichen sich aus".
+   */
   const forderungKopf = bloecke.reduce(
     (n, b) => n + parseBetragCents(getField(b.kopf, "ZEM_BTR_Forderg"), "punkt"), 0);
   const forderungPosten = bloecke.reduce(
     (n, b) => n + b.posten.reduce(
       (m, r) => m + parseBetragCents(getField(r, "ZEM_BTR_Forderg"), "punkt"), 0), 0);
+
+  const abweichungJeBlock = bloecke
+    .filter(b => b.posten.length > 0)
+    .reduce((n, b) => {
+      const kopfF = parseBetragCents(getField(b.kopf, "ZEM_BTR_Forderg"), "punkt");
+      const postenF = b.posten.reduce(
+        (m, r) => m + parseBetragCents(getField(r, "ZEM_BTR_Forderg"), "punkt"), 0);
+      return n + Math.abs(postenF - kopfF);
+    }, 0);
 
   const hatPosten = bloecke.some(b => b.posten.length > 0);
 
@@ -410,8 +511,8 @@ function parseDavaso(csvContent: string): ParsedAvis {
     pruefsumme: {
       ausPostenCents: forderungPosten,
       ausgewiesenCents: hatPosten ? forderungKopf : null,
-      quelle: "ZEM_BTR_Forderg der Kopfzeilen gegen die ihrer Belegzeilen",
-      abweichungCents: hatPosten ? forderungPosten - forderungKopf : null,
+      quelle: "ZEM_BTR_Forderg je Block: Kopfzeile gegen ihre Belegzeilen",
+      abweichungCents: hatPosten ? abweichungJeBlock : null,
       ausAnderenZeilen: true,
     },
   };
