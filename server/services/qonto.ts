@@ -155,6 +155,43 @@ function planAusEntscheidung(
     `nur gebunden — ${nummer} zur Pruefung markiert (Ueberzahlung ueber Toleranz)`);
 }
 
+/**
+ * Trockenlauf: ein getroffener Sammel-Avis bezahlt ALLE seine offenen
+ * Rechnungen — die stehen danach keiner weiteren Zahlung mehr zur Verfuegung.
+ */
+function merkeAvisGeschlossen(
+  advices: Array<{ id: number; openInvoiceIds: number[] }>,
+  adviceId: number,
+  geschlossen: Set<number>,
+): void {
+  const treffer = advices.find(a => a.id === adviceId);
+  for (const id of treffer?.openInvoiceIds ?? []) geschlossen.add(id);
+}
+
+/**
+ * Warum diese Rechnung keine Zahlung annimmt — EINE Formulierung fuer beide
+ * Modi.
+ *
+ * Die erste Fassung des Trockenlaufs baute hier einen eigenen Text und der
+ * Schreibpfad einen anderen. Beide sagten dasselbe, aber nicht mit denselben
+ * Worten — und TL-2 (der Plan-Vergleich) fiel sofort. Das ist genau seine
+ * Aufgabe: zwei Modi, die „im Grunde dasselbe" melden, sind keine zwei Modi
+ * derselben Vorschau.
+ *
+ * `Status beim Lesen` ist bewusst so formuliert: im Schreibpfad kann sich der
+ * Status seit dem Laden geaendert haben — dann ist genau das der Grund, und
+ * die Angabe bleibt trotzdem wahr.
+ */
+function nichtZahlbarGrund(
+  nummer: string,
+  status: string,
+  imLaufGeschlossen: boolean,
+): string {
+  return imLaufGeschlossen
+    ? `${nummer} ist in diesem Lauf bereits geschlossen worden`
+    : `${nummer} nimmt keine Zahlung an (Status beim Lesen: „${status}")`;
+}
+
 function bulkEintrag(
   qtx: PlanZahlung,
   bulk: { adviceId: number; invoiceCount: number },
@@ -468,14 +505,24 @@ class QontoService {
    * wäre die Vorschau eine Behauptung.
    *
    * ── Was der Trockenlauf NICHT vorhersagen kann ───────────────────────────
-   *  - **Parallele Zustandsänderungen.** Der echte Lauf schreibt geguardet und
-   *    bricht eine Bindung ab, wenn die Rechnung inzwischen storniert oder
-   *    bezahlt wurde (`INVOICE_STATUS_CHANGED`). Wird zwischen Vorschau und
-   *    Lauf woanders gearbeitet, kann eine geplante Zeile ausfallen.
-   *  - Nicht dazu gehört die Reihenfolge-Wirkung INNERHALB des Laufs: dass ein
-   *    gebundener Avis aus der Kandidatenliste fällt und dass eine zweite
-   *    Zahlung auf dieselbe Rechnung die kumulierte Summe hebt, hält der
-   *    Trockenlauf mit (siehe `simulierteZahlungen`).
+   * **Genau eines: parallele Zustandsänderungen.** Der echte Lauf schreibt
+   * geguardet und bricht eine Bindung ab, wenn die Rechnung inzwischen
+   * woanders storniert oder bezahlt wurde. Wird zwischen Vorschau und Lauf
+   * gearbeitet, kann eine geplante Zeile ausfallen.
+   *
+   * Diese Aufzählung stand hier schon einmal — und war falsch. Sie behauptete,
+   * die Nebenläufigkeit sei die einzige Grenze, während der Trockenlauf in
+   * Wahrheit den Status-Guard gar nicht kannte (Gate-2-Blocker zu #156:
+   * Entwurfs-Rechnungen und zweite Vollzahlungen liefen auseinander, beide
+   * ohne jede Nebenläufigkeit). Der Satz ist jetzt wahr, weil der Code ihn
+   * wahr macht — nicht umgekehrt.
+   *
+   * **Was er sehr wohl mitführt**, je mit eigener Simulation und eigenem Test:
+   *  - die kumulierte Zahlsumme je Rechnung (`simulierteZahlungen`, TL-3),
+   *  - welche Rechnungen im Lauf geschlossen wurden und deshalb nichts mehr
+   *    annehmen (`simuliertGeschlossen`, TL-5/TL-6),
+   *  - dass ein gebundener Avis aus der Kandidatenliste fällt und seine
+   *    Rechnungen mit ihm (TL-7).
    */
   async autoMatch(
     userId: number,
@@ -495,6 +542,37 @@ class QontoService {
      * Überlagerung stellt den Unterschied her.
      */
     const simulierteZahlungen = new Map<number, number>();
+
+    /**
+     * Trockenlauf: welche Rechnungen kein Geld mehr annehmen koennen.
+     *
+     * ── Der Fund, wegen dem es das gibt (Gate 2 zu #156) ────────────────────
+     * Die erste Fassung simulierte den BETRAG, aber nicht den STATUS-Guard.
+     * Jeder Schreibzweig verlangt `statusesAllowedToTransitionTo("bezahlt")` —
+     * und das ist genau `["versendet"]`. Zwei alltaegliche Faelle liefen
+     * dadurch auseinander, beide vom Reviewer AUSGEFUEHRT, nicht hergeleitet:
+     *
+     *  - **Entwurfs-Rechnungen.** Sie stehen bewusst in der Kandidatenliste,
+     *    koennen aber von KEINEM Schreibpfad gebunden werden. Vorschau:
+     *    „wird auf bezahlt gesetzt". Echter Lauf: Rollback, uebersprungen.
+     *  - **Zweite VOLLE Zahlung auf dieselbe Rechnung.** Die erste schliesst
+     *    sie; die zweite laeuft im echten Lauf auf. Vorschau: „gebunden, zur
+     *    Pruefung". Echter Lauf: uebersprungen.
+     *
+     * Die Richtung war die ungefaehrliche — die Vorschau versprach MEHR, als
+     * geschieht. Trotzdem ein Blocker: der Docblock behauptete, die einzige
+     * Grenze seien parallele Zustandsaenderungen. Das war nachweislich falsch,
+     * und es ist genau die Zusage, auf die sich jemand vor dem Druecken
+     * verlaesst.
+     *
+     * Gespeist aus drei Quellen: Status beim Eintritt, eigene
+     * `invoice_paid`-Entscheidungen, und alle Rechnungen eines im Trockenlauf
+     * getroffenen Sammel-Avis.
+     */
+    const simuliertGeschlossen = new Set<number>();  // in BEIDEN Modi gefuehrt
+    const ZAHLBARE_VORSTATUS = statusesAllowedToTransitionTo("bezahlt");
+    const kannNochZahlen = (inv: { id: number; status: string }): boolean =>
+      !simuliertGeschlossen.has(inv.id) && ZAHLBARE_VORSTATUS.includes(inv.status);
 
     const unmatched = await qontoStorage.getUnmatchedTransactions();
 
@@ -573,10 +651,11 @@ class QontoService {
           // Fremd-Avis (der die genannte Rechnung fälschlich offen ließe).
           const memberAdvices = openAdvices.filter(a => a.openInvoiceIds.includes(matchedInvoiceId));
           if (memberAdvices.length > 0) {
-            const didBulk = await this.tryBulkAdviceMatch(qtx, memberAdvices, userId, ipAddress, { dryRun });
+            const didBulk = await this.tryBulkAdviceMatch(qtx, memberAdvices, userId, ipAddress, { dryRun, stillPayable: (id) => !simuliertGeschlossen.has(id) });
             if (didBulk) {
               matched++;
               plan.push(bulkEintrag(qtx, didBulk));
+              merkeAvisGeschlossen(openAdvices, didBulk.adviceId, simuliertGeschlossen);
               openAdvices = openAdvices.filter(a => a.id !== didBulk.adviceId);
               continue;
             }
@@ -588,10 +667,11 @@ class QontoService {
       // Task #1672 — Bulk-Avis-Strategie NACH den Einzelrechnungs-Strategien:
       // nur versuchen, wenn keine Rechnungsnummer/Betrag-Einzelrechnung traf.
       if (!bestMatch && openAdvices.length > 0) {
-        const didBulk = await this.tryBulkAdviceMatch(qtx, openAdvices, userId, ipAddress, { dryRun });
+        const didBulk = await this.tryBulkAdviceMatch(qtx, openAdvices, userId, ipAddress, { dryRun, stillPayable: (id) => !simuliertGeschlossen.has(id) });
         if (didBulk) {
           matched++;
           plan.push(bulkEintrag(qtx, didBulk));
+          merkeAvisGeschlossen(openAdvices, didBulk.adviceId, simuliertGeschlossen);
           // in-memory: geschlossenes Avis nicht erneut als Kandidat anbieten.
           openAdvices = openAdvices.filter(a => a.id !== didBulk.adviceId);
         } else {
@@ -652,6 +732,18 @@ class QontoService {
       // nicht schreibt", ist die Bauform, bei der eines Tages doch geschrieben
       // wird.
       if (dryRun) {
+        // Erst der Guard, den jeder Schreibzweig stellt — sonst kuendigt die
+        // Vorschau eine Buchung an, die der echte Lauf zurueckrollt.
+        if (!kannNochZahlen(match.invoice)) {
+          skipped++;
+          plan.push(uebersprungen(qtx, nichtZahlbarGrund(
+            match.invoice.invoiceNumber,
+            match.invoice.status,
+            simuliertGeschlossen.has(match.invoiceId),
+          )));
+          continue;
+        }
+
         const ausDb = (await qontoStorage.getInvoicePaymentTotals([match.invoiceId])).get(match.invoiceId)
           ?? { paidCents: 0, skontoCents: 0 };
         const schonSimuliert = simulierteZahlungen.get(match.invoiceId) ?? 0;
@@ -674,6 +766,7 @@ class QontoService {
           skontoCents: ausDb.skontoCents,
         });
         matched++;
+        if (vorschau.status === "bezahlt") simuliertGeschlossen.add(match.invoiceId);
         plan.push(planAusEntscheidung(qtx, match, confidence, vorschau));
         continue;
       }
@@ -881,10 +974,23 @@ class QontoService {
           "nur gebunden, Prüf-Zustand (kein Beleg im Verwendungszweck)"));
       } else if (bindOutcome) {
         matched++;
+        // Auch im echten Lauf mitgefuehrt: nicht als Gate (das macht die DB),
+        // sondern damit die Begruendung einer spaeteren Zahlung dieselbe ist
+        // wie im Trockenlauf.
+        if (bindOutcome.entscheidung.status === "bezahlt") simuliertGeschlossen.add(match.invoiceId);
         plan.push(planAusEntscheidung(qtx, match, confidence, bindOutcome.entscheidung));
       } else {
         skipped++;
-        plan.push(uebersprungen(qtx, "Rechnung war beim Schreiben nicht mehr offen (parallel storniert/bezahlt)"));
+        // BEWUSST ohne „parallel storniert/bezahlt": man kommt hierher auch ohne
+        // jede Nebenlaeufigkeit (Entwurf, oder derselbe Lauf hat die Rechnung
+        // zwei Zeilen vorher geschlossen). Eine Begruendung, die den Leser
+        // einen Vorfall suchen laesst, den es nicht gab, ist schlechter als
+        // keine (Gate-2-Fund S3).
+        plan.push(uebersprungen(qtx, nichtZahlbarGrund(
+          match.invoice.invoiceNumber,
+          match.invoice.status,
+          simuliertGeschlossen.has(match.invoiceId),
+        )));
       }
     }
 
@@ -913,7 +1019,15 @@ class QontoService {
     }>,
     userId: number,
     ipAddress?: string,
-    opts: { dryRun?: boolean } = {},
+    opts: {
+      dryRun?: boolean;
+      /**
+       * Nur im Trockenlauf: kann diese Rechnung im laufenden Plan noch eine
+       * Zahlung annehmen? Der Aufrufer kennt die Antwort, weil er die im Lauf
+       * bereits geschlossenen Rechnungen mitfuehrt.
+       */
+      stillPayable?: (invoiceId: number) => boolean;
+    } = {},
   ): Promise<{ adviceId: number; invoiceCount: number } | null> {
     const candidates: BulkAdviceCandidate[] = openAdvices.map(a => ({
       adviceId: a.id,
@@ -936,7 +1050,21 @@ class QontoService {
     // echten Lauf — inklusive der Zahl, auf die es ankommt: wie viele
     // Rechnungen dieser eine Treffer auf `bezahlt` heben wuerde.
     if (opts.dryRun === true) {
-      return { adviceId: resolved.adviceId, invoiceCount: advice.openInvoiceIds.length };
+      // Der echte Pfad rollt zurueck (`ADVICE_INVOICES_CHANGED`), wenn KEINE
+      // der Avis-Rechnungen mehr zahlbar ist. Das kann INNERHALB desselben
+      // Laufs eintreten: ein frueherer Einzeltreffer schliesst die letzte noch
+      // offene Rechnung des Avis. Ohne diese Pruefung kuendigte die Vorschau
+      // einen Stapel an, den der echte Lauf ablehnt (Gate-2-Fund S1).
+      //
+      // Gezaehlt wird, was WIRKT — nicht, was Kandidat war. Der echte Lauf
+      // meldet `invoiceUpdate.length`, und genau diese Zahl steht danach im
+      // Audit; eine Vorschau mit der groesseren Kandidatenzahl waere eine
+      // Zeile, die 23 Rechnungen ankuendigt, wo 19 folgen (S2).
+      const nochZahlbar = opts.stillPayable
+        ? advice.openInvoiceIds.filter(opts.stillPayable)
+        : advice.openInvoiceIds;
+      if (nochZahlbar.length === 0) return null;
+      return { adviceId: resolved.adviceId, invoiceCount: nochZahlbar.length };
     }
 
     const didMatch = await withAudit(async (dbTx, audit) => {
@@ -951,7 +1079,11 @@ class QontoService {
         .returning({ id: qontoTransactions.id });
 
       if (matchUpdate.length === 0) {
-        return false;
+        // 0 statt `false`: dieser Block liefert jetzt die ANZAHL der bezahlt
+        // gesetzten Rechnungen. „Nichts passiert" ist dann schlicht 0 — ein
+        // gemischter Typ (boolean | number) waere genau die Unschaerfe, die
+        // eine Zeile spaeter zur falschen Zahl auf dem Schirm fuehrt.
+        return 0;
       }
 
       const invoiceUpdate = await dbTx.update(invoices)
@@ -1003,16 +1135,18 @@ class QontoService {
         ipAddress,
       });
 
-      return true;
+      // Die WIRKUNG, nicht die Kandidatenzahl: genau dieser Wert steht auch im
+      // Avis-Audit. Vorschau und Protokoll nennen damit dieselbe Zahl (S2).
+      return invoiceUpdate.length;
     }).catch((err: unknown) => {
       if (err instanceof Error && err.message === "ADVICE_INVOICES_CHANGED") {
-        return false;
+        return 0;
       }
       throw err;
     });
 
-    return didMatch
-      ? { adviceId: resolved.adviceId, invoiceCount: advice.openInvoiceIds.length }
+    return didMatch > 0
+      ? { adviceId: resolved.adviceId, invoiceCount: didMatch }
       : null;
   }
 

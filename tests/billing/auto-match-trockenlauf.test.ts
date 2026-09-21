@@ -25,7 +25,9 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { db } from "../../server/lib/db";
-import { invoices, qontoTransactions } from "../../shared/schema";
+import {
+  auditLog, invoices, qontoTransactions, paymentAdvices, paymentAdviceItems,
+} from "../../shared/schema";
 import { eq, inArray, sql } from "drizzle-orm";
 import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
 import { withGobdMutation } from "../helpers/gobd";
@@ -57,9 +59,20 @@ let userId = 0;
 let customerId = 0;
 const txIds: number[] = [];
 const invoiceIds: number[] = [];
+const adviceIds: number[] = [];
+
+/**
+ * Zahlungen beim NAMEN, nicht beim Index.
+ *
+ * Die erste Fassung griff mit `txIds.slice(6, 8)` zu — und als zwei Faelle
+ * dazwischen kamen, zeigte der Zugriff auf andere Zahlungen. Der Test wurde
+ * rot, ohne dass sich der Pruefgegenstand geaendert hatte. Ein Index ist
+ * keine Aussage darueber, was gemeint ist.
+ */
+const zahlung: Record<string, number> = {};
 const tag = uniqueId();
 
-async function insertInvoice(nummer: string, cents: number): Promise<number> {
+async function insertInvoice(nummer: string, cents: number, status = "versendet"): Promise<number> {
   const [row] = await db.insert(invoices).values({
     invoiceNumber: nummer,
     customerId,
@@ -70,7 +83,7 @@ async function insertInvoice(nummer: string, cents: number): Promise<number> {
     recipientName: "Trockenlauf",
     grossAmountCents: cents,
     netAmountCents: cents,
-    status: "versendet",
+    status,
   }).returning({ id: invoices.id });
   invoiceIds.push(row.id);
   return row.id;
@@ -123,11 +136,11 @@ beforeAll(async () => {
 
   // (1) Referenz + exakter Betrag  ⇒ „wird bezahlt"
   await insertInvoice(NUMMER(0), BASIS);
-  await insertTx(BASIS, `Zahlung ${NUMMER(0)}`);
+  zahlung.exakt = await insertTx(BASIS, `Zahlung ${NUMMER(0)}`);
 
   // (2) Referenz, Betrag deckt NICHT ⇒ „nur gebunden, bleibt offen"
   await insertInvoice(NUMMER(1), BASIS + 2);
-  await insertTx(BASIS - 5_000, `Anzahlung ${NUMMER(1)}`);
+  zahlung.unterdeckung = await insertTx(BASIS - 5_000, `Anzahlung ${NUMMER(1)}`);
 
   // (3) ZWEI Zahlungen auf dieselbe Rechnung — die Reihenfolge-Wirkung.
   //
@@ -138,15 +151,60 @@ beforeAll(async () => {
   // genau deshalb die falsche Zahlung erwartet.
   const dritte = BASIS + 4;
   await insertInvoice(NUMMER(2), dritte);
-  await insertTx(dritte / 2, `Teil A ${NUMMER(2)}`, new Date("2026-05-02T10:00:00Z"));
-  await insertTx(dritte / 2, `Teil B ${NUMMER(2)}`, new Date("2026-05-01T10:00:00Z"));
+  zahlung.haelfteZuerst = await insertTx(dritte / 2, `Teil A ${NUMMER(2)}`, new Date("2026-05-02T10:00:00Z"));
+  zahlung.haelfteDanach = await insertTx(dritte / 2, `Teil B ${NUMMER(2)}`, new Date("2026-05-01T10:00:00Z"));
 
   // (4) Weder Referenz noch eindeutiger Betrag ⇒ „übersprungen"
-  await insertTx(BASIS + 7, "SIEHE AVIS");
+  zahlung.ohneZuordnung = await insertTx(BASIS + 7, "SIEHE AVIS");
+
+  // (5) ENTWURFS-Rechnung — Gate-2-Fund B1.
+  // Sie steht bewusst in der Kandidatenliste des Matchers, kann aber von
+  // keinem Schreibpfad gebunden werden (`statusesAllowedToTransitionTo`
+  // liefert nur `versendet`). Die erste Fassung der Vorschau kündigte hier
+  // „wird auf bezahlt gesetzt" an; der echte Lauf rollte zurück.
+  await insertInvoice(NUMMER(3), BASIS + 12, "entwurf");
+  zahlung.aufEntwurf = await insertTx(BASIS + 12, `Zahlung ${NUMMER(3)}`);
+
+  // (7) SAMMEL-AVIS — der Zweig, der einen ganzen Stapel bewegt, und der
+  // einzige mit eigenem fruehen Ausstieg im Trockenlauf (Gate-2-Fund S1).
+  // Ohne diesen Fall vergliche TL-2 den Bulk-Pfad ueberhaupt nicht.
+  const avisA = BASIS + 20;
+  const avisB = BASIS + 24;
+  const rAvisA = await insertInvoice(NUMMER(5), avisA);
+  const rAvisB = await insertInvoice(NUMMER(6), avisB);
+  const [avis] = await db.insert(paymentAdvices).values({
+    fileName: `trockenlauf-${tag}.csv`,
+    format: "manuell",
+    gesamtBetragCents: avisA + avisB,
+    kostentraegerName: "Testkasse",
+  }).returning({ id: paymentAdvices.id });
+  adviceIds.push(avis.id);
+  await db.insert(paymentAdviceItems).values([
+    { paymentAdviceId: avis.id, betragCents: avisA, matchedInvoiceId: rAvisA },
+    { paymentAdviceId: avis.id, betragCents: avisB, matchedInvoiceId: rAvisB },
+  ]);
+  // Ohne Rechnungsnummer im Text — sonst gewinnt der Einzel-Pfad.
+  zahlung.sammel = await insertTx(avisA + avisB, "Sammelzahlung Testkasse");
+
+  // (8) REINER BETRAGS-TREFFER OHNE BELEG ⇒ Pruef-Zustand. Der zweite Zweig,
+  // den der Plan-Vergleich bisher nicht beruehrt hat.
+  await insertInvoice(NUMMER(7), BASIS + 28);
+  zahlung.nurBetrag = await insertTx(BASIS + 28, "Ueberweisung Eingang");
+
+  // (6) ZWEITE VOLLE Zahlung auf dieselbe Rechnung — die Umkehrung von TL-3.
+  // Die erste schließt die Rechnung, die zweite läuft im echten Lauf auf.
+  const doppelt = BASIS + 16;
+  await insertInvoice(NUMMER(4), doppelt);
+  zahlung.vollZuerst = await insertTx(doppelt, `Voll A ${NUMMER(4)}`, new Date("2026-05-04T10:00:00Z"));
+  zahlung.vollDanach = await insertTx(doppelt, `Voll B ${NUMMER(4)}`, new Date("2026-05-03T10:00:00Z"));
 });
 
 afterAll(async () => {
   if (txIds.length) await db.delete(qontoTransactions).where(inArray(qontoTransactions.id, txIds));
+  if (adviceIds.length) {
+    await db.delete(paymentAdviceItems).where(inArray(paymentAdviceItems.paymentAdviceId, adviceIds));
+    await db.delete(paymentAdvices).where(inArray(paymentAdvices.id, adviceIds));
+  }
   // Der ECHTE Lauf aus TL-2 hat Rechnungen auf `bezahlt` gesetzt — und eine
   // finalisierte Rechnung zu loeschen verbietet der GoBD-Trigger zu Recht.
   // Das Aufraeumen einer Test-Fixture ist der eine Fall, in dem das erlaubt
@@ -172,10 +230,26 @@ describe("Auto-Abgleich — Trockenlauf (6hHW39P2JxmcjvQp)", () => {
   let echt: AutoMatchPlanEntry[] = [];
 
   it("TL-1 – der Trockenlauf plant etwas und schreibt dabei NICHTS", async () => {
-    const vorherTx = await db.select({ id: qontoTransactions.id, m: qontoTransactions.matchedInvoiceId })
-      .from(qontoTransactions).where(inArray(qontoTransactions.id, txIds));
-    const vorherRechnung = await db.select({ id: invoices.id, s: invoices.status })
-      .from(invoices).where(inArray(invoices.id, invoiceIds));
+    // Alle vier Spalten, die ein Schreibpfad anfassen könnte — die erste
+    // Fassung prüfte nur zwei, und `matchedPaymentAdviceId` ist ausgerechnet
+    // die, die der Bulk-Pfad schriebe (Gate-2-Fund S4).
+    const zustandTx = () => db.select({
+      id: qontoTransactions.id,
+      rechnung: qontoTransactions.matchedInvoiceId,
+      avis: qontoTransactions.matchedPaymentAdviceId,
+      confidence: qontoTransactions.matchConfidence,
+    }).from(qontoTransactions).where(inArray(qontoTransactions.id, txIds));
+    const zustandRechnung = () => db.select({
+      id: invoices.id, s: invoices.status, bezahltAm: invoices.paidAt,
+    }).from(invoices).where(inArray(invoices.id, invoiceIds));
+    const auditZahl = async () => {
+      const [z] = await db.select({ n: sql<number>`count(*)::int` }).from(auditLog);
+      return z.n;
+    };
+
+    const vorherTx = await zustandTx();
+    const vorherRechnung = await zustandRechnung();
+    const vorherAudit = await auditZahl();
 
     const ergebnis = await qontoService.autoMatch(userId, undefined, { dryRun: true });
     trocken = ergebnis.plan;
@@ -185,13 +259,11 @@ describe("Auto-Abgleich — Trockenlauf (6hHW39P2JxmcjvQp)", () => {
     expect(nurUnsere(trocken).length, "der Trockenlauf plant nichts").toBe(txIds.length);
     expect(nurUnsere(trocken).some((e) => e.outcome === "invoice_paid")).toBe(true);
 
-    const nachherTx = await db.select({ id: qontoTransactions.id, m: qontoTransactions.matchedInvoiceId })
-      .from(qontoTransactions).where(inArray(qontoTransactions.id, txIds));
-    const nachherRechnung = await db.select({ id: invoices.id, s: invoices.status })
-      .from(invoices).where(inArray(invoices.id, invoiceIds));
-
-    expect(nachherTx, "der Trockenlauf hat Zahlungen gebunden").toEqual(vorherTx);
-    expect(nachherRechnung, "der Trockenlauf hat Rechnungs-Status geändert").toEqual(vorherRechnung);
+    expect(await zustandTx(), "der Trockenlauf hat Zahlungen gebunden").toEqual(vorherTx);
+    expect(await zustandRechnung(), "der Trockenlauf hat Rechnungs-Status geändert").toEqual(vorherRechnung);
+    // Der Wächter, der die Zusage HÄLT, wenn jemand den `if (dryRun)`-Block
+    // später verschiebt: jeder Schreibpfad hier schreibt auch ein Audit.
+    expect(await auditZahl(), "der Trockenlauf hat Audit-Einträge geschrieben").toBe(vorherAudit);
   });
 
   it("TL-2 – der echte Lauf entscheidet GENAUSO wie die Vorschau", async () => {
@@ -212,10 +284,8 @@ describe("Auto-Abgleich — Trockenlauf (6hHW39P2JxmcjvQp)", () => {
     // (`ORDER BY emitted_at DESC`). Sie deckt die Rechnung nur zur Hälfte;
     // erst die danach verarbeitete `Teil B` schließt sie — und nur, wenn der
     // Trockenlauf die erste Hälfte mitgerechnet hat.
-    const [zuerstId, danachId] = txIds.slice(2, 4);
-
-    const zuerst = nurUnsere(trocken).find((e) => e.transactionId === zuerstId)!;
-    const danach = nurUnsere(trocken).find((e) => e.transactionId === danachId)!;
+    const zuerst = nurUnsere(trocken).find((e) => e.transactionId === zahlung.haelfteZuerst)!;
+    const danach = nurUnsere(trocken).find((e) => e.transactionId === zahlung.haelfteDanach)!;
 
     expect(zuerst.outcome, "die zuerst verarbeitete Hälfte dürfte noch nicht bezahlen")
       .toBe("invoice_bound_partial");
@@ -227,6 +297,53 @@ describe("Auto-Abgleich — Trockenlauf (6hHW39P2JxmcjvQp)", () => {
     const [rechnung] = await db.select({ status: invoices.status })
       .from(invoices).where(eq(invoices.id, invoiceIds[2]));
     expect(rechnung.status).toBe("bezahlt");
+  });
+
+  it("TL-5 – eine ENTWURFS-Rechnung wird NICHT als „wird bezahlt“ angekündigt", () => {
+    // Gate-2-Fund B1, Fall (a). Der Matcher nimmt Entwürfe als Kandidaten auf,
+    // jeder Schreibpfad lehnt sie ab. Die Vorschau muss das vorher sagen —
+    // sonst kündigt sie eine Buchung an, die nie stattfindet.
+    const eintrag = nurUnsere(trocken).find((e) => e.transactionId === zahlung.aufEntwurf)!;
+    expect(eintrag.outcome, "Entwurf als bezahlbar angekündigt").toBe("skipped");
+    expect(eintrag.wirkung, "der Grund nennt den Status nicht").toMatch(/entwurf/i);
+  });
+
+  it("TL-6 – die zweite VOLLE Zahlung wird als übersprungen angekündigt", () => {
+    // Gate-2-Fund B1, Fall (b), und die Umkehrung von TL-3: dort ergänzen sich
+    // zwei Hälften, hier schließt schon die erste Zahlung die Rechnung. Die
+    // zweite kann dann nichts mehr — auch nicht „binden und flaggen".
+    const zuerst = nurUnsere(trocken).find((e) => e.transactionId === zahlung.vollZuerst)!;
+    const danach = nurUnsere(trocken).find((e) => e.transactionId === zahlung.vollDanach)!;
+
+    expect(zuerst.outcome).toBe("invoice_paid");
+    expect(danach.outcome, "zweite Vollzahlung als buchbar angekündigt").toBe("skipped");
+    expect(danach.wirkung).toMatch(/bereits geschlossen/);
+  });
+
+  it("TL-7 – der Sammel-Avis steht mit der WIRKSAMEN Rechnungszahl in beiden Plänen", () => {
+    // Gate-2-Fund S2: die Vorschau nannte die KANDIDATEN-Zahl
+    // (`openInvoiceIds.length`), das Audit schreibt die tatsächlich
+    // geschriebene (`invoiceUpdate.length`). Bei einer Zeile, die einen
+    // 23-Rechnungen-Stapel ankündigt, ist das die wichtigste Zahl auf dem
+    // Schirm — und zwei Modi, die einig sind und beide danebenliegen, fängt
+    // der Plan-Vergleich per Konstruktion nicht.
+    const bulkTrocken = nurUnsere(trocken).find((e) => e.outcome === "bulk_advice_paid");
+    expect(bulkTrocken, "der Sammel-Avis-Fall fehlt in der Vorschau").toBeTruthy();
+    expect(bulkTrocken!.adviceInvoiceCount, "angekündigte Rechnungszahl stimmt nicht").toBe(2);
+    expect(bulkTrocken!.wirkung).toMatch(/2 Rechnung\(en\) werden auf/);
+
+    const bulkEcht = nurUnsere(echt).find((e) => e.outcome === "bulk_advice_paid");
+    expect(bulkEcht?.adviceInvoiceCount, "der echte Lauf hat eine andere Zahl geschrieben").toBe(2);
+  });
+
+  it("TL-8 – der Prüf-Zustand wird in beiden Modi als solcher angekündigt", () => {
+    // Der zweite Zweig mit eigenem Plan-Eintrag, den TL-2 vorher nicht berührt
+    // hat: reiner Betrags-Treffer ohne Beleg im Verwendungszweck. Er darf NICHT
+    // als „wird bezahlt" erscheinen — seit #1864 bindet er nur.
+    const pruef = nurUnsere(trocken).find((e) => e.outcome === "invoice_bound_review");
+    expect(pruef, "der Prüf-Fall fehlt in der Vorschau").toBeTruthy();
+    expect(pruef!.confidence).toBe("auto_amount_review");
+    expect(pruef!.wirkung).toMatch(/Pr(ü|ue)f-Zustand/);
   });
 
   it("TL-4 – die Vorschau nennt die WIRKUNG, nicht nur die Confidence", async () => {
