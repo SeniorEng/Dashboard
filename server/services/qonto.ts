@@ -63,6 +63,114 @@ interface QontoTransactionsResponse {
   };
 }
 
+/**
+ * Was ein Abgleich-Lauf je Zahlung TUN WUERDE bzw. GETAN HAT.
+ *
+ * Bewusst die WIRKUNG und nicht nur die Confidence: „auto_amount" sagt einem
+ * Bediener nicht, ob gleich eine Rechnung auf `bezahlt` springt oder nur ein
+ * Pruef-Zustand entsteht. Genau diese Frage soll die Vorschau beantworten.
+ */
+export type AutoMatchOutcomeKind =
+  | "invoice_paid"
+  | "invoice_bound_partial"
+  | "invoice_bound_mismatch"
+  | "invoice_bound_review"
+  | "bulk_advice_paid"
+  | "skipped";
+
+export interface AutoMatchPlanEntry {
+  transactionId: number;
+  amountCents: number;
+  emittedAt: Date;
+  outcome: AutoMatchOutcomeKind;
+  /** Menschlich lesbar — die Zeile, die der Bediener liest. */
+  wirkung: string;
+  confidence: string | null;
+  invoiceId?: number;
+  invoiceNumber?: string;
+  adviceId?: number;
+  /** Wie viele Rechnungen dieser Sammel-Avis auf `bezahlt` hebt. */
+  adviceInvoiceCount?: number;
+}
+
+export interface AutoMatchResult {
+  matched: number;
+  skipped: number;
+  review: number;
+  plan: AutoMatchPlanEntry[];
+}
+
+type PlanZahlung = { id: number; amountCents: number; emittedAt: Date };
+
+function uebersprungen(qtx: PlanZahlung, grund: string): AutoMatchPlanEntry {
+  return {
+    transactionId: qtx.id,
+    amountCents: qtx.amountCents,
+    emittedAt: qtx.emittedAt,
+    outcome: "skipped",
+    wirkung: `uebersprungen: ${grund}`,
+    confidence: null,
+  };
+}
+
+function rechnungsEintrag(
+  qtx: PlanZahlung,
+  match: { invoiceId: number; invoice: { invoiceNumber: string } },
+  confidence: string,
+  outcome: AutoMatchOutcomeKind,
+  wirkung: string,
+): AutoMatchPlanEntry {
+  return {
+    transactionId: qtx.id,
+    amountCents: qtx.amountCents,
+    emittedAt: qtx.emittedAt,
+    outcome,
+    wirkung,
+    confidence,
+    invoiceId: match.invoiceId,
+    invoiceNumber: match.invoice.invoiceNumber,
+  };
+}
+
+/**
+ * Uebersetzt die Zahlungsstands-Entscheidung in einen Plan-Eintrag — EINE
+ * Stelle fuer beide Modi.
+ */
+function planAusEntscheidung(
+  qtx: PlanZahlung,
+  match: { invoiceId: number; invoice: { invoiceNumber: string } },
+  confidence: string,
+  entscheidung: { status: string | null; classification: { result: string } },
+): AutoMatchPlanEntry {
+  const nummer = match.invoice.invoiceNumber;
+  if (entscheidung.status === "bezahlt") {
+    return rechnungsEintrag(qtx, match, confidence, "invoice_paid",
+      `Rechnung ${nummer} wird auf „bezahlt" gesetzt`);
+  }
+  if (entscheidung.classification.result === "underpaid") {
+    return rechnungsEintrag(qtx, match, confidence, "invoice_bound_partial",
+      `nur gebunden — ${nummer} bleibt offen (Teilzahlung)`);
+  }
+  return rechnungsEintrag(qtx, match, confidence, "invoice_bound_mismatch",
+    `nur gebunden — ${nummer} zur Pruefung markiert (Ueberzahlung ueber Toleranz)`);
+}
+
+function bulkEintrag(
+  qtx: PlanZahlung,
+  bulk: { adviceId: number; invoiceCount: number },
+): AutoMatchPlanEntry {
+  return {
+    transactionId: qtx.id,
+    amountCents: qtx.amountCents,
+    emittedAt: qtx.emittedAt,
+    outcome: "bulk_advice_paid",
+    wirkung: `Sammel-Avis ${bulk.adviceId}: ${bulk.invoiceCount} Rechnung(en) werden auf „bezahlt" gesetzt`,
+    confidence: BULK_ADVICE_CONFIDENCE,
+    adviceId: bulk.adviceId,
+    adviceInvoiceCount: bulk.invoiceCount,
+  };
+}
+
 class QontoService {
   private async getCredentials(): Promise<QontoCredentials | null> {
     const settings = await storage.getCompanySettings();
@@ -338,7 +446,56 @@ class QontoService {
     return qontoStorage.markTransactionsIrrelevantAuto(toHide);
   }
 
-  async autoMatch(userId: number, ipAddress?: string): Promise<{ matched: number; skipped: number; review: number }> {
+  /**
+   * Task 6hHW39P2JxmcjvQp — Abgleich der offenen Zahlungen, wahlweise als
+   * TROCKENLAUF.
+   *
+   * ── Warum es den Trockenlauf gibt ────────────────────────────────────────
+   * Dieser Lauf ist kein Lese-Vorgang: er bindet Zahlungen an Rechnungen und
+   * setzt Rechnungen auf `bezahlt` — über ALLE offenen Zahlungen, nicht über
+   * eine ausgewählte. Gemessen am 21.09.2026 waren das 76 Stück, darunter
+   * Sammel-Avise, bei denen ein einziger Treffer einen ganzen Stapel Rechnungen
+   * bezahlt markiert. Wer drückt, wusste bis hierhin nicht, was gleich passiert.
+   *
+   * ── EIN Pfad, ein Schalter ───────────────────────────────────────────────
+   * Der Trockenlauf ist bewusst KEIN zweiter Matcher. Die Entscheidungslogik
+   * ist dieselbe Zeile für Zeile; übersprungen wird nur das Schreiben. Ein
+   * danebengebauter Vorschau-Pfad wäre ein Zweitbegriff — er liefe genau dann
+   * auseinander, wenn sich jemand auf ihn verlässt.
+   *
+   * Beide Modi liefern DENSELBEN `plan`. `tests/billing/auto-match-trockenlauf.test.ts`
+   * fährt erst trocken, dann echt und vergleicht ihn — ohne diesen Vergleich
+   * wäre die Vorschau eine Behauptung.
+   *
+   * ── Was der Trockenlauf NICHT vorhersagen kann ───────────────────────────
+   *  - **Parallele Zustandsänderungen.** Der echte Lauf schreibt geguardet und
+   *    bricht eine Bindung ab, wenn die Rechnung inzwischen storniert oder
+   *    bezahlt wurde (`INVOICE_STATUS_CHANGED`). Wird zwischen Vorschau und
+   *    Lauf woanders gearbeitet, kann eine geplante Zeile ausfallen.
+   *  - Nicht dazu gehört die Reihenfolge-Wirkung INNERHALB des Laufs: dass ein
+   *    gebundener Avis aus der Kandidatenliste fällt und dass eine zweite
+   *    Zahlung auf dieselbe Rechnung die kumulierte Summe hebt, hält der
+   *    Trockenlauf mit (siehe `simulierteZahlungen`).
+   */
+  async autoMatch(
+    userId: number,
+    ipAddress?: string,
+    opts: { dryRun?: boolean } = {},
+  ): Promise<AutoMatchResult> {
+    const dryRun = opts.dryRun === true;
+    const plan: AutoMatchPlanEntry[] = [];
+
+    /**
+     * Trockenlauf: was dieser Lauf einer Rechnung bereits „gutgeschrieben" hat.
+     *
+     * Im echten Lauf liest `getInvoicePaymentTotals` INNERHALB der Transaktion
+     * und sieht die soeben gebundene Zahlung dadurch mit. Ohne Schreiben fällt
+     * das weg — zwei Zahlungen auf dieselbe Rechnung würden beide „nur
+     * gebunden" zeigen, während die zweite in echt auf `bezahlt` hebt. Diese
+     * Überlagerung stellt den Unterschied her.
+     */
+    const simulierteZahlungen = new Map<number, number>();
+
     const unmatched = await qontoStorage.getUnmatchedTransactions();
 
     // Offen = alles, was noch nach `bezahlt` wechseln darf, PLUS Entwuerfe
@@ -416,9 +573,10 @@ class QontoService {
           // Fremd-Avis (der die genannte Rechnung fälschlich offen ließe).
           const memberAdvices = openAdvices.filter(a => a.openInvoiceIds.includes(matchedInvoiceId));
           if (memberAdvices.length > 0) {
-            const didBulk = await this.tryBulkAdviceMatch(qtx, memberAdvices, userId, ipAddress);
+            const didBulk = await this.tryBulkAdviceMatch(qtx, memberAdvices, userId, ipAddress, { dryRun });
             if (didBulk) {
               matched++;
+              plan.push(bulkEintrag(qtx, didBulk));
               openAdvices = openAdvices.filter(a => a.id !== didBulk.adviceId);
               continue;
             }
@@ -430,19 +588,22 @@ class QontoService {
       // Task #1672 — Bulk-Avis-Strategie NACH den Einzelrechnungs-Strategien:
       // nur versuchen, wenn keine Rechnungsnummer/Betrag-Einzelrechnung traf.
       if (!bestMatch && openAdvices.length > 0) {
-        const didBulk = await this.tryBulkAdviceMatch(qtx, openAdvices, userId, ipAddress);
+        const didBulk = await this.tryBulkAdviceMatch(qtx, openAdvices, userId, ipAddress, { dryRun });
         if (didBulk) {
           matched++;
+          plan.push(bulkEintrag(qtx, didBulk));
           // in-memory: geschlossenes Avis nicht erneut als Kandidat anbieten.
           openAdvices = openAdvices.filter(a => a.id !== didBulk.adviceId);
         } else {
           skipped++;
+          plan.push(uebersprungen(qtx, "keine Rechnungsnummer, kein eindeutiger Betrag, kein passender Sammel-Avis"));
         }
         continue;
       }
 
       if (!bestMatch) {
         skipped++;
+        plan.push(uebersprungen(qtx, "keine Rechnungsnummer und kein eindeutiger Betrags-Treffer"));
         continue;
       }
 
@@ -474,12 +635,48 @@ class QontoService {
           // Zahlung liegt datumsmäßig vor der Rechnungserstellung ⇒ kann diese
           // Rechnung unmöglich betreffen: gar nicht binden.
           skipped++;
+          plan.push(uebersprungen(
+            qtx,
+            `Zahlung datiert vor der Erstellung von ${match.invoice.invoiceNumber} — kann sie nicht betreffen`,
+          ));
           continue;
         }
         reviewOnly = outcome.decision === "review";
       }
 
       const confidence = reviewOnly ? AMOUNT_MATCH_REVIEW_CONFIDENCE : match.confidence;
+
+      // ── TROCKENLAUF ────────────────────────────────────────────────────────
+      // Dieselbe Entscheidung wie unten, nur ohne Schreiben. Bewusst VOR dem
+      // `withAudit`-Block und nicht darin: ein Schreib-Block, der „manchmal
+      // nicht schreibt", ist die Bauform, bei der eines Tages doch geschrieben
+      // wird.
+      if (dryRun) {
+        const ausDb = (await qontoStorage.getInvoicePaymentTotals([match.invoiceId])).get(match.invoiceId)
+          ?? { paidCents: 0, skontoCents: 0 };
+        const schonSimuliert = simulierteZahlungen.get(match.invoiceId) ?? 0;
+        const dieseZahlung = Math.abs(qtx.amountCents);
+
+        // Auch ein Prüf-Treffer wird GEBUNDEN — er zählt für die nächste
+        // Zahlung auf dieselbe Rechnung also mit, obwohl er sie nicht bezahlt.
+        simulierteZahlungen.set(match.invoiceId, schonSimuliert + dieseZahlung);
+
+        if (reviewOnly) {
+          review++;
+          plan.push(rechnungsEintrag(qtx, match, confidence, "invoice_bound_review",
+            "nur gebunden, Prüf-Zustand (kein Beleg im Verwendungszweck)"));
+          continue;
+        }
+
+        const vorschau = resolveInvoicePaymentStatus({
+          invoiceGrossCents: match.invoiceGrossCents,
+          paidCents: ausDb.paidCents + schonSimuliert + dieseZahlung,
+          skontoCents: ausDb.skontoCents,
+        });
+        matched++;
+        plan.push(planAusEntscheidung(qtx, match, confidence, vorschau));
+        continue;
+      }
 
       // Pro Match komplett transaktional: Match-Update mit Guard
       // (matched_invoice_id IS NULL), Invoice-Status-Update mit Guard
@@ -498,7 +695,11 @@ class QontoService {
           .returning({ id: qontoTransactions.id });
 
         if (matchUpdate.length === 0) {
-          return false;
+          // `null` statt `false`: die drei Ausgaenge dieses Blocks sind
+          // „nichts passiert" / „nur gebunden" / „gebunden mit Entscheidung".
+          // Als `boolean` verschmilzt der erste mit dem zweiten, und der
+          // Aufrufer kann die Entscheidung nicht mehr herausziehen.
+          return null;
         }
 
         // Task #1864 — reiner Betrags-Treffer ohne Beleg: Die Transaktion ist jetzt
@@ -663,20 +864,31 @@ class QontoService {
           });
         }
 
-        return "matched" as const;
+        // Die Entscheidung wandert mit hinaus: BEIDE Modi bauen ihren
+        // Plan-Eintrag aus derselben Quelle. Zwei getrennte Uebersetzungen
+        // waeren genau die Drift, die der Vergleichstest sucht.
+        return { entscheidung: decision } as const;
       }).catch((err: unknown) => {
         if (err instanceof Error && err.message === "INVOICE_STATUS_CHANGED") {
-          return false;
+          return null;
         }
         throw err;
       });
 
-      if (bindOutcome === "review") review++;
-      else if (bindOutcome) matched++;
-      else skipped++;
+      if (bindOutcome === "review") {
+        review++;
+        plan.push(rechnungsEintrag(qtx, match, confidence, "invoice_bound_review",
+          "nur gebunden, Prüf-Zustand (kein Beleg im Verwendungszweck)"));
+      } else if (bindOutcome) {
+        matched++;
+        plan.push(planAusEntscheidung(qtx, match, confidence, bindOutcome.entscheidung));
+      } else {
+        skipped++;
+        plan.push(uebersprungen(qtx, "Rechnung war beim Schreiben nicht mehr offen (parallel storniert/bezahlt)"));
+      }
     }
 
-    return { matched, skipped, review };
+    return { matched, skipped, review, plan };
   }
 
   /**
@@ -701,7 +913,8 @@ class QontoService {
     }>,
     userId: number,
     ipAddress?: string,
-  ): Promise<{ adviceId: number } | null> {
+    opts: { dryRun?: boolean } = {},
+  ): Promise<{ adviceId: number; invoiceCount: number } | null> {
     const candidates: BulkAdviceCandidate[] = openAdvices.map(a => ({
       adviceId: a.id,
       advice: {
@@ -717,6 +930,14 @@ class QontoService {
 
     const advice = openAdvices.find(a => a.id === resolved.adviceId);
     if (!advice) return null;
+
+    // Trockenlauf: die Entscheidung ist gefallen (`resolveUniqueBulkMatch`),
+    // geschrieben wird nichts. Der Aufrufer bekommt dieselbe Antwort wie im
+    // echten Lauf — inklusive der Zahl, auf die es ankommt: wie viele
+    // Rechnungen dieser eine Treffer auf `bezahlt` heben wuerde.
+    if (opts.dryRun === true) {
+      return { adviceId: resolved.adviceId, invoiceCount: advice.openInvoiceIds.length };
+    }
 
     const didMatch = await withAudit(async (dbTx, audit) => {
       const matchUpdate = await dbTx.update(qontoTransactions)
@@ -790,7 +1011,9 @@ class QontoService {
       throw err;
     });
 
-    return didMatch ? { adviceId: resolved.adviceId } : null;
+    return didMatch
+      ? { adviceId: resolved.adviceId, invoiceCount: advice.openInvoiceIds.length }
+      : null;
   }
 
   /**
