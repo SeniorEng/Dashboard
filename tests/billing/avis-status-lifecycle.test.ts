@@ -43,6 +43,7 @@ import {
 } from "../../shared/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { withGobdMutation } from "../helpers/gobd";
+import { parseBetragCents } from "../../server/services/avis-parser";
 
 interface Seeded {
   customerId: number;
@@ -94,17 +95,29 @@ async function insertQontoTx(opts: { amountCents: number }): Promise<number> {
 /**
  * Barmer-CSV (Zeilentypen 1/2/3 mit Semikolon). Pro Rechnungsnummer eine
  * "2;"-Position; das Zahlungsdatum kommt aus der "3;"-Summenzeile.
+ *
+ * Die `3;`-Summe wird AUS DEN POSTEN gebildet, nicht danebengesetzt. Vorher
+ * stand dort `opts.amountEuro` — bei einem Posten stimmt das zufällig, bei
+ * zwei Posten à 70,00 € behauptete die Datei eine Überweisung von 70,00 € für
+ * 140,00 € Forderung. Der Prüfsummen-Riegel (P1 6hXqFcc2hRQfC9qp) hat genau
+ * das abgelehnt, und er hatte recht: eine Kasse schickt keine solche Datei.
+ * Ein Fixture, das der echten Datei widerspricht, prüft nichts — es hält nur
+ * den Riegel für kaputt, den es selbst verletzt.
  */
 function buildBarmerCsv(opts: {
   invoiceNumbers: string[];
   amountEuro: string;
   zahlungsDatum: string;
 }): string {
+  const proPostenCents = parseBetragCents(opts.amountEuro, "komma");
+  const summeCents = proPostenCents * opts.invoiceNumbers.length;
+  const summeEuro = (summeCents / 100).toFixed(2).replace(".", ",");
+
   const lines = ["1;IK123456789"];
   for (const num of opts.invoiceNumbers) {
     lines.push(`2;Sammelueberweisung;${num};${opts.zahlungsDatum};${opts.amountEuro}`);
   }
-  lines.push(`3;BELEG-${uniqueId()};${opts.zahlungsDatum};${opts.amountEuro};DE00123456780000000000`);
+  lines.push(`3;BELEG-${uniqueId()};${opts.zahlungsDatum};${summeEuro};DE00123456780000000000`);
   return lines.join("\n");
 }
 

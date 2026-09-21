@@ -7,6 +7,7 @@ import { qontoStorage } from "../../storage/qonto";
 import { parseAvisCsv, AvisParseUncertainError } from "../../services/avis-parser";
 import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
+import { formatEuroDE } from "@shared/utils/money";
 import { db, type DbOrTx } from "../../lib/db";
 import { invoices, qontoTransactions, paymentAdviceItems, paymentAdvices } from "@shared/schema";
 import { eq, and, ilike, isNull, isNotNull, inArray } from "drizzle-orm";
@@ -1436,6 +1437,12 @@ const paymentAdviceSchema = z.object({
   notes: z.string().optional().nullable(),
   csvContent: z.string().optional().nullable(),
   force: z.boolean().optional(),
+  /**
+   * Schritt 0 der Erstinbetriebnahme: parsen und zurueckgeben, NICHTS
+   * schreiben. Derselbe Pfad wie der echte Import — nur der Schreibteil faellt
+   * weg, und der Pruefsummen-Riegel darueber gilt unveraendert.
+   */
+  dryRun: z.boolean().optional(),
   // Task #1687 — manuelles Spalten-Mapping (Fallback), wenn die strukturelle
   // Betrags-Erkennung mehrdeutig war (`AvisParseUncertainError` ⇒ 422 ⇒ Dialog).
   columnMap: z.object({
@@ -1470,6 +1477,55 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     }
     if (parsed.items.length === 0) {
       return res.status(400).json({ message: "CSV enthält keine Positionen" });
+    }
+
+    // ── Der Riegel: die Datei liefert ZWEI Zahlen, also werden zwei gelesen ──
+    //
+    // Beide Fehler vom 21.09.2026 (Faktor 100 auf dem DAVASO-Pfad,
+    // Gesamtbetrag = Posten 1) waren aus der Datei selbst erkennbar — die
+    // Postensumme hätte nie zur ausgewiesenen Summe gepasst. Aufgefallen sind
+    // sie erst an einer „Überzahlung" von 28.149,66 € im UI.
+    //
+    // Er blockiert BEWUSST auch, wenn gar keine zweite Zahl gefunden wurde:
+    // „nicht vergleichbar" ist kein bestandener Vergleich. Dieselbe Regel wie
+    // beim Publish-Preflight, der seinen eigenen Ausfall als „nichts gefunden"
+    // ausgab.
+    //
+    // Die Toleranz ist ABSICHTLICH null. Skonto und Kürzung sind bereits
+    // abgezogen; was dann bleibt, ist unerklärt. Sollten echte Dateien eine
+    // systematische Restdifferenz zeigen, lernen wir die Regel aus der
+    // Vorschau — statt sie jetzt zu raten.
+    const p = parsed.pruefsumme;
+    if (p.abweichungCents === null || p.abweichungCents !== 0) {
+      return res.status(400).json({
+        message: p.abweichungCents === null
+          ? `Die Datei enthält keine zweite Summe zum Abgleich (erwartet: ${p.quelle}). Import abgelehnt.`
+          : `Postensumme und ausgewiesene Summe stimmen nicht überein — Differenz ${formatEuroDE(p.abweichungCents)}. Import abgelehnt.`,
+        code: "AVIS_PRUEFSUMME",
+        details: { pruefsumme: p },
+      });
+    }
+
+    // ── Schritt 0: Vorschau. Derselbe Parser-Pfad, ein Schalter. ──
+    //
+    // KEIN Zweitparser: die Vorschau läuft durch `parseAvisCsv` wie der Import
+    // und durch denselben Riegel darüber. Ein danebengebauter Vorschau-Pfad
+    // wäre genau der Zweitbegriff, den wir in `gesamt_betrag_cents` gerade
+    // gefunden haben — und er liefe auseinander, sobald sich jemand auf ihn
+    // verlässt.
+    //
+    // Der Grund, warum die Vorschau VOR dem ersten echten Import gebraucht
+    // wird: die Dateien tragen Versichertennamen und -nummern. Sie können
+    // deshalb nur bei Alrik geprüft werden — und ohne Vorschau hieße „prüfen"
+    // importieren.
+    if (data.dryRun) {
+      return res.json({
+        dryRun: true,
+        header: parsed.header,
+        pruefsumme: parsed.pruefsumme,
+        itemCount: parsed.items.length,
+        items: parsed.items,
+      });
     }
 
     if (!data.force) {

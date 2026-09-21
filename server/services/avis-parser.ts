@@ -36,9 +36,59 @@ interface ParsedAvisItem {
   buchungsDatum: string | null;
 }
 
+/**
+ * Die zwei unabhaengigen Zahlen der Datei — und ihre Differenz.
+ *
+ * ── Warum das der wichtigste Teil dieses Umbaus ist ─────────────────────
+ * Beide Fehler vom 21.09.2026 (Faktor 100, Gesamtbetrag = Posten 1) waren
+ * AUS DER DATEI SELBST erkennbar: die Postensumme haette nie zur
+ * ausgewiesenen Summe gepasst. Ein Import, der zwei Zahlen bekommt und nur
+ * eine liest, ist die eigentliche Luecke — der Faktor 100 war nur ihr
+ * sichtbarstes Symptom.
+ *
+ * Gilt fuer BEIDE Familien: jede der 53 Kassen-Dateien traegt genau eine
+ * `3;`-Summenzeile (gemessen), DAVASO traegt je Posten einen Zahlbetrag.
+ */
+interface AvisPruefsumme {
+  /** Σ der Posten-Forderungen. */
+  ausPostenCents: number;
+  /** Die zweite, unabhaengig in der Datei stehende Zahl. `null` = keine gefunden. */
+  ausgewiesenCents: number | null;
+  /** Woher die zweite Zahl stammt — gehoert in die Vorschau, damit sie pruefbar ist. */
+  quelle: string;
+  /**
+   * `ausPosten − Skonto − Kuerzung − ausgewiesen`. 0 heisst: die Datei ist in
+   * sich stimmig. `null` = keine zweite Zahl, also nichts zu vergleichen —
+   * und das ist ausdruecklich KEIN bestandener Vergleich.
+   */
+  abweichungCents: number | null;
+}
+
 interface ParsedAvis {
   header: ParsedAvisHeader;
   items: ParsedAvisItem[];
+  pruefsumme: AvisPruefsumme;
+}
+
+/**
+ * Die Differenz, gegen die der Import gatet.
+ *
+ * Skonto und Kuerzung sind legitime Gruende, warum die Postensumme NICHT dem
+ * gezahlten Betrag entspricht — sie werden deshalb abgezogen, nicht ignoriert.
+ * Was danach bleibt, ist unerklaert.
+ */
+function bildePruefsumme(
+  items: ParsedAvisItem[],
+  header: ParsedAvisHeader,
+  ausgewiesenCents: number | null,
+  quelle: string,
+): AvisPruefsumme {
+  const ausPostenCents = items.reduce((n, i) => n + i.betragCents, 0);
+  const skonto = header.skontoCents + items.reduce((n, i) => n + i.skontoCents, 0);
+  const abweichungCents = ausgewiesenCents === null
+    ? null
+    : ausPostenCents - skonto - header.kuerzungCents - ausgewiesenCents;
+  return { ausPostenCents, ausgewiesenCents, quelle, abweichungCents };
 }
 
 export interface ParseAvisOptions {
@@ -48,8 +98,48 @@ export interface ParseAvisOptions {
   columnMap?: AvisColumnMap | null;
 }
 
-function parseEuroCents(value: string): number {
-  const cleaned = value.trim().replace(/\s/g, "").replace(/€/g, "").replace(/\./g, "").replace(",", ".");
+/**
+ * Welches Zeichen trennt die Nachkommastellen?
+ *
+ * Das ist KEINE Geschmacksfrage und auch nicht pro Wert zu raten: es haengt am
+ * Dateiformat, und dort an einer Kopplung, der man nicht entkommt.
+ *
+ *   DAVASO   Header `LfdNr,…`  → KOMMA-getrennt → Dezimaltrennung ist der PUNKT
+ *   Kassen   Zeilen `1;2;3;`   → SEMIKOLON     → Dezimaltrennung ist das KOMMA
+ *
+ * Eine komma-getrennte CSV kann keine unquotierten deutschen Dezimalkommas
+ * tragen — jedes Feld zerfiele. Das Trennzeichen legt die Konvention fest.
+ *
+ * Gemessen am 21.09.2026 ueber 85 Dateien: DAVASO 492 Betraege mit Punkt und
+ * 0 mit Komma, Kassen-CSV 0 mit Punkt und 474 mit Komma. Sauber getrennt,
+ * keine Mischung.
+ */
+export type Dezimalkonvention = "punkt" | "komma";
+
+/**
+ * Betrag in Cent — mit AUSDRUECKLICHER Konvention.
+ *
+ * ERSETZT `parseEuroCents`, das die deutsche Konvention global annahm: es
+ * strich JEDEN Punkt als Tausendertrenner. Gegen eine DAVASO-Datei las es
+ * `70.00` als 7000 Euro und speicherte 700.000 Cent — **Faktor genau 100**,
+ * immer, weil zwei Nachkommastellen hochrutschen.
+ *
+ * Belegt an zwei Prod-Avisen (ICL01278/ICL01290, 21.09.2026): jeder einzelne
+ * Posten exakt x100, und die Differenz zur Rechnungssumme centgenau die
+ * angezeigte „Ueberzahlung" (28.149,66 € bzw. 56.960,64 €).
+ *
+ * **Die Konvention wird uebergeben, nicht erraten.** Eine Heuristik pro Wert
+ * kann `1.234` nicht entscheiden — deutsche Tausender oder 1,234 mit Punkt? —
+ * und genau diese Mehrdeutigkeit hat den Fehler ermoeglicht.
+ */
+export function parseBetragCents(value: string, konvention: Dezimalkonvention): number {
+  const roh = value.trim().replace(/\s/g, "").replace(/€/g, "");
+  if (!roh) return 0;
+  const cleaned = konvention === "komma"
+    // deutsch: Punkte sind Tausendertrenner, das Komma trennt die Nachkommastellen
+    ? roh.replace(/\./g, "").replace(",", ".")
+    // englisch: Kommas sind Tausendertrenner, der Punkt trennt die Nachkommastellen
+    : roh.replace(/,/g, "");
   const num = parseFloat(cleaned);
   if (isNaN(num)) return 0;
   return Math.round(num * 100);
@@ -130,20 +220,32 @@ function parseDavaso(csvContent: string): ParsedAvis {
 
   const items: ParsedAvisItem[] = [];
 
-  const summaryRow = dataRows.find(r => {
-    const zahlg = getField(r, "KTR_BTR_Zahlg");
-    return zahlg && zahlg !== "";
-  });
+  /**
+   * Die Summenzeile erkennt man an dem, was sie NICHT hat: eine Belegnummer.
+   *
+   * ── Warum nicht „erste Zeile mit gefuelltem KTR_BTR_Zahlg" ──────────────
+   * Das stand hier vorher und traegt nur, solange die Spalte auf den
+   * Postenzeilen leer ist. Am 21.09.2026 kamen zwei Prod-Dateien, bei denen
+   * `gesamt_betrag_cents` exakt dem ERSTEN POSTEN entsprach — dort war die
+   * Spalte offenbar je Zeile gefuellt, und „die erste" war Posten 1.
+   *
+   * `ZEM_BelegNr` ist das strukturelle Merkmal: die Summenzeile hat keine
+   * (siehe den Regressions-Fixture `IKK_DAVASO`), jede Postenzeile hat eine —
+   * dieselbe Bedingung, nach der unten die Posten gesammelt werden. Findet
+   * sich keine solche Zeile, gibt es keine zweite Zahl, und der Riegel im
+   * Import lehnt ab. Das ist der gewollte Ausgang: lieber eine Ablehnung als
+   * eine Summe aus der falschen Zeile.
+   */
+  const summaryRow = dataRows.find(r => !getField(r, "ZEM_BelegNr") && getField(r, "KTR_BTR_Zahlg"));
 
   if (summaryRow) {
     headerData.avisNummer = getField(summaryRow, "AVISNr") || null;
-    headerData.gesamtBetragCents = parseEuroCents(getField(summaryRow, "KTR_BTR_Zahlg"));
     headerData.kostentraegerIk = getField(summaryRow, "KTR_IK") || null;
     headerData.kostentraegerName = getField(summaryRow, "KTR_Name") || null;
     headerData.zahlungsempfaengerIk = getField(summaryRow, "ZEM_IK") || null;
     headerData.zahlungsempfaengerIban = getField(summaryRow, "ZEM_IBAN") || null;
-    headerData.skontoCents = parseEuroCents(getField(summaryRow, "KTR_BTR_Skonto"));
-    headerData.kuerzungCents = parseEuroCents(getField(summaryRow, "KTR_BTR_DTA_Kuerzg"));
+    headerData.skontoCents = parseBetragCents(getField(summaryRow, "KTR_BTR_Skonto"), "punkt");
+    headerData.kuerzungCents = parseBetragCents(getField(summaryRow, "KTR_BTR_DTA_Kuerzg"), "punkt");
     headerData.zahlungsDatum = toIsoDate(getField(summaryRow, "Datum_ZahlungAusfuehrg") || null);
   }
 
@@ -157,8 +259,8 @@ function parseDavaso(csvContent: string): ParsedAvis {
       rechnungsNummer: getField(row, "ZEM_RecNr") || null,
       rechnungsDatum: toIsoDate(getField(row, "ZEM_RecDatum") || null),
       verwendungszweck: null,
-      betragCents: parseEuroCents(getField(row, "ZEM_BTR_Forderg")),
-      skontoCents: parseEuroCents(getField(row, "KTR_BTR_Skonto")),
+      betragCents: parseBetragCents(getField(row, "ZEM_BTR_Forderg"), "punkt"),
+      skontoCents: parseBetragCents(getField(row, "KTR_BTR_Skonto"), "punkt"),
       buchungsDatum: null,
     });
   }
@@ -176,7 +278,30 @@ function parseDavaso(csvContent: string): ParsedAvis {
     });
   }
 
-  return { header: headerData, items };
+  // Der Gesamtbetrag kommt aus den POSTEN, nicht aus einem Feld.
+  //
+  // Vorher stand hier `KTR_BTR_Zahlg` aus der ersten Zeile, in der die Spalte
+  // gefuellt ist — in den echten Dateien ist sie in JEDER Zeile gefuellt, also
+  // war die „Summenzeile" schlicht Posten 1. Gemessen an Avis 24/25 vom
+  // 21.09.2026: gespeichert waren 700.000 bzw. 1.168.400 — jeweils exakt der
+  // Betrag des ersten Postens.
+  //
+  // Das war kein Rechenfehler, sondern eine falsche Annahme ueber den
+  // Dateiaufbau. Eine Summe leitet man nicht aus einer Zeile ab.
+  headerData.gesamtBetragCents = items.reduce((n, i) => n + i.betragCents, 0);
+
+  // Die zweite, unabhaengige Zahl: der Zahlbetrag der SUMMENZEILE. Die Posten
+  // tragen die Forderung je Beleg, die Summenzeile den gezahlten Gesamtbetrag —
+  // zwei Wege zu derselben Zahl, und genau deshalb vergleichbar.
+  const ausgewiesen = summaryRow
+    ? parseBetragCents(getField(summaryRow, "KTR_BTR_Zahlg"), "punkt")
+    : null;
+
+  return {
+    header: headerData,
+    items,
+    pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, "Summenzeile (ohne ZEM_BelegNr), KTR_BTR_Zahlg"),
+  };
 }
 
 /**
@@ -208,6 +333,9 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
 
   const items: ParsedAvisItem[] = [];
   const columnMap = options?.columnMap ?? null;
+  // „keine Summenzeile gefunden" und „Summenzeile sagt 0" sind zwei
+  // verschiedene Dinge — nur das erste heisst „nichts zu vergleichen".
+  let gesamtbetragGefunden = false;
 
   for (const line of lines) {
     const parts = line.split(";").map(p => p.trim());
@@ -234,7 +362,7 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
         }
       }
 
-      const betragCents = parseEuroCents(parts[betragIdx] ?? "0");
+      const betragCents = parseBetragCents(parts[betragIdx] ?? "0", "komma");
 
       const verwendungszweck = parts[1] || null;
       const refFieldIdx = columnMap?.referenz ?? 2;
@@ -267,7 +395,8 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
     } else if (lineType === "3") {
       headerData.belegNummer = parts[1] || null;
       headerData.zahlungsDatum = toIsoDate(parts[2] || null);
-      headerData.gesamtBetragCents = parseEuroCents(parts[3] || "0");
+      headerData.gesamtBetragCents = parseBetragCents(parts[3] || "0", "komma");
+      gesamtbetragGefunden = true;
       headerData.zahlungsempfaengerIban = parts[4] || null;
     }
   }
@@ -277,7 +406,17 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
     kostentraegerName: headerData.kostentraegerName,
   });
 
-  return { header: headerData, items };
+  // Jede der 53 gemessenen Kassen-Dateien traegt genau eine `3;`-Zeile. Ihr
+  // Gesamtbetrag ist die zweite, unabhaengige Zahl — und sie faengt hier, was
+  // der Betrags-Detektor per Konstruktion nicht kann: einen FELDVERSATZ. Bei
+  // 7, 8, 9 und 13 Feldern in `2;`-Zeilen ist der keine Randmoeglichkeit.
+  const ausgewiesen = gesamtbetragGefunden ? headerData.gesamtBetragCents : null;
+
+  return {
+    header: headerData,
+    items,
+    pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, "Summenzeile 3;"),
+  };
 }
 
 export function parseAvisCsv(csvContent: string, options?: ParseAvisOptions): ParsedAvis {

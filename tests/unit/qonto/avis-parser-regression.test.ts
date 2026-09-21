@@ -41,10 +41,27 @@ const SAP_C = [
 ].join("\n");
 
 // --- Echtes IKK-Classic-DAVASO-Sample (Header `LfdNr,…`), wörtliche Kopie. ---
-// Die DAVASO-Beträge (`ZEM_BTR_Forderg`) werden HEUTE ×100 zu groß interpretiert
-// (`127.32` → 1273200 Cent) — das ist eine bestehende DAVASO-Eigenheit AUSSERHALB
-// dieses Tasks. Der Snapshot friert bewusst das IST-Verhalten ein, damit der
-// `1;`-Umbau DAVASO nachweislich NICHT verändert.
+// KORRIGIERT am 21.09.2026 (P1 6hXqFcc2hRQfC9qp). Vorher stand hier:
+//
+//   „Die DAVASO-Beträge werden HEUTE ×100 zu groß interpretiert (`127.32` →
+//    1273200 Cent) — das ist eine bestehende DAVASO-Eigenheit AUSSERHALB dieses
+//    Tasks. Der Snapshot friert bewusst das IST-Verhalten ein."
+//
+// Das war kein Snapshot einer Eigenheit, sondern eines Fehlers. Am 21.09.2026
+// lief der DAVASO-Pfad zum ersten Mal in Prod und schrieb zwei Avise mit exakt
+// diesem Faktor 100 — 28.149,66 € und 56.960,64 € „Überzahlung". Der Test war
+// die ganze Zeit grün und hat den Fehler mitgetragen: er prüfte, dass sich
+// nichts ändert, statt dass etwas stimmt.
+//
+// Das ist dieselbe Klasse wie ID-4 in #154 (ein Test, der den Port als Teil des
+// Hosts festnagelte und damit ein Passwort-Leck deckte): ein Test, der
+// VERHALTEN zementiert, prüft keine Zusage — er verteidigt den Ist-Zustand,
+// auch gegen dessen Reparatur. Wer ein Ist-Verhalten einfriert, das er selbst
+// für falsch hält, muss es als Befund melden, nicht als Sollwert schreiben.
+//
+// Struktur des Samples (maßgeblich für die Summenzeilen-Erkennung): Zeile 1 hat
+// KEINE `ZEM_BelegNr` und trägt in `KTR_BTR_Zahlg` den Gesamtbetrag 692.12;
+// die fünf Postenzeilen tragen Belegnummern und lassen `KTR_BTR_Zahlg` leer.
 const IKK_DAVASO = [
   "LfdNr,AvisPos,AVISNr,KTR_IK,KTR_Name,ZEM_IK,ZEM_IBAN,ZEM_RecNr,ZEM_BelegNr,ZEM_VorgangsNr,ZEM_RecDatum,ZEMRecEingDatum,ZEM_BTR_Forderg,KTR_BTR_Zahlg,KTR_BTR_Skonto,KTR_BTR_DTA_Kuerzg,Datum_ZahlungAusfuehrg",
   "1,1,ICL01159,183500693,IKK classic,461438852,DE92100101237314306198,2026-01-02,,2505802877,13.02.2026,16.02.2026,692.12,692.12,0.00,0.00,26.02.2026",
@@ -76,13 +93,27 @@ describe("Task #1687 — Parser-Regressions-Snapshot (Betrag/Gesamt/Anzahl)", ()
     expect(r.header.gesamtBetragCents).toBe(34017);
   });
 
-  it("IKK/DAVASO: unverändert (Format davaso, 5 Positionen)", () => {
+  it("IKK/DAVASO: Beträge in Euro-Cent, nicht ×100 (Format davaso, 5 Positionen)", () => {
     const r = parseAvisCsv(IKK_DAVASO);
     expect(r.header.format).toBe("davaso");
-    expect(r.items.map(i => i.betragCents)).toEqual([1273200, 2306100, 687300, 874600, 1780000]);
-    expect(r.header.gesamtBetragCents).toBe(6921200);
+    // 127.32 € = 12732 Cent. Bis zum 21.09.2026 stand hier 1273200.
+    expect(r.items.map(i => i.betragCents)).toEqual([12732, 23061, 6873, 8746, 17800]);
+    expect(r.header.gesamtBetragCents).toBe(69212);
     expect(r.header.kostentraegerName).toBe("IKK classic");
     expect(r.header.kostentraegerIk).toBe("183500693");
+  });
+
+  it("IKK/DAVASO: die Summenzeile der Datei bestätigt die Postensumme", () => {
+    // Die zweite, unabhängige Zahl — und der Grund, warum der Faktor 100 ab
+    // jetzt an der Tür auffällt statt in der Datenbank: Posten und Summenzeile
+    // sind zwei getrennte Wege zu derselben Zahl. Mit dem alten Parser war die
+    // Postensumme 6.921.200 und die Summenzeile 6.921.200 — beide ×100, beide
+    // einig. Deshalb trägt der Riegel nur zusammen mit der Korrektur.
+    const r = parseAvisCsv(IKK_DAVASO);
+    expect(r.pruefsumme.ausPostenCents).toBe(69212);
+    expect(r.pruefsumme.ausgewiesenCents, "Summenzeile (Zeile ohne ZEM_BelegNr) nicht gefunden")
+      .toBe(69212);
+    expect(r.pruefsumme.abweichungCents).toBe(0);
   });
 });
 
