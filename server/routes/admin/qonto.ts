@@ -1241,6 +1241,23 @@ router.post("/auto-match", asyncHandler("Auto-Abgleich fehlgeschlagen", async (r
   res.json(result);
 }));
 
+/**
+ * Task 6hHW39P2JxmcjvQp — Vorschau auf denselben Lauf, OHNE zu schreiben.
+ *
+ * Bewusst ein EIGENER Pfad und kein Schalter auf `/auto-match`: ein Flag, das
+ * per Default schreibt, laesst jeden Aufrufer, der es vergisst, buchen. So
+ * behaelt der schreibende Endpunkt seinen Namen, und der harmlose hat einen
+ * eigenen — verwechseln kann man sie nicht.
+ *
+ * Trotzdem POST und nicht GET: der Lauf ist teuer (er liest alle offenen
+ * Zahlungen, Rechnungen und Avise) und soll nicht von einem Browser-Prefetch
+ * oder Cache ausgeloest werden.
+ */
+router.post("/auto-match/preview", asyncHandler("Vorschau fehlgeschlagen", async (req, res) => {
+  const result = await qontoService.autoMatch(req.user!.id, req.ip, { dryRun: true });
+  res.json(result);
+}));
+
 // Task #1599 — Auto-Ausblenden-Regeln: markieren neu eingehende (und bei
 // Regel-Anlage bereits vorhandene, noch offene) Zahlungseingänge automatisch
 // als nicht abrechnungsrelevant. Regel-Anlage/-Löschung sind GoBD-auditiert.
