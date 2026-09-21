@@ -37,6 +37,58 @@ in `replit.md` (Guards in die Eltern-Aufgabe einfalten, Publishes bündeln).
 
 ---
 
+### 2026-09-18 — Umsatz-Kachel (unterer Block + S-1) und der Vor-Riegel — Publish durch, OHNE Release-Step
+
+**Anlass:** Sechs gemergte PRs, gebündelt in EINEM Publish (Batch-Policy oben):
+
+| PR | Inhalt | Schema? |
+|---|---|---|
+| #148 | Umsatz-Kachel, unterer Block: Kosten aufgefächert, Potenzial-Spalten, Cutoff nach Weg A | nein |
+| #152 | S-1: alle vier Ansichten sagen, was sie zählen und was der Monatsabschluss damit macht | nein |
+| #149 | Korrektur-Protokoll LN-Constraint (`docs/corrections/`) | nein |
+| #151 | Doku-Konvention (Beschreibung / Kommentar / Chat) nach `CLAUDE.md` | nein |
+| #153 | `CLAUDE.md`-Korrektur: Schritt 0d ist auf dem Replit-Pfad kein Riegel | nein |
+| #154 | Riegel VOR dem Publish (`npm run pre-publish-gate`) + zwei fail-open-Stellen im Drop-Detektor | nein |
+
+**Kein DDL in diesem Publish.** Reader-, UI-, Skript- und Dokumentänderungen; keine
+Migrationsdatei, keine Spalten- oder Tabellenänderung, kein Constraint.
+
+**Dieser Publish lief OHNE den Release-Step.** Die `.replit`-Build-Zeile in Alriks
+Workspace ist seit dem 17.09. lokal um `bash scripts/migrate.sh --force`
+erleichtert, weil Schritt 0d gegen Prod nicht durchkommt (Ticket
+`6hWvrJgff5xr9hfp`). Es gab also **keinen** Identitätsriegel (0a), **keinen**
+DROP-Trockenlauf (0d), **keine** Nachbedingung (1b) und **keine** Datenstand-Prüfung
+(0e/2). Das ist bei „kein DDL" vertretbar und war es genau deshalb — es ist keine
+Zusage für den nächsten Publish. Im Repo steht die richtige Zeile; sie geht zurück,
+sobald 0d einen Weg hat.
+
+**Ersatz dafür war der neue Vor-Riegel** (`npm run pre-publish-gate`, aus #154),
+hier zum ersten Mal gegen echtes Prod gefahren:
+
+```
+[ ✓ ] Verglichen wurde
+      Ziel helium/heliumdb gegen Prod ep-still-term-akch49kv.c-3.us-west-2.aws.neon.tech/neondb
+[3/4] ACHTUNG: die Build-Zeile ruft `migrate.sh` NICHT auf.
+```
+
+Beide Auflagen aus dem Ticket sind damit in der Praxis erfüllt: der Vergleich ist
+**sichtbar** (beide Datenbanken beim Namen, kein Passwort im Log), und die Warnung
+zu Schritt 3 hat gegriffen — in genau dem Zustand, für den es sie gibt.
+
+**Backup:** kein lokaler Dump. Die Prod-DB hat **Point-in-time recovery über 7 Tage**
+plus Scheduled Backups mit 28 Tagen Aufbewahrung; PITR kann auf eine Minute vor dem
+Publish zurück, was ein Tages-Snapshot nicht könnte. Der Runbook-Punkt „Auto-Backup
+≤ 1 h alt" ist damit gegenstandslos, nicht übersprungen — §5-Vorlage oben ist auf
+Dump-Dateien geschrieben und passt für diese Lage nicht mehr.
+
+**Nicht erhoben und deshalb hier nicht behauptet:** exakte Publish-Uhrzeit und
+Build-ID. Gemeldet wurde der Abschluss um 12:06 UTC im Ticket
+`6hWvMvpxpJFFjwQG`; der Publish lag davor.
+
+- Durchgeführt von: Alrik (Publish + Gate-Lauf), Protokoll: CC
+- `PROD_DATABASE_URL` nach dem Lauf wieder unset
+- Tickets: `6hWgVqw2C8442hcG` (Kachel), `6hWvMvpxpJFFjwQG` (Gate-Reihenfolge), `6hWvrJgff5xr9hfp` (0d/`.replit`)
+
 ### 2026-06-25 (b) — Re-Publish §45b-Anzeige/Konsolidierung (Task #1422) — Publish erledigt & LIVE verifiziert (Task #1423)
 
 **Anlass:** Der letzte Production-Publish war am **2026-06-17** (Build `94b24fe9-…`, enthielt den §45b-Juli-Buchungs-Fix #1306). Mehrere danach gemergte §45b-**Folge-Arbeiten** sind noch **nicht** live und betreffen ausschließlich die Budget-**Anzeige** + Code-Konsolidierung (NICHT den Buchungs-Pfad, der seit 06-17 korrekt ist):

@@ -91,7 +91,16 @@ if (!hasDestructive && replica.available) {
   record(
     "Keine destruktiven Schema-Änderungen erkannt (Migration-Grep + Prod-Replica-Diff)",
     "ok",
-    `Migration: ${result.latestMigration ?? "keine"}`,
+    // Die Dateiangabe NICHT nackt: sie nennt die jüngste Datei in
+    // `migrations/`, und die ist auf dem `push`-Pfad per Konstruktion alt —
+    // `drizzle-kit push` schreibt keine Migrationsdateien (CLAUDE.md). Beim
+    // ersten Prod-Lauf am 18.09.2026 stand dort `0001_right_scrambler.sql` vom
+    // 09.08., also fünf Wochen alt, und las sich wie der Prüfgegenstand.
+    // Dieselbe Klasse wie eine Beschreibung, die einen überholten Zustand
+    // behauptet: sie wird als Beleg gelesen.
+    `Belegt durch den Prod-Replica-Diff. Der Migrations-Grep steuert hier nichts `
+      + `bei — bei \`drizzle-kit push\` entstehen keine Migrationsdateien, er ist `
+      + `dafür blind (jüngste vorhandene: ${result.latestMigration ?? "keine"}).`,
   );
   record(
     "Pre-Publish-Backup nicht zwingend nötig (keine DROP-Statements)",

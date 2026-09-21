@@ -166,6 +166,13 @@ describe("Publish-Checkliste, grüner Pfad gegen zwei echte DBs (6hWvMvpxpJFFjwQ
     // oben geprüft), der Fall ist also nicht vakuum-wahr.
     expect(code === 0 && /Verglichen wurde/.test(text)).toBe(true);
 
+    // Die Ausgabe darf die Migrations-Datei nicht als Prüfgegenstand ausgeben.
+    // Beim ersten Prod-Lauf stand dort eine fünf Wochen alte Datei neben dem
+    // Häkchen — auf dem `push`-Pfad ist der Grep per Konstruktion blind, und
+    // wer das nicht danebenliest, hält sie für aktuell.
+    expect(text, "die Migrations-Angabe steht ohne den Hinweis auf ihre Blindheit")
+      .toMatch(/blind/);
+
     // Und die Zugangsdaten dürfen nirgends auftauchen.
     //
     // Geprüft wird der ganze Connection-String, NICHT das Passwort allein: das
