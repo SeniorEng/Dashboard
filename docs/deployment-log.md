@@ -37,6 +37,59 @@ in `replit.md` (Guards in die Eltern-Aufgabe einfalten, Publishes bündeln).
 
 ---
 
+### 2026-09-21 — Trockenlauf + Messwerkzeug (#155, #156) — ZWEI Publishes, der erste baute den falschen Stand
+
+**Anlass:** zwei gemergte PRs, gebündelt:
+
+| PR | Inhalt | Schema? |
+|---|---|---|
+| #155 | `scripts/messe-0d.ts` (Messwerkzeug für den 0d-Abbruch), Logbuch-Eintrag 18.09., Checkliste nennt die Blindheit des Migrations-Greps | nein |
+| #156 | Trockenlauf für den Qonto-Zahlungs-Abgleich (`POST /api/admin/qonto/auto-match/preview`) | nein |
+
+**Kein DDL.** Skript-, Service- und Routen-Änderungen; keine Migrationsdatei,
+keine Spalte, kein Constraint. **0 DROPs**, Backup entsprechend nicht nötig —
+der Vor-Riegel (`npm run pre-publish-gate`) wurde gefahren und hat das belegt,
+nicht angenommen.
+
+#### Der erste Publish lieferte den Stand VOR dem Merge
+
+| | |
+|---|---|
+| Merge von #156 | 17:37:03 UTC (`28a3a5b5`) |
+| `builtAt` des ersten Builds | **17:38:30 UTC** — 87 Sekunden danach |
+| `version` des ersten Builds | **`d14e9e60c5d01219`** = Quellstand **vor** #156 |
+
+Aufgefallen ist es erst, als der neue Endpunkt in Prod **404** lieferte.
+
+**Die Ursache ist weder „zu früh publisht" noch ein veraltetes Bundle** — es
+wurde nach dem Merge frisch gebaut. Der Build sah nur anderen Quelltext:
+**Replit baut aus dem Workspace, und der Workspace hatte den Merge nicht
+gezogen.** Derselbe Mechanismus wie am 17.09., als `HEAD` einen Commit hinter
+`origin/main` lag.
+
+**Das Werkzeug dagegen lag bereit und wurde nicht gefahren:**
+`npm run pre-publish-gate` prüft als Schritt 2 genau `HEAD == origin/main` und
+hätte abgebrochen. Ein Riegel nützt nichts, den man nicht fährt.
+
+#### Der zweite Publish
+
+| | |
+|---|---|
+| `version` | **`7e5dd3ded1d89778`** = `origin/main` mit #156 |
+| Vor-Riegel | gefahren, 0 DROPs, kein Backup nötig |
+| Verifikation | `GET /health` gegen den nachgerechneten Hash |
+
+**Uhrzeit des zweiten Builds nicht erhoben** und deshalb hier nicht behauptet.
+
+#### Was dieser Vorfall geändert hat
+
+Die §5-Vorlage im Runbook hat jetzt ein Feld für `version` + `builtAt`. Bis
+hierhin hielt das Logbuch fest, welche PRs **gemeint** waren — nicht, welcher
+Quellstand **ankam**. Genau diese Lücke hat den Abend gekostet.
+
+- Durchgeführt von: Alrik (beide Publishes, Gate-Lauf), Protokoll: CC
+- Tickets: `6hHW39P2JxmcjvQp` (Avise/Qonto), `6hWvrJgff5xr9hfp` (0d-Messwerkzeug)
+
 ### 2026-09-18 — Umsatz-Kachel (unterer Block + S-1) und der Vor-Riegel — Publish durch, OHNE Release-Step
 
 **Anlass:** Sechs gemergte PRs, gebündelt in EINEM Publish (Batch-Policy oben):
