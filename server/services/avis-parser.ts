@@ -33,33 +33,63 @@ interface ParsedAvisItem {
   verwendungszweck: string | null;
   betragCents: number;
   skontoCents: number;
+  /**
+   * Datei-Abzug auf DIESEM Posten. Auf der DAVASO-Paar-Struktur traegt die
+   * Kopfzeile je Rechnung ihre eigene Kuerzung — ein Kopf-Feld waere dort die
+   * Kuerzung der ERSTEN Rechnung, faelschlich fuer alle gelesen.
+   */
+  kuerzungCents: number;
   buchungsDatum: string | null;
 }
 
 /**
- * Die zwei unabhaengigen Zahlen der Datei — und ihre Differenz.
+ * Der datei-interne KONSISTENZ-Hinweis. Ausdruecklich NICHT der Riegel.
  *
- * ── Warum das der wichtigste Teil dieses Umbaus ist ─────────────────────
- * Beide Fehler vom 21.09.2026 (Faktor 100, Gesamtbetrag = Posten 1) waren
- * AUS DER DATEI SELBST erkennbar: die Postensumme haette nie zur
- * ausgewiesenen Summe gepasst. Ein Import, der zwei Zahlen bekommt und nur
- * eine liest, ist die eigentliche Luecke — der Faktor 100 war nur ihr
- * sichtbarstes Symptom.
+ * ── Was hier vorher stand, und warum es falsch war ──────────────────────
+ * „Die zwei unabhaengigen Zahlen der Datei … haette beide Fehler vom
+ * 21.09.2026 am ersten Tag gezeigt." Das hat der Gate-2-Review widerlegt und
+ * eine Messung an den echten Prod-Dateien bestaetigt:
  *
- * Gilt fuer BEIDE Familien: jede der 53 Kassen-Dateien traegt genau eine
- * `3;`-Summenzeile (gemessen), DAVASO traegt je Posten einen Zahlbetrag.
+ *  1. **Keine datei-interne Zahl ueberlebt einen Skalenfehler.** Beide Zahlen
+ *     kommen durch denselben `parseBetragCents`-Aufruf. Liest er `70.00` als
+ *     7.000 statt 70, skalieren Postensumme UND ausgewiesene Summe mit, und
+ *     die Differenz bleibt 0. Genau der Faktor 100, gegen den dieser Riegel
+ *     gebaut war, laeuft durch ihn hindurch.
+ *
+ *  2. **Auf der DAVASO-Paar-Struktur ist der Vergleich tautologisch.** Je
+ *     Rechnung stehen dort zwei Zeilen: eine Kopfzeile mit Forderung UND
+ *     Zahlbetrag (zeilenweise identisch, 70.00/70.00) und eine Postenzeile
+ *     mit nur der Forderung. Gemessen ueber die 29 lesbaren DAVASO-Dateien:
+ *     66 von 66 Kopfzeilen exakt gleich. `abweichung = 0` ist dort eine
+ *     EIGENSCHAFT DES FORMATS, kein Pruefergebnis.
+ *
+ * Die echte zweite Zahl steht deshalb nicht in der Datei, sondern im System:
+ * `ZEM_RecNr` nennt die Rechnung, die Rechnung traegt `gross_amount_cents`.
+ * Dieser Vergleich laeuft durch keinen gemeinsamen Parser und ist von jeder
+ * Dateikonvention unabhaengig — siehe `server/services/avis-rechnungsabgleich.ts`.
+ * ER ist der Riegel; was hier steht, faengt nur noch Feldversatz und
+ * verlorene Zeilen INNERHALB einer Datei.
  */
 interface AvisPruefsumme {
   /** Σ der Posten-Forderungen. */
   ausPostenCents: number;
-  /** Die zweite, unabhaengig in der Datei stehende Zahl. `null` = keine gefunden. */
+  /** Die zweite in der Datei stehende Zahl. `null` = keine gefunden. */
   ausgewiesenCents: number | null;
+  /**
+   * Stammt die zweite Zahl aus ANDEREN Zeilen als die Posten?
+   *
+   * `false` heisst: derselbe Zeilensatz, zwei Spalten — der Vergleich kann
+   * per Konstruktion keine fehlende oder doppelte Zeile finden. Er ist dann
+   * ein Formatmerkmal, kein Befund, und darf nirgends als „geprueft"
+   * ausgewiesen werden. Auch `true` schuetzt NICHT gegen Skalenfehler.
+   */
+  ausAnderenZeilen: boolean;
   /** Woher die zweite Zahl stammt — gehoert in die Vorschau, damit sie pruefbar ist. */
   quelle: string;
   /**
-   * `ausPosten − Skonto − Kuerzung − ausgewiesen`. 0 heisst: die Datei ist in
-   * sich stimmig. `null` = keine zweite Zahl, also nichts zu vergleichen —
-   * und das ist ausdruecklich KEIN bestandener Vergleich.
+   * `ausPosten − Abzuege − ausgewiesen`. 0 heisst: die Datei ist in sich
+   * stimmig — nicht, dass die Betraege richtig sind. `null` = keine zweite
+   * Zahl, also nichts zu vergleichen, und das ist kein bestandener Vergleich.
    */
   abweichungCents: number | null;
 }
@@ -71,24 +101,36 @@ interface ParsedAvis {
 }
 
 /**
- * Die Differenz, gegen die der Import gatet.
+ * Die datei-interne Differenz.
  *
  * Skonto und Kuerzung sind legitime Gruende, warum die Postensumme NICHT dem
- * gezahlten Betrag entspricht — sie werden deshalb abgezogen, nicht ignoriert.
- * Was danach bleibt, ist unerklaert.
+ * gezahlten Betrag entspricht — sie werden abgezogen, nicht ignoriert.
+ *
+ * **Je Abzugsart genau EINE Quelle.** Vorher wurden Kopf- und Posten-Skonto
+ * ADDIERT; eine Datei, die denselben Abzug aggregiert oben und je Posten
+ * unten fuehrt, bekam ihn zweimal abgezogen und wurde als unstimmig
+ * abgelehnt, obwohl sie aufgeht (Gate-2-Befund S4, ausgefuehrt). Die Posten
+ * sind die feinere Angabe und haben deshalb Vorrang; der Kopf tritt nur ein,
+ * wenn die Posten nichts tragen.
  */
 function bildePruefsumme(
   items: ParsedAvisItem[],
   header: ParsedAvisHeader,
   ausgewiesenCents: number | null,
   quelle: string,
+  ausAnderenZeilen: boolean,
 ): AvisPruefsumme {
   const ausPostenCents = items.reduce((n, i) => n + i.betragCents, 0);
-  const skonto = header.skontoCents + items.reduce((n, i) => n + i.skontoCents, 0);
+
+  const skontoPosten = items.reduce((n, i) => n + i.skontoCents, 0);
+  const kuerzungPosten = items.reduce((n, i) => n + i.kuerzungCents, 0);
+  const abzuege = (skontoPosten > 0 ? skontoPosten : header.skontoCents)
+                + (kuerzungPosten > 0 ? kuerzungPosten : header.kuerzungCents);
+
   const abweichungCents = ausgewiesenCents === null
     ? null
-    : ausPostenCents - skonto - header.kuerzungCents - ausgewiesenCents;
-  return { ausPostenCents, ausgewiesenCents, quelle, abweichungCents };
+    : ausPostenCents - abzuege - ausgewiesenCents;
+  return { ausPostenCents, ausgewiesenCents, quelle, abweichungCents, ausAnderenZeilen };
 }
 
 export interface ParseAvisOptions {
@@ -218,43 +260,64 @@ function parseDavaso(csvContent: string): ParsedAvis {
     kuerzungCents: 0,
   };
 
-  const items: ParsedAvisItem[] = [];
-
   /**
-   * Die Summenzeile erkennt man an dem, was sie NICHT hat: eine Belegnummer.
+   * DAVASO ist in BLOECKEN aufgebaut — eine Rechnung je Block.
    *
-   * ── Warum nicht „erste Zeile mit gefuelltem KTR_BTR_Zahlg" ──────────────
-   * Das stand hier vorher und traegt nur, solange die Spalte auf den
-   * Postenzeilen leer ist. Am 21.09.2026 kamen zwei Prod-Dateien, bei denen
-   * `gesamt_betrag_cents` exakt dem ERSTEN POSTEN entsprach — dort war die
-   * Spalte offenbar je Zeile gefuellt, und „die erste" war Posten 1.
+   * ── Was hier vorher stand, und warum es falsch war ──────────────────────
+   * Der Parser sammelte die Posten aus den Zeilen MIT `ZEM_BelegNr` und nahm
+   * ihren `ZEM_BTR_Forderg`. Das sind die Unterpositionen, und das ist die
+   * FORDERUNG. Ein Avis sagt aber, was GEZAHLT wurde, und das steht in
+   * `KTR_BTR_Zahlg` auf der Kopfzeile.
    *
-   * `ZEM_BelegNr` ist das strukturelle Merkmal: die Summenzeile hat keine
-   * (siehe den Regressions-Fixture `IKK_DAVASO`), jede Postenzeile hat eine —
-   * dieselbe Bedingung, nach der unten die Posten gesammelt werden. Findet
-   * sich keine solche Zeile, gibt es keine zweite Zahl, und der Riegel im
-   * Import lehnt ab. Das ist der gewollte Ausgang: lieber eine Ablehnung als
-   * eine Summe aus der falschen Zeile.
+   * Bei 65 von 66 gemessenen Kopfzeilen sind beide Zahlen gleich, deshalb ist
+   * es nie aufgefallen. Bei der 66. nicht: `Avis_ICL01267.csv`, RE-2026-0213 —
+   * gefordert 117,19 EUR, gezahlt 58,16 EUR. Der alte Aufbau haette 117,19
+   * gebucht, der Rechnungsabgleich haette `bestaetigt` gemeldet, und die
+   * Unterzahlung von 59,03 EUR waere unsichtbar geblieben. Dieselbe Datei
+   * liegt im aktuellen Rueckstand.
+   *
+   * Die zweite Folge traegt genauso weit: bei einem Block mit mehreren Belegen
+   * (N=5 im Repo-Fixture) entstanden FUENF Posten fuer EINE Rechnung — alle
+   * Belege eines Blocks tragen dieselbe `ZEM_RecNr`. Der alte Regressionstest
+   * hat das als „5 Positionen" eingefroren.
+   *
+   * ── Die Struktur, an 29 Dateien gemessen ────────────────────────────────
+   *  - Kopfzeile: KEINE `ZEM_BelegNr` (0 von 66), traegt `ZEM_RecNr`,
+   *    `KTR_BTR_Zahlg`, Skonto, Kuerzung, Zahldatum.
+   *  - Postenzeilen: `ZEM_BelegNr` gefuellt (114 von 114), tragen ihren
+   *    Anteil der Forderung und dieselbe `ZEM_RecNr` wie ihre Kopfzeile
+   *    (0 Abweichungen).
+   *  - Blockgroessen: N=1 54x, N=2 2x, N=3 1x, N=5 3x, N=6 4x, N=7 2x.
+   *    **54 von 66 sind 1:1** — genau dort faellt der Spaltenfehler nicht auf.
    */
-  const summaryRow = dataRows.find(r => !getField(r, "ZEM_BelegNr") && getField(r, "KTR_BTR_Zahlg"));
+  interface Block {
+    kopf: string[];
+    posten: string[][];
+  }
 
-  /**
-   * Die Kopfzeile ist NICHT dasselbe wie die Summenzeile — zwei Fragen, die
-   * ich zuerst vermischt hatte.
-   *
-   * „Woher kommen AVISNr, IK, IBAN, Zahlungsdatum?" beantwortet in DAVASO
-   * JEDE Zeile gleich: die Felder wiederholen sich zeilenweise. „Woher kommt
-   * die ausgewiesene Summe?" beantwortet nur die Summenzeile — und die gibt es
-   * nicht in jeder Datei.
-   *
-   * Wer beides an `summaryRow` haengt, verliert bei einer Datei ohne
-   * Summenzeile auch noch den Kopf: Avis-Nummer, Kostentraeger und
-   * Zahlungsdatum waeren still `null`. Deshalb faellt der Kopf auf die erste
-   * Datenzeile zurueck, die Summe nicht.
-   */
-  const kopfZeile = summaryRow ?? dataRows[0];
+  const bloecke: Block[] = [];
+  for (const row of dataRows) {
+    if (getField(row, "ZEM_BelegNr")) {
+      const offen = bloecke[bloecke.length - 1];
+      if (!offen) {
+        // Eine Postenzeile vor der ersten Kopfzeile gehoert zu keiner Rechnung.
+        // In 29 gemessenen Dateien kommt das nicht vor; kaeme es vor, waere
+        // still eine Forderung ohne Zahlung im Avis — deshalb laut.
+        throw new Error(
+          `Postenzeile ohne vorangehende Kopfzeile (Beleg ${getField(row, "ZEM_BelegNr")}). `
+          + "Dateiaufbau nicht erkannt, Import abgelehnt.",
+        );
+      }
+      offen.posten.push(row);
+    } else {
+      bloecke.push({ kopf: row, posten: [] });
+    }
+  }
 
+  const kopfZeile = bloecke[0]?.kopf ?? dataRows[0];
   if (kopfZeile) {
+    // Avis-Nummer, Kostentraeger und IBAN wiederholen sich zeilenweise; das
+    // Zahlungsdatum steht auf den Kopfzeilen.
     headerData.avisNummer = getField(kopfZeile, "AVISNr") || null;
     headerData.kostentraegerIk = getField(kopfZeile, "KTR_IK") || null;
     headerData.kostentraegerName = getField(kopfZeile, "KTR_Name") || null;
@@ -263,95 +326,94 @@ function parseDavaso(csvContent: string): ParsedAvis {
     headerData.zahlungsDatum = toIsoDate(getField(kopfZeile, "Datum_ZahlungAusfuehrg") || null);
   }
 
-  // Skonto und Kuerzung sind datei-weite Abzuege und stehen deshalb NUR auf der
-  // Summenzeile. Von einer Postenzeile gelesen waeren es die des ersten Postens
-  // — ein Abzug, der faelschlich fuer die ganze Datei gilt.
-  if (summaryRow) {
-    headerData.skontoCents = parseBetragCents(getField(summaryRow, "KTR_BTR_Skonto"), "punkt");
-    headerData.kuerzungCents = parseBetragCents(getField(summaryRow, "KTR_BTR_DTA_Kuerzg"), "punkt");
-  }
-
-  for (const row of dataRows) {
-    const belegNr = getField(row, "ZEM_BelegNr");
-    if (!belegNr) continue;
-
-    items.push({
-      belegNr,
-      vorgangsNr: getField(row, "ZEM_VorgangsNr") || null,
-      rechnungsNummer: getField(row, "ZEM_RecNr") || null,
-      rechnungsDatum: toIsoDate(getField(row, "ZEM_RecDatum") || null),
-      verwendungszweck: null,
-      betragCents: parseBetragCents(getField(row, "ZEM_BTR_Forderg"), "punkt"),
-      skontoCents: parseBetragCents(getField(row, "KTR_BTR_Skonto"), "punkt"),
-      buchungsDatum: null,
-    });
-  }
-
-  if (items.length === 0 && summaryRow) {
-    items.push({
-      belegNr: null,
-      vorgangsNr: getField(summaryRow, "ZEM_VorgangsNr") || null,
-      rechnungsNummer: getField(summaryRow, "ZEM_RecNr") || null,
-      rechnungsDatum: headerData.zahlungsDatum,
-      verwendungszweck: null,
-      betragCents: headerData.gesamtBetragCents,
-      skontoCents: headerData.skontoCents,
-      buchungsDatum: null,
-    });
-  }
-
-  // Der Gesamtbetrag kommt aus den POSTEN, nicht aus einem Feld.
-  //
-  // Vorher stand hier `KTR_BTR_Zahlg` aus der ersten Zeile, in der die Spalte
-  // gefuellt ist — in den echten Dateien ist sie in JEDER Zeile gefuellt, also
-  // war die „Summenzeile" schlicht Posten 1. Gemessen an Avis 24/25 vom
-  // 21.09.2026: gespeichert waren 700.000 bzw. 1.168.400 — jeweils exakt der
-  // Betrag des ersten Postens.
-  //
-  // Das war kein Rechenfehler, sondern eine falsche Annahme ueber den
-  // Dateiaufbau. Eine Summe leitet man nicht aus einer Zeile ab.
-  headerData.gesamtBetragCents = items.reduce((n, i) => n + i.betragCents, 0);
+  // Ein Posten je BLOCK, nicht je Belegzeile — und mit dem ZAHLbetrag.
+  const items: ParsedAvisItem[] = bloecke.map(b => ({
+    // Der Block kann mehrere Belege tragen; sie gehoeren alle zu dieser einen
+    // Rechnung. Bei N=1 ist es schlicht die Belegnummer.
+    belegNr: b.posten.map(r => getField(r, "ZEM_BelegNr")).filter(Boolean).join(", ") || null,
+    vorgangsNr: getField(b.kopf, "ZEM_VorgangsNr") || null,
+    /**
+     * Kanonisch, wo erkennbar — sonst der ROHWERT.
+     *
+     * Der Kassen-Pfad normalisiert seine Referenz seit jeher ueber
+     * `extractReInvoiceNumber` (O→0, eingeschobene Leerzeichen wie in
+     * `RE-2026- 0212`). DAVASO nahm `ZEM_RecNr` roh — zwei Arten, dieselbe
+     * Frage zu beantworten. Eine Nummer mit so einer Eigenheit faende der
+     * Rechnungsabgleich nicht und meldete `ungeprueft`: kein falscher Betrag,
+     * aber eine ausgelassene Pruefung, die wie ein Befund aussieht.
+     *
+     * `?? roh` und ausdruecklich NICHT `?? null`: 41 von 66 gemessenen
+     * Kopfzeilen nennen keine EngelDesk-Nummer, sondern ein Muster wie
+     * `2026-01-123` oder ein Datum — der Bestand vor Juli 2026, als Alrik noch
+     * von Hand abrechnete. Das ist keine kaputte Rechnungsnummer, das ist die
+     * Realitaet von damals. Ein Parser, der daraus etwas macht, das wie eine
+     * Nummer aussieht, erfindet Daten; einer, der sie verwirft, verschweigt
+     * sie. Sie bleibt stehen und landet sichtbar in `ungeprueft`.
+     */
+    rechnungsNummer: extractReInvoiceNumber(getField(b.kopf, "ZEM_RecNr"))
+      ?? (getField(b.kopf, "ZEM_RecNr") || null),
+    rechnungsDatum: toIsoDate(getField(b.kopf, "ZEM_RecDatum") || null),
+    verwendungszweck: null,
+    betragCents: parseBetragCents(getField(b.kopf, "KTR_BTR_Zahlg"), "punkt"),
+    skontoCents: parseBetragCents(getField(b.kopf, "KTR_BTR_Skonto"), "punkt"),
+    kuerzungCents: parseBetragCents(getField(b.kopf, "KTR_BTR_DTA_Kuerzg"), "punkt"),
+    buchungsDatum: null,
+  }));
 
   /**
-   * Die zweite, unabhaengige Zahl — und es gibt ZWEI belegte DAVASO-Praegungen,
-   * die sie an verschiedenen Stellen fuehren:
-   *
-   *  (a) mit Summenzeile: `IKK_Classic_Avis_ICL01159` (woertliche Kopie im
-   *      Regressionstest) — Zeile 1 ohne `ZEM_BelegNr` traegt 692.12 in
-   *      `KTR_BTR_Zahlg`, die Postenzeilen lassen die Spalte LEER.
-   *
-   *  (b) ohne Summenzeile: die beiden Dateien von Avis 24/25 — dort stand in
-   *      der ersten gefundenen `KTR_BTR_Zahlg` der Betrag von Posten 1
-   *      (700.000 Cent bei vier Posten von zusammen 284,34 EUR). Das geht nur,
-   *      wenn die Spalte je Postenzeile gefuellt ist.
-   *
-   * Das ist EINE fachliche Frage („was weist die Datei als gezahlt aus?"),
-   * beantwortet aus der Spalte, die sie traegt — kein Zweitbegriff. Die
-   * Reihenfolge ist nicht beliebig: die Summenzeile gewinnt, weil sie die
-   * Aussage der Datei ist; die Postensumme ist die Rekonstruktion daraus.
-   *
-   * Findet sich keine von beiden, bleibt es `null` — und der Import lehnt ab.
-   * „Nicht vergleichbar" ist kein bestandener Vergleich.
-   *
-   * `quelle` sagt, WELCHER Weg gegriffen hat. Die Vorschau zeigt das an: ein
-   * gruenes Ergebnis ohne sichtbaren Vergleich gilt nicht als bestanden.
+   * Zwei Belegzeilen mit derselben Belegnummer sind kein Avis, sondern eine
+   * verdoppelte Zeile (Gate-2-Befund G). Geprueft wird auf den ROHZEILEN, nicht
+   * auf den Posten: die Belegnummer ist der Schluessel der Datei, ein Posten
+   * fasst inzwischen einen ganzen Block zusammen.
    */
-  const summeZahlbetraege = dataRows
-    .filter(r => getField(r, "ZEM_BelegNr"))
-    .reduce((n, r) => n + parseBetragCents(getField(r, "KTR_BTR_Zahlg"), "punkt"), 0);
+  const alleBelege = bloecke.flatMap(b => b.posten.map(r => getField(r, "ZEM_BelegNr")));
+  const dubletten = alleBelege.filter((b, i) => alleBelege.indexOf(b) !== i);
+  if (dubletten.length > 0) {
+    throw new Error(
+      `Belegnummer mehrfach in der Datei: ${[...new Set(dubletten)].join(", ")}. `
+      + "Eine verdoppelte Zeile wuerde den Betrag doppelt buchen. Import abgelehnt.",
+    );
+  }
 
-  const ausgewiesen = summaryRow
-    ? parseBetragCents(getField(summaryRow, "KTR_BTR_Zahlg"), "punkt")
-    : (summeZahlbetraege > 0 ? summeZahlbetraege : null);
+  // Der Gesamtbetrag ist die Summe der ZAHLbetraege — also das, was die Bank
+  // ueberweist. Genau diese Groesse braucht die Triple-Equality des
+  // Bulk-Matchers (Bank ~ Avis-Summe ~ Σ offene Rechnungen).
+  headerData.gesamtBetragCents = items.reduce((n, i) => n + i.betragCents, 0);
+  headerData.skontoCents = items.reduce((n, i) => n + i.skontoCents, 0);
+  headerData.kuerzungCents = items.reduce((n, i) => n + i.kuerzungCents, 0);
 
-  const quelle = summaryRow
-    ? "Summenzeile (Zeile ohne ZEM_BelegNr), Spalte KTR_BTR_Zahlg"
-    : "Summe der Spalte KTR_BTR_Zahlg ueber alle Postenzeilen";
+  /**
+   * Der datei-interne Konsistenzhinweis: FORDERUNG gegen FORDERUNG.
+   *
+   * Die Kopfzeile eines Blocks traegt die Gesamtforderung, die Postenzeilen
+   * ihre Anteile. Das sind verschiedene Zeilen, und sie muessen aufgehen — ein
+   * verlorener oder verdoppelter Posten faellt damit auf.
+   *
+   * Bewusst NICHT Forderung gegen Zahlung: die beiden duerfen auseinanderliegen
+   * (das ist eine Kuerzung, siehe ICL01267), und ein Hinweis, der bei jedem
+   * legitimen Fall anschlaegt, wird weggesehen.
+   *
+   * Und weiterhin blind gegen einen SKALENFEHLER — beide Zahlen kommen durch
+   * denselben `parseBetragCents`-Aufruf. Dafuer ist der Rechnungsabgleich da.
+   */
+  const forderungKopf = bloecke.reduce(
+    (n, b) => n + parseBetragCents(getField(b.kopf, "ZEM_BTR_Forderg"), "punkt"), 0);
+  const forderungPosten = bloecke.reduce(
+    (n, b) => n + b.posten.reduce(
+      (m, r) => m + parseBetragCents(getField(r, "ZEM_BTR_Forderg"), "punkt"), 0), 0);
+
+  const hatPosten = bloecke.some(b => b.posten.length > 0);
 
   return {
     header: headerData,
     items,
-    pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, quelle),
+    pruefsumme: {
+      ausPostenCents: forderungPosten,
+      ausgewiesenCents: hatPosten ? forderungKopf : null,
+      quelle: "ZEM_BTR_Forderg der Kopfzeilen gegen die ihrer Belegzeilen",
+      abweichungCents: hatPosten ? forderungPosten - forderungKopf : null,
+      ausAnderenZeilen: true,
+    },
   };
 }
 
@@ -441,6 +503,9 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
         verwendungszweck,
         betragCents,
         skontoCents: 0,
+        // Die `2;`-Zeilen der Kassen-Familie fuehren keinen Abzug je Posten;
+        // Skonto/Kuerzung stehen dort, wenn ueberhaupt, im Kopf.
+        kuerzungCents: 0,
         buchungsDatum: parts[datumIdx] || null,
       });
     } else if (lineType === "3") {
@@ -457,16 +522,20 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
     kostentraegerName: headerData.kostentraegerName,
   });
 
-  // Jede der 53 gemessenen Kassen-Dateien traegt genau eine `3;`-Zeile. Ihr
-  // Gesamtbetrag ist die zweite, unabhaengige Zahl — und sie faengt hier, was
-  // der Betrags-Detektor per Konstruktion nicht kann: einen FELDVERSATZ. Bei
-  // 7, 8, 9 und 13 Feldern in `2;`-Zeilen ist der keine Randmoeglichkeit.
+  // Jede der 53 gemessenen Kassen-Dateien traegt genau eine `3;`-Zeile. Sie
+  // steht in einer ANDEREN Zeile als die Posten und faengt damit, was der
+  // Betrags-Detektor per Konstruktion nicht kann: einen FELDVERSATZ. Bei 7, 8,
+  // 9 und 13 Feldern in `2;`-Zeilen ist der keine Randmoeglichkeit.
+  //
+  // Gegen einen SKALENFEHLER schuetzt auch sie nicht — sie kommt durch
+  // denselben `parseBetragCents`-Aufruf wie die Posten. Dafuer ist der
+  // Rechnungsabgleich da.
   const ausgewiesen = gesamtbetragGefunden ? headerData.gesamtBetragCents : null;
 
   return {
     header: headerData,
     items,
-    pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, "Summenzeile 3;"),
+    pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, "Summenzeile 3;", true),
   };
 }
 

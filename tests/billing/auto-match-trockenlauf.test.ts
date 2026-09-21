@@ -28,7 +28,7 @@ import { db } from "../../server/lib/db";
 import {
   auditLog, invoices, qontoTransactions, paymentAdvices, paymentAdviceItems,
 } from "../../shared/schema";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { uniqueId, createTestCustomer, cleanupCustomer } from "../test-utils";
 import { withGobdMutation } from "../helpers/gobd";
 import { qontoService, type AutoMatchPlanEntry } from "../../server/services/qonto";
@@ -242,9 +242,45 @@ describe("Auto-Abgleich — Trockenlauf (6hHW39P2JxmcjvQp)", () => {
     const zustandRechnung = () => db.select({
       id: invoices.id, s: invoices.status, bezahltAm: invoices.paidAt,
     }).from(invoices).where(inArray(invoices.id, invoiceIds));
+    /**
+     * Audit-Zeilen ZU UNSEREN Entitaeten — nicht `count(*)` ueber die ganze
+     * Tabelle.
+     *
+     * So stand es hier zuerst, und es war falsch gemessen: unter dem
+     * Orchestrator teilen sich mehrere Testdateien eine Wegwerf-DB, und eine
+     * gleichzeitig laufende Datei hebt den globalen Zaehler zwischen den
+     * beiden Lesungen. Belegt am 21.09.2026 — waehrend dieses Trockenlaufs
+     * erschien ein `invoice_avis_received` zu einer fremden Rechnung, das der
+     * Avis-Import einer anderen Datei geschrieben hatte.
+     *
+     * Der globale Zaehler sollte maximale Deckung geben; tatsaechlich hat er
+     * eine Zusage geprueft, die dieser Test gar nicht kontrolliert, und ist
+     * genau daran rot geworden — ein Fehlalarm, der wie ein Leck aussieht.
+     * Geprueft wird jetzt, was der Trockenlauf anfassen koennte: die
+     * Rechnungen und Avise DIESES Falls.
+     *
+     * ── Was die Verengung KOSTET, damit es nicht spaeter als geprueft gilt ──
+     * Ein Schreibvorgang auf eine FREMDE Entitaet faellt jetzt durch. Wuerde
+     * der Trockenlauf einen Audit-Eintrag zu einer Rechnung schreiben, die
+     * dieser Test nicht angelegt hat, bliebe der Zaehler bei 0 und der Test
+     * gruen. Die Gegenprobe (ein kuenstlich eingebautes Leck im
+     * Trockenlauf-Zweig, ausgefuehrt: `expected 5 to be 0`) belegt den eigenen
+     * Fall — nicht den fremden.
+     *
+     * Das ist eine bewusste Abwaegung, kein Versehen: in einer geteilten DB
+     * ist der fremde Fall nicht messbar, ohne Nachbarn mitzuzaehlen. Die
+     * Diagnosefrage dahinter lautet nicht „ist die Messung korrekt", sondern
+     * „deckt sich der gemessene Bereich exakt mit der Zusage?" — und wo er es
+     * nicht tut, gehoert die Luecke benannt statt stillschweigend geschlossen.
+     */
     const auditZahl = async () => {
-      const [z] = await db.select({ n: sql<number>`count(*)::int` }).from(auditLog);
-      return z.n;
+      const zeilen = await db.select({ id: auditLog.id })
+        .from(auditLog)
+        .where(or(
+          and(eq(auditLog.entityType, "invoice"), inArray(auditLog.entityId, invoiceIds)),
+          and(eq(auditLog.entityType, "payment_advice"), inArray(auditLog.entityId, adviceIds)),
+        ));
+      return zeilen.length;
     };
 
     const vorherTx = await zustandTx();

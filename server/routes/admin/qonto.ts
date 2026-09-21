@@ -5,12 +5,16 @@ import { requireIntParam } from "../../lib/params";
 import { qontoService } from "../../services/qonto";
 import { qontoStorage } from "../../storage/qonto";
 import { parseAvisCsv, AvisParseUncertainError } from "../../services/avis-parser";
+import {
+  pruefeGegenRechnungen,
+  findeRechnungUeberNummer,
+  findeRechnungUeberBetrag,
+} from "../../services/avis-rechnungsabgleich";
 import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
-import { formatEuroDE } from "@shared/utils/money";
 import { db, type DbOrTx } from "../../lib/db";
 import { invoices, qontoTransactions, paymentAdviceItems, paymentAdvices } from "@shared/schema";
-import { eq, and, ilike, isNull, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray } from "drizzle-orm";
 import { withAudit } from "../../lib/with-audit";
 import { readTestFaults, readQontoHttpStub } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
@@ -18,7 +22,6 @@ import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
 import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
 import { withQontoBackfillLock, isQontoBackfillRunning } from "../../services/qonto-backfill-runner";
 import { scanAdviceSuggestions, MANUAL_BULK_ADVICE_CONFIDENCE } from "@shared/domain/qonto/bulk-advice-match";
-import { resolveUniqueMatch } from "@shared/domain/qonto/avis-match";
 import {
   classifyPaymentDifference,
   isPaymentFullyCovered,
@@ -1359,38 +1362,24 @@ async function autoMatchAvisItems(
     const searchNum = item.rechnungsNummer;
     let matchedId: number | null = null;
 
-    if (searchNum) {
-      // 1) Exakte Rechnungsnummer (bereits O→0-normalisiert vom Parser).
-      const exact = await db.select({ id: invoices.id })
-        .from(invoices)
-        .where(eq(invoices.invoiceNumber, searchNum))
-        .limit(1);
-      if (exact.length > 0) {
-        matchedId = exact[0].id;
-      } else if (!searchNum.startsWith("RE-") && searchNum.length >= 6) {
-        // 2) Tolerante Teilstring-Suche — aber nur bei GENAU EINEM Treffer
-        //    (limit 2 ⇒ resolveUniqueMatch verwirft ≥2 als mehrdeutig).
-        const fuzzy = await db.select({ id: invoices.id })
-          .from(invoices)
-          .where(ilike(invoices.invoiceNumber, `%${searchNum}%`))
-          .limit(2);
-        const unique = resolveUniqueMatch(fuzzy);
-        if (unique) matchedId = unique.id;
-      }
-    }
+    // 1) + 2) Ueber die REFERENZ — exakt, sonst tolerant bei genau einem Treffer.
+    //
+    // Dieselbe Funktion, die der Import-Riegel benutzt
+    // (`server/services/avis-rechnungsabgleich.ts`). Vorher stand die Abfrage
+    // hier ein zweites Mal ausgeschrieben: zwei Antworten auf „welche Rechnung
+    // gehoert zu diesem Posten?", die beim naechsten Umbau auseinanderlaufen.
+    const ueberNummer = await findeRechnungUeberNummer(searchNum);
+    if (ueberNummer) matchedId = ueberNummer.id;
 
-    // 3) Betrags-Fallback: keine Referenz-Zuordnung ⇒ genau EINE offene Rechnung
-    //    (offen laut Uebergangs-SSoT) mit exakt passendem Bruttobetrag.
-    if (matchedId === null && item.betragCents > 0) {
-      const byAmount = await db.select({ id: invoices.id })
-        .from(invoices)
-        .where(and(
-          eq(invoices.grossAmountCents, item.betragCents),
-          inArray(invoices.status, statusesAllowedToTransitionTo("bezahlt")),
-        ))
-        .limit(2);
-      const unique = resolveUniqueMatch(byAmount);
-      if (unique) matchedId = unique.id;
+    // 3) Betrags-Fallback: genau EINE offene Rechnung mit passendem Brutto.
+    //
+    // Bewusst eine EIGENE Funktion und kein Schalter an der obigen: der
+    // Riegel darf ihn nie benutzen. Eine Rechnung zu finden, WEIL der Betrag
+    // passt, und dann den Betrag zu bestaetigen, koennte per Konstruktion nie
+    // eine Abweichung melden.
+    if (matchedId === null) {
+      const ueberBetrag = await findeRechnungUeberBetrag(item.betragCents);
+      if (ueberBetrag) matchedId = ueberBetrag.id;
     }
 
     if (matchedId !== null) {
@@ -1438,9 +1427,10 @@ const paymentAdviceSchema = z.object({
   csvContent: z.string().optional().nullable(),
   force: z.boolean().optional(),
   /**
-   * Schritt 0 der Erstinbetriebnahme: parsen und zurueckgeben, NICHTS
-   * schreiben. Derselbe Pfad wie der echte Import — nur der Schreibteil faellt
-   * weg, und der Pruefsummen-Riegel darueber gilt unveraendert.
+   * Schritt 0 der Erstinbetriebnahme: parsen, gegen die Rechnungen pruefen
+   * und zurueckgeben — NICHTS schreiben. Derselbe Pfad wie der echte Import,
+   * nur der Schreibteil faellt weg; der Riegel darueber gilt unveraendert.
+   * Braucht `csvContent`; mit `objectPath` allein wird abgelehnt.
    */
   dryRun: z.boolean().optional(),
   // Task #1687 — manuelles Spalten-Mapping (Fallback), wenn die strukturelle
@@ -1454,6 +1444,25 @@ const paymentAdviceSchema = z.object({
 
 router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeichert werden", async (req, res) => {
   const data = paymentAdviceSchema.parse(req.body);
+
+  /**
+   * Die Vorschau braucht eine Datei zum Ansehen — sonst gäbe es nichts
+   * vorzuführen, und der Aufruf fiele stillschweigend in den Schreibpfad.
+   *
+   * Genau das tat er: die `dryRun`-Abzweigung lag INNERHALB des
+   * `csvContent`-Blocks, ein Request mit `objectPath` lief daran vorbei und
+   * legte einen echten Avis an (Gate-2-Befund S2). `dryRun` existiert nur per
+   * API — der Aufruf wird von Hand gebaut, also ist genau diese Kombination
+   * realistisch. Eine Vorschau, die schreibt, ist die gefährlichste Zusage
+   * von allen: man prüft im Vertrauen darauf, dass nichts passiert.
+   */
+  if (data.dryRun && !data.csvContent) {
+    return res.status(400).json({
+      message: "Die Vorschau braucht den Dateiinhalt (csvContent). "
+        + "Ein Dateipfad allein würde den Avis anlegen statt ihn zu zeigen.",
+      code: "AVIS_VORSCHAU_OHNE_INHALT",
+    });
+  }
 
   if (data.csvContent) {
     let parsed;
@@ -1479,30 +1488,43 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
       return res.status(400).json({ message: "CSV enthält keine Positionen" });
     }
 
-    // ── Der Riegel: die Datei liefert ZWEI Zahlen, also werden zwei gelesen ──
+    // ── Der Riegel: jeder Posten gegen die Rechnung, die er nennt ──
     //
-    // Beide Fehler vom 21.09.2026 (Faktor 100 auf dem DAVASO-Pfad,
-    // Gesamtbetrag = Posten 1) waren aus der Datei selbst erkennbar — die
-    // Postensumme hätte nie zur ausgewiesenen Summe gepasst. Aufgefallen sind
-    // sie erst an einer „Überzahlung" von 28.149,66 € im UI.
+    // ERSETZT den datei-internen Prüfsummen-Riegel (`AVIS_PRUEFSUMME`), der
+    // hier zuerst stand. Der verglich zwei Zahlen AUS DER DATEI und konnte
+    // genau den Fehler nicht finden, gegen den er gebaut war:
     //
-    // Er blockiert BEWUSST auch, wenn gar keine zweite Zahl gefunden wurde:
-    // „nicht vergleichbar" ist kein bestandener Vergleich. Dieselbe Regel wie
-    // beim Publish-Preflight, der seinen eigenen Ausfall als „nichts gefunden"
-    // ausgab.
+    //  1. Beide Zahlen laufen durch denselben `parseBetragCents`-Aufruf. Der
+    //     Faktor 100 skaliert beide, die Differenz bleibt 0.
+    //  2. Auf der DAVASO-Paar-Struktur — allen 29 lesbaren Dateien — stehen
+    //     Forderung und Zahlbetrag zeilenweise identisch. Der Vergleich ist
+    //     dort tautologisch, 66 von 66 Kopfzeilen exakt gleich.
     //
-    // Die Toleranz ist ABSICHTLICH null. Skonto und Kürzung sind bereits
-    // abgezogen; was dann bleibt, ist unerklärt. Sollten echte Dateien eine
-    // systematische Restdifferenz zeigen, lernen wir die Regel aus der
-    // Vorschau — statt sie jetzt zu raten.
-    const p = parsed.pruefsumme;
-    if (p.abweichungCents === null || p.abweichungCents !== 0) {
+    // Die Rechnung ist die einzige echte zweite Zahl: sie kommt aus der DB,
+    // durch keinen gemeinsamen Parser, unabhängig von jeder Dateikonvention.
+    // Genau dieser Vergleich hat den Vorfall gefunden — er stand nur HINTER
+    // dem Import statt davor.
+    //
+    // Klassifikation UND Toleranz kommen aus `classifyPaymentDifference` —
+    // der SSoT für „deckt diese Zahlung diese Rechnung?". Eine eigene Toleranz
+    // hier wäre ein Zweitbegriff derselben Frage und liefe irgendwann anders
+    // als die, gegen die der Zahlungspfad prüft.
+    //
+    // Nur die ÜBERzahlung blockiert, und es gibt keinen `force`-Weg daran
+    // vorbei: eine Korrektur läuft über den Parser, nicht über eine
+    // Übersteuerung im Einzelfall.
+    const abgleich = await pruefeGegenRechnungen(parsed.items);
+
+    // Nur die ÜBERzahlung blockiert. Eine Unterzahlung ist eine Kürzung durch
+    // die Kasse — normaler Geschäftsfall, den der Lesepfad je Position
+    // abbildet; sie wird gemeldet, nicht abgelehnt.
+    if (abgleich.ueberzahlungen > 0) {
+      const erste = abgleich.befunde.filter(b => b.status === "ueberzahlung").slice(0, 3);
       return res.status(400).json({
-        message: p.abweichungCents === null
-          ? `Die Datei enthält keine zweite Summe zum Abgleich (erwartet: ${p.quelle}). Import abgelehnt.`
-          : `Postensumme und ausgewiesene Summe stimmen nicht überein — Differenz ${formatEuroDE(p.abweichungCents)}. Import abgelehnt.`,
-        code: "AVIS_PRUEFSUMME",
-        details: { pruefsumme: p },
+        message: `${abgleich.ueberzahlungen} von ${parsed.items.length} Posten nennen MEHR als die Rechnung. `
+          + `Import abgelehnt. Beispiele: ${erste.map(b => b.grund).join(" · ")}`,
+        code: "AVIS_RECHNUNGSABGLEICH",
+        details: { abgleich, pruefsumme: parsed.pruefsumme },
       });
     }
 
@@ -1522,6 +1544,15 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
       return res.json({
         dryRun: true,
         header: parsed.header,
+        // Der gatende Befund zuerst — er ist der Grund, warum es die Vorschau
+        // gibt. `ungeprueft` ist ausdrücklich KEIN bestandener Vergleich:
+        // diese Posten nennen keine auflösbare Rechnung, ihr Betrag ist also
+        // gegen nichts geprüft. Wie viele das sind, ist die Frage, die dieser
+        // Lauf beantworten soll.
+        abgleich,
+        // Der datei-interne Konsistenzhinweis — NICHT der Riegel. `quelle`
+        // und `ausAnderenZeilen` sagen, was verglichen wurde; ein grünes
+        // Ergebnis ohne sichtbaren Vergleich gilt nicht als bestanden.
         pruefsumme: parsed.pruefsumme,
         itemCount: parsed.items.length,
         items: parsed.items,

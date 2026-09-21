@@ -93,27 +93,48 @@ describe("Task #1687 — Parser-Regressions-Snapshot (Betrag/Gesamt/Anzahl)", ()
     expect(r.header.gesamtBetragCents).toBe(34017);
   });
 
-  it("IKK/DAVASO: Beträge in Euro-Cent, nicht ×100 (Format davaso, 5 Positionen)", () => {
+  it("IKK/DAVASO: EIN Block, EIN Posten — 692,12 € in Cent", () => {
+    // ── Dritte Korrektur an derselben Erwartung, dritter falscher Modellteil ──
+    //  1. „×100 ist eine DAVASO-Eigenheit"  → war ein Fehler, kein Format.
+    //  2. „5 Positionen"                    → sind fünf BELEGE EINER Rechnung.
+    //  3. Beträge aus `ZEM_BTR_Forderg`     → der Avis sagt, was GEZAHLT wurde.
+    //
+    // Dieses Sample ist EIN Block: eine Kopfzeile (ohne `ZEM_BelegNr`, mit
+    // `KTR_BTR_Zahlg` = 692.12) und fünf Belegzeilen, die alle dieselbe
+    // `ZEM_RecNr` tragen. Das ist eine Rechnung, nicht fünf — an 29 Dateien
+    // gemessen: `ZEM_RecNr` je Block genau eine, 0 Abweichungen.
     const r = parseAvisCsv(IKK_DAVASO);
     expect(r.header.format).toBe("davaso");
-    // 127.32 € = 12732 Cent. Bis zum 21.09.2026 stand hier 1273200.
-    expect(r.items.map(i => i.betragCents)).toEqual([12732, 23061, 6873, 8746, 17800]);
+    expect(r.items, "die fünf Belege wurden wieder zu fünf Posten").toHaveLength(1);
+    expect(r.items[0].betragCents).toBe(69212);
+    expect(r.items[0].belegNr).toBe("1, 2, 3, 4, 5");
     expect(r.header.gesamtBetragCents).toBe(69212);
     expect(r.header.kostentraegerName).toBe("IKK classic");
     expect(r.header.kostentraegerIk).toBe("183500693");
   });
 
-  it("IKK/DAVASO: die Summenzeile der Datei bestätigt die Postensumme", () => {
-    // Die zweite, unabhängige Zahl — und der Grund, warum der Faktor 100 ab
-    // jetzt an der Tür auffällt statt in der Datenbank: Posten und Summenzeile
-    // sind zwei getrennte Wege zu derselben Zahl. Mit dem alten Parser war die
-    // Postensumme 6.921.200 und die Summenzeile 6.921.200 — beide ×100, beide
-    // einig. Deshalb trägt der Riegel nur zusammen mit der Korrektur.
+  it("IKK/DAVASO: die Belegzeilen bestätigen die Forderung der Kopfzeile", () => {
+    // Der datei-interne Konsistenzhinweis: Forderung gegen Forderung, aus
+    // VERSCHIEDENEN Zeilen — ein verlorener oder verdoppelter Beleg fällt auf.
+    // Er ist ausdrücklich NICHT der Riegel: beide Zahlen kommen durch denselben
+    // Parser und skalieren bei einem Faktor-100-Fehler gemeinsam mit.
     const r = parseAvisCsv(IKK_DAVASO);
     expect(r.pruefsumme.ausPostenCents).toBe(69212);
-    expect(r.pruefsumme.ausgewiesenCents, "Summenzeile (Zeile ohne ZEM_BelegNr) nicht gefunden")
-      .toBe(69212);
+    expect(r.pruefsumme.ausgewiesenCents).toBe(69212);
     expect(r.pruefsumme.abweichungCents).toBe(0);
+  });
+
+  it("IKK/DAVASO: die Rechnungsnummer ist die des Altbestands — kein RE-Format", () => {
+    // `ZEM_RecNr` trägt hier `2026-01-02`. Das ist kein Parse-Fehler, sondern
+    // der Bestand vor Juli 2026: gemessen nennen 41 von 66 Kopfzeilen keine
+    // EngelDesk-Rechnungsnummer (27 ein Muster wie `2026-01-123`, 14 ein
+    // Datum); tolerant über alle 17 Spalten gesucht, 41 von 41 nirgends.
+    //
+    // Diese Posten gehören in den `ungeprueft`-Ausgang des Rechnungsabgleichs —
+    // nicht in `bestaetigt`. Ab 01.07.2026 nennt die Kasse die Nummer
+    // (25 von 29), und der aktuelle Rückstand ab 01.08. trägt sie 15 von 15.
+    const r = parseAvisCsv(IKK_DAVASO);
+    expect(r.items[0].rechnungsNummer).toBe("2026-01-02");
   });
 });
 
