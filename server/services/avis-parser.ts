@@ -238,15 +238,37 @@ function parseDavaso(csvContent: string): ParsedAvis {
    */
   const summaryRow = dataRows.find(r => !getField(r, "ZEM_BelegNr") && getField(r, "KTR_BTR_Zahlg"));
 
+  /**
+   * Die Kopfzeile ist NICHT dasselbe wie die Summenzeile — zwei Fragen, die
+   * ich zuerst vermischt hatte.
+   *
+   * „Woher kommen AVISNr, IK, IBAN, Zahlungsdatum?" beantwortet in DAVASO
+   * JEDE Zeile gleich: die Felder wiederholen sich zeilenweise. „Woher kommt
+   * die ausgewiesene Summe?" beantwortet nur die Summenzeile — und die gibt es
+   * nicht in jeder Datei.
+   *
+   * Wer beides an `summaryRow` haengt, verliert bei einer Datei ohne
+   * Summenzeile auch noch den Kopf: Avis-Nummer, Kostentraeger und
+   * Zahlungsdatum waeren still `null`. Deshalb faellt der Kopf auf die erste
+   * Datenzeile zurueck, die Summe nicht.
+   */
+  const kopfZeile = summaryRow ?? dataRows[0];
+
+  if (kopfZeile) {
+    headerData.avisNummer = getField(kopfZeile, "AVISNr") || null;
+    headerData.kostentraegerIk = getField(kopfZeile, "KTR_IK") || null;
+    headerData.kostentraegerName = getField(kopfZeile, "KTR_Name") || null;
+    headerData.zahlungsempfaengerIk = getField(kopfZeile, "ZEM_IK") || null;
+    headerData.zahlungsempfaengerIban = getField(kopfZeile, "ZEM_IBAN") || null;
+    headerData.zahlungsDatum = toIsoDate(getField(kopfZeile, "Datum_ZahlungAusfuehrg") || null);
+  }
+
+  // Skonto und Kuerzung sind datei-weite Abzuege und stehen deshalb NUR auf der
+  // Summenzeile. Von einer Postenzeile gelesen waeren es die des ersten Postens
+  // — ein Abzug, der faelschlich fuer die ganze Datei gilt.
   if (summaryRow) {
-    headerData.avisNummer = getField(summaryRow, "AVISNr") || null;
-    headerData.kostentraegerIk = getField(summaryRow, "KTR_IK") || null;
-    headerData.kostentraegerName = getField(summaryRow, "KTR_Name") || null;
-    headerData.zahlungsempfaengerIk = getField(summaryRow, "ZEM_IK") || null;
-    headerData.zahlungsempfaengerIban = getField(summaryRow, "ZEM_IBAN") || null;
     headerData.skontoCents = parseBetragCents(getField(summaryRow, "KTR_BTR_Skonto"), "punkt");
     headerData.kuerzungCents = parseBetragCents(getField(summaryRow, "KTR_BTR_DTA_Kuerzg"), "punkt");
-    headerData.zahlungsDatum = toIsoDate(getField(summaryRow, "Datum_ZahlungAusfuehrg") || null);
   }
 
   for (const row of dataRows) {
@@ -290,17 +312,46 @@ function parseDavaso(csvContent: string): ParsedAvis {
   // Dateiaufbau. Eine Summe leitet man nicht aus einer Zeile ab.
   headerData.gesamtBetragCents = items.reduce((n, i) => n + i.betragCents, 0);
 
-  // Die zweite, unabhaengige Zahl: der Zahlbetrag der SUMMENZEILE. Die Posten
-  // tragen die Forderung je Beleg, die Summenzeile den gezahlten Gesamtbetrag —
-  // zwei Wege zu derselben Zahl, und genau deshalb vergleichbar.
+  /**
+   * Die zweite, unabhaengige Zahl — und es gibt ZWEI belegte DAVASO-Praegungen,
+   * die sie an verschiedenen Stellen fuehren:
+   *
+   *  (a) mit Summenzeile: `IKK_Classic_Avis_ICL01159` (woertliche Kopie im
+   *      Regressionstest) — Zeile 1 ohne `ZEM_BelegNr` traegt 692.12 in
+   *      `KTR_BTR_Zahlg`, die Postenzeilen lassen die Spalte LEER.
+   *
+   *  (b) ohne Summenzeile: die beiden Dateien von Avis 24/25 — dort stand in
+   *      der ersten gefundenen `KTR_BTR_Zahlg` der Betrag von Posten 1
+   *      (700.000 Cent bei vier Posten von zusammen 284,34 EUR). Das geht nur,
+   *      wenn die Spalte je Postenzeile gefuellt ist.
+   *
+   * Das ist EINE fachliche Frage („was weist die Datei als gezahlt aus?"),
+   * beantwortet aus der Spalte, die sie traegt — kein Zweitbegriff. Die
+   * Reihenfolge ist nicht beliebig: die Summenzeile gewinnt, weil sie die
+   * Aussage der Datei ist; die Postensumme ist die Rekonstruktion daraus.
+   *
+   * Findet sich keine von beiden, bleibt es `null` — und der Import lehnt ab.
+   * „Nicht vergleichbar" ist kein bestandener Vergleich.
+   *
+   * `quelle` sagt, WELCHER Weg gegriffen hat. Die Vorschau zeigt das an: ein
+   * gruenes Ergebnis ohne sichtbaren Vergleich gilt nicht als bestanden.
+   */
+  const summeZahlbetraege = dataRows
+    .filter(r => getField(r, "ZEM_BelegNr"))
+    .reduce((n, r) => n + parseBetragCents(getField(r, "KTR_BTR_Zahlg"), "punkt"), 0);
+
   const ausgewiesen = summaryRow
     ? parseBetragCents(getField(summaryRow, "KTR_BTR_Zahlg"), "punkt")
-    : null;
+    : (summeZahlbetraege > 0 ? summeZahlbetraege : null);
+
+  const quelle = summaryRow
+    ? "Summenzeile (Zeile ohne ZEM_BelegNr), Spalte KTR_BTR_Zahlg"
+    : "Summe der Spalte KTR_BTR_Zahlg ueber alle Postenzeilen";
 
   return {
     header: headerData,
     items,
-    pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, "Summenzeile (ohne ZEM_BelegNr), KTR_BTR_Zahlg"),
+    pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, quelle),
   };
 }
 

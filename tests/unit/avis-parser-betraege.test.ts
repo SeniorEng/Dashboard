@@ -186,3 +186,68 @@ describe("Avis-Dateien aus der Praxis — Verpackung und Fremddateien", () => {
     expect(() => parseAvisCsv("")).toThrow();
   });
 });
+
+/**
+ * Die zweite belegte DAVASO-Prägung. Sie ist der Grund, warum dieser PR die
+ * Summenzeile NICHT zur einzigen Quelle macht.
+ *
+ * Avis 24/25 vom 21.09.2026 speicherten als Gesamtbetrag exakt Posten 1 —
+ * das geht nur, wenn `KTR_BTR_Zahlg` je Postenzeile gefüllt ist und es keine
+ * eigene Summenzeile gibt. Der authentische Fixture `IKK_DAVASO` im
+ * Regressionstest zeigt die andere Prägung. Beide sind belegt, beide müssen
+ * durch — und keine darf still die falsche Zahl liefern.
+ */
+const DAVASO_OHNE_SUMMENZEILE = [
+  "LfdNr,AVISNr,KTR_IK,KTR_Name,ZEM_IK,ZEM_IBAN,ZEM_BelegNr,ZEM_VorgangsNr,ZEM_RecNr,ZEM_RecDatum,ZEM_BTR_Forderg,KTR_BTR_Zahlg,KTR_BTR_Skonto,KTR_BTR_DTA_Kuerzg,Datum_ZahlungAusfuehrg",
+  "1,TST01278,100000000,Testkasse,200000000,DE00000000000000000000,B-1,V-1,RE-2026-9001,01.08.2026,70.00,70.00,0.00,0.00,15.09.2026",
+  "2,TST01278,100000000,Testkasse,200000000,DE00000000000000000000,B-2,V-2,RE-2026-9002,01.08.2026,123.49,123.49,0.00,0.00,15.09.2026",
+  "3,TST01278,100000000,Testkasse,200000000,DE00000000000000000000,B-3,V-3,RE-2026-9003,01.08.2026,76.29,76.29,0.00,0.00,15.09.2026",
+  "4,TST01278,100000000,Testkasse,200000000,DE00000000000000000000,B-4,V-4,RE-2026-9004,01.08.2026,14.56,14.56,0.00,0.00,15.09.2026",
+].join("\n");
+
+describe("DAVASO — zwei Prägungen, eine fachliche Frage", () => {
+  it("AP-13 – ohne Summenzeile kommt die zweite Zahl aus der Spalte über alle Posten", () => {
+    const { header, pruefsumme } = parseAvisCsv(DAVASO_OHNE_SUMMENZEILE);
+    expect(header.gesamtBetragCents).toBe(28434);
+    expect(pruefsumme.ausPostenCents).toBe(28434);
+    expect(pruefsumme.ausgewiesenCents, "ohne Summenzeile keine zweite Zahl gefunden").toBe(28434);
+    expect(pruefsumme.abweichungCents).toBe(0);
+  });
+
+  it("AP-14 – die Vorschau zeigt, WELCHER Weg gegriffen hat", () => {
+    // Alriks Bedingung aus Weiche 2, hier auf den Parser angewandt: ein grünes
+    // Ergebnis ohne sichtbaren Vergleich gilt nicht als bestanden. Die beiden
+    // Prägungen müssen sich in der Ausgabe unterscheiden lassen — sonst weiss
+    // hinterher niemand, gegen was verglichen wurde.
+    const mit = parseAvisCsv(DAVASO).pruefsumme.quelle;
+    const ohne = parseAvisCsv(DAVASO_OHNE_SUMMENZEILE).pruefsumme.quelle;
+    expect(mit).toMatch(/Summenzeile/);
+    expect(ohne).toMatch(/über alle Postenzeilen|ueber alle Postenzeilen/);
+    expect(mit, "beide Wege melden dieselbe Quelle").not.toBe(ohne);
+  });
+
+  it("AP-15 – der Dateikopf überlebt eine Datei ohne Summenzeile", () => {
+    // Der Fehler, den ich beim Umbau fast eingebaut hätte: Kopf und Summe an
+    // dieselbe Zeile gehängt. Ohne Summenzeile wären Avis-Nummer,
+    // Kostenträger und Zahlungsdatum still `null` gewesen — und `null` sieht
+    // aus wie „steht nicht in der Datei", nicht wie „falsch gelesen".
+    const { header } = parseAvisCsv(DAVASO_OHNE_SUMMENZEILE);
+    expect(header.avisNummer).toBe("TST01278");
+    expect(header.kostentraegerIk).toBe("100000000");
+    expect(header.kostentraegerName).toBe("Testkasse");
+    expect(header.zahlungsempfaengerIban).toBe("DE00000000000000000000");
+    expect(header.zahlungsDatum).toBe("2026-09-15");
+  });
+
+  it("AP-16 – Skonto und Kürzung werden NICHT von einer Postenzeile gelesen", () => {
+    // Sie sind datei-weite Abzüge. Von Posten 1 gelesen gälte dessen Abzug für
+    // die ganze Datei — und die Prüfsumme rechnete ihn heraus, womit der
+    // Riegel genau den Fehler durchwinkt, den er fangen soll.
+    const mitSkontoAufPosten = DAVASO_OHNE_SUMMENZEILE.replace(
+      "B-1,V-1,RE-2026-9001,01.08.2026,70.00,70.00,0.00,0.00",
+      "B-1,V-1,RE-2026-9001,01.08.2026,70.00,70.00,5.00,0.00",
+    );
+    const { header } = parseAvisCsv(mitSkontoAufPosten);
+    expect(header.skontoCents, "Skonto aus einer Postenzeile als Datei-Skonto gelesen").toBe(0);
+  });
+});
