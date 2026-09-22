@@ -153,6 +153,33 @@ Code (`scripts/release-verify.ts`, 6hHqw8c7).
   NICHT bauen, erst bei Alrik rückfragen. Gilt ausdrücklich auch für die KI.
 - **Eine SSoT pro fachlicher Frage (+ Integer-Cents)**: Genau eine Funktion pro
   fachlicher Frage; Anzeige- und Schreibpfade importieren dieselbe. Geld = Integer-Cents.
+- **Drei-Schichten-Pflicht** (die SSoT-Regel, über Schichten hinweg gelesen):
+  Jede Änderung an einer fachlichen Regel benennt, **wo die Regel sitzt** —
+  1. **Server** — Storage, Schema, Validierung
+  2. **Midlayer** — Routen, DTOs, Response-Schemata, Query-Hooks
+  3. **Client** — Anzeige, Eingabe, Knopf-Zustände
+
+  Für jede Schicht genau eine von zwei Antworten: **„sitzt hier: `<Stelle>`"**
+  oder **„sitzt hier nicht"**. **„Nicht geprüft" ist keine zulässige Antwort** —
+  sonst wird aus der Feststellung eine Leerformel.
+
+  **Der Midlayer ist der gefährliche.** Dort kann die Unterscheidung
+  *wegoptimiert* werden (weggelassenes Feld, `?? 0`, ein Filter auf den Wert).
+  Danach kann der Client sie nicht mehr treffen, **selbst wenn er wollte** — und
+  weder ein Backend- noch ein Frontend-Blick findet den Fehler, weil beide
+  Seiten für sich richtig aussehen.
+
+  **Auch melden, wenn zwei Schichten heute zufällig dasselbe tun.** Die Gefahr
+  ist nicht der heutige Unterschied, sondern der nächste.
+
+  Gilt ausdrücklich für die **`RELEVANT FILES` eines Tickets**: eine reine
+  Server-Liste mit dem UI als Nachtrag ist die Fehlform. Belegt am 22.09.2026:
+  die Regel „0 € ist ein gültiger Startwert" saß an **acht** Stellen (zweimal
+  Server-Schema, viermal Client-Editor, einmal Übersichtskarte, einmal
+  `budget-initial-setup` — dazu ein DTO, das die Unterscheidung gar nicht
+  transportiert). Fünf wurden repariert; die übrigen blieben stehen, **weil sie
+  nicht auf der Liste standen und die Liste die Grenze der Suche war**
+  (Ticket `6hc4m66XRg53X55G`).
 - **Erstberatungen werden dem KUNDEN nicht abgerechnet — mitarbeiterseitig zählen sie
   voll (zweiseitige Regel, #1886).** Erstberatungs-Termine (`appointment_type =
   'Erstberatung'`, kundenlose Interessenten-/Prospect-Termine mit `customer_id = NULL`;
@@ -205,7 +232,10 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   fälschlich „heute" statt „as-of Zeitraum" gelesen wird. Dieser Bug ist dreimal
   aufgetreten: §45b-Verfall, Kostenträger-Empfänger, `asOfIso` in `invoice-calc`.
 - **Eine SSoT pro fachlicher Frage**: Anzeige-, Schreib- UND Filter-Pfade
-  importieren dieselbe Funktion; kein Zweitbegriff derselben Frage.
+  importieren dieselbe Funktion; kein Zweitbegriff derselben Frage. **Und über
+  Schichten hinweg**: Server, Midlayer und Client je benennen — siehe
+  Drei-Schichten-Pflicht unter „Arbeitsregeln". Die Pfade oben sind *innerhalb*
+  einer Schicht gedacht; die Wiederholung passiert aber quer dazu.
 - **Nebenbefunde**: Jeden Nebenbefund (Bug/Auffälligkeit/Tech-Debt), der beim
   Arbeiten auffällt, im **PR-Body als `FINDING: … [P1/P2/P3]`** vermerken —
   Alrik/Cowork übernimmt ihn in die Long-List. Den laufenden Task NICHT
