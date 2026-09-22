@@ -6,7 +6,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime";
 import { clampToStatutoryMax, resolve45bActivation } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
@@ -19,6 +19,7 @@ import { netAvailable45bAt } from "./net-available-45b";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { computeCapSlot } from "./cap-calculator";
 import { readUnifiedBudgetAvailability, type PotAvailability, type UnifiedBudgetAvailability } from "./unified-reader";
+import { allocationValidAtWhere } from "./allocation-window";
 import { budgetAllocationsRepo } from "../../repos";
 
 // Hinweis (Task #603): §45b bleibt ein Jahrestopf — KEIN harter Monats-Cap.
@@ -37,11 +38,7 @@ export async function getTotalCarryoverCents(customerId: number, asOfDate: strin
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       eq(budgetAllocations.source, "carryover"),
       isNull(budgetAllocations.deletedAt),
-      lte(budgetAllocations.validFrom, asOfDate),
-      or(
-        isNull(budgetAllocations.expiresAt),
-        gte(budgetAllocations.expiresAt, asOfDate)
-      )
+      allocationValidAtWhere(asOfDate)
     ));
 
   return Number(carryoverAllocations[0]?.total ?? 0);
@@ -55,11 +52,7 @@ async function getAvailableCarryoverCents(customerId: number, asOfDate: string, 
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       eq(budgetAllocations.source, "carryover"),
       isNull(budgetAllocations.deletedAt),
-      lte(budgetAllocations.validFrom, asOfDate),
-      or(
-        isNull(budgetAllocations.expiresAt),
-        gte(budgetAllocations.expiresAt, asOfDate)
-      )
+      allocationValidAtWhere(asOfDate)
     ));
 
   if (carryoverAllocations.length === 0) return 0;
@@ -120,9 +113,8 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   const allocValidWhere = and(
     eq(budgetAllocations.customerId, customerId),
     eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
-    lte(budgetAllocations.validFrom, today),
     isNull(budgetAllocations.deletedAt),
-    or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, today))
+    allocationValidAtWhere(today),
   );
 
   const [totalAllocatedCents, currentYearAllocatedCents, txResult, carryoverResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([

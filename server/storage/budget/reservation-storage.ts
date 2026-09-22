@@ -50,7 +50,8 @@ import {
   readUnifiedBudgetAvailability,
   type CappedBudgetPot,
 } from "./unified-reader";
-import { lastDayOfMonth, parseLocalDate } from "@shared/utils/datetime";
+import { projected45bAvailableCents as projected45bAvailable } from "./net-available-45b";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 const STATUTORY_POTS: CappedBudgetPot[] = [
   "entlastungsbetrag_45b",
@@ -266,23 +267,13 @@ export async function planHold(
     // aktive Holds des Jahres werden weiter abgezogen, der projizierte Anspruch
     // ist die einzige Änderung). §45a/§39 bleiben unverändert (Monats-/Jahres-Cap).
     const pot45b = avail.pots.entlastungsbetrag_45b;
-    let projected45bAvailableCents = pot45b.availableCents;
-    if (pot45b.enabled && pot45b.inRange) {
-      const apptDate = parseLocalDate(params.transactionDate);
-      const monthEnd = lastDayOfMonth(apptDate.getFullYear(), apptDate.getMonth() + 1);
-      const projectedAllocated = await calculateAllocatedCents(
-        params.customerId,
-        "entlastungsbetrag_45b",
-        { asOfDate: monthEnd, projectFuture: true },
-        tx,
-        undefined,
-        settings,
-      );
-      projected45bAvailableCents = Math.max(
-        0,
-        projectedAllocated - pot45b.consumedNetCents - pot45b.holdsActiveCents,
-      );
-    }
+    // Dieselbe Funktion, die auch die Vorab-Pruefung im Terminformular ruft
+    // (Replit #1916). Vorher stand die Rechnung hier inline, und das Formular
+    // las die UNGEPROJIZIERTE Verfuegbarkeit — es sperrte damit Termine, die
+    // genau diese Stelle angenommen haette.
+    const projected45bAvailableCents = await projected45bAvailable(
+      params.customerId, params.transactionDate, pot45b, tx, settings,
+    );
 
     const orderedStatutory = isSelbstzahler
       ? []

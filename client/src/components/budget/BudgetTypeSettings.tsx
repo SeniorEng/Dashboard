@@ -58,8 +58,49 @@ interface InitialBalanceAllocation {
   // aus dem Vorjahr im UI sichtbar und löschbar ist.
   source?: string;
   expiresAt?: string | null;
+  /**
+   * Traegt diese Zuweisung heute zum Budget bei? Kommt vom Server aus
+   * `excludedSpecialAllocationIds` — der SSoT, aus der sich auch die
+   * symmetrische Verbrauchs-Korrektur speist. Der Client rechnet sie NICHT
+   * nach; er konnte es vorher auch gar nicht, weil die Antwort die
+   * Unterscheidung nicht transportierte.
+   */
+  zaehltNicht?: boolean;
+  /** `MM/JJJJ` des Startwerts, der sie ersetzt — nur wenn DAS der Grund ist. */
+  ersetztDurchStartwertMonat?: string | null;
   year?: number;
   month?: number | null;
+}
+
+/**
+ * Eine ersetzte Zuweisung: Betrag durchgestrichen, Grund daneben.
+ *
+ * ── Warum als gemeinsamer Helfer (Gate 2 zu #166, B2) ──────────────────
+ * Die erste Fassung rief die Kennzeichnung NUR im Uebertrags-Abschnitt.
+ * Der Server lieferte den ersetzten STARTWERT korrekt als ersetzt — und der
+ * Client zeigte ihn weiter als gleichberechtigten Betrag. Genau der Fall, mit
+ * dem der PR begruendet war („wirkt sofort"), kam nicht auf den Schirm.
+ *
+ * Aufgefallen ist es nicht am Test: `EK-1` prueft die API-ANTWORT, nicht die
+ * Anzeige. Eine Zusage ueber das UI, die eine Ebene tiefer geprueft wird,
+ * haelt genau so lange, bis jemand die obere Ebene vergisst.
+ */
+export function BetragMitVerdraengung({
+  allocation, testId, klasse,
+}: {
+  allocation: InitialBalanceAllocation;
+  testId: string;
+  klasse: string;
+}) {
+  if (!allocation.ersetztDurchStartwertMonat) {
+    return <span className={klasse}>{formatCurrency(allocation.amountCents)}</span>;
+  }
+  return (
+    <span className="text-xs text-gray-500 flex items-center gap-1.5" data-testid={testId}>
+      <span className="line-through">{formatCurrency(allocation.amountCents)}</span>
+      <span>ersetzt durch Startwert {allocation.ersetztDurchStartwertMonat}</span>
+    </span>
+  );
 }
 
 interface CareLevelHistoryEntry {
@@ -894,7 +935,11 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
             )}
           </span>
           <div className="flex items-center gap-2">
-            <span className={`font-semibold ${latestAllocation.source === "carryover" ? "text-amber-700" : "text-teal-700"}`}>{formatCurrency(latestAllocation.amountCents)}</span>
+            <BetragMitVerdraengung
+              allocation={latestAllocation}
+              testId={`text-allocation-superseded-${budgetType}-latest`}
+              klasse={`font-semibold ${latestAllocation.source === "carryover" ? "text-amber-700" : "text-teal-700"}`}
+            />
             {deleteConfirmId === latestAllocation.id ? (
               <div className="flex items-center gap-1">
                 <button
@@ -1096,7 +1141,11 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
                 {alloc.notes && <span className="text-gray-500">{alloc.notes}</span>}
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-700">{formatCurrency(alloc.amountCents)}</span>
+                <BetragMitVerdraengung
+                  allocation={alloc}
+                  testId={`text-allocation-superseded-${budgetType}-${alloc.id}`}
+                  klasse="font-medium text-gray-700"
+                />
                 {deleteConfirmId === alloc.id ? (
                   <div className="flex items-center gap-1">
                     <button
@@ -1264,7 +1313,24 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
                   </span>
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-amber-700">{formatCurrency(c.amountCents)}</span>
+                  {/**
+                    * E4 — verdraengt, nicht geloescht.
+                    *
+                    * Stand vorher als gleichberechtigte Zeile neben dem
+                    * Startwert, auch wenn sie laengst ersetzt war: Alrik sah
+                    * 1.179 EUR und die Karte rechnete etwas anderes.
+                    *
+                    * Der Betrag bleibt sichtbar (durchgestrichen), damit
+                    * nachvollziehbar bleibt, DASS es einen Uebertrag gab und
+                    * WARUM er nicht mehr zaehlt. Loeschen waere die
+                    * naheliegende und die falsche Handlung — dann ist die
+                    * Historie weg.
+                    */}
+                  <BetragMitVerdraengung
+                    allocation={c}
+                    testId={`text-carryover-superseded-${budgetType}-${src}`}
+                    klasse="font-semibold text-amber-700"
+                  />
                   {deleteConfirmId === c.id ? (
                     <div className="flex flex-col items-end gap-1">
                       {deleteUsageLoading ? (

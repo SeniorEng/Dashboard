@@ -171,10 +171,40 @@ function emptyPot(budgetType: CappedBudgetPot, enabled: boolean, inRange: boolea
  * `getAvailableForDate`-Mathematik, aber als eine benannte Erhaltungs-Identität
  * mit Per-Topf-Aufschlüsselung. Rein lesend.
  */
+/**
+ * Optionen, die der Reader NICHT selbst entscheidet, sondern durchreicht.
+ *
+ * ── Warum durchreichen und nicht hart setzen (Replit #1916) ─────────────
+ * Die Vorab-Pruefung im Terminformular ruft diesen Reader OHNE
+ * `projectFuture`, die Reservierung ruft `calculateAllocatedCents` MIT
+ * `projectFuture: true` und `asOfDate = Monatsende`. Ergebnis: **das Formular
+ * sperrt Termine, die der Server annehmen wuerde** — geschaeftsblockierend
+ * (Kunde 157 konnte fuer Oktober nichts buchen).
+ *
+ * `netAvailable45bAt` kennt `projectFuture` und reicht es SYMMETRISCH an
+ * beide Seiten weiter (Anspruch und Verbrauchs-Ausschluss). Der Reader hat es
+ * nur nie gesetzt.
+ *
+ * **Hart setzen waere falsch:** `readUnifiedBudgetAvailability` speist mehr
+ * als die Kostenschaetzung — die Kundenkarte soll weiter „Stand heute"
+ * zeigen. Die Entscheidung gehoert also zum Aufrufer, nicht in den Reader.
+ *
+ * Dasselbe gilt fuer `resetDisplacesAllSources` (P1 `6hXp9qMrXH2WGVVG`):
+ * ohne Durchreiche ist der produktive Lesepfad konstruktiv nicht erreichbar,
+ * und wer das Flag spaeter an einer Route setzt, erreicht den Reader nicht.
+ */
+export interface UnifiedBudgetReadOptions {
+  /** Zukuenftige Monatsaufstockungen bis zum Stichtag einrechnen (Forecast). */
+  readonly projectFuture?: boolean;
+  /** Inventur-Lesart: der juengste Startwert verdraengt frueher Beginnendes. */
+  readonly resetDisplacesAllSources?: boolean;
+}
+
 export async function readUnifiedBudgetAvailability(
   customerId: number,
   asOfDate: string,
   tx?: DbClient,
+  opts?: UnifiedBudgetReadOptions,
 ): Promise<UnifiedBudgetAvailability> {
   const d = tx ?? db;
 
@@ -228,7 +258,13 @@ export async function readUnifiedBudgetAvailability(
     const net = await netAvailable45bAt(
       customerId,
       asOfDate,
-      { holds: "subtract", typeSettings },
+      {
+        holds: "subtract",
+        typeSettings,
+        // Durchgereicht, nicht hart gesetzt — siehe `UnifiedBudgetReadOptions`.
+        projectFuture: opts?.projectFuture,
+        resetDisplacesAllSources: opts?.resetDisplacesAllSources,
+      },
       tx,
     );
     pot45b = {

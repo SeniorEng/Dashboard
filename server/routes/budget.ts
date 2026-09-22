@@ -308,6 +308,22 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   // Kostenschätzung NICHT mehr von der späteren Buchung im selben oder einem
   // zurückliegenden/zukünftigen Monat.
   const { getAvailableForDate } = await import("../storage/budget/import-availability");
+  /**
+   * KEINE Monatsend-Projektion hier — und das ist ein Befund, keine
+   * Unterlassung (Replit #1916).
+   *
+   * Der naheliegende Fix waere gewesen, hier wie `planHold` bis zum
+   * Monatsende zu projizieren. **Ausgefuehrt bricht das `#424`:** der
+   * Verbrauchspfad `createConsumptionTransaction` projiziert NICHT, und die
+   * dort gesicherte Invariante lautet „Vorschau == was die Buchung
+   * durchlaesst" (gemessen 127.200 statt 114.100).
+   *
+   * Es gibt also ZWEI Tore mit verschiedenen Stichtagen — `planHold`
+   * (projiziert) und `createConsumptionTransaction` (projiziert nicht). Die
+   * Vorschau kann nicht zu beiden gleich sein. Welches maßgeblich ist, ist
+   * eine fachliche Frage und keine, die man in der Kostenschaetzung
+   * entscheidet.
+   */
   const dateAware = await getAvailableForDate(customerId, date);
 
   // Task #876 — Serving-Pfad auf den unified Reader vereinheitlicht. Gelesen
@@ -499,7 +515,77 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
   if (customerId === null) return;
   const budgetType = req.params.budgetType;
   const allocations = await budgetStorage.getInitialBalanceAllocations(customerId, budgetType);
-  res.json(allocations);
+
+  /**
+   * E4 — die Zeilen tragen jetzt, OB sie zaehlen, und warum nicht.
+   *
+   * Bisher lieferte diese Route rohe Zuweisungen: „Restguthaben aus Vorjahr
+   * 1.179,00 EUR" und „Startwert (ab Juni 2026) 131,00 EUR" standen als zwei
+   * gleichberechtigte Zeilen nebeneinander — auch dann, wenn die eine die
+   * andere laengst ersetzt hatte. **Der Midlayer transportierte die
+   * Unterscheidung nicht, also konnte der Client sie nicht treffen.**
+   *
+   * Kein neuer Begriff: `excludedSpecialAllocationIds` beantwortet die Frage
+   * „traegt diese Zuweisung zum Budget bei?" bereits und ist die SSoT, aus
+   * der sich auch die symmetrische Verbrauchs-Korrektur speist. Die Route
+   * liest sie, statt eine zweite Regel zu bauen — und wird damit von selbst
+   * richtig, sobald die Verdraengung scharf geschaltet wird.
+   *
+   * **Verdraengen, nicht loeschen:** neben dem Uebertrag steht ein
+   * Loeschsymbol, und das waere die naheliegende und die falsche Handlung.
+   * Beim Loeschen ist die Historie weg; beim Verdraengen bleibt sichtbar,
+   * DASS es einen Uebertrag gab und WARUM er nicht mehr zaehlt.
+   */
+  if (budgetType !== "entlastungsbetrag_45b") {
+    res.json(allocations.map(a => ({ ...a, zaehltNicht: false, ersetztDurchStartwertMonat: null })));
+    return;
+  }
+  const { read45bAllocationDiagnostics } = await import("../storage/budget/allocation-storage");
+  const { allocationValidAt, displacedByReset } = await import("../storage/budget/allocation-window");
+  const heute = todayISO();
+  const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: heute });
+  const ausgeschlossen = new Set(diagnose.excludedSpecialAllocationIds);
+  // `resetYear` kommt aus der Diagnose, nicht aus `resetCutoffDate.slice(0, 4)`.
+  // Die Ableitung waere rechnerisch richtig und trotzdem die siebte Stelle,
+  // an der dieselbe Groesse ein zweites Mal entsteht — sie haelt nur, solange
+  // das Datumsformat bleibt (Gate 2 zu #166).
+  const resetAnker = diagnose.resetCutoffDate != null && diagnose.resetYear != null
+    ? { cutoffDate: diagnose.resetCutoffDate, year: diagnose.resetYear }
+    : null;
+  const resetMonat = diagnose.resetCutoffDate
+    ? `${diagnose.resetCutoffDate.slice(5, 7)}/${diagnose.resetCutoffDate.slice(0, 4)}`
+    : null;
+
+  res.json(allocations.map(a => {
+    const zaehltNicht = ausgeschlossen.has(a.id);
+    /**
+     * Der GRUND wird gefragt, nicht erschlossen (Gate 2 zu #166, B1).
+     *
+     * Die erste Fassung las „zaehlt nicht" plus „`validFrom` vor dem Reset"
+     * als „also ersetzt". **Ausgefuehrt war das in JEDEM heute sichtbaren Fall
+     * falsch:** solange das Flag aus ist, kann ein Uebertrag nur aus einem
+     * Grund herausfallen — er ist VERFALLEN. Die Zeile meldete dann
+     * „ersetzt durch Startwert 03/2026" direkt neben „verfaellt 30.06.2026".
+     * Zwei widersprechende Auskuenfte, an genau der Stelle, an der jemand
+     * nachsieht, warum eine Zahl nicht stimmt.
+     *
+     * Jetzt beide Bedingungen aus der SSoT, und die erste schliesst den
+     * Verfall aus: die Zeile muss im Gueltigkeitsfenster LIEGEN und vom Reset
+     * verdraengt SEIN. Ein verfallener Uebertrag faellt an der ersten,
+     * unabhaengig davon, ob ein Startwert existiert.
+     */
+    const imFenster = allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, heute);
+    const vomResetVerdraengt = displacedByReset(
+      { validFrom: a.validFrom, expiresAt: a.expiresAt, year: a.year },
+      resetAnker,
+    );
+    return {
+      ...a,
+      zaehltNicht,
+      ersetztDurchStartwertMonat:
+        zaehltNicht && resetMonat && imFenster && vomResetVerdraengt ? resetMonat : null,
+    };
+  }));
 }));
 
 /**

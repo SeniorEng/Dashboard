@@ -6,7 +6,7 @@ import {
   type BudgetTransaction,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, asc, inArray } from "drizzle-orm";
 import { parseLocalDate, todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import type { DbClient, CascadeResult } from "./types";
@@ -21,6 +21,7 @@ import { isPrivatePaymentAllowed, isSelbstzahlerBillingType } from "@shared/doma
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
+import { allocationValidAtWhere } from "./allocation-window";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
 import { auditService } from "../../services/audit";
 
@@ -165,11 +166,7 @@ export async function computeFifoAvailability(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),
       isNull(budgetAllocations.deletedAt),
-      lte(budgetAllocations.validFrom, today),
-      or(
-        isNull(budgetAllocations.expiresAt),
-        gte(budgetAllocations.expiresAt, today)
-      ),
+      allocationValidAtWhere(today),
       sql`${budgetAllocations.source} IN ('carryover', 'initial_balance', 'manual_adjustment')`
     ))
     .orderBy(

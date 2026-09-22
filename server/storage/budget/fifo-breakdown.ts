@@ -20,8 +20,9 @@
  *  existiert — die bekannte manual_adjustment-Schatten-Drift ist Phase-6-Thema
  *  und wird hier bewusst NICHT übermalt.)
  */
+import { allocationValidAtWhere } from "./allocation-window";
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
-import { and, eq, gte, lte, or, isNull, inArray, sql } from "drizzle-orm";
+import { and, eq, lte, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { appointmentsRepo, budgetAllocationsRepo } from "../../repos";
 import { todayISO } from "@shared/utils/datetime";
@@ -75,8 +76,12 @@ export async function readBudget45bFifoBreakdown(
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       eq(budgetAllocations.source, "carryover"),
       isNull(budgetAllocations.deletedAt),
-      lte(budgetAllocations.validFrom, asOfDate),
-      or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, asOfDate)),
+      // SSoT statt Nachbau (P1 6hXp9qMrXH2WGVVG, Punkt 2). Der Kommentar
+      // darueber sagte „identischer Filter wie FIFO-Engine" — das stimmte,
+      // solange beide nur das Zeitfenster pruefen. Eine Zusage, die an
+      // Gleichschritt haengt statt an einer gemeinsamen Funktion, gilt nur so
+      // lange, bis jemand eine Seite anfasst.
+      allocationValidAtWhere(asOfDate),
     ));
 
   const carryoverIds = carryoverAllocations.map(a => a.id);
