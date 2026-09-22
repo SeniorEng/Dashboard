@@ -490,4 +490,52 @@ describe("Task #1687 — Avis-Import: strukturell + robustes Matching", () => {
     expect(item!.matchedInvoiceGrossCents).toBe(10000);
     expect(item!.unterzahlungCents).toBe(1000);
   });
+
+  /**
+   * ── S2 aus Gate 2 (#161): Gültigkeit, nicht Anwesenheit ───────────────
+   * Der Riegel „ohne Zahlungsdatum wird nicht gebucht" prüfte zuerst
+   * `!advice.zahlungsDatum`. Genau das greift bei den Werten nicht, für die
+   * er geschrieben wurde: die drei Bestands-Avise tragen `"82051000"` —
+   * truthy. Und ein gespeichertes `"2026-13-32"` rollt in `parseLocalDate`
+   * still zum 31.01.2027 durch: ein falsches `paid_at` auf einem
+   * GoBD-Feld, ohne Fehlermeldung.
+   *
+   * Der Test setzt den Wert direkt in der DB, weil genau das der Fall ist —
+   * ein Datenstand, der VOR der heutigen Parser-Prüfung entstanden ist. Über
+   * den Import-Pfad wäre er nicht mehr erzeugbar, und das ist der Punkt.
+   */
+  for (const [was, roh] of [["unlesbar (Prod-Fall Avis 41)", "82051000"], ["formgleich, aber unmöglich", "2026-13-32"]] as const) {
+    it(`mark-paid verweigert ein ungültiges Zahlungsdatum — ${was}`, async () => {
+      const num = nextInvoiceNumber();
+      const invoiceId = await insertInvoice({ amountCents: 10000, invoiceNumber: num });
+      const csv = buildAokCsv({ ref: num, amountEuro: "100,00", zahlungsDatum: "19.04.2026" });
+      const { adviceId, matched } = await createAdviceWithRawCsv(csv);
+      expect(matched).toBe(1);
+
+      await db.update(paymentAdvices).set({ zahlungsDatum: roh }).where(eq(paymentAdvices.id, adviceId));
+
+      const res = await apiPost(`/api/admin/qonto/payment-advices/${adviceId}/mark-paid`, {});
+      expect(res.status, "der Riegel greift nicht — es wird gebucht").toBe(400);
+      expect((res.data as { code?: string }).code).toBe("AVIS_OHNE_ZAHLUNGSDATUM");
+
+      // Und nichts ist geschrieben worden. Das ist die eigentliche Zusage:
+      // ein 400 ist wertlos, wenn die Transaktion vorher schon lief.
+      expect((await getInvoiceStatus(invoiceId)).status,
+        "die Rechnung wurde trotz Ablehnung gebucht").toBe("versendet");
+    });
+  }
+
+  it("mark-paid bucht mit gültigem Datum unverändert", async () => {
+    // Gegenprobe zum Riegel: er darf den Normalfall nicht anfassen. Ohne sie
+    // wäre „lehnt ab" nicht von „lehnt alles ab" zu unterscheiden.
+    const num = nextInvoiceNumber();
+    const invoiceId = await insertInvoice({ amountCents: 10000, invoiceNumber: num });
+    const csv = buildAokCsv({ ref: num, amountEuro: "100,00", zahlungsDatum: "19.04.2026" });
+    const { adviceId } = await createAdviceWithRawCsv(csv);
+
+    const res = await apiPost<{ paid: number }>(`/api/admin/qonto/payment-advices/${adviceId}/mark-paid`, {});
+    expect(res.status).toBe(200);
+    expect(res.data.paid).toBe(1);
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("bezahlt");
+  });
 });
