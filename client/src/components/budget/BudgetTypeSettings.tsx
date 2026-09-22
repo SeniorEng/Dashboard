@@ -58,6 +58,16 @@ interface InitialBalanceAllocation {
   // aus dem Vorjahr im UI sichtbar und löschbar ist.
   source?: string;
   expiresAt?: string | null;
+  /**
+   * Traegt diese Zuweisung heute zum Budget bei? Kommt vom Server aus
+   * `excludedSpecialAllocationIds` — der SSoT, aus der sich auch die
+   * symmetrische Verbrauchs-Korrektur speist. Der Client rechnet sie NICHT
+   * nach; er konnte es vorher auch gar nicht, weil die Antwort die
+   * Unterscheidung nicht transportierte.
+   */
+  zaehltNicht?: boolean;
+  /** `MM/JJJJ` des Startwerts, der sie ersetzt — nur wenn DAS der Grund ist. */
+  ersetztDurchStartwertMonat?: string | null;
   year?: number;
   month?: number | null;
 }
@@ -1264,7 +1274,30 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
                   </span>
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-amber-700">{formatCurrency(c.amountCents)}</span>
+                  {/**
+                    * E4 — verdraengt, nicht geloescht.
+                    *
+                    * Stand vorher als gleichberechtigte Zeile neben dem
+                    * Startwert, auch wenn sie laengst ersetzt war: Alrik sah
+                    * 1.179 EUR und die Karte rechnete etwas anderes.
+                    *
+                    * Der Betrag bleibt sichtbar (durchgestrichen), damit
+                    * nachvollziehbar bleibt, DASS es einen Uebertrag gab und
+                    * WARUM er nicht mehr zaehlt. Loeschen waere die
+                    * naheliegende und die falsche Handlung — dann ist die
+                    * Historie weg.
+                    */}
+                  {c.ersetztDurchStartwertMonat ? (
+                    <span
+                      className="text-xs text-gray-500 flex items-center gap-1.5"
+                      data-testid={`text-carryover-superseded-${budgetType}-${src}`}
+                    >
+                      <span className="line-through">{formatCurrency(c.amountCents)}</span>
+                      <span>ersetzt durch Startwert {c.ersetztDurchStartwertMonat}</span>
+                    </span>
+                  ) : (
+                    <span className="font-semibold text-amber-700">{formatCurrency(c.amountCents)}</span>
+                  )}
                   {deleteConfirmId === c.id ? (
                     <div className="flex flex-col items-end gap-1">
                       {deleteUsageLoading ? (

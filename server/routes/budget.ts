@@ -515,7 +515,54 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
   if (customerId === null) return;
   const budgetType = req.params.budgetType;
   const allocations = await budgetStorage.getInitialBalanceAllocations(customerId, budgetType);
-  res.json(allocations);
+
+  /**
+   * E4 — die Zeilen tragen jetzt, OB sie zaehlen, und warum nicht.
+   *
+   * Bisher lieferte diese Route rohe Zuweisungen: „Restguthaben aus Vorjahr
+   * 1.179,00 EUR" und „Startwert (ab Juni 2026) 131,00 EUR" standen als zwei
+   * gleichberechtigte Zeilen nebeneinander — auch dann, wenn die eine die
+   * andere laengst ersetzt hatte. **Der Midlayer transportierte die
+   * Unterscheidung nicht, also konnte der Client sie nicht treffen.**
+   *
+   * Kein neuer Begriff: `excludedSpecialAllocationIds` beantwortet die Frage
+   * „traegt diese Zuweisung zum Budget bei?" bereits und ist die SSoT, aus
+   * der sich auch die symmetrische Verbrauchs-Korrektur speist. Die Route
+   * liest sie, statt eine zweite Regel zu bauen — und wird damit von selbst
+   * richtig, sobald die Verdraengung scharf geschaltet wird.
+   *
+   * **Verdraengen, nicht loeschen:** neben dem Uebertrag steht ein
+   * Loeschsymbol, und das waere die naheliegende und die falsche Handlung.
+   * Beim Loeschen ist die Historie weg; beim Verdraengen bleibt sichtbar,
+   * DASS es einen Uebertrag gab und WARUM er nicht mehr zaehlt.
+   */
+  if (budgetType !== "entlastungsbetrag_45b") {
+    res.json(allocations.map(a => ({ ...a, zaehltNicht: false, ersetztDurchStartwertMonat: null })));
+    return;
+  }
+  const { read45bAllocationDiagnostics } = await import("../storage/budget/allocation-storage");
+  const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: todayISO() });
+  const ausgeschlossen = new Set(diagnose.excludedSpecialAllocationIds);
+  const resetMonat = diagnose.resetCutoffDate
+    ? `${diagnose.resetCutoffDate.slice(5, 7)}/${diagnose.resetCutoffDate.slice(0, 4)}`
+    : null;
+
+  res.json(allocations.map(a => {
+    const zaehltNicht = ausgeschlossen.has(a.id);
+    return {
+      ...a,
+      zaehltNicht,
+      // Nur wenn der Reset der Grund ist: eine Zeile kann auch aus anderen
+      // Gruenden herausfallen (Verfall, IB-Supersession). „Ersetzt durch
+      // Startwert" zu behaupten, wo in Wahrheit der Uebertrag verfallen ist,
+      // waere eine falsche Auskunft an genau der Stelle, an der jemand
+      // nachsieht, warum eine Zahl nicht stimmt.
+      ersetztDurchStartwertMonat:
+        zaehltNicht && resetMonat && a.validFrom < (diagnose.resetCutoffDate ?? "")
+          ? resetMonat
+          : null,
+    };
+  }));
 }));
 
 /**
