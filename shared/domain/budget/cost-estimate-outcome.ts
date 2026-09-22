@@ -136,6 +136,21 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
    * Der mittlere Fall ist neu. Er trägt `isHardBlock: false` — der Client
    * sperrt den Knopf über genau dieses Feld, und er soll ihn hier nicht mehr
    * sperren.
+   *
+   * ── Warum „die Budget-Sperre entfällt" und nicht „der Termin kann
+   *    angelegt werden" (Gate 2 zu #167, S1) ──────────────────────────
+   * Die Vorschau rechnet NICHT mit derselben Kostenbasis wie `planHold`:
+   * das Formular schickt nur Leistungen, `getPlannedHoldInputs` gibt dem Tor
+   * zusätzlich Fahrt- und Kunden-Kilometer, und beim Zwei-Kräfte-Einsatz
+   * reserviert `planHold` ZWEIMAL die vollen Kosten.
+   *
+   * Solange die Vorschau nur sperrte, war das folgenlos. Eine aktive Zusage
+   * („kann angelegt werden") wäre aber ausgerechnet in dem Regime falsch, in
+   * dem das Budget gerade eben reicht — also dort, wo ein km-Posten oder das
+   * zweite Bein in ein 422 kippt.
+   *
+   * Der Satz beschreibt deshalb, was die Vorschau WEISS (die Sperre entfällt),
+   * nicht, was sie nicht wissen kann (dass das Speichern gelingt).
    */
   /**
    * Massgeblich ist die PROJIZIERTE Zahl — nicht das Maximum.
@@ -171,7 +186,7 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
         `Im Termin-Monat reicht das Budget (${formatEuroDE(projiziert)} verfügbar, `
         + `Termin kostet ${formatEuroDE(totalCostCents)}). `
         + `Heute fehlen davon noch ${fehltHeute} — sie kommen mit der `
-        + `Monatsaufstockung. Der Termin kann angelegt werden; die Beträge `
+        + `Monatsaufstockung. Die Budget-Sperre entfällt damit; die Beträge `
         + `beziehen sich auf den Monat des Termins.`
         + (input.pflegegrad1OhnePrivatzahlung ? " Kein Ausweichbudget verfügbar." : ""),
       isHardBlock: false,

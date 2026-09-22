@@ -46,6 +46,13 @@ describe("Kostenschätzung — projizieren, aber warnen statt sperren", () => {
     expect(o.warning).toContain("100,00");
     expect(o.warning, "die Differenz zu heute fehlt").toContain("53,00");
     expect(o.warning, "der Monatsbezug fehlt").toContain("Monat des Termins");
+    // Und: eine AUSSAGE, keine Zusage. Die Vorschau rechnet nicht mit
+    // derselben Kostenbasis wie `planHold` (km fehlen, Zwei-Kräfte-Einsatz
+    // reserviert doppelt) — sie kann den Erfolg des Speicherns nicht
+    // versprechen, nur das Wegfallen der Sperre (Gate 2 zu #167, S1).
+    expect(o.warning).toContain("Budget-Sperre entfällt");
+    expect(o.warning, "die Vorschau verspricht etwas, das sie nicht weiß")
+      .not.toContain("kann angelegt werden");
   });
 
   it("MG-2 – projiziert reicht NICHT: harter Stopp bleibt", () => {

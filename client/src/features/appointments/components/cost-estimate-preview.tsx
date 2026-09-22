@@ -75,13 +75,41 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
     )
     : null;
 
+  /**
+   * Kopf und Warntext MÜSSEN aus derselben Zahl kommen — in JEDEM Zweig.
+   *
+   * ── Was hier schiefging (Gate 2 zu #167, B1) ────────────────────────
+   * Der Warntext rechnet seit der S1-Korrektur gegen die projizierte Zahl
+   * (`massgeblich` in `classifyCostEstimate`), der Kopf nahm weiter
+   * `availableCents`. Ausgeführt ergab das:
+   *
+   *   „Kosten: 1.500,00 € — verfügbar: 2.358,00 €"   +  „es fehlen 583,00 €"
+   *   „Kosten:   300,00 € — verfügbar:    47,00 €"   +  „es fehlen 122,00 €"
+   *
+   * Die erste Zeile ist offen unsinnig, die zweite ist der häufige Fall.
+   * **Das ist genau die Klasse, für die dieser PR den Midlayer geändert hat**
+   * — geschlossen war sie nur für den Mittelzweig, in den beiden
+   * Engpass-Zweigen hat der PR sie NEU erzeugt.
+   *
+   * Deshalb hängt die Kopfzahl jetzt nicht mehr an `kind`, sondern daran, ob
+   * die projizierte Zahl da ist: dann ist SIE die maßgebliche, und zwar
+   * überall.
+   */
+  const zeigtMonatszahl = cost.projectedAvailableCents !== undefined;
+  const massgeblichEuro = zeigtMonatszahl
+    ? formatEuroDE(cost.projectedAvailableCents!, { withCurrency: false })
+    : availEuro;
+  const verfuegbarLabel = zeigtMonatszahl ? "im Termin-Monat verfügbar" : "verfügbar";
+  // Nur für die Test-Kennung: welcher Kasten ist es fachlich?
+  const istMonatsFall = cost.kind === "erst_im_monat_gedeckt" && zeigtMonatszahl;
+
   if (cost.isHardBlock) {
     return (
       <div className="rounded-lg border bg-red-50 border-red-300 p-4 text-sm flex items-start gap-3" data-testid="budget-hard-block">
         <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
         <div>
           <p className="text-red-800 font-semibold">Budget reicht nicht</p>
-          <p className="text-red-700 mt-1">Kosten: {costEuro} € — {availEuro !== null ? `verfügbar: ${availEuro} €` : "kein Budget"}</p>
+          <p className="text-red-700 mt-1">Kosten: {costEuro} € — {massgeblichEuro !== null ? `${verfuegbarLabel}: ${massgeblichEuro} €` : "kein Budget"}</p>
           <p className="text-red-600 text-xs mt-1">{cost.warning}</p>
         </div>
       </div>
@@ -95,15 +123,6 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
    * zwei verschiedene „verfügbar" in einem Kasten, und der Bediener müsste
    * raten, welche gilt (Replit #1916).
    */
-  // Nur wenn die Zahl auch DA ist (Gate 2 zu #167, Notiz): sonst faellt der
-  // Kopf auf die heutige zurueck — also genau die zwei verschiedenen
-  // „verfuegbar" in einem Kasten, gegen die dieser Zweig gebaut ist.
-  const istMonatsFall = cost.kind === "erst_im_monat_gedeckt"
-    && cost.projectedAvailableCents !== undefined;
-  const monatsEuro = cost.projectedAvailableCents !== undefined
-    ? formatEuroDE(cost.projectedAvailableCents, { withCurrency: false })
-    : null;
-
   if (cost.warning) {
     return (
       <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid={istMonatsFall ? "budget-warning-monat" : "budget-warning"}>
@@ -111,9 +130,9 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
         <div>
           <p className="text-amber-800 font-semibold">
             Kosten: {costEuro} €{" "}
-            {istMonatsFall && monatsEuro !== null
-              ? <span className="font-normal">— im Termin-Monat verfügbar: {monatsEuro} €</span>
-              : availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}
+            {massgeblichEuro !== null && (
+              <span className="font-normal">— {verfuegbarLabel}: {massgeblichEuro} €</span>
+            )}
           </p>
           <p className="text-amber-700 text-xs mt-1">{cost.warning}</p>
           {holdsNote}
@@ -126,7 +145,7 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
     <div className="rounded-lg border bg-green-50 border-green-200 p-3 text-sm flex items-start gap-3" data-testid="budget-cost-estimate">
       <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
       <div>
-        <p className="text-green-800 font-medium">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal text-green-600">— verfügbar: {availEuro} €</span>}</p>
+        <p className="text-green-800 font-medium">Kosten: {costEuro} € {massgeblichEuro !== null && <span className="font-normal text-green-600">— {verfuegbarLabel}: {massgeblichEuro} €</span>}</p>
         {holdsNote}
       </div>
     </div>
