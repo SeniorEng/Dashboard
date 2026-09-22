@@ -1614,6 +1614,15 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
         // den seltenen echten Fall mit), Schweigen auch: dann entscheidet
         // niemand, weil niemand es sieht.
         hinweise: parsed.hinweise,
+        // Dieselben Zähler wie in der Import-Antwort — ein Ausgang, der nie
+        // feuert, ist sonst nicht von einem zu unterscheiden, der gerade
+        // nichts zu sagen hat.
+        ausgaenge: {
+          bestaetigt: abgleich.bestaetigt,
+          unterzahlungen: abgleich.unterzahlungen,
+          ungeprueft: abgleich.ungeprueft,
+          hinweise: parsed.hinweise.length,
+        },
         itemCount: parsed.items.length,
         items: parsed.items,
       });
@@ -1686,7 +1695,34 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     const bulkClose = await qontoService.autoCloseAdviceFromTransactions(advice.id, req.user!.id, req.ip);
 
     const refreshed = await qontoStorage.getPaymentAdviceById(advice.id);
-    res.json({ advice: refreshed, matched: matchCount, bulkClosed: bulkClose != null });
+
+    /**
+     * `hinweise` und die AUSGANGS-ZÄHLER gehören auch in die Import-Antwort.
+     *
+     * Gate 2 (3. Durchgang, S2): der Hinweis-Kanal kam nur im `dryRun`-Zweig
+     * zurück — und `dryRun` sendet der Client nie. Der Kanal erreichte damit
+     * den einzigen Pfad nicht, den ein Mensch benutzt, und die
+     * Teilverdopplung lief mit doppeltem Betrag still durch. Genau das, wogegen
+     * sein eigener Docblock geschrieben ist: „dann entscheidet niemand, weil
+     * niemand es sieht."
+     *
+     * Die Zähler stehen dabei, weil ein Kanal, der NIE feuert, sonst nicht von
+     * einem Kanal zu unterscheiden ist, der gerade nichts zu sagen hat. Mit
+     * ihnen wäre „existiert, feuert nie" beim ersten Lauf aufgefallen statt im
+     * dritten Review.
+     */
+    res.json({
+      advice: refreshed,
+      matched: matchCount,
+      bulkClosed: bulkClose != null,
+      hinweise: parsed.hinweise,
+      ausgaenge: {
+        bestaetigt: abgleich.bestaetigt,
+        unterzahlungen: abgleich.unterzahlungen,
+        ungeprueft: abgleich.ungeprueft,
+        hinweise: parsed.hinweise.length,
+      },
+    });
     return;
   }
 

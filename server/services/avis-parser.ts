@@ -214,11 +214,13 @@ export function parseBetragCents(value: string, konvention: Dezimalkonvention): 
  * fehlende oder unlesbare Feld nicht. Genau diese Unterscheidung konnte die
  * alte Fassung nicht treffen.
  */
-function parseBetragCentsStrikt(value: string, konvention: Dezimalkonvention, feld: string): number {
+function parseBetragCentsStrikt(
+  value: string, konvention: Dezimalkonvention, feld: string, ort: string,
+): number {
   const roh = value.trim().replace(/\s/g, "").replace(/€/g, "");
   if (!roh) {
     throw new AvisDateiaufbauError(
-      `Pflichtfeld ${feld} ist leer. Dateiaufbau nicht erkannt, Import abgelehnt.`,
+      `Pflichtfeld ${feld} ist leer (${ort}). Dateiaufbau nicht erkannt, Import abgelehnt.`,
     );
   }
   const cleaned = konvention === "komma"
@@ -236,7 +238,7 @@ function parseBetragCentsStrikt(value: string, konvention: Dezimalkonvention, fe
      * Datei zu finden; der Inhalt gehoert nicht in eine Fehlermeldung.
      */
     throw new AvisDateiaufbauError(
-      `Pflichtfeld ${feld} ist kein Betrag (${roh.length} Zeichen, nicht numerisch). `
+      `Pflichtfeld ${feld} ist kein Betrag (${ort}). `
       + "Dateiaufbau nicht erkannt, Import abgelehnt.",
     );
   }
@@ -321,6 +323,19 @@ function parseDavaso(csvContent: string): ParsedAvis {
 
   const dataRows = lines.slice(1).filter(l => l.trim()).map(l => splitCsvLine(l, delimiter));
 
+  /**
+   * Ortsangabe fuer Fehlermeldungen — `LfdNr`, sonst gar nichts.
+   *
+   * Jede Struktur-Meldung verlaesst den Server als 400-`message` und landet im
+   * Toast. Die Dateien tragen Versichertennamen und -nummern; eine Meldung,
+   * die eine Zelle zitiert, gibt im Feldversatz-Fall genau die preis. `LfdNr`
+   * ist reine Dateimechanik, lokalisiert aber exakt.
+   */
+  const ortVon = (row: string[]): string => {
+    const lfd = getField(row, "LfdNr");
+    return lfd ? `Zeile LfdNr ${lfd}` : "Zeile ohne LfdNr";
+  };
+
   const headerData: ParsedAvisHeader = {
     format: "davaso",
     avisNummer: null,
@@ -379,7 +394,7 @@ function parseDavaso(csvContent: string): ParsedAvis {
         // In 29 gemessenen Dateien kommt das nicht vor; kaeme es vor, waere
         // still eine Forderung ohne Zahlung im Avis — deshalb laut.
         throw new AvisDateiaufbauError(
-          `Postenzeile ohne vorangehende Kopfzeile (Beleg ${getField(row, "ZEM_BelegNr")}). `
+          `Belegzeile ohne vorangehende Kopfzeile (${ortVon(row)}). `
           + "Dateiaufbau nicht erkannt, Import abgelehnt.",
         );
       }
@@ -431,7 +446,9 @@ function parseDavaso(csvContent: string): ParsedAvis {
     verwendungszweck: null,
     // Strikt: eine Kopfzeile OHNE Zahlbetrag ist keine Kopfzeile, sondern ein
     // nicht erkannter Dateiaufbau. `0.00` bleibt erlaubt.
-    betragCents: parseBetragCentsStrikt(getField(b.kopf, "KTR_BTR_Zahlg"), "punkt", "KTR_BTR_Zahlg"),
+    betragCents: parseBetragCentsStrikt(
+      getField(b.kopf, "KTR_BTR_Zahlg"), "punkt", "KTR_BTR_Zahlg", ortVon(b.kopf),
+    ),
     skontoCents: parseBetragCents(getField(b.kopf, "KTR_BTR_Skonto"), "punkt"),
     kuerzungCents: parseBetragCents(getField(b.kopf, "KTR_BTR_DTA_Kuerzg"), "punkt"),
     buchungsDatum: null,
@@ -458,9 +475,12 @@ function parseDavaso(csvContent: string): ParsedAvis {
     for (const r of b.posten) {
       const postenRec = getField(r, "ZEM_RecNr");
       if (postenRec !== kopfRec) {
+        // Der Riegel, der per Konstruktion GENAU im Feldversatz-Fall feuert —
+        // also dort, wo an diesen Positionen fremder Zellinhalt steht. Er
+        // zitierte drei Zellen. Jetzt nur noch die beiden Orte.
         throw new AvisDateiaufbauError(
-          `Belegzeile ${getField(r, "ZEM_BelegNr")} nennt ZEM_RecNr „${postenRec}", `
-          + `ihre Kopfzeile „${kopfRec}". Block-Zuordnung nicht erkannt, Import abgelehnt.`,
+          `Belegzeile (${ortVon(r)}) nennt eine andere ZEM_RecNr als ihre Kopfzeile `
+          + `(${ortVon(b.kopf)}). Block-Zuordnung nicht erkannt, Import abgelehnt.`,
         );
       }
     }
@@ -500,8 +520,8 @@ function parseDavaso(csvContent: string): ParsedAvis {
     const dubletten = belege.filter((x, i) => belege.indexOf(x) !== i);
     if (dubletten.length > 0) {
       throw new AvisDateiaufbauError(
-        `Belegnummer mehrfach im selben Block (${getField(b.kopf, "ZEM_RecNr")}): `
-        + `${[...new Set(dubletten)].join(", ")}. `
+        `Belegnummer mehrfach im selben Block (Kopfzeile ${ortVon(b.kopf)}, `
+        + `${dubletten.length} Wiederholung(en)). `
         + "Die Belegzeilen eines Blocks muessen eindeutig sein. Import abgelehnt.",
       );
     }
@@ -525,16 +545,32 @@ function parseDavaso(csvContent: string): ParsedAvis {
    * Blockgroessen und die Kopf-gegen-Beleg-Gleichheit — nicht die
    * Eindeutigkeit der Rechnungsnummer ueber Bloecke hinweg.
    *
-   * Genau dieser Sprung von der Messung zur Annahme hat heute schon einmal
-   * jede intakte Mehrblock-Datei abgelehnt. Deshalb hier die schwaechere,
-   * aber gedeckte Bedingung: zwei identische Bloecke haben unter KEINER
-   * Lesart einen legitimen Fall — dieselbe Rechnung zweimal mit demselben
-   * Betrag im selben Avis ist keine Teilzahlung, sondern eine Verdopplung.
+   * ── Und `ZEM_VorgangsNr` gehoert in den Schluessel ─────────────────────
+   * Die erste Fassung nahm nur (RecNr, Zahlbetrag, Belege) und begruendete das
+   * mit: „dieselbe Rechnung zweimal mit demselben Betrag hat unter keiner
+   * Lesart einen legitimen Fall". **Der Satz war nicht gedeckt.** Die Messung
+   * sagte nur, dass gleiche Betraege in DIESEN 29 Dateien nicht vorkommen —
+   * daraus folgt nicht „nie". Und ein paar Zeilen weiter steht hier selbst,
+   * dass `ZEM_RecNr` im Altbestand ein ZEITRAUM ist: zwei Bloecke mit gleichem
+   * Zeitraum, gleichem Standardbetrag und je `BelegNr=1` sind dann keine
+   * Verdopplung, sondern die intakte Monatsdatei mit zwei Vorgaengen. Gate 2
+   * (3. Durchgang) hat genau die gegen das echte Spaltenlayout ausgefuehrt und
+   * abgelehnt bekommen.
    *
-   * Sobald die Eindeutigkeit von `ZEM_RecNr` gemessen ist, gehoert der Riegel
-   * auf das Paar nachgezogen.
+   * `ZEM_VorgangsNr` trennt die beiden Faelle, und zwar gemessen: ueber alle
+   * 66 Bloecke nie leer, blockweit konstant (Kopf = Posten), und **0 Mal
+   * dieselbe Nummer in zwei Bloecken**. Eine zweimal angehaengte Datei
+   * wiederholt sie mitsamt allem anderen — die echte Verdopplung wird weiter
+   * gefangen; zwei echte Vorgaenge nicht mehr.
+   *
+   * Ein zusaetzliches Feld im Identitaets-Schluessel kann nur WENIGER
+   * ablehnen. Es erzeugt also per Konstruktion keinen neuen Fehlalarm —
+   * deshalb war es auch ohne die Messung sicher; die Messung sagt, wie SCHARF
+   * es ist. `AvisPos`/`LfdNr` gehoeren ausdruecklich NICHT hinein: die kann
+   * ein Zusammenfuehrer neu vergeben, dann laeuft die echte Verdopplung durch.
    */
   const blockSchluessel = bloecke.map(b => JSON.stringify([
+    getField(b.kopf, "ZEM_VorgangsNr"),
     getField(b.kopf, "ZEM_RecNr"),
     getField(b.kopf, "KTR_BTR_Zahlg"),
     b.posten.map(r => getField(r, "ZEM_BelegNr")).sort(),
@@ -621,10 +657,26 @@ function parseDavaso(csvContent: string): ParsedAvis {
    * selten genug, dass ein Mensch hinsehen kann, und mehrdeutig genug, dass
    * eine Maschine nicht entscheiden sollte.
    */
-  const KANONISCH = /^RE-\d{4}-\d+$/;
-  const recNummern = bloecke.map(b => getField(b.kopf, "ZEM_RecNr"));
+  /**
+   * Geprueft wird die KANONISIERTE Nummer, nicht der Rohwert — und „kanonisch"
+   * beantwortet die SSoT, nicht ein eigener Regex.
+   *
+   * Die erste Fassung hatte `/^RE-\d{4}-\d+$/` gegen `getField(..., "ZEM_RecNr")`
+   * laufen lassen. Zwei Fehler in einem: der Parser kanonisiert die Nummer 200
+   * Zeilen weiter oben ueber `extractReInvoiceNumber` (O→0, eingeschobene
+   * Leerzeichen wie `RE-2026- 0212`), und ein eigener Regex ist der DRITTE
+   * Block fuer eine Frage, fuer die `avis-match.ts` ausdruecklich eine SSoT
+   * fuehrt.
+   *
+   * Gate 2 (3. Durchgang) hat es ausgefuehrt: bei `RE-2026-O212` verwarf der
+   * Test beide Bloecke als „Altbestand" und verschluckte den Hinweis — der
+   * Mechanismus, der Altbestand schonen soll, schluckte eine echte kanonische
+   * Nummer.
+   */
+  const recNummern = items.map(i => i.rechnungsNummer ?? "");
   const mehrfachKanonisch = [...new Set(
-    recNummern.filter((r, i) => KANONISCH.test(r) && recNummern.indexOf(r) !== i),
+    recNummern.filter((r, i) =>
+      extractReInvoiceNumber(r) !== null && recNummern.indexOf(r) !== i),
   )];
   const hinweise = mehrfachKanonisch.map(r =>
     `Rechnung ${r} kommt in mehreren Bloecken vor. In den gemessenen Dateien `

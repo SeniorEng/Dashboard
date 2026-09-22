@@ -49,11 +49,11 @@ let lfd = 0;
 /** Kopfzeile eines Blocks: keine Belegnummer, trägt den ZAHLbetrag. */
 function kopf(
   recNr: string, forderung: string, zahlung: string,
-  extra: Partial<{ skonto: string; kuerzung: string }> = {},
+  extra: Partial<{ skonto: string; kuerzung: string; vorgang: string }> = {},
 ) {
   lfd += 1;
   return [`${lfd}`, "TST01278", "100000000", "Testkasse", "200000000", "DE00000000000000000000",
-    "", "V-1", recNr, "01.08.2026", forderung, zahlung,
+    "", extra.vorgang ?? "V-1", recNr, "01.08.2026", forderung, zahlung,
     extra.skonto ?? "0.00", extra.kuerzung ?? "0.00", "15.09.2026"].join(",");
 }
 /** Belegzeile: Belegnummer gefüllt, nur die Forderung, dieselbe `ZEM_RecNr`. */
@@ -250,8 +250,8 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
     // Melden statt riegeln: selten genug, dass ein Mensch hinsieht, und
     // mehrdeutig genug, dass eine Maschine nicht entscheiden sollte.
     const zweiTranchen = datei(
-      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
-      kopf("RE-2026-9001", "30.00", "30.00"), beleg("RE-2026-9001", "1", "30.00"),
+      kopf("RE-2026-9001", "70.00", "70.00", { vorgang: "V-A" }), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9001", "30.00", "30.00", { vorgang: "V-B" }), beleg("RE-2026-9001", "1", "30.00"),
     );
     const r = parseAvisCsv(zweiTranchen);
     expect(r.items, "die Datei wurde abgelehnt statt gemeldet").toHaveLength(2);
@@ -266,12 +266,72 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
     // erwartbar und bedeutungslos — gemessen in `Avis_ICL01201.csv`. Ein
     // Hinweis hier wäre Rauschen, und Rauschen macht Hinweise wertlos.
     const altbestand = datei(
-      kopf("2026-03-06", "70.00", "70.00"), beleg("2026-03-06", "1", "70.00"),
-      kopf("2026-03-06", "30.00", "30.00"), beleg("2026-03-06", "1", "30.00"),
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "V-A" }), beleg("2026-03-06", "1", "70.00"),
+      kopf("2026-03-06", "30.00", "30.00", { vorgang: "V-B" }), beleg("2026-03-06", "1", "30.00"),
     );
     const r = parseAvisCsv(altbestand);
     expect(r.items).toHaveLength(2);
     expect(r.hinweise, "Altbestands-Wiederholung als Auffälligkeit gemeldet").toEqual([]);
+  });
+
+  it("AP-31 – zwei echte Vorgänge mit gleicher Nummer und gleichem Betrag laufen durch", () => {
+    // ── Die dritte Wiederholung desselben Musters, gefunden im Review ──
+    // Ich hatte geschrieben: „dieselbe Rechnung zweimal mit demselben Betrag
+    // im selben Avis hat unter keiner Lesart einen legitimen Fall." Die
+    // Messung sagte aber nur, dass gleiche Beträge in DIESEN 29 Dateien nicht
+    // vorkommen — daraus folgt nicht „nie".
+    //
+    // Und im Altbestand ist `ZEM_RecNr` ein ZEITRAUM, kein Schlüssel: zwei
+    // Blöcke mit gleichem Zeitraum, gleichem Standardbetrag und je `BelegNr=1`
+    // sind dann die intakte Monatsdatei mit zwei Vorgängen. Mein Riegel hat
+    // sie abgelehnt.
+    //
+    // `ZEM_VorgangsNr` trennt die Fälle — gemessen über alle 66 Blöcke: nie
+    // leer, blockweit konstant, 0 Mal dieselbe Nummer in zwei Blöcken.
+    const zweiVorgaenge = datei(
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "2505802877" }),
+      beleg("2026-03-06", "1", "70.00"),
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "2505809999" }),
+      beleg("2026-03-06", "1", "70.00"),
+    );
+    const r = parseAvisCsv(zweiVorgaenge);
+    expect(r.items, "zwei echte Vorgänge als Verdopplung abgelehnt").toHaveLength(2);
+    expect(r.header.gesamtBetragCents).toBe(14000);
+  });
+
+  it("AP-32 – dieselbe VorgangsNr zweimal ist weiterhin eine Verdopplung", () => {
+    // Die Gegenprobe zu AP-31: eine zweimal angehängte Datei wiederholt die
+    // VorgangsNr mitsamt allem anderen. Ein zusätzliches Feld im
+    // Identitäts-Schlüssel kann nur WENIGER ablehnen — es darf den Riegel
+    // nicht stumpf machen.
+    const verdoppelt = datei(
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "2505802877" }),
+      beleg("2026-03-06", "1", "70.00"),
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "2505802877" }),
+      beleg("2026-03-06", "1", "70.00"),
+    );
+    expect(() => parseAvisCsv(verdoppelt)).toThrow(/Block mehrfach/);
+  });
+
+  it("AP-33 – der Hinweis greift auf der KANONISIERTEN Nummer, nicht am Rohwert", () => {
+    // Der Parser kanonisiert `ZEM_RecNr` über `extractReInvoiceNumber` (O→0,
+    // eingeschobene Leerzeichen). Die erste Fassung prüfte mit einem eigenen
+    // Regex gegen den ROHWERT — ein dritter Block für eine Frage, für die
+    // `avis-match.ts` ausdrücklich eine SSoT führt.
+    //
+    // Ausgeführt im Review: bei `RE-2026-O212` verwarf der Test beide Blöcke
+    // als „Altbestand" und verschluckte den Hinweis. Der Mechanismus, der
+    // Altbestand schonen soll, schluckte eine echte kanonische Nummer.
+    const mitBuchstabeO = datei(
+      kopf("RE-2026-O212", "70.00", "70.00", { vorgang: "V-A" }),
+      beleg("RE-2026-O212", "1", "70.00"),
+      kopf("RE-2026-0212", "30.00", "30.00", { vorgang: "V-B" }),
+      beleg("RE-2026-0212", "1", "30.00"),
+    );
+    const r = parseAvisCsv(mitBuchstabeO);
+    expect(r.items.map(i => i.rechnungsNummer)).toEqual(["RE-2026-0212", "RE-2026-0212"]);
+    expect(r.hinweise, "der Hinweis wurde am Rohwert vorbei verschluckt").toHaveLength(1);
+    expect(r.hinweise[0]).toContain("RE-2026-0212");
   });
 
   it("AP-28 – eine Fehlermeldung zitiert KEINEN Zellinhalt", () => {
@@ -290,8 +350,9 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
       const m = (e as Error).message;
       expect(m, "der Zellinhalt steht in der Meldung").not.toContain("Musterfrau");
       expect(m).toContain("KTR_BTR_Zahlg");
-      expect(m, "ohne Längenangabe ist die Stelle nicht zu finden").toMatch(/\d+ Zeichen/);
-      expect(m).toMatch(/nicht numerisch/);
+      // Die Länge lokalisiert in einer Datei mit 66 Blöcken nichts und ist
+      // überdies die NACH `trim()`. `LfdNr` trifft die Zeile genau.
+      expect(m, "ohne Ortsangabe ist die Stelle nicht zu finden").toMatch(/LfdNr \d+/);
     }
   });
 

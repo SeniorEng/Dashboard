@@ -264,12 +264,38 @@ export function useAdviceMutations({ onCreateSuccess }: { onCreateSuccess: () =>
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) =>
-      unwrapResult(await api.post<{ advice: PaymentAdvice; matched: number }>("/admin/qonto/payment-advices", data)),
+      unwrapResult(await api.post<{
+        advice: PaymentAdvice;
+        matched: number;
+        hinweise?: string[];
+        ausgaenge?: { bestaetigt: number; unterzahlungen: number; ungeprueft: number; hinweise: number };
+      }>("/admin/qonto/payment-advices", data)),
     onSuccess: (result) => {
       const msg = result.matched > 0
         ? `Avis gespeichert — ${result.matched} Rechnungen zugeordnet`
         : "Zahlungsavis gespeichert";
-      toast({ title: msg });
+
+      /**
+       * Auffälligkeiten und Ausgangs-Zähler anzeigen — nicht nur „gespeichert".
+       *
+       * Der Hinweis-Kanal blockiert bewusst nicht; er ist der dritte Ausgang
+       * neben „abgelehnt" und „in Ordnung". Wenn er hier nicht ankommt, ist er
+       * keiner: dann entscheidet niemand, weil niemand es sieht.
+       *
+       * Die Zähler stehen dabei, damit „nichts gemeldet" von „nichts geprüft"
+       * unterscheidbar bleibt.
+       */
+      const a = result.ausgaenge;
+      const zeilen = [
+        a && `${a.bestaetigt} bestätigt · ${a.unterzahlungen} unterzahlt · ${a.ungeprueft} ohne auflösbare Rechnung`,
+        ...(result.hinweise ?? []),
+      ].filter(Boolean) as string[];
+
+      toast({
+        title: msg,
+        description: zeilen.length > 0 ? zeilen.join("\n") : undefined,
+        variant: (result.hinweise?.length ?? 0) > 0 ? "destructive" : undefined,
+      });
       invalidateRelated(queryClient, "qonto");
       onCreateSuccess();
     },
