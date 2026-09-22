@@ -130,6 +130,33 @@ describe("Kostenschätzung — projizieren, aber warnen statt sperren", () => {
     expect(mitAusweich.warning).not.toContain("Ausweichbudget");
   });
 
+  it("MG-8 – der Satz steht auch im harten Stopp", () => {
+    // Alriks Ergänzung: im Mittelzweig heißt der Satz „es wird knapp", im
+    // harten Stopp heißt er „du musst nicht weitersuchen". Dort steht eine
+    // Mitarbeiterin vor einem gesperrten Knopf und müsste sonst raten, ob
+    // irgendein anderer Topf noch hilft.
+    const gesperrt = classifyCostEstimate({
+      ...BASIS,
+      totalCostCents: 300_00,
+      availableCents: 47_00,
+      projectedAvailableCents: 178_00,
+      pflegegrad1OhnePrivatzahlung: true,
+    });
+    expect(gesperrt.kind).toBe("hard_block");
+    expect(gesperrt.warning).toContain("Kein Ausweichbudget verfügbar.");
+    // Der Fehlbetrag bleibt daneben stehen — der Satz ersetzt ihn nicht.
+    expect(gesperrt.warning).toContain("122,00");
+
+    const mitAusweichGesperrt = classifyCostEstimate({
+      ...BASIS,
+      totalCostCents: 300_00,
+      availableCents: 47_00,
+      projectedAvailableCents: 178_00,
+      pflegegrad1OhnePrivatzahlung: false,
+    });
+    expect(mitAusweichGesperrt.warning).not.toContain("Ausweichbudget");
+  });
+
   it("MG-7 – ist die Projektion KLEINER, entscheidet trotzdem sie", () => {
     /**
      * Der Fall, den `Math.max` verschluckt hat (Gate 2 zu #167, S1).

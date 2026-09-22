@@ -197,7 +197,17 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
     }
     return {
       kind: "hard_block",
-      warning: `Budget reicht nicht — es fehlen ${shortfallEuro}.`,
+      /**
+       * Alriks Satz steht HIER genauso wie im Mittelzweig — und hier ist er
+       * am meisten wert.
+       *
+       * Im Mittelzweig heisst er „es wird knapp". Im harten Stopp heisst er
+       * **„du musst nicht weitersuchen"**: die Mitarbeiterin steht vor einem
+       * gesperrten Knopf und muesste sonst raten, ob irgendein anderer Topf
+       * noch hilft.
+       */
+      warning: `Budget reicht nicht — es fehlen ${shortfallEuro}.`
+        + (input.pflegegrad1OhnePrivatzahlung ? " Kein Ausweichbudget verfügbar." : ""),
       isHardBlock: true,
       privateCents: 0,
       vatCents: 0,
