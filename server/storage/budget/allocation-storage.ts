@@ -596,6 +596,16 @@ interface Allocated45bResult {
   // werden (`getExcluded45bConsumption`). `null`, wenn kein Reset wirksam ist
   // bzw. im `{year}`-Pool-Modus.
   resetCutoffDate: string | null;
+  /**
+   * Jahr desselben Reset-Startwerts.
+   *
+   * Wird MITGEGEBEN statt beim Aufrufer aus `resetCutoffDate` abgeleitet
+   * (Gate 2 zu #166): die Groesse existiert hier bereits als `resetYear`, und
+   * eine zweite Ableitung waere genau das, was dieser PR an sechs Stellen
+   * beseitigt — dieselbe Frage zweimal beantwortet, wobei die zweite Antwort
+   * nur haelt, solange das Datumsformat bleibt.
+   */
+  resetYear: number | null;
   // Task #1927 — Monatsanfang, ab dem Monatsaufstockungen zum Topf beitragen
   // (`enumStart` nach ALLEN Shifts: Anker, Übertrag, Settings-Fenster,
   // Verfalls-Boden, Startwert-Reset).
@@ -710,7 +720,7 @@ async function calculateAllocated45b(
   if (anchor.kind === "ineligible") {
     // Kein Anspruch, also auch kein Aufstockungs-Boden: es gibt keine Monate,
     // die herausfallen koennten.
-    return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetCutoffDate: null, accrualFloorDate: null };
+    return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetCutoffDate: null, resetYear: null, accrualFloorDate: null };
   }
   const budgetStartDate: string = anchor.anchorIso;
 
@@ -1125,6 +1135,7 @@ async function calculateAllocated45b(
       allocatedCents: yearMonthlyTotal + sumInitialBalancesForYear(existingAllocations, opts.year),
       excludedSpecialAllocationIds: [],
       resetCutoffDate: null,
+      resetYear: null,
       // Pool-Modus (Uebertrags-Berechnung), kein Lesepfad: dort muss das volle
       // Quelljahr sichtbar bleiben, ein Boden waere fachlich falsch.
       accrualFloorDate: null,
@@ -1199,6 +1210,7 @@ async function calculateAllocated45b(
     allocatedCents: totalCalculated + initialBalanceTotal + carryoverTotal,
     excludedSpecialAllocationIds,
     resetCutoffDate,
+    resetYear: hasReset ? resetYear : null,
     accrualFloorDate,
   };
 }

@@ -545,8 +545,12 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
   const heute = todayISO();
   const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: heute });
   const ausgeschlossen = new Set(diagnose.excludedSpecialAllocationIds);
-  const resetAnker = diagnose.resetCutoffDate
-    ? { cutoffDate: diagnose.resetCutoffDate, year: Number(diagnose.resetCutoffDate.slice(0, 4)) }
+  // `resetYear` kommt aus der Diagnose, nicht aus `resetCutoffDate.slice(0, 4)`.
+  // Die Ableitung waere rechnerisch richtig und trotzdem die siebte Stelle,
+  // an der dieselbe Groesse ein zweites Mal entsteht — sie haelt nur, solange
+  // das Datumsformat bleibt (Gate 2 zu #166).
+  const resetAnker = diagnose.resetCutoffDate != null && diagnose.resetYear != null
+    ? { cutoffDate: diagnose.resetCutoffDate, year: diagnose.resetYear }
     : null;
   const resetMonat = diagnose.resetCutoffDate
     ? `${diagnose.resetCutoffDate.slice(5, 7)}/${diagnose.resetCutoffDate.slice(0, 4)}`
