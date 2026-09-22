@@ -1,8 +1,31 @@
 # CareConnect — Betriebs- & Arbeitsregeln
 
-Elderly-care-Service-Management. Diese Datei gilt für die Nicht-Replit-Umgebung
-(Hetzner-Server + Coolify, Docker-Deploy aus GitHub). `replit.md` bleibt bis zum
-Cutover parallel gültig (Replit-Betrieb).
+Elderly-care-Service-Management.
+
+> ## ⚠ Die laufende Umgebung ist REPLIT
+>
+> **Hetzner + Coolify ist der GEPLANTE Umzug, nicht der Ist-Zustand.** Prod
+> läuft heute auf Replit; `replit.md` beschreibt den laufenden Betrieb. Der
+> Coolify-Hinweis in `.replit` ist ein Kommentar über den Umzug, keine aktive
+> Konfiguration.
+>
+> Die Abschnitte „Deploy & Betrieb (Hetzner/Coolify)" und der Release-Step
+> unten beschreiben deshalb die **Ziel**-Umgebung. Wer heute etwas über Deploy,
+> Env oder Secrets wissen will, liest `replit.md` — Env-Werte stehen unter
+> **Deployments → Secrets**, und die Workspace-Shell kann andere tragen als die
+> veröffentlichte App.
+>
+> **Warum das hier oben steht:** die Datei las sich als Beschreibung der
+> laufenden Umgebung, und genau so wurde sie benutzt — am 22.09.2026 mehrfach
+> in einer Arbeitssitzung, bis hin zu „die Env liegt bei Coolify" bei einer
+> Frage, deren Antwort in den Replit-Secrets stand. Eine Grundannahme, die
+> falsch ist, kostet nicht dort, wo sie steht, sondern in jeder Ableitung
+> daraus.
+
+Diese Datei gilt für die Ziel-Umgebung (Hetzner-Server + Coolify, Docker-Deploy
+aus GitHub) **sowie** für die Arbeits-, Gate- und Test-Regeln, die schon heute
+unverändert gelten. `replit.md` bleibt bis zum Cutover die Quelle für den
+laufenden Betrieb.
 
 ## Deploy & Betrieb (Hetzner/Coolify)
 
