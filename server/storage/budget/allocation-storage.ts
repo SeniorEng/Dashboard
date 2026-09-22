@@ -425,10 +425,47 @@ export async function getCustomerBudgetAmounts(customerId: number, _tx?: DbClien
   };
 }
 
+/**
+ * `resetDisplacesAllSources` — die Inventur-Lesart, hinter einem Flag.
+ *
+ * P1 `6hXp9qMrXH2WGVVG`. Ein §45b-Startwert ist eine INVENTUR: er sagt nicht
+ * „hier kommt etwas dazu", sondern „ab hier gilt dieser Bestand, ungeachtet
+ * dessen, was vorher gerechnet wurde". Eine Inventur ersetzt alles davor —
+ * **vollstaendig und unabhaengig von der Quelle.**
+ *
+ * Heute gilt das nur fuer eine Quelle. Zwei Mechanismen verdraengen bereits:
+ *  - **IB-Supersession** (#959/#1392): ein Uebertrag fuer Zieljahr T sperrt den
+ *    Startwert des Quelljahrs T-1. Zweck ist Doppelzaehlung, nicht Inventur.
+ *  - **Reset-Semantik** (#1812): nur der Startwert des SPAETESTEN wirksamen
+ *    Reset-Monats zaehlt; fruehere fallen in `excludedSpecialAllocationIds`.
+ *    Das IST die Inventur-Regel — aber `ibCounted` prueft
+ *    `a.source === "initial_balance"`, also greift sie ausschliesslich dort.
+ *
+ * `carryoverCounted` kennt **keine** Reset-Bedingung: es prueft nur das
+ * Zeitfenster. Genau daraus entsteht der gemeldete Fehler — Startwert und
+ * Uebertrag stehen nebeneinander, obwohl der Startwert den Uebertrag ersetzt.
+ *
+ * Das Flag ERWEITERT deshalb die bestehende Grenze (`resetCutoffDate`) auf die
+ * zweite Quelle, statt eine zweite Verdraengung danebenzustellen. Ein nicht
+ * gezaehlter Uebertrag faellt automatisch in `excludedSpecialAllocationIds` —
+ * die Symmetrie auf der Verbrauchsseite kommt damit ohne Zutun mit
+ * (Symmetrie-Anker #1306/#1392).
+ *
+ * ── Warum Flag und nicht direkt ──────────────────────────────────────────
+ * Die Betroffenheit ist zu MESSEN, nicht zu schaetzen, und jeder Nachbau von
+ * `allocatedCents` in SQL hat denselben blinden Fleck: `totalCalculated` (die
+ * virtuelle Monatsaufstockung) ist keine Tabellenzeile, dazu
+ * `manual_adjustment` als vierte Quelle. Ein erster Anlauf ist genau daran
+ * gescheitert (negative SOLL-Werte). Mit dem Flag laesst sich DIESELBE
+ * Funktion zweimal aufrufen und die Differenz ausweisen — per Konstruktion
+ * deckungsgleich mit dem, was die App anzeigt.
+ *
+ * Default `false`: ohne ausdrueckliches Setzen aendert sich nichts.
+ */
 export async function calculateAllocatedCents(
   customerId: number,
   budgetType: string,
-  opts: { year?: number; asOfDate?: string; projectFuture?: boolean },
+  opts: { year?: number; asOfDate?: string; projectFuture?: boolean; resetDisplacesAllSources?: boolean },
   _tx?: DbClient,
   _preferences?: CustomerBudgetPreferences | undefined,
   _typeSettings?: CustomerBudgetTypeSetting[]
@@ -567,9 +604,42 @@ interface Allocated45bResult {
   accrualFloorDate: string | null;
 }
 
+/**
+ * Lese-Zugang zu den Diagnose-Groessen von `calculateAllocated45b`.
+ *
+ * ERSETZT nichts — es gab bisher keinen Weg, `accrualFloorDate` und
+ * `resetCutoffDate` von aussen zu sehen. `getExcluded45bConsumption` liefert
+ * nur `{ excludedSpecialAllocationIds, excludedConsumedNetCents }`.
+ *
+ * Gebaut fuer die Messung zu P1 `6hXp9qMrXH2WGVVG` (Gate 2, S4): der Docblock
+ * des Mess-Skripts begruendete, warum `accrualFloorDate` mitausgegeben werden
+ * MUSS — eine Anspruchs-Differenz waere sonst nicht von der
+ * `latestValidCarryoverYear`-Nebenwirkung zu unterscheiden — und das Skript
+ * gab es nirgends aus. **Es konnte es auch nicht.** Eine Begruendung fuer
+ * etwas, das es nicht gibt, ist schlimmer als keine: sie wird als Nachweis
+ * gelesen.
+ *
+ * Rein lesend, keine Seiteneffekte.
+ */
+export async function read45bAllocationDiagnostics(
+  customerId: number,
+  opts: { year?: number; asOfDate?: string; projectFuture?: boolean; resetDisplacesAllSources?: boolean },
+  _tx?: DbClient,
+  _typeSettings?: CustomerBudgetTypeSetting[],
+): Promise<Allocated45bResult> {
+  const d = _tx ?? db;
+  const typeSettings = _typeSettings
+    ?? await readBudgetTypeSettings(
+      customerId,
+      { kind: "forDate", asOfDate: opts.asOfDate ?? todayISO() },
+      _tx,
+    );
+  return calculateAllocated45b(customerId, opts, d, typeSettings);
+}
+
 async function calculateAllocated45b(
   customerId: number,
-  opts: { year?: number; asOfDate?: string; projectFuture?: boolean },
+  opts: { year?: number; asOfDate?: string; projectFuture?: boolean; resetDisplacesAllSources?: boolean },
   d: Pick<typeof db, 'select'>,
   typeSettings: CustomerBudgetTypeSetting[]
 ): Promise<Allocated45bResult> {
@@ -652,6 +722,35 @@ async function calculateAllocated45b(
     .filter(a => a.source === "initial_balance" && a.month != null)
     .map(a => ({ year: a.year, month: a.month! }));
 
+  // ── Task #1812, hochgezogen (P1 6hXp9qMrXH2WGVVG) ──────────────────────
+  // Der SPAETESTE zum Stichtag bereits wirksame Startwert-Monat M ist die neue
+  // Basis. Diese Rechnung stand frueher unmittelbar vor der Enumeration; sie
+  // haengt aber NUR an `initialBalanceMonths` und `opts`, nicht an irgendeinem
+  // Uebertrag. Hochgezogen, damit `carryoverCounted` (unten) dieselbe Grenze
+  // sehen kann — sonst muesste die Verdraengungsregel ein ZWEITES Mal
+  // ausrechnen, was der Reset-Monat ist.
+  //
+  // Ein rein zukuenftiger Startwert (M-Start > Stichtag) ist noch nicht wirksam
+  // und loest keinen Reset aus (rueckwirkende Reads bleiben korrekt). Im
+  // `{year}`-Pool-Modus gibt es keinen Reset (out of scope, s.u.).
+  const resetDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
+  let resetYear = 0, resetMonth = 0;
+  let hasReset = false;
+  if (opts.year == null) {
+    for (const ib of initialBalanceMonths) {
+      const ibStart = `${ib.year}-${String(ib.month).padStart(2, "0")}-01`;
+      if (ibStart > resetDateLimit) continue;
+      if (!hasReset || ib.year > resetYear || (ib.year === resetYear && ib.month > resetMonth)) {
+        resetYear = ib.year;
+        resetMonth = ib.month;
+        hasReset = true;
+      }
+    }
+  }
+  const resetCutoffDate = hasReset
+    ? `${resetYear}-${String(resetMonth).padStart(2, "0")}-01`
+    : null;
+
   // Task #1812 — §45b-Startwert = Reset/Re-Baseline (nicht mehr additiv).
   // Der `allocStart`-Shift auf den Monat NACH dem Startwert wird NICHT mehr hier
   // auf die geteilte `allocStart`-Variable angewendet (er kollidierte mit dem
@@ -699,10 +798,31 @@ async function calculateAllocated45b(
   //    `expiryFloor` ohnehin ausgeblendet und sein Verbrauch wird symmetrisch
   //    herausgerechnet. Damit kann ein abgelaufener Übertrag weder allocStart
   //    noch den Startwert-Boden verfälschen (Entkopplung Startwert↔Übertrag).
+  //
+  // ── Die Verdraengung, hinter `resetDisplacesAllSources` ────────────────
+  // Ein Uebertrag, dessen Gueltigkeit VOR dem wirksamen Startwert-Monat
+  // beginnt, ist Teil dessen, was die Inventur ersetzt. Bisher zaehlte er
+  // weiter — er ist der einzige Fall, den die Reset-Semantik (#1812) nicht
+  // erfasst, weil `ibCounted` auf `source === "initial_balance"` prueft.
+  //
+  // **Diese Bedingung wirkt auf DREI Verbraucher, nicht nur auf die Summe:**
+  //  1. `carryoverTotal`               — hier ist die Aenderung gewollt
+  //  2. `supersededIbYears`            — ein verdraengter Uebertrag supersediert
+  //                                      keinen Startwert mehr
+  //  3. `latestValidCarryoverYear`     — der `allocStart`-Shift
+  //
+  // (3) ist der gefaehrliche: weniger Shift heisst MEHR aufgestockte Monate,
+  // also potenziell ein HOEHERER Anspruch — die Gegenrichtung zum Zweck der
+  // Korrektur. In den bekannten Faellen dominiert
+  // `enumStart = max(Shift, Reset+1)` ohnehin der Reset, aber das ist ein
+  // Argument ueber wenige Kunden und kein Beweis. Deshalb gibt der
+  // Mess-Aufruf `accrualFloorDate` mit aus: sonst ist eine Differenz im
+  // Anspruch nicht von dieser Nebenwirkung zu unterscheiden.
   const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null }) =>
     a.source === "carryover" &&
     a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
-    (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`));
+    (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)) &&
+    (!opts.resetDisplacesAllSources || !resetCutoffDate || a.validFrom >= resetCutoffDate);
   const validCarryoverTargetYears = existingAllocations
     .filter(carryoverCounted)
     .map(a => a.year);
@@ -897,23 +1017,6 @@ async function calculateAllocated45b(
   // (Carryover-Berechnung, out of scope) — dort bleibt allocStart maßgeblich.
   // Ein rein zukünftiger Startwert (M-Start > Stichtag) ist noch nicht wirksam
   // und löst keinen Reset aus (rückdatierte Reads bleiben korrekt).
-  const resetDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
-  let resetYear = 0, resetMonth = 0;
-  let hasReset = false;
-  if (opts.year == null) {
-    for (const ib of initialBalanceMonths) {
-      const ibStart = `${ib.year}-${String(ib.month).padStart(2, "0")}-01`;
-      if (ibStart > resetDateLimit) continue;
-      if (!hasReset || ib.year > resetYear || (ib.year === resetYear && ib.month > resetMonth)) {
-        resetYear = ib.year;
-        resetMonth = ib.month;
-        hasReset = true;
-      }
-    }
-  }
-  const resetCutoffDate = hasReset
-    ? `${resetYear}-${String(resetMonth).padStart(2, "0")}-01`
-    : null;
 
   let enumStartYear = allocStartYear;
   let enumStartMonth = allocStartMonth;
@@ -1085,7 +1188,7 @@ export async function getExcluded45bConsumption(
   asOfDate: string,
   d: Pick<typeof db, 'select'>,
   typeSettings: CustomerBudgetTypeSetting[],
-  opts?: { projectFuture?: boolean },
+  opts?: { projectFuture?: boolean; resetDisplacesAllSources?: boolean },
 ): Promise<{ excludedSpecialAllocationIds: number[]; excludedConsumedNetCents: number }> {
   // Task #1340 — `projectFuture` MUSS denselben Wert haben wie der zugehörige
   // `calculateAllocatedCents`-Aufruf, dessen Verbrauch wir symmetrisch
@@ -1095,7 +1198,14 @@ export async function getExcluded45bConsumption(
   // Lese-/Buchungs-Pfade (`unified-reader`, `consumption-engine`).
   const { excludedSpecialAllocationIds, resetCutoffDate, accrualFloorDate } = await calculateAllocated45b(
     customerId,
-    { asOfDate, projectFuture: opts?.projectFuture },
+    // `resetDisplacesAllSources` MUSS aus demselben Grund mitlaufen wie
+    // `projectFuture` (P1 6hXp9qMrXH2WGVVG): verdraengt das Flag einen
+    // Uebertrag aus `Allocated`, faellt dessen ID in
+    // `excludedSpecialAllocationIds` — aber nur, wenn dieser Aufruf dieselbe
+    // Regel faehrt. Ohne Durchreichen saenke die Verdraengung den Anspruch und
+    // zoege den zugehoerigen Verbrauch weiter ab: genau die Drift, vor der der
+    // Kommentar oben warnt, nur mit einer zweiten Stellschraube.
+    { asOfDate, projectFuture: opts?.projectFuture, resetDisplacesAllSources: opts?.resetDisplacesAllSources },
     d,
     typeSettings,
   );
