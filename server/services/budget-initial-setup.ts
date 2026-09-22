@@ -37,8 +37,19 @@ export class BudgetInitialSetupError extends Error {
 export interface ApplyInitialBudgetParams {
   customerId: number;
   budgetType: string;
-  currentMonthAmountCents: number;
-  carryoverAmountCents?: number;
+  /**
+   * Startwert fuer den Stichmonat. `null`/`undefined` = **keine Angabe**,
+   * `0` = **festgestellte Null**.
+   *
+   * Die Unterscheidung ist fachlich, nicht kosmetisch (Alrik, 22.09.2026,
+   * Inventur-Lesart): „0,00 EUR" heisst „aus dem Vorjahr ist nichts uebrig",
+   * und das ist eine Aussage, kein leeres Feld. Vorher war der Typ
+   * `number` und der Aufrufer schrieb `?? 0` — die Unterscheidung war damit
+   * schon VOR dieser Funktion verloren.
+   */
+  currentMonthAmountCents?: number | null;
+  /** Uebertrag aus dem Vorjahr. Dieselbe Semantik: `null` = keine Angabe. */
+  carryoverAmountCents?: number | null;
   /** RAW-Anker (Pflegegrad-Beginn / Stichmonat), ungekappt. */
   budgetStartDate: string;
   /** Bereits geladene Kundenstammdaten für die Intent-Validierung. */
@@ -64,8 +75,9 @@ export interface ApplyInitialBudgetParams {
  * (Task #705/#876) sind hier zentralisiert — siehe Inline-Kommentare.
  */
 export async function applyInitialBudget(params: ApplyInitialBudgetParams): Promise<BudgetAllocation[]> {
-  const { customerId, budgetType, currentMonthAmountCents, customer, userId, tx } = params;
-  const carryoverAmountCents = params.carryoverAmountCents ?? 0;
+  const { customerId, budgetType, customer, userId, tx } = params;
+  const currentMonthAmountCents = params.currentMonthAmountCents ?? null;
+  const carryoverAmountCents = params.carryoverAmountCents ?? null;
   const rawBudgetStartDate = params.budgetStartDate;
 
   // Selbstzahler-/Pflegegrad-Block via geteilte reine Validatoren (Task #705/
@@ -99,7 +111,7 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
     const careLevelHistory = await getCustomerCareLevelHistory(customerId);
     const accrualAnchor = resolve45bAccrualAnchor(careLevelHistory, rawBudgetStartDate);
 
-    if (currentMonthAmountCents > 0) {
+    if (currentMonthAmountCents != null && currentMonthAmountCents > 0) {
       const startCap = max45bStartValueCents(accrualAnchor, budgetStartDate);
       if (currentMonthAmountCents > startCap) {
         throw new BudgetInitialSetupError(
@@ -110,7 +122,7 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
       }
     }
 
-    if (carryoverAmountCents > 0) {
+    if (carryoverAmountCents != null && carryoverAmountCents > 0) {
       const carryoverCap = max45bCarryoverCents(
         eligible45bCarryoverMonths(accrualAnchor, year),
       );
@@ -126,13 +138,25 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
 
   // §45a/§39_42a: Topf idempotent in-place aktivieren, damit der Read-Pfad den
   // Startwert nicht herausfiltert (Task #705/#876).
-  if ((budgetType === "umwandlung_45a" || budgetType === "ersatzpflege_39_42a") && currentMonthAmountCents > 0) {
+  if ((budgetType === "umwandlung_45a" || budgetType === "ersatzpflege_39_42a") && currentMonthAmountCents != null && currentMonthAmountCents > 0) {
     await budgetStorage.ensureBudgetTypeEnabledInPlace(customerId, budgetType, budgetStartDate, tx);
   }
 
   const allocations: BudgetAllocation[] = [];
 
-  if (currentMonthAmountCents > 0) {
+  /**
+   * ── Schranke 6 (Gate 2 zu #163, S6) ──────────────────────────────────
+   * Hier stand `> 0`. Eine 0 wurde nach der Validierung **verworfen** — und
+   * die Route meldete trotzdem `201 Created` mit einem Audit-Eintrag, der
+   * `currentMonthAmountCents: 0` behauptet, waehrend in der DB nichts steht.
+   * **Angenommen, quittiert, verworfen** ist die schlechteste Kombination:
+   * der Audit-Eintrag ist dann kein Beleg mehr, sondern eine Behauptung.
+   *
+   * Geprueft wird jetzt die ANGABE (`!= null`), nicht ihre Hoehe. Der
+   * Lesepfad haengt ohnehin an der Existenz der Zeile
+   * (`initialBalanceMonths` filtert auf sie), nicht am Betrag.
+   */
+  if (currentMonthAmountCents != null) {
     const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
     const startMonth = startDate.getMonth() + 1;
     await budgetStorage.upsertInitialBalanceAllocation({
@@ -149,7 +173,7 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
     if (allAllocations.length > 0) allocations.push(allAllocations[0]);
   }
 
-  if (carryoverAmountCents > 0 && budgetType === "entlastungsbetrag_45b") {
+  if (carryoverAmountCents != null && budgetType === "entlastungsbetrag_45b") {
     // validFrom auf Jahresanfang (Task #116/#601), Zieljahr-konsistent zu
     // `ensureYearlyCarryover45b` (verhindert Doppel-Carryover via Auto-Dedup).
     const carryoverAllocation = await budgetStorage.createBudgetAllocation({

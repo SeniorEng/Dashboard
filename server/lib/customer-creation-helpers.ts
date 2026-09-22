@@ -231,7 +231,12 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
   if (input.budgets) {
     {
       const typeSettings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }> = [];
-      if (input.budgets.entlastungsbetrag45b > 0) {
+      // Auch dann anlegen, wenn nur ein Startwert oder ein Uebertrag angegeben
+      // ist: bei einer festgestellten Null ist `entlastungsbetrag45b` haeufig
+      // 0, und `> 0` allein haette die Angabe verschluckt (Schranke 8).
+      if (input.budgets.entlastungsbetrag45b > 0
+        || input.budgets.override45bCents != null
+        || input.budgets.carryoverAmountCents != null) {
         // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Der vom
         // Wizard gesendete Eurobetrag dient nur noch als Enable-Signal —
         // monthlyLimitCents bleibt explizit null.
@@ -273,16 +278,26 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
       // zum bisherigen Frontend-Verhalten.
       const budgetStart = input.pflegegradSeit || todayISO();
       const customerForBudget = { billingType: input.billingType, pflegegrad: input.pflegegrad };
-      const carryover = input.budgets.carryoverAmountCents ?? 0;
+      // `?? null` statt `?? 0`: hier ging die Unterscheidung zwischen „keine
+      // Angabe" und „festgestellte Null" verloren, BEVOR `applyInitialBudget`
+      // sie ueberhaupt sehen konnte. Der Wizard traegt sie inzwischen bis
+      // hierher durch (`override45bActive`/`carryover45bUsable` als
+      // Existenz-Signal, der Betrag als Wert).
+      const carryover = input.budgets.carryoverAmountCents ?? null;
 
-      if (input.budgets.entlastungsbetrag45b > 0) {
+      // Auch dann anlegen, wenn nur ein Startwert oder ein Uebertrag angegeben
+      // ist: bei einer festgestellten Null ist `entlastungsbetrag45b` haeufig
+      // 0, und `> 0` allein haette die Angabe verschluckt (Schranke 8).
+      if (input.budgets.entlastungsbetrag45b > 0
+        || input.budgets.override45bCents != null
+        || carryover != null) {
         maybeFail("initial_budget", testFaults);
         await applyInitialBudget({
           customerId,
           budgetType: "entlastungsbetrag_45b",
           // §45b: nur der aktive Restguthaben-Override bucht ein initial_balance;
           // sonst 0 (rein auto-renewal-getrieben), Carryover + Anker via Preferences.
-          currentMonthAmountCents: input.budgets.override45bCents ?? 0,
+          currentMonthAmountCents: input.budgets.override45bCents ?? null,
           carryoverAmountCents: carryover,
           budgetStartDate: input.budgets.override45bStichmonatStart || budgetStart,
           customer: customerForBudget,

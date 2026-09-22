@@ -1362,6 +1362,39 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
           </div>
         )}
 
+        {/**
+          * PFLICHT-Warnung zur 0 (Alrik, 22.09.2026, zusammen mit der Freigabe).
+          *
+          * „0,00 € Restguthaben aus Vorjahr" heißt „aus dem Vorjahr ist nichts
+          * übrig" — eine Aussage, kein leeres Feld. Das Verhalten dazu ist
+          * richtig und bleibt: die Zeile verdrängt den Startwert des
+          * Bezugsjahres, und der Topf läuft im Folgejahr neu an.
+          *
+          * **Nur ist der Weg dorthin unsichtbar.** Gemessen an einem echten
+          * Fall: eine 0-€-Übertragszeile senkt den Anspruch um 1.286,00 €,
+          * ohne dass ein Cent dagegensteht — sie supersediert den Startwert
+          * und schiebt den Beginn der Monatsaufstockung. Wer „0" eintippt,
+          * sieht davon nichts.
+          *
+          * Ohne diese Warnung wäre es dieselbe Konflation, die dieser Vorgang
+          * beseitigt, nur mit umgekehrtem Vorzeichen: vorher war die 0 nicht
+          * eingebbar, danach wäre sie eingebbar und folgenreich, ohne dass
+          * jemand die Folge sieht.
+          */}
+        {hasValidInput && eingegebeneCents === 0 && (
+          <div
+            className="flex items-start gap-2 mt-1 p-2 rounded bg-amber-50 border border-amber-300 text-xs text-amber-900"
+            data-testid={`warning-carryover-zero-${budgetType}`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>
+              Damit gilt das Vorjahresbudget als aufgebraucht. Ein Startwert aus{" "}
+              {sourceYear} wird dadurch ersetzt, und der Topf läuft ab 01.01.
+              {targetYear} neu an.
+            </span>
+          </div>
+        )}
+
         {hasValidInput && (
           <div className="space-y-2 mt-1">
             <p className="text-xs text-amber-700">

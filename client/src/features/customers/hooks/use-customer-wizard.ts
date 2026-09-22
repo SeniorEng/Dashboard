@@ -369,12 +369,16 @@ export function useCustomerWizard() {
       verhinderungspflege39: is39Enabled ? (Math.round(parseFloat(formData.verhinderungspflege39) * 100) || 0) : 0,
       pflegesachleistungen36: is45aEnabled ? (Math.round(parseFloat(formData.pflegesachleistungen36) * 100) || 0) : 0,
       validFrom: today,
-      carryoverAmountCents: carryoverAmount > 0 ? carryoverAmount : undefined,
+      // Das EXISTENZ-Signal ist der Schalter, nicht der Betrag: `undefined`
+      // heisst „nicht angegeben", `0` heisst „festgestellte Null". Vorher
+      // entschied `> 0` beides zugleich und warf eine bewusst eingetragene 0
+      // weg, bevor sie den Server erreichte (Schranke 8, P1 6hXp9qMrXH2WGVVG).
+      carryoverAmountCents: (is45bEnabled && carryover45bUsable) ? carryoverAmount : undefined,
       // Task #1213 — §45b-Restguthaben-Override (laufendes Jahr) + Stichmonat-Start
       // fließen jetzt in DENSELBEN Anlage-Request; der Server bucht das
       // initial_balance innerhalb der Anlage-Transaktion (kein separater
       // `POST /budget/:id/initial-budget` mehr).
-      override45bCents: override45bCents > 0 ? override45bCents : undefined,
+      override45bCents: override45bActive ? override45bCents : undefined,
       override45bStichmonatStart: override45bStichmonatStart || undefined,
     };
     const budgets = budgetValues.entlastungsbetrag45b > 0 || budgetValues.verhinderungspflege39 > 0 || budgetValues.pflegesachleistungen36 > 0

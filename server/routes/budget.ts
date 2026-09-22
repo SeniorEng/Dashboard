@@ -1034,11 +1034,32 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   // `applyInitialBudget` (SSoT, auch vom atomaren Kunden-Anlage-Flow genutzt).
   // Die Route übersetzt nur typisierte Fehler ins Wire-Format.
   try {
+    /**
+     * Auf DIESEM Endpunkt heisst `0` weiterhin „keine Angabe" — und das ist
+     * bewusst NICHT die Inventur-Lesart.
+     *
+     * Alriks Entscheidung vom 22.09.2026 betrifft das Feld *Restguthaben aus
+     * Vorjahr* im Budget-Editor: dort ist „0,00 EUR" eine Aussage. Dieser
+     * Endpunkt ist der ONBOARDING-Pfad, und dort bedeutet `0` seit jeher
+     * „ohne Startguthaben und ohne Uebertrag" — so steht es im Aufrufer und
+     * so pruefen es `INT-18.2`/`INT-18.4`.
+     *
+     * Die Unterscheidung „keine Angabe" vs. „festgestellte Null" waere hier
+     * ueber JSON gar nicht ausdrueckbar, solange `0` die eine Bedeutung schon
+     * traegt. Wer eine festgestellte Null setzen will, nimmt
+     * `/initial-balance/:budgetType` bzw. `/carryover/:budgetType` — die
+     * Wege, die die Oberflaeche benutzt.
+     *
+     * **Das ist der Preis des Zweitbegriffs, nicht seine Rechtfertigung.**
+     * Zwei Endpunkte fuer denselben Vorgang beantworten dieselbe Frage jetzt
+     * nachweislich verschieden; welcher bleibt, ist die offene fachliche
+     * Frage im PR (FINDING).
+     */
     const allocations = await applyInitialBudget({
       customerId,
       budgetType,
-      currentMonthAmountCents,
-      carryoverAmountCents,
+      currentMonthAmountCents: currentMonthAmountCents > 0 ? currentMonthAmountCents : null,
+      carryoverAmountCents: carryoverAmountCents > 0 ? carryoverAmountCents : null,
       budgetStartDate,
       customer: { billingType: customer.billingType, pflegegrad: customer.pflegegrad },
       userId,

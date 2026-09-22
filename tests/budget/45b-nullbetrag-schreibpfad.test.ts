@@ -3,6 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { budgetAllocations } from "@shared/schema";
 import { apiPost, createTestCustomer, cleanupCustomer } from "../test-utils";
+import { applyInitialBudget } from "../../server/services/budget-initial-setup";
 
 /**
  * P1 `6hXp9qMrXH2WGVVG` — 0 € muss durch den SCHREIBPFAD kommen, nicht nur
@@ -111,6 +112,60 @@ describe("§45b — 0 € ist ein gültiger Wert auf dem Schreibpfad", () => {
 
       expect((await zeilen(customerId, "initial_balance")).length).toBe(0);
       expect((await zeilen(customerId, "carryover")).length).toBe(0);
+    } finally {
+      await cleanupCustomer(customerId);
+    }
+  });
+
+  it("NS-4 – der Anlage-Pfad legt eine festgestellte Null an, statt sie zu verwerfen", async () => {
+    // Schranke 6/7 (Gate 2 zu #163, S6): `applyInitialBudget` prüfte die HÖHE
+    // (`> 0`) und verwarf eine 0 nach der Validierung — die Route meldete
+    // trotzdem Erfolg, und der Audit-Eintrag behauptete `0`, während in der DB
+    // nichts stand. Ein Audit-Eintrag, der etwas behauptet, was nicht
+    // geschrieben wurde, ist kein Beleg, sondern eine Behauptung.
+    //
+    // Geprüft wird jetzt die ANGABE, nicht ihre Höhe: `undefined` = keine
+    // Angabe, `0` = festgestellte Null.
+    const customerId = await frischerKunde("NS4");
+    try {
+      await applyInitialBudget({
+        customerId,
+        budgetType: "entlastungsbetrag_45b",
+        currentMonthAmountCents: 0,
+        carryoverAmountCents: 0,
+        budgetStartDate: `${JAHR}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`,
+        customer: { billingType: "pflegekasse_gesetzlich", pflegegrad: 3 },
+      });
+
+      const ib = await zeilen(customerId, "initial_balance");
+      expect(ib.length, "die festgestellte Null wurde verworfen").toBe(1);
+      expect(ib[0].amountCents).toBe(0);
+
+      const co = await zeilen(customerId, "carryover");
+      expect(co.length, "der 0-€-Übertrag wurde verworfen").toBe(1);
+      expect(co[0].amountCents).toBe(0);
+    } finally {
+      await cleanupCustomer(customerId);
+    }
+  });
+
+  it("NS-5 – keine Angabe legt weiterhin nichts an", async () => {
+    // Die Gegenprobe zu NS-4, und der eigentliche Grund für `!= null` statt
+    // `>= 0`: „nicht angegeben" darf nicht zu einer Zeile werden. Sonst hätte
+    // jeder Kunde ohne Startwert plötzlich einen Reset-Anker.
+    const customerId = await frischerKunde("NS5");
+    try {
+      await applyInitialBudget({
+        customerId,
+        budgetType: "entlastungsbetrag_45b",
+        budgetStartDate: `${JAHR}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`,
+        customer: { billingType: "pflegekasse_gesetzlich", pflegegrad: 3 },
+      });
+
+      expect((await zeilen(customerId, "initial_balance")).length,
+        "aus „keine Angabe“ ist eine Zeile geworden").toBe(0);
+      expect((await zeilen(customerId, "carryover")).length,
+        "aus „keine Angabe“ ist ein Übertrag geworden").toBe(0);
     } finally {
       await cleanupCustomer(customerId);
     }
