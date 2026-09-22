@@ -289,13 +289,58 @@ function splitCsvLine(line: string, delimiter: string): string[] {
   return parts;
 }
 
+/** `dd.mm.yyyy` oder bereits `yyyy-mm-dd` — sonst nichts. */
+const DEUTSCHES_DATUM = /^(\d{2})\.(\d{2})\.(\d{4})$/;
+const ISO_DATUM = /^\d{4}-\d{2}-\d{2}$/;
+
+/** IBAN: zwei Buchstaben, zwei Ziffern, dann alphanumerisch. `EUR` faellt durch. */
+const IBAN_FELD = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,}$/;
+
+/** Sieht dieses Feld wie ein Datum aus? Grundlage der strukturellen Erkennung. */
+function istDatumsFeld(wert: string): boolean {
+  const w = wert.trim();
+  return DEUTSCHES_DATUM.test(w) || ISO_DATUM.test(w);
+}
+
+/**
+ * Datum in ISO — oder `null`. NIE der Rohwert.
+ *
+ * ── Was hier vorher stand, und was es gekostet hat ──────────────────────
+ * `raw.split(".")`, bei drei Teilen umsortieren, **sonst `raw` zurueckgeben**.
+ * Damit wurde aus `82051000` ein „Datum" — und das landete in
+ * `payment_advices.zahlungs_datum` von drei Avisen (#7, #8, #41, gemessen 3
+ * von 37).
+ *
+ * Die Folge sass zwei Ebenen weiter: `mark-paid` rechnet
+ * `paidAt = parseLocalDate(advice.zahlungsDatum)`, das ergibt `Invalid Date`,
+ * und der Treiber lehnt den Schreibvorgang ab (gemessen). Transaktion,
+ * Rollback, HTTP 500 — **„Als bezahlt markieren" ist fuer diese Avise seit
+ * Juli unbenutzbar**, 49 gebundene Rechnungen ueber 5.798,66 EUR.
+ *
+ * Kein falsches `paid_at` in der Datenbank. Das lag aber am SPALTENTYP:
+ * `paid_at` ist `timestamp`. Waere es `text`, stuende `82051000` heute als
+ * Bezahldatum bei 49 Rechnungen. Das Typ-System war die letzte
+ * Verteidigungslinie und die einzige — Glueck, keine Konstruktion.
+ *
+ * ── Die Bauform, zum dritten Mal ────────────────────────────────────────
+ * `getField` gibt `""` fuer eine fehlende Spalte, `parseBetragCents` gab `0`
+ * fuer Unlesbares, `toIsoDate` gab den Rohwert: **„nicht lesbar" wird zu
+ * einem Wert statt zu einem Fehler.** Drei Stellen, drei Haende, dieselbe
+ * bequeme Wahl — sie zwingt den Aufrufer nicht, einen Fehlerfall zu
+ * behandeln. Die Frage, die sie alle drei gefunden haette: *wer sieht es,
+ * wenn hier nichts Lesbares ankam?*
+ *
+ * Gemessen vor dem Umbau: 3 von 37 `zahlungs_datum` sind kein gueltiges
+ * ISO-Datum, und es sind genau diese drei. `null` setzt also nichts still auf
+ * leer, das heute jemand liest.
+ */
 function toIsoDate(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  const parts = raw.split(".");
-  if (parts.length === 3) {
-    return `${parts[2]}-${parts[1]}-${parts[0]}`;
-  }
-  return raw;
+  const w = raw.trim();
+  const de = w.match(DEUTSCHES_DATUM);
+  if (de) return `${de[3]}-${de[2]}-${de[1]}`;
+  if (ISO_DATUM.test(w)) return w;
+  return null;
 }
 
 function parseDavaso(csvContent: string): ParsedAvis {
@@ -974,11 +1019,58 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
         buchungsDatum: parts[datumIdx] || null,
       });
     } else if (lineType === "3") {
-      headerData.belegNummer = parts[1] || null;
-      headerData.zahlungsDatum = toIsoDate(parts[2] || null);
+      /**
+       * Die Kopffelder STRUKTURELL erkennen, nicht positionell.
+       *
+       * ── Der Prod-Fall (Avis 41, AOK, 22.09.2026) ──────────────────────
+       * Feste Indizes ergaben dort:
+       *   belegNummer   = 130050598   ← die Kostentraeger-IK
+       *   zahlungsDatum = "82051000"  ← kein Datum
+       *   IBAN          = "EUR"
+       *
+       * Gemessen ueber alle 53 Kassen-Dateien gibt es DREI Belegungen der
+       * `3;`-Zeile: Breite 6 (Datum bei [2]), Breite 7 AOK (Datum bei [6],
+       * [2] traegt die Konstante 82051000), Breite 7 BARMER (Datum bei [2],
+       * [6] leer). **Die Feldzahl allein identifiziert das Layout nicht** —
+       * bei 33 von 53 Zeilen ist die Belegung bei gleicher Breite
+       * uneinheitlich. „Breite als Schluessel" war mein erster Vorschlag und
+       * ist durch die Messung widerlegt.
+       *
+       * Der Betrag wird seit Task #1687 strukturell erkannt und ist laut
+       * derselben Messung der einzige Wert, der heute ueberall stimmt. Die
+       * uebrigen Kopffelder folgen jetzt demselben Weg.
+       */
+      const felder = parts.slice(1);
+
+      // Das Datum ist eindeutig: KEINE der 53 `3;`-Zeilen traegt zwei
+      // Datums-Felder, und `82051000` faellt durch beide Datumsmuster.
+      headerData.zahlungsDatum = toIsoDate(felder.find(istDatumsFeld) ?? null);
+
+      // Die IBAN ebenso — `EUR` ist keine.
+      headerData.zahlungsempfaengerIban = felder.find(f => IBAN_FELD.test(f.trim())) ?? null;
+
       headerData.gesamtBetragCents = parseBetragCents(parts[3] || "0", "komma");
       gesamtbetragGefunden = true;
-      headerData.zahlungsempfaengerIban = parts[4] || null;
+
+      /**
+       * Die BELEGNUMMER geht NICHT strukturell — und wird deshalb nur dort
+       * gelesen, wo die Messung sie deckt.
+       *
+       * Die naheliegende Regel („die erste lange Ziffernfolge, die kein
+       * Betrag und kein Datum ist") greift bei der AOK-Zeile auf
+       * `130050598`, also genau auf die IK: sie reproduziert den Bug, den sie
+       * beheben soll. **IK und Belegnummer sind durch ihre Gestalt nicht
+       * unterscheidbar**, das ist grundsaetzlich und kein Detail.
+       *
+       * Breite 6 ist die einzige gemessen EINHEITLICHE Belegung (19 von 19
+       * Zeilen, `[1]` traegt die Belegnummer). Nur dort wird gelesen; sonst
+       * bleibt das Feld leer.
+       *
+       * Ein leeres Feld kostet eine Anzeigezeile. Ein falsch gefuelltes sieht
+       * benutzbar aus — Cowork hat am 22.09. einen Dublettenriegel auf genau
+       * diesem Feld vermutet, weil dort eine Nummer stand.
+       */
+      headerData.belegNummer = parts.length === 6 ? (parts[1] || null) : null;
     }
   }
 

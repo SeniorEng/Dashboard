@@ -730,3 +730,77 @@ describe("DAVASO — eine abweichende Datei bricht ab, statt still zu lügen", (
     expect(pruefsumme.abweichungCents, "die Fehler gleichen sich wieder aus").toBe(2000);
   });
 });
+
+/**
+ * Die Kopffelder der `3;`-Zeile — strukturell statt positionell.
+ *
+ * ── Der Prod-Fall (Avis 41, AOK, 22.09.2026) ────────────────────────────
+ * Feste Indizes ergaben: `belegNummer = 130050598` (die Kostenträger-IK),
+ * `zahlungsDatum = "82051000"` (kein Datum), `IBAN = "EUR"`.
+ *
+ * Die Folge saß zwei Ebenen weiter: `mark-paid` rechnet
+ * `paidAt = parseLocalDate(zahlungsDatum)` → `Invalid Date` → der Treiber
+ * lehnt ab → Rollback → **„Als bezahlt markieren" ist für diese Avise seit
+ * Juli unbenutzbar**, 49 gebundene Rechnungen über 5.798,66 €.
+ *
+ * ── Warum nicht „Breite als Schlüssel" ──────────────────────────────────
+ * Gemessen über alle 53 Kassen-Dateien gibt es DREI Belegungen, und bei
+ * 33 von 53 Zeilen ist sie bei gleicher Feldzahl uneinheitlich. Die Breite
+ * identifiziert das Layout nicht — das war der erste Vorschlag und ist durch
+ * die Messung widerlegt.
+ */
+describe("Kassen-CSV — Kopffelder strukturell erkannt", () => {
+  const kasse = (dreiZeile: string) => [
+    "1;461438852;Senioren Engel;",
+    "2;853010969199;01.06.2026;27.06.2026 RE-2026- 0212;262,00;+;EUR;",
+    dreiZeile,
+  ].join("\n");
+
+  it("AP-39 – das Datum wird gefunden, egal an welcher Position es steht", () => {
+    // Keine der 53 gemessenen `3;`-Zeilen trägt zwei Datums-Felder — das
+    // macht „das Feld, das wie ein Datum aussieht" eindeutig.
+    const breite6 = kasse("3;769501965926;07.01.2026;340,17;DE92100101237314306198;");
+    const breite13 = kasse("3;130050598;82051000;5798,66;EUR;TEXT;24.04.2026;;;;;;");
+    expect(parseAvisCsv(breite6).header.zahlungsDatum).toBe("2026-01-07");
+    expect(parseAvisCsv(breite13).header.zahlungsDatum, "82051000 als Datum gelesen")
+      .toBe("2026-04-24");
+  });
+
+  it("AP-40 – `82051000` ist kein Datum und wird nicht eins", () => {
+    // Der Wert, der drei Avise seit Juli unbezahlbar gemacht hat. Steht in
+    // der Datei kein Datum, ist das Feld `null` — nicht der Rohwert.
+    const ohneDatum = kasse("3;130050598;82051000;5798,66;EUR;");
+    expect(parseAvisCsv(ohneDatum).header.zahlungsDatum).toBeNull();
+  });
+
+  it("AP-41 – die Kostenträger-IK wird nicht als Belegnummer gespeichert", () => {
+    // Die naheliegende Regel — „die erste lange Ziffernfolge, die kein Betrag
+    // und kein Datum ist" — griffe hier auf 130050598, also genau auf die IK:
+    // sie reproduziert den Bug, den sie beheben soll. IK und Belegnummer sind
+    // durch ihre Gestalt NICHT unterscheidbar.
+    //
+    // Deshalb wird die Belegnummer nur dort gelesen, wo die Messung sie deckt
+    // (Breite 6, 19 von 19 Zeilen einheitlich) — sonst bleibt sie leer.
+    const aok = kasse("3;130050598;82051000;5798,66;EUR;TEXT;24.04.2026;;;;;;");
+    expect(parseAvisCsv(aok).header.belegNummer, "die IK steht als Belegnummer").toBeNull();
+
+    const barmer = kasse("3;769501965926;07.01.2026;340,17;DE92100101237314306198;");
+    expect(parseAvisCsv(barmer).header.belegNummer).toBe("769501965926");
+  });
+
+  it("AP-42 – `EUR` ist keine IBAN", () => {
+    const aok = kasse("3;130050598;82051000;5798,66;EUR;TEXT;24.04.2026;;;;;;");
+    expect(parseAvisCsv(aok).header.zahlungsempfaengerIban).toBeNull();
+
+    const barmer = kasse("3;769501965926;07.01.2026;340,17;DE92100101237314306198;");
+    expect(parseAvisCsv(barmer).header.zahlungsempfaengerIban)
+      .toBe("DE92100101237314306198");
+  });
+
+  it("AP-43 – der Betrag bleibt unberührt", () => {
+    // Er wird seit Task #1687 strukturell erkannt und ist laut Messung der
+    // einzige Wert, der heute überall stimmt. Dieser Umbau fasst ihn nicht an.
+    const aok = kasse("3;130050598;82051000;5798,66;EUR;TEXT;24.04.2026;;;;;;");
+    expect(parseAvisCsv(aok).header.gesamtBetragCents).toBe(579866);
+  });
+});
