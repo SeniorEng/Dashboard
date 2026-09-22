@@ -95,7 +95,11 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
    * zwei verschiedene „verfügbar" in einem Kasten, und der Bediener müsste
    * raten, welche gilt (Replit #1916).
    */
-  const istMonatsFall = cost.kind === "erst_im_monat_gedeckt";
+  // Nur wenn die Zahl auch DA ist (Gate 2 zu #167, Notiz): sonst faellt der
+  // Kopf auf die heutige zurueck — also genau die zwei verschiedenen
+  // „verfuegbar" in einem Kasten, gegen die dieser Zweig gebaut ist.
+  const istMonatsFall = cost.kind === "erst_im_monat_gedeckt"
+    && cost.projectedAvailableCents !== undefined;
   const monatsEuro = cost.projectedAvailableCents !== undefined
     ? formatEuroDE(cost.projectedAvailableCents, { withCurrency: false })
     : null;

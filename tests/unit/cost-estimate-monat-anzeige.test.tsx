@@ -92,4 +92,33 @@ describe("Kostenschätzung-Anzeige — „reicht erst im Monat“", () => {
     );
     expect(screen.getByTestId("budget-hard-block")).toBeTruthy();
   });
+
+  it("MA-5 – ohne projizierte Zahl kein irreführender Kopf", () => {
+    /**
+     * Gate 2 zu #167, Notiz: `kind === "erst_im_monat_gedeckt"` OHNE
+     * `projectedAvailableCents` fiel im Kopf auf die heutige Zahl zurück —
+     * also genau die zwei verschiedenen „verfügbar" in einem Kasten, gegen
+     * die dieser Zweig gebaut ist.
+     *
+     * Der Fall entsteht, wenn ein Aufrufer die Projektion nicht anfordert.
+     * Dann ist die WARNUNG richtig und der KOPF falsch — die schlechteste
+     * Kombination, weil beides nebeneinander steht.
+     */
+    render(
+      <CostEstimatePreview
+        billingType="pflegekasse_gesetzlich"
+        costEstimate={{
+          ...BASIS,
+          kind: "erst_im_monat_gedeckt",
+          warning: "Im Termin-Monat reicht das Budget.",
+          // projectedAvailableCents fehlt
+        }}
+      />,
+    );
+    // Kein Monats-Kopf ohne Monats-Zahl.
+    expect(screen.queryByTestId("budget-warning-monat"),
+      "der Kopf nennt eine Monatszahl, die es nicht gibt").toBeNull();
+    // Der generische Warn-Kasten bleibt — die Warnung geht nicht verloren.
+    expect(screen.getByTestId("budget-warning")).toBeTruthy();
+  });
 });

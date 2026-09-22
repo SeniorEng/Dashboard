@@ -2,6 +2,7 @@ import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { syncCarryoverAndExpiry } from "./allocation-storage";
 import { projected45bAvailableCents } from "./net-available-45b";
+import { readBudgetTypeSettings } from "./preferences-storage";
 import { readUnifiedBudgetAvailability } from "./unified-reader";
 
 interface DateAwareAvailability {
@@ -74,8 +75,18 @@ export async function getAvailableForDate(
   // Dieselbe Funktion, die `planHold` fuer seine Entscheidung ruft. Verbrauch
   // und Holds kommen aus dem Read zum TERMINDATUM, nur der Anspruch wird
   // projiziert — die Asymmetrie ist die Overdraft-Garantie und gehoert dazu.
+  // `typeSettings` ZUM STICHTAG mitgeben (Gate 2 zu #167, S7). Ohne den
+  // Parameter faellt `calculateAllocatedCents` auf
+  // `readBudgetTypeSettings(..., todayISO())` zurueck — ein „heute"-Read
+  // mitten in einer Rechnung, deren Zweck der Stichtag ist. `planHold`
+  // uebergibt ihn; zwei Aufrufstellen derselben Funktion mit verschiedenen
+  // Stichtags-Eingaben sind genau die Drift, vor der der Docblock der
+  // Funktion warnt. Spart obendrein eine Query.
+  const typeSettings = await readBudgetTypeSettings(
+    customerId, { kind: "forDate", asOfDate: transactionDate }, _tx,
+  );
   const projiziert45b = await projected45bAvailableCents(
-    customerId, transactionDate, unified.pots.entlastungsbetrag_45b, _tx ?? db,
+    customerId, transactionDate, unified.pots.entlastungsbetrag_45b, _tx ?? db, typeSettings,
   );
   return {
     ...basis,

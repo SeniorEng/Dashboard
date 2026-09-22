@@ -114,7 +114,7 @@ describe("Kostenschätzung — projizieren, aber warnen statt sperren", () => {
       totalCostCents: 100_00,
       availableCents: 47_00,
       projectedAvailableCents: 178_00,
-      hasNoFallbackBudget: true,
+      pflegegrad1OhnePrivatzahlung: true,
     });
     expect(ohneAusweich.warning).toContain("Kein Ausweichbudget verfügbar.");
 
@@ -125,8 +125,38 @@ describe("Kostenschätzung — projizieren, aber warnen statt sperren", () => {
       totalCostCents: 100_00,
       availableCents: 47_00,
       projectedAvailableCents: 178_00,
-      hasNoFallbackBudget: false,
+      pflegegrad1OhnePrivatzahlung: false,
     });
     expect(mitAusweich.warning).not.toContain("Ausweichbudget");
+  });
+
+  it("MG-7 – ist die Projektion KLEINER, entscheidet trotzdem sie", () => {
+    /**
+     * Der Fall, den `Math.max` verschluckt hat (Gate 2 zu #167, S1).
+     *
+     * Die Projektion kann kleiner sein als der heutige Stand — strukturell,
+     * nicht als Sonderfall: `expiry45bFloorDateFor` setzt den Boden aufs
+     * Vorjahr, solange der Horizont ≤ 30.06. liegt, und aufs laufende Jahr
+     * danach. Der Reader deckelt auf HEUTE, die Projektion aufs
+     * Termin-MONATSENDE. Liegt heute im ersten Halbjahr und der Termin im
+     * zweiten, nimmt die Projektion den zum 30.06. verfallenden Anspruch weg.
+     *
+     * Gemessen wurde `available = 2.358,00`, `projiziert = 917,00`.
+     *
+     * Mit `Math.max` hätte die Vorschau hier einen GRÜNEN Kasten gezeigt und
+     * `planHold` beim Speichern mit 422 abgelehnt — **die Umkehrung des
+     * Fehlers, gegen den dieser PR gebaut ist.**
+     */
+    const o = classifyCostEstimate({
+      ...BASIS,
+      totalCostCents: 1_500_00,
+      availableCents: 2_358_00,        // Stand heute: reicht
+      projectedAvailableCents: 917_00, // was `planHold` sieht: reicht NICHT
+    });
+
+    expect(o.kind, "die Vorschau zeigt grün, wo planHold mit 422 ablehnt").toBe("hard_block");
+    expect(o.isHardBlock).toBe(true);
+    // Und der Fehlbetrag gegen die maßgebliche Zahl: 1.500 − 917 = 583.
+    expect(o.warning).toContain("583,00");
   });
 });

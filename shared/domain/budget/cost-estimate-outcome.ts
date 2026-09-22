@@ -64,7 +64,17 @@ export interface CostEstimateInput {
   /** Kunde ist `billingType=selbstzahler` (Privatabrechnung — kein Budget-Pfad). */
   isSelbstzahler: boolean;
   /**
-   * Kunde hat KEINEN Ausweichtopf: Pflegegrad 1 und keine Privatzahlung.
+   * Pflegegrad 1 UND keine Privatzahlung — Alriks Kriterium, woertlich.
+   *
+   * **Der Name sagt das Kriterium, nicht seine Deutung** (Gate 2 zu #167,
+   * S4). Eine fruehere Fassung hiess `hasNoFallbackBudget` und behauptete
+   * damit mehr, als geprueft wird: bei nachtraeglicher Absenkung auf PG < 2
+   * bleiben historische Allokationen erhalten, ein PG-1-Kunde kann also sehr
+   * wohl einen Ausweichtopf haben — und umgekehrt sind §45a/§39
+   * default AUS, ein PG-2-Kunde hat im Normalfall keinen.
+   *
+   * Das Kriterium ist Alriks Entscheidung und bleibt. Der Name darf sie nur
+   * nicht ueberdehnen: wer das Feld anderswo verdrahtet, glaubt ihm sonst.
    *
    * Der Zusatzsatz stammt von Alrik und ist **keine Fehlermeldung, sondern
    * eine Aussage ueber Leistungsansprueche**, die eine Mitarbeiterin
@@ -76,7 +86,7 @@ export interface CostEstimateInput {
    * Faelle — das waere aber eine Ausweitung der Zusage und gehoert gefragt,
    * nicht gebaut (FINDING im PR).
    */
-  hasNoFallbackBudget?: boolean;
+  pflegegrad1OhnePrivatzahlung?: boolean;
 }
 
 export interface CostEstimateOutcome {
@@ -127,8 +137,31 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
    * sperrt den Knopf über genau dieses Feld, und er soll ihn hier nicht mehr
    * sperren.
    */
-  const projiziert = input.projectedAvailableCents ?? availableCents;
-  const massgeblich = Math.max(availableCents, projiziert);
+  /**
+   * Massgeblich ist die PROJIZIERTE Zahl — nicht das Maximum.
+   *
+   * ── Warum `Math.max` falsch war (Gate 2 zu #167, S1) ─────────────────
+   * `planHold` rechnet beim Anlegen **ausschliesslich** mit der projizierten
+   * Zahl. `Math.max` war damit ein DRITTES Praedikat, per Konstruktion
+   * grosszuegiger als das Tor, gegen das es angeblich prueft.
+   *
+   * Und die Projektion kann kleiner sein als der heutige Stand — das ist
+   * strukturell, kein Sonderfall: `expiry45bFloorDateFor` setzt den Boden aufs
+   * Vorjahr, solange der Horizont `<= 30.06.` liegt, und aufs laufende Jahr
+   * danach. Der Reader deckelt den Horizont auf HEUTE, die Projektion auf das
+   * Termin-MONATSENDE. Liegt heute im ersten Halbjahr und der Termin im
+   * zweiten, nimmt die Projektion den zum 30.06. verfallenden Anspruch weg.
+   *
+   * Gemessen: `available = 235.800`, `projiziert = 91.700`. Mit `Math.max`
+   * haette die Vorschau einen gruenen Kasten gezeigt, und `planHold` haette
+   * beim Speichern mit 422 abgelehnt — **die Umkehrung des Fehlers, gegen den
+   * dieser PR gebaut ist.**
+   *
+   * `availableCents` bleibt davon unberuehrt auf der Leitung; die
+   * `#424`-Zusage haengt am Feld, nicht an dieser Entscheidung.
+   */
+  const massgeblich = input.projectedAvailableCents ?? availableCents;
+  const projiziert = massgeblich;
 
   if (totalCostCents <= massgeblich && totalCostCents > availableCents) {
     const fehltHeute = formatEuroDE(totalCostCents - availableCents);
@@ -140,7 +173,7 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
         + `Heute fehlen davon noch ${fehltHeute} — sie kommen mit der `
         + `Monatsaufstockung. Der Termin kann angelegt werden; die Beträge `
         + `beziehen sich auf den Monat des Termins.`
-        + (input.hasNoFallbackBudget ? " Kein Ausweichbudget verfügbar." : ""),
+        + (input.pflegegrad1OhnePrivatzahlung ? " Kein Ausweichbudget verfügbar." : ""),
       isHardBlock: false,
       privateCents: 0,
       vatCents: 0,

@@ -348,7 +348,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     // Alriks Kriterium, woertlich: Pflegegrad 1 und keine Privatzahlung. Bei
     // PG 1 gibt es weder Umwandlung (§45a) noch Verhinderungspflege
     // (§39/§42a) — es bleibt allein der Entlastungsbetrag.
-    hasNoFallbackBudget: customer?.pflegegrad === 1 && !acceptsPrivatePayment,
+    pflegegrad1OhnePrivatzahlung: customer?.pflegegrad === 1 && !acceptsPrivatePayment,
     weightedVatRate,
     acceptsPrivatePayment,
     isSelbstzahler: false,
