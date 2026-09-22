@@ -309,22 +309,28 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   // zurückliegenden/zukünftigen Monat.
   const { getAvailableForDate } = await import("../storage/budget/import-availability");
   /**
-   * KEINE Monatsend-Projektion hier — und das ist ein Befund, keine
-   * Unterlassung (Replit #1916).
+   * BEIDE Zahlen holen — die projizierte und die ungeprojizierte.
    *
-   * Der naheliegende Fix waere gewesen, hier wie `planHold` bis zum
-   * Monatsende zu projizieren. **Ausgefuehrt bricht das `#424`:** der
-   * Verbrauchspfad `createConsumptionTransaction` projiziert NICHT, und die
-   * dort gesicherte Invariante lautet „Vorschau == was die Buchung
-   * durchlaesst" (gemessen 127.200 statt 114.100).
+   * ── Zwei Tore mit verschiedenen Stichtagen (Replit #1916) ────────────
+   * `planHold` entscheidet beim ANLEGEN und projiziert bis zum Monatsende.
+   * `createConsumptionTransaction` entscheidet beim DOKUMENTIEREN und ist auf
+   * heute gedeckelt. **Beide sind fuer sich richtig**: wer im Oktober
+   * dokumentiert, hat den Oktober-Anspruch real.
    *
-   * Es gibt also ZWEI Tore mit verschiedenen Stichtagen — `planHold`
-   * (projiziert) und `createConsumptionTransaction` (projiziert nicht). Die
-   * Vorschau kann nicht zu beiden gleich sein. Welches maßgeblich ist, ist
-   * eine fachliche Frage und keine, die man in der Kostenschaetzung
-   * entscheidet.
+   * Falsch war, die Vorschau der ANLAGE gegen den Dokumentations-Stichtag zu
+   * pruefen. Sie war damit strenger als der Server und sperrte Termine, die
+   * `planHold` angenommen haette — eine Mitarbeiterin konnte fuer Oktober
+   * nichts anlegen.
+   *
+   * Ein frueherer Anlauf hat nur die projizierte Zahl eingesetzt und damit
+   * `#424` gebrochen (gemessen 127.200 statt 114.100): dessen Invariante
+   * lautet „Vorschau == was die BUCHUNG durchlaesst". Mit beiden Zahlen
+   * bleibt sie erhalten — `availableCents` ist weiterhin die des
+   * Verbrauchspfads, die Projektion kommt als zweite Groesse daneben.
    */
-  const dateAware = await getAvailableForDate(customerId, date);
+  const dateAware = await getAvailableForDate(customerId, date, undefined, {
+    project45bToMonthEnd: true,
+  });
 
   // Task #876 — Serving-Pfad auf den unified Reader vereinheitlicht. Gelesen
   // werden hier nur Nicht-Verfügbarkeits-Felder (`currentMonthUsedCents`,
@@ -338,6 +344,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   const outcome = classifyCostEstimate({
     totalCostCents,
     availableCents: totalAvailable,
+    projectedAvailableCents: dateAware.projectedTotalCents,
     weightedVatRate,
     acceptsPrivatePayment,
     isSelbstzahler: false,
@@ -362,6 +369,21 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     monthlyLimitCents: summary45b.monthlyLimitCents,
     warning: outcome.warning,
     isHardBlock: outcome.isHardBlock,
+    /**
+     * `kind` und die projizierte Zahl gehen mit ueber die Leitung.
+     *
+     * Ohne sie kann der Client die zwei NICHT-blockierenden Faelle nicht
+     * unterscheiden — „privat berechnet" und „reicht erst im Monat" saehen
+     * gleich aus. Schlimmer: der Amber-Kopf zeigt „verfuegbar: X" aus
+     * `availableCents` (ungeprojiziert), waehrend der Warntext die
+     * Monatszahl nennt. **Zwei verschiedene „verfuegbar" in einem Kasten.**
+     *
+     * Drei-Schichten-Pflicht (CLAUDE.md): die Unterscheidung sitzt im Server
+     * (`classifyCostEstimate`), muss also hier transportiert werden, sonst
+     * KANN der Client sie nicht treffen.
+     */
+    kind: outcome.kind,
+    projectedAvailableCents: dateAware.projectedTotalCents,
     privateCents: outcome.privateCents,
     vatCents: outcome.vatCents,
     vatRate: Math.round(weightedVatRate),

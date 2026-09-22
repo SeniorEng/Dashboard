@@ -15,12 +15,42 @@
  */
 import { formatEuroDE } from "../../utils/money";
 
-export type CostEstimateKind = "selbstzahler" | "ok" | "soft_private" | "hard_block";
+export type CostEstimateKind =
+  | "selbstzahler"
+  | "ok"
+  /** Budget reicht erst durch die Aufstockung des Termin-Monats. Anlegbar, mit Warnung. */
+  | "erst_im_monat_gedeckt"
+  | "soft_private"
+  | "hard_block";
 
 export interface CostEstimateInput {
   totalCostCents: number;
-  /** Budget-Verfügbarkeit zum Termin-Datum (nur für non-Selbstzahler relevant). */
+  /**
+   * Budget-Verfügbarkeit zum Termin-Datum, Horizont auf HEUTE gedeckelt.
+   * Das ist die Zahl, gegen die `createConsumptionTransaction` beim
+   * Dokumentieren entscheidet.
+   */
   availableCents: number;
+  /**
+   * Verfügbarkeit mit Projektion bis zum MONATSENDE des Termins — die Zahl,
+   * gegen die `planHold` beim ANLEGEN entscheidet.
+   *
+   * ── Warum es zwei Zahlen braucht (Replit #1916) ──────────────────────
+   * Es gibt zwei Tore mit verschiedenen Stichtagen: `planHold` beim Anlegen
+   * (projiziert bis Monatsende) und `createConsumptionTransaction` beim
+   * Dokumentieren (auf heute gedeckelt). Die Vorschau kannte nur die zweite
+   * Zahl und war damit **strenger als der Server** — sie sperrte Termine, die
+   * `planHold` angenommen hätte. Eine Mitarbeiterin konnte für Oktober nichts
+   * anlegen.
+   *
+   * Beide Tore sind für sich richtig: wer im Oktober dokumentiert, hat den
+   * Oktober-Anspruch real. Falsch war nur, die Anlage gegen den
+   * Dokumentations-Stichtag zu prüfen.
+   *
+   * Fehlt der Wert (`undefined`), gilt das alte Verhalten — Aufrufer, die
+   * nicht projizieren können, bleiben unverändert.
+   */
+  projectedAvailableCents?: number;
   /**
    * MwSt-Satz in Prozent (z.B. 19 für 19 %). Gewichtet über die einzelnen
    * Leistungs-Positionen aufsummiert. Wird für `bruttoCents`/`vatCents` benutzt.
@@ -72,8 +102,39 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
     };
   }
 
-  if (totalCostCents > availableCents) {
-    const shortfall = totalCostCents - availableCents;
+  /**
+   * Die Weiche (Alrik, 22.09.2026): **projizieren, aber warnen statt sperren.**
+   *
+   *   projiziert reicht nicht          → harter Stopp, wie bisher
+   *   projiziert reicht, heute nicht   → anlegbar, MIT Warnung
+   *   beides reicht                    → unverändert
+   *
+   * Der mittlere Fall ist neu. Er trägt `isHardBlock: false` — der Client
+   * sperrt den Knopf über genau dieses Feld, und er soll ihn hier nicht mehr
+   * sperren.
+   */
+  const projiziert = input.projectedAvailableCents ?? availableCents;
+  const massgeblich = Math.max(availableCents, projiziert);
+
+  if (totalCostCents <= massgeblich && totalCostCents > availableCents) {
+    const fehltHeute = formatEuroDE(totalCostCents - availableCents);
+    return {
+      kind: "erst_im_monat_gedeckt",
+      warning:
+        `Im Termin-Monat reicht das Budget (${formatEuroDE(projiziert)} verfügbar, `
+        + `Termin kostet ${formatEuroDE(totalCostCents)}). `
+        + `Heute fehlen davon noch ${fehltHeute} — sie kommen mit der `
+        + `Monatsaufstockung. Der Termin kann angelegt werden; die Beträge `
+        + `beziehen sich auf den Monat des Termins.`,
+      isHardBlock: false,
+      privateCents: 0,
+      vatCents: 0,
+      bruttoCents: 0,
+    };
+  }
+
+  if (totalCostCents > massgeblich) {
+    const shortfall = totalCostCents - massgeblich;
     const shortfallEuro = formatEuroDE(shortfall);
     if (acceptsPrivatePayment) {
       const vatCents = Math.round(shortfall * (weightedVatRate / 100));

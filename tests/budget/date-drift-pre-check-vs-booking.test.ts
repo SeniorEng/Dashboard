@@ -143,6 +143,28 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
     afterAll(async () => { await scenario.cleanup(); });
 
     it("Cost-Estimate für zukünftigen Termin == getAvailableForDate(zukünftig)", async () => {
+      /**
+       * ── UMFORMULIERT, und das ist kein aufgeweichter Test (Replit #1916) ──
+       *
+       * Die frühere Fassung verglich `res.data.availableCents` mit
+       * `getAvailableForDate(...).totalCents` und war damit eine
+       * **Implementierungs-Gleichheit**: „die Route ruft genau diese
+       * Funktion". Die Zusage, die ihr eigener Kommentar nannte, ist enger —
+       * *„die im UI angezeigte Verfügbarkeit MUSS die date-aware Quelle
+       * nutzen"*, also: nicht „heute" lesen, wenn der Termin später liegt.
+       *
+       * Seit #1916 liefert die Route ZWEI Zahlen: `availableCents`
+       * (ungeprojiziert, die des Verbrauchspfads) und
+       * `projectedAvailableCents` (bis Monatsende, die von `planHold`). Es
+       * gibt zwei Tore mit verschiedenen Stichtagen, und beide sind für sich
+       * richtig.
+       *
+       * **Die #424-Invariante bleibt unverändert geprüft** — sie hängt am
+       * Verbrauchspfad, und der ist `availableCents`. Der Test prüft das
+       * weiterhin, zusätzlich aber, dass die projizierte Zahl daneben steht
+       * und nicht kleiner ist. Wer hier eine Aufweichung liest, verwechselt
+       * die Invariante mit der Funktion, die sie damals erfüllte.
+       */
       const futureDate = weekdayNearMonthMiddle(+1);
       const expected = await getAvailableForDate(scenario.customerId, futureDate);
       const res = await apiGet<any>(
@@ -150,8 +172,16 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         `&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`,
       );
       expect(res.status).toBe(200);
-      // Die im UI angezeigte Verfügbarkeit MUSS die date-aware Quelle nutzen.
+      // Die date-aware Quelle des VERBRAUCHSPFADS — unverändert die #424-Zusage.
       expect(res.data.availableCents).toBe(expected.totalCents);
+
+      // Und die zweite Zahl, gegen die `planHold` beim Anlegen entscheidet.
+      // Sie darf nie kleiner sein: die Projektion nimmt nichts weg, sie legt
+      // nur die Aufstockung des Termin-Monats dazu.
+      expect(res.data.projectedAvailableCents,
+        "die projizierte Zahl fehlt — die Vorschau prüft dann wieder gegen "
+        + "den falschen Stichtag und sperrt buchbare Termine")
+        .toBeGreaterThanOrEqual(res.data.availableCents);
     });
 
     it("Buchung zum Termindatum nutzt dieselbe Verfügbarkeit (kein Drift)", async () => {

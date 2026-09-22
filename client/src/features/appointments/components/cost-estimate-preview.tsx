@@ -8,6 +8,10 @@ export type CostEstimate = {
   noPricing?: boolean;
   availableCents?: number;
   isHardBlock?: boolean;
+  /** Welcher Ausgang der SSoT — der Client rechnet ihn NICHT nach. */
+  kind?: "selbstzahler" | "ok" | "erst_im_monat_gedeckt" | "soft_private" | "hard_block";
+  /** Verfügbar mit Projektion bis Monatsende (Replit #1916). */
+  projectedAvailableCents?: number;
   isSelbstzahler?: boolean;
   bruttoCents?: number;
   vatCents?: number;
@@ -84,12 +88,29 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
     );
   }
 
+  /**
+   * „Reicht erst im Monat" nennt die MONATS-Zahl im Kopf, nicht die heutige.
+   *
+   * Sonst stünde „verfügbar: 47,00 €" über einem Text, der 178,00 € nennt —
+   * zwei verschiedene „verfügbar" in einem Kasten, und der Bediener müsste
+   * raten, welche gilt (Replit #1916).
+   */
+  const istMonatsFall = cost.kind === "erst_im_monat_gedeckt";
+  const monatsEuro = cost.projectedAvailableCents !== undefined
+    ? formatEuroDE(cost.projectedAvailableCents, { withCurrency: false })
+    : null;
+
   if (cost.warning) {
     return (
-      <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
+      <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid={istMonatsFall ? "budget-warning-monat" : "budget-warning"}>
         <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
         <div>
-          <p className="text-amber-800 font-semibold">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}</p>
+          <p className="text-amber-800 font-semibold">
+            Kosten: {costEuro} €{" "}
+            {istMonatsFall && monatsEuro !== null
+              ? <span className="font-normal">— im Termin-Monat verfügbar: {monatsEuro} €</span>
+              : availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}
+          </p>
           <p className="text-amber-700 text-xs mt-1">{cost.warning}</p>
           {holdsNote}
         </div>
