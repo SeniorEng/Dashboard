@@ -58,11 +58,72 @@ export class AvisDateiaufbauError extends Error {
   }
 }
 
-// Deutsch formatierter Geldbetrag: 49,13 · 1.234,56 · -70,00 (Komma zwingend).
-const GERMAN_AMOUNT_RE = /^-?\d{1,3}(\.\d{3})*,\d{2}$/;
-// dd.mm.yyyy (auch dd.mm.yy) — als Datum ausgeschlossen.
-const DE_DATE_RE = /^\d{1,2}\.\d{1,2}\.\d{2,4}$/;
+/**
+ * Deutsch formatierter Geldbetrag: 49,13 · 1.234,56 · -70,00 · 252,3.
+ *
+ * EINE ODER ZWEI Nachkommastellen. Das Muster verlangte zwei — gemessen am
+ * Korpus (`tests/fixtures/avis-korpus`, 82 Echt-Dateien) gibt es Zeilen mit
+ * einer: `…;252,3;…` und `…;76,7;+;…`. Sie ergaben KEINEN Kandidaten, also
+ * `detectAmountFieldIndex → -1`, also `AvisParseUncertainError` — **zwei der
+ * 82 Dateien waren gar nicht importierbar.**
+ *
+ * Die Erweiterung ist einseitig, und das ist gemessen, nicht angenommen: über
+ * alle 480 `2;`/`3;`-Zeilen des Korpus gewinnen genau DREI einen Kandidaten,
+ * alle drei hatten vorher NULL. **Keine einzige Zeile geht von eindeutig zu
+ * mehrdeutig** — es kann also nichts brechen, was heute liest.
+ *
+ * `parseBetragCents` konnte `252,3` schon immer korrekt lesen (25230 ct,
+ * ausgefuehrt). Die Luecke sass allein in der ERKENNUNG.
+ *
+ * ── Und die Tausendergruppe ist OPTIONAL ──────────────────────────────
+ * `\d{1,3}(\.\d{3})*` verlangt bei vier Stellen eine Gruppierung: `5798,66`
+ * fiel durch, `5.798,66` nicht. Solange der Gesamtbetrag ueber `parts[3]`
+ * gelesen wurde, spielte das keine Rolle — `parseBetragCents` prueft die Form
+ * nicht. Seit die ERKENNUNG strukturell ist, waere daraus „kein Betrag
+ * gefunden" geworden.
+ *
+ * Der Korpus enthaelt die ungruppierte Form NICHT (0 von 480 Zeilen aendern
+ * sich durch diese Erweiterung, ausgefuehrt) — gefunden hat sie ein
+ * konstruiertes Fixture. Echte Dateien und erdachte Faelle fangen
+ * verschiedene Dinge; der Korpus ERSETZT die Fixtures nicht, er ergaenzt sie.
+ */
+const GERMAN_AMOUNT_RE = /^-?(\d{1,3}(\.\d{3})*|\d+),\d{1,2}$/;
+/**
+ * dd.mm.yyyy (auch dd.mm.yy) — als Datum ausgeschlossen.
+ *
+ * Das ist die SSoT fuer „ist dieses Feld ein Datum?". Der Kassen-Parser hatte
+ * dafuer kurzzeitig ein eigenes, STRENGERES Muster (zweistelliger Tag,
+ * vierstelliges Jahr) — ein Zweitbegriff derselben fachlichen Frage. Gemessen
+ * am Korpus weicht keine der 985 Datumsangaben vom strengen Muster ab, die
+ * beiden Fassungen waren also verhaltensgleich; der Zweitbegriff kostete
+ * trotzdem die Zusage „eine SSoT pro fachlicher Frage".
+ */
+export const DE_DATE_RE = /^\d{1,2}\.\d{1,2}\.\d{2,4}$/;
 const SIGN_TOKENS = new Set(["+", "-"]);
+
+/**
+ * Ist `yyyy-mm-dd` ein EXISTIERENDER Tag? SSoT fuer „darf darauf gebucht
+ * werden".
+ *
+ * Form allein reicht nicht: `2026-13-32` passiert jedes Muster, und
+ * `parseLocalDate` rollt es still zum 31.01.2027 durch — kein `Invalid Date`,
+ * kein Laut, ein falsches `paid_at`.
+ *
+ * Die Funktion steht hier und nicht im Parser, weil sie ZWEI Aufrufer hat:
+ * `toIsoDate` beim Import und `mark-paid` beim Buchen. Der Riegel dort prueft
+ * einen Wert, der schon in der Datenbank steht — was `toIsoDate` heute
+ * abweist, sagt nichts ueber das, was vor ihr geschrieben wurde. Zwei
+ * Fassungen derselben Frage waeren genau der Zweitbegriff, an dem dieser
+ * Vorgang mehrfach haengengeblieben ist.
+ */
+export function isValidIsoDate(value: string | null | undefined): value is string {
+  if (!value) return false;
+  const v = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const [j, m, t] = v.split("-").map(Number);
+  const d = new Date(Date.UTC(j, m - 1, t));
+  return d.getUTCFullYear() === j && d.getUTCMonth() === m - 1 && d.getUTCDate() === t;
+}
 
 /** Ist das Feld ein deutsch-formatierter Geldbetrag (und kein Datum)? */
 export function isGermanAmountField(field: string): boolean {

@@ -797,27 +797,98 @@ describe("Kassen-CSV — Kopffelder strukturell erkannt", () => {
       .toBe("DE92100101237314306198");
   });
 
-  it("AP-43 – der Betrag bleibt unberührt, ist aber NICHT strukturell erkannt", () => {
-    // ── Richtigstellung: der Kommentar hier behauptete das Gegenteil ──
-    // „Der Betrag wird seit #1687 strukturell erkannt und ist der einzige
-    // Wert, der überall stimmt" — das gilt für die `2;`-Zeilen.
-    // `detectAmountFieldIndex` läuft NUR im `lineType === "2"`-Zweig; der
-    // Gesamtbetrag der `3;`-Zeile liest weiterhin `parts[3]`.
+  it("AP-43 – der Gesamtbetrag wird strukturell erkannt, auch bei [5]", () => {
+    // ── Der Test, der die Lücke festhielt, hält jetzt den Fix ──────────
+    // Seine frühere Fassung nagelte `gesamtBetragCents === 0` fest, mit dem
+    // ausdrücklichen Vermerk „wenn der Betrag bei [5] gefunden wird, gehört
+    // dieser Test umgeschrieben". Genau das ist passiert.
+    //
+    // Die Bedingung dafür war eine Messung, und sie liegt jetzt vor: über die
+    // 53 Kassen-Dateien des Korpus trägt **keine einzige `3;`-Zeile zwei
+    // betragsförmige Felder** (0 von 53). Damit ist `detectAmountFieldIndex`
+    // hier eindeutig — dieselbe SSoT wie bei den `2;`-Posten.
     const aok = kasse("3;130050598;82051000;5798,66;EUR;TEXT;24.04.2026;;;;;;");
     expect(parseAvisCsv(aok).header.gesamtBetragCents).toBe(579866);
 
-    // Und so sieht der Fall aus, den `parts[3]` nicht kann: laut Messung ist
-    // `[3]` in 8 von 53 Zeilen leer, der Betrag steht dann bei `[5]`.
-    // `|| "0"` macht daraus eine 0 — die als ausgewiesene Summe gilt.
-    //
-    // Vorbestehend, nicht von diesem PR erzeugt, und bewusst NICHT hier
-    // behoben: der Umbau braucht eine eigene Messung (gibt es Zeilen mit ZWEI
-    // Komma-Dezimalfeldern?). Der Test hält den Ist-Zustand fest, damit die
-    // Lücke sichtbar bleibt statt als „geprüft" zu gelten — siehe FINDING im PR.
+    // Die AOK-BW-Form: `[3]` leer, Betrag bei `[5]`. Gezählt: 8 von 53
+    // Dateien. `parts[3] || "0"` machte daraus eine ausgewiesene Summe von 0
+    // — und `gesamtBetragCents` speist `satisfiesTripleEquality`, diese acht
+    // Avise konnten also nie gegen eine Qonto-Gutschrift auto-matchen.
     const betragBeiFuenf = kasse("3;123456789;ABC;;07.01.2026;49,13;775335315683;");
     expect(parseAvisCsv(betragBeiFuenf).header.gesamtBetragCents,
-      "der Betrag bei [5] wird jetzt gefunden — dann gehört dieser Test umgeschrieben")
-      .toBe(0);
+      "der Betrag bei [5] wird nicht gefunden").toBe(4913);
+  });
+
+  it("AP-48 – kein lesbarer Gesamtbetrag ist null, nicht 0", () => {
+    // Die Bauform zum vierten Mal: `|| "0"` machte aus „nicht gefunden" einen
+    // Wert. `ausgewiesenCents === 0` heißt „die Kasse weist 0 aus", und das
+    // ist eine ganz andere Aussage als „die Zeile trägt keinen Betrag".
+    const ohneBetrag = kasse("3;123456789;ABC;;07.01.2026;;775335315683;");
+    const r = parseAvisCsv(ohneBetrag);
+    expect(r.pruefsumme?.ausgewiesenCents,
+      "„nicht lesbar“ ist wieder zu einem Wert geworden").toBeNull();
+    expect(r.hinweise.some(h => /Gesamtbetrag/.test(h)),
+      "die Vorschau schweigt über den fehlenden Gesamtbetrag").toBe(true);
+  });
+
+  it("AP-49 – eine Nachkommastelle ist ein Betrag", () => {
+    // Gemessen am Korpus: zwei der 82 Dateien tragen `252,3` bzw. `76,7` und
+    // waren damit **gar nicht importierbar** — `isGermanAmountField` verlangte
+    // zwei Nachkommastellen, `detectAmountFieldIndex` gab -1, der Parser warf.
+    //
+    // Die Erweiterung ist einseitig und das ist gezählt: über alle 480
+    // `2;`/`3;`-Zeilen gewinnen genau drei einen Kandidaten, alle drei hatten
+    // vorher null. Keine geht von eindeutig zu mehrdeutig.
+    expect(parseAvisCsv(kasse("3;769501965926;19.02.2026;252,3;DE92100101237314306198;;"))
+      .header.gesamtBetragCents, "252,3 sind 252,30 €").toBe(25230);
+
+    // Und der Posten-Pfad, der vorher geworfen hat:
+    const mitPosten = [
+      "1;461438852;Senioren Engel;",
+      "2;853010969199;01.06.2026;27.06.2026 RE-2026- 0212;76,7;+;EUR;",
+      "3;769501965926;19.02.2026;76,7;DE92100101237314306198;;",
+    ].join("\n");
+    expect(parseAvisCsv(mitPosten).items[0].betragCents).toBe(7670);
+  });
+
+  it("AP-50 – der Layout-Zeuge schreibt keinen Freitext als Belegnummer", () => {
+    // ── S1 aus Gate 2 (#161): zwei Zeugen, zweimal dieselbe Konstruktion ──
+    // `parts.length === 6` deckte die falsche Menge; der Ersatz
+    // `Datum@[2] ∧ IBAN@[4]` ebenfalls. Am Korpus ausgezählt trifft er 22
+    // Zeilen — 19 mit Ziffern bei `[1]`, **drei mit Text**. Diese drei Werte
+    // stehen so in echten (anonymisierten) BARMER-Dateien.
+    for (const text of ["0,32211SV19", "3,96742BB19", "7,12161LN67"]) {
+      const zeile = kasse(`3;${text};05.01.2026;131,01;DE92100101237314306198;;`);
+      const h = parseAvisCsv(zeile).header;
+      expect(h.belegNummer, `„${text}" steht als Belegnummer in der Liste`).toBeNull();
+      // Die übrigen Felder bleiben lesbar — die Verengung trifft NUR `[1]`.
+      expect(h.zahlungsDatum).toBe("2026-01-05");
+      expect(h.gesamtBetragCents).toBe(13101);
+    }
+
+    // Gegenprobe: die 19 Zeilen mit Ziffernfolge werden weiterhin gelesen.
+    expect(parseAvisCsv(kasse("3;769501965926;05.01.2026;131,01;DE92100101237314306198;;"))
+      .header.belegNummer, "die Verengung hat die gültigen Nummern mitgenommen")
+      .toBe("769501965926");
+  });
+
+  it("AP-51 – der IBAN-Hinweis meldet Mehrdeutigkeit, nicht Abwesenheit", () => {
+    // Die AOK-Form trägt an dieser Stelle `EUR`. Das ist kein Befund, das ist
+    // ihr Format — gezählt tragen 30 der 53 Zeilen eine IBAN, der Hinweis
+    // hätte also auf rund 23 Importen dauerhaft gestanden, ohne eine Handlung
+    // zu nennen. Dasselbe Versagen wie die zwölf gleichlautenden
+    // DAVASO-Hinweise in #160, nur über den Inhalt statt über die Anzahl.
+    const ohneIban = parseAvisCsv(kasse("3;130050598;82051000;301,26;EUR;"));
+    expect(ohneIban.header.zahlungsempfaengerIban).toBeNull();
+    expect(ohneIban.hinweise.some(h => /IBAN/.test(h)),
+      "der Normalfall einer ganzen Kassenfamilie wird als Befund gemeldet").toBe(false);
+
+    // Überraschend ist allein der Fall ZWEI Kandidaten.
+    const zwei = parseAvisCsv(
+      kasse("3;769501965926;05.01.2026;131,01;DE92100101237314306198;DE02120300000000202051;"));
+    expect(zwei.header.zahlungsempfaengerIban).toBeNull();
+    expect(zwei.hinweise.some(h => /IBAN/.test(h)),
+      "zwei Kandidaten verlieren den Diskriminator still").toBe(true);
   });
 
   it("AP-44 – die AOK-Zeile mit SECHS Feldern schreibt die IK nicht", () => {

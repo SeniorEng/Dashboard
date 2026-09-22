@@ -18,6 +18,7 @@ import { withAudit } from "../../lib/with-audit";
 import { readTestFaults, readQontoHttpStub } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
+import { isValidIsoDate } from "@shared/domain/qonto/avis-format";
 import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
 import { withQontoBackfillLock, isQontoBackfillRunning } from "../../services/qonto-backfill-runner";
 import { scanAdviceSuggestions, MANUAL_BULK_ADVICE_CONFIDENCE } from "@shared/domain/qonto/bulk-advice-match";
@@ -1864,14 +1865,35 @@ router.post("/payment-advices/:id/mark-paid", asyncHandler("Avis konnte nicht al
    * Bezahldatum. Gemessen traegt heute keiner der 37 Avise ein leeres
    * `zahlungs_datum` — der Zweig hat also nie einem legitimen Fall gedient.
    */
-  if (!advice.zahlungsDatum) {
+  /**
+   * ── Und derselbe Fehler eine Schicht weiter aussen (Gate 2 zu #161, S2) ──
+   * Die erste Fassung dieses Riegels prüfte `!advice.zahlungsDatum` — also
+   * LEERHEIT. Genau das greift bei den Werten nicht, für die er geschrieben
+   * wurde: die drei Bestands-Avise tragen `"82051000"`, das ist **truthy**.
+   * Ausgeführt: `parseLocalDate("82051000")` → `Invalid Date` → 500, also
+   * unverändert. Und ein gespeichertes `"2026-13-32"` (was die alte
+   * `toIsoDate` aus `32.13.2026` gemacht hätte) passiert den Riegel und bucht
+   * ausgeführt **den 31.01.2027** als `paid_at`.
+   *
+   * Der Docblock unten sagt selbst, was schiefging — *„die Frage war auf den
+   * Parser angewandt, nicht auf den Verbraucher"*. Ich habe sie dann auf den
+   * Verbraucher angewandt und zur Hälfte beantwortet. Die neue Bereichsprüfung
+   * in `toIsoDate` schützt den IMPORT-Pfad; sie sagt nichts über Werte, die
+   * vor ihr geschrieben wurden.
+   *
+   * Geprüft wird deshalb GÜLTIGKEIT, nicht Anwesenheit.
+   */
+  if (!isValidIsoDate(advice.zahlungsDatum)) {
     return res.status(400).json({
-      message: "Dieser Avis trägt kein lesbares Zahlungsdatum. "
-        + "Ohne Datum wird nicht gebucht — die Datei muss erneut importiert werden.",
+      message: "Dieser Avis trägt kein gültiges Zahlungsdatum "
+        + `(gespeichert: ${advice.zahlungsDatum ? "unlesbarer Wert" : "leer"}). `
+        + "Ohne Datum wird nicht gebucht. Die Rechnungen bleiben gebunden — "
+        + "der Avis kann über die passende Qonto-Gutschrift abgeschlossen werden, "
+        + "die ihr Ausführungsdatum selbst mitbringt.",
       code: "AVIS_OHNE_ZAHLUNGSDATUM",
     });
   }
-  const paidAt = parseLocalDate(advice.zahlungsDatum);
+  const paidAt = parseLocalDate(advice.zahlungsDatum!);
 
   // Brutto je zugeordneter Rechnung laden und pro Avis-Position klassifizieren
   // (SSoT, inkl. Skonto). Nur voll gedeckte Positionen dürfen auf „bezahlt"
