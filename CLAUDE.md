@@ -240,6 +240,32 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   Arbeiten auffällt, im **PR-Body als `FINDING: … [P1/P2/P3]`** vermerken —
   Alrik/Cowork übernimmt ihn in die Long-List. Den laufenden Task NICHT
   entgleisen lassen.
+- **Mutations-Gegencheck — Pflicht für jeden Test, der eine Zusage sichert.**
+  Ein solcher Test muss **einmal rot gesehen worden sein**. Praktisch: die
+  geprüfte Stelle mutieren (Bedingung umdrehen, Konstante ändern, den Fix
+  zurücknehmen), Test laufen lassen, Rot bestätigen, zurücksetzen. Im
+  Commit/PR vermerken: *„mutations-gegengeprüft"*.
+
+  **Warum:** ein grüner Test ohne Aussage ist von einem grünen Test mit Aussage
+  nicht zu unterscheiden. Am 22./23.09.2026 sind binnen 24 Stunden **drei
+  verschiedene Wege** dorthin aufgetreten:
+  - **Zufall der Zahlen** — die Fixture-Werte erfüllen die Zusage auch ohne den
+    Fix (`VD-5`: der verdrängte Übertrag war 500 €, die freigelegte
+    Aufstockung 262 € — bei 50 € kippte es).
+  - **Falsche Ebene** — geprüft wird die Schicht *unter* der Behauptung
+    (`EK-1` prüfte die API-Antwort, behauptet war etwas über die Anzeige).
+  - **Unerreichbare Konstellation** — der Gegenfall kann im Szenario gar nicht
+    auftreten (der `#424`-Zusatz: kein Übertrag, `+1` Monat im selben
+    Halbjahr).
+
+  **Der Gegencheck fängt alle drei, weil er nicht am Mechanismus ansetzt,
+  sondern am Ergebnis.** Man muss nicht wissen, *warum* ein Test nichts sagt —
+  es genügt festzustellen, dass er beim Verletzen der Zusage grün bleibt.
+
+  Gilt für Zusagen, nicht für jeden Test: ein Smoke-Test, der „rendert
+  überhaupt" prüft, braucht das nicht. Ein Test, dessen Name eine Invariante
+  behauptet („… darf nie …", „… bleibt unverändert", „… wird nicht …"),
+  braucht es immer.
 - **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
   kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
   Der `tests`-CI-Job hat **keinen roten Altbestand mehr** (Stand 08.08.2026,
