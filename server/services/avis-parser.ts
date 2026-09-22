@@ -623,13 +623,49 @@ function parseDavaso(csvContent: string): ParsedAvis {
     (n, b) => n + b.posten.reduce(
       (m, r) => m + parseBetragCents(getField(r, "ZEM_BTR_Forderg"), "punkt"), 0), 0);
 
+  /**
+   * ZWEI zulaessige Lesarten, weil nur eine davon gemessen ist.
+   *
+   * ── Was der Vorschau-Lauf vom 22.09.2026 gezeigt hat ────────────────────
+   * `Avis_ICL01267.csv`, die einzige Kuerzung im ganzen Bestand, ist zwei
+   * Zeilen lang:
+   *
+   *   Kopfzeile    Forderg 117.19   Zahlg 58.16
+   *   Belegzeile   Forderg  58.16
+   *
+   * Die Belegzeile traegt den GEKUERZTEN Betrag, summiert sich also auf den
+   * Zahlbetrag — nicht auf die Kopf-Forderung. Der Vergleich „Kopf-Forderung
+   * gegen Beleg-Forderung" meldete deshalb 5903 und war damit auf dem
+   * Kuerzungs-Pfad nicht mehr von einem Parse-Fehler zu unterscheiden: genau
+   * die Schaerfe, die der Rechnungsabgleich hergestellt hatte, waere hier
+   * wieder weg gewesen.
+   *
+   * Im Normalfall sind Forderung und Zahlbetrag der Kopfzeile identisch
+   * (gemessen: 65 von 66 Kopfzeilen), dann fallen beide Lesarten zusammen.
+   *
+   * ── Warum trotzdem BEIDE zugelassen sind ────────────────────────────────
+   * Die naheliegende Korrektur waere „gegen den Zahlbetrag pruefen". Sie
+   * stuetzt sich aber auf **genau einen** gemessenen Kuerzungs-Fall — und aus
+   * einem Fall eine Konvention zu machen, ist der Fehler, der an diesem
+   * Vorgang schon fuenfmal passiert ist.
+   *
+   * Ein Block gilt deshalb als stimmig, wenn seine Belegsumme EINE der beiden
+   * Zahlen trifft. Das gibt nichts auf, was der Hinweis leisten soll: eine
+   * verlorene oder verdoppelte Belegzeile verfehlt BEIDE. Gemeldet wird der
+   * kleinere der beiden Abstaende — also das, was auch unter der guenstigsten
+   * Lesart unerklaert bleibt.
+   */
   const abweichungJeBlock = bloecke
     .filter(b => b.posten.length > 0)
     .reduce((n, b) => {
-      const kopfF = parseBetragCents(getField(b.kopf, "ZEM_BTR_Forderg"), "punkt");
+      const kopfForderung = parseBetragCents(getField(b.kopf, "ZEM_BTR_Forderg"), "punkt");
+      const kopfZahlung = parseBetragCents(getField(b.kopf, "KTR_BTR_Zahlg"), "punkt");
       const postenF = b.posten.reduce(
         (m, r) => m + parseBetragCents(getField(r, "ZEM_BTR_Forderg"), "punkt"), 0);
-      return n + Math.abs(postenF - kopfF);
+      return n + Math.min(
+        Math.abs(postenF - kopfForderung),
+        Math.abs(postenF - kopfZahlung),
+      );
     }, 0);
 
   const hatPosten = bloecke.some(b => b.posten.length > 0);
@@ -691,7 +727,8 @@ function parseDavaso(csvContent: string): ParsedAvis {
     pruefsumme: {
       ausPostenCents: forderungPosten,
       ausgewiesenCents: hatPosten ? forderungKopf : null,
-      quelle: "ZEM_BTR_Forderg je Block: Kopfzeile gegen ihre Belegzeilen",
+      quelle: "Belegsumme je Block gegen Forderung ODER Zahlbetrag der Kopfzeile "
+        + "(beide zulaessig — bei einer Kuerzung traegt die Belegzeile den gekuerzten Betrag)",
       abweichungCents: hatPosten ? abweichungJeBlock : null,
       ausAnderenZeilen: true,
     },
