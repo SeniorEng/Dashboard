@@ -354,6 +354,52 @@ describe("Avis-Import — der Riegel hängt an der Rechnung", () => {
       .find(b => b.status === "ungeprueft");
     expect(String(gutschrift?.grund)).toMatch(/Gutschrift|Storno/);
   });
+
+  it("AV-16 – ein Struktur-Riegel nennt den GRUND, statt 500 zu werfen", async () => {
+    // Am 22.09.2026 in Prod aufgefallen: beim Dateiauswählen kam
+    // „Zahlungsavis konnte nicht gespeichert werden" — die Standardmeldung von
+    // `asyncHandler`. Die Struktur-Riegel warfen einen nackten `Error`, der
+    // damit zu HTTP 500 ohne Begründung wurde.
+    //
+    // Der Riegel war im Code laut und an der Oberfläche stumm. Eine korrekt
+    // abgelehnte Datei sah aus wie ein kaputtes System — dasselbe Versagen,
+    // das dieser ganze Vorgang abräumt: eine Prüfung, deren Ergebnis niemand
+    // ablesen kann, ist keine.
+    const ohnePflichtspalte = [
+      "LfdNr,AVISNr,KTR_IK,KTR_Name,ZEM_IK,ZEM_IBAN,ZEM_BelegNr,ZEM_VorgangsNr,ZEM_RecNr,ZEM_RecDatum,ZEM_BTR_Forderg,KTR_BTR_Zahlung,KTR_BTR_Skonto,KTR_BTR_DTA_Kuerzg,Datum_ZahlungAusfuehrg",
+      "1,TST,100000000,Testkasse,200000000,DE00,,V-1,RE-2017-1,01.08.2017,100.00,100.00,0.00,0.00,15.09.2017",
+    ].join("\n");
+
+    const res = await sende(ohnePflichtspalte, { dryRun: true });
+
+    expect(res.status, "Struktur-Fehler kommt als 500 statt 400").toBe(400);
+    expect(res.data.code).toBe("AVIS_DATEIAUFBAU");
+    expect(String(res.data.message), "die Meldung nennt die fehlende Spalte nicht")
+      .toContain("KTR_BTR_Zahlg");
+    expect(String(res.data.message), "die Standardmeldung verdeckt den Grund")
+      .not.toMatch(/konnte nicht gespeichert werden/);
+  });
+
+  it("AV-17 – die Ablehnung nennt alle vier Ausgänge, nicht nur den blockierenden", async () => {
+    // Ein Bediener soll sehen, welche Prüfung angeschlagen hat UND wie die
+    // übrigen Posten stehen. Sonst ist „abgelehnt" nicht von „kaputt" zu
+    // unterscheiden.
+    const zuHoch = naechsteNummer();
+    const stimmig = naechsteNummer();
+    await legeRechnungAn(zuHoch, 7000);
+    await legeRechnungAn(stimmig, 15000);
+
+    const res = await sende(kassenCsv(
+      [{ nummer: zuHoch, euro: "7.000,00" }, { nummer: stimmig, euro: "150,00" }], "7.150,00",
+    ));
+
+    expect(res.status).toBe(400);
+    const meldung = String(res.data.message);
+    expect(meldung).toMatch(/bestätigt 1/);
+    expect(meldung).toMatch(/unterzahlt 0/);
+    expect(meldung).toMatch(/ohne auflösbare Rechnung 0/);
+    expect(meldung, "der blockierende Grund fehlt").toContain(zuHoch);
+  });
 });
 
 describe("Avis-Import — die Vorschau", () => {

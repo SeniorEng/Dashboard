@@ -4,7 +4,7 @@ import { asyncHandler, badRequest, notFound, conflict } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { qontoService } from "../../services/qonto";
 import { qontoStorage } from "../../storage/qonto";
-import { parseAvisCsv, AvisParseUncertainError } from "../../services/avis-parser";
+import { parseAvisCsv, AvisParseUncertainError, AvisDateiaufbauError } from "../../services/avis-parser";
 import {
   pruefeGegenRechnungen,
   findeRechnungUeberNummer,
@@ -1489,10 +1489,31 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
           },
         });
       }
+      /**
+       * Die Struktur-Riegel antworten mit 400 und dem GRUND.
+       *
+       * Sie warfen vorher einen nackten `Error`. `asyncHandler` ersetzt den
+       * durch seine Standardmeldung — aus „ZEM_BelegNr fehlt" wurde ein
+       * HTTP 500 „Zahlungsavis konnte nicht gespeichert werden". Der Riegel
+       * war damit im Code laut und an der Oberfläche stumm, und eine korrekt
+       * abgelehnte Datei sah aus wie ein kaputtes System.
+       *
+       * Das ist dasselbe Versagen, das dieser ganze Vorgang abräumt: eine
+       * Prüfung, deren Ergebnis niemand ablesen kann, ist keine.
+       */
+      if (err instanceof AvisDateiaufbauError) {
+        return res.status(400).json({
+          message: err.message,
+          code: "AVIS_DATEIAUFBAU",
+        });
+      }
       throw err;
     }
     if (parsed.items.length === 0) {
-      return res.status(400).json({ message: "CSV enthält keine Positionen" });
+      return res.status(400).json({
+        message: "Die Datei enthält keine Posten. Import abgelehnt.",
+        code: "AVIS_DATEIAUFBAU",
+      });
     }
 
     // ── Der Riegel: jeder Posten gegen die Rechnung, die er nennt ──
@@ -1520,16 +1541,43 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     // Nur die ÜBERzahlung blockiert, und es gibt keinen `force`-Weg daran
     // vorbei: eine Korrektur läuft über den Parser, nicht über eine
     // Übersteuerung im Einzelfall.
-    const abgleich = await pruefeGegenRechnungen(parsed.items);
+    /**
+     * Auch hier gilt „400 mit Grund", nicht nur beim Parsen.
+     *
+     * Der Catch oben umschliesst nur `parseAvisCsv`. Ein `AvisDateiaufbauError`
+     * aus dem Abgleich kaeme als 500 mit der Standardmeldung heraus — genau
+     * der Zustand, den dieser PR abraeumt (Gate 2 zu #159, S2). Heute wirft
+     * der Abgleich die Klasse nicht, der Befund ist also latent; er wird
+     * scharf, sobald ein Struktur-Riegel dorthin wandert.
+     *
+     * Sauberer waere ein Mapping in einem Error-Mapper, damit die Zusage
+     * unabhaengig davon gilt, WO der Riegel sitzt — siehe FINDING im PR.
+     */
+    let abgleich;
+    try {
+      abgleich = await pruefeGegenRechnungen(parsed.items);
+    } catch (err) {
+      if (err instanceof AvisDateiaufbauError) {
+        return res.status(400).json({ message: err.message, code: "AVIS_DATEIAUFBAU" });
+      }
+      throw err;
+    }
 
     // Nur die ÜBERzahlung blockiert. Eine Unterzahlung ist eine Kürzung durch
     // die Kasse — normaler Geschäftsfall, den der Lesepfad je Position
     // abbildet; sie wird gemeldet, nicht abgelehnt.
     if (abgleich.ueberzahlungen > 0) {
       const erste = abgleich.befunde.filter(b => b.status === "ueberzahlung").slice(0, 3);
+      // Die Meldung nennt ALLE vier Ausgänge, nicht nur den blockierenden.
+      // Ein Bediener soll sehen, welche Prüfung angeschlagen hat und wie die
+      // übrigen Posten stehen — sonst ist „abgelehnt" nicht von „kaputt" zu
+      // unterscheiden.
       return res.status(400).json({
-        message: `${abgleich.ueberzahlungen} von ${parsed.items.length} Posten nennen MEHR als die Rechnung. `
-          + `Import abgelehnt. Beispiele: ${erste.map(b => b.grund).join(" · ")}`,
+        message: `${abgleich.ueberzahlungen} von ${parsed.items.length} Posten nennen MEHR als die Rechnung `
+          + `— dafür gibt es keinen legitimen Fall, Import abgelehnt. `
+          + `(bestätigt ${abgleich.bestaetigt} · unterzahlt ${abgleich.unterzahlungen} `
+          + `· ohne auflösbare Rechnung ${abgleich.ungeprueft}) `
+          + `Beispiele: ${erste.map(b => b.grund).join(" · ")}`,
         code: "AVIS_RECHNUNGSABGLEICH",
         details: { abgleich, pruefsumme: parsed.pruefsumme },
       });
@@ -1561,6 +1609,20 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
         // und `ausAnderenZeilen` sagen, was verglichen wurde; ein grünes
         // Ergebnis ohne sichtbaren Vergleich gilt nicht als bestanden.
         pruefsumme: parsed.pruefsumme,
+        // Auffälligkeiten, die nicht blockieren — der dritte Ausgang neben
+        // „abgelehnt" und „in Ordnung". Ein Riegel wäre hier falsch (er träfe
+        // den seltenen echten Fall mit), Schweigen auch: dann entscheidet
+        // niemand, weil niemand es sieht.
+        hinweise: parsed.hinweise,
+        // Dieselben Zähler wie in der Import-Antwort — ein Ausgang, der nie
+        // feuert, ist sonst nicht von einem zu unterscheiden, der gerade
+        // nichts zu sagen hat.
+        ausgaenge: {
+          bestaetigt: abgleich.bestaetigt,
+          unterzahlungen: abgleich.unterzahlungen,
+          ungeprueft: abgleich.ungeprueft,
+          hinweise: parsed.hinweise.length,
+        },
         itemCount: parsed.items.length,
         items: parsed.items,
       });
@@ -1633,7 +1695,34 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     const bulkClose = await qontoService.autoCloseAdviceFromTransactions(advice.id, req.user!.id, req.ip);
 
     const refreshed = await qontoStorage.getPaymentAdviceById(advice.id);
-    res.json({ advice: refreshed, matched: matchCount, bulkClosed: bulkClose != null });
+
+    /**
+     * `hinweise` und die AUSGANGS-ZÄHLER gehören auch in die Import-Antwort.
+     *
+     * Gate 2 (3. Durchgang, S2): der Hinweis-Kanal kam nur im `dryRun`-Zweig
+     * zurück — und `dryRun` sendet der Client nie. Der Kanal erreichte damit
+     * den einzigen Pfad nicht, den ein Mensch benutzt, und die
+     * Teilverdopplung lief mit doppeltem Betrag still durch. Genau das, wogegen
+     * sein eigener Docblock geschrieben ist: „dann entscheidet niemand, weil
+     * niemand es sieht."
+     *
+     * Die Zähler stehen dabei, weil ein Kanal, der NIE feuert, sonst nicht von
+     * einem Kanal zu unterscheiden ist, der gerade nichts zu sagen hat. Mit
+     * ihnen wäre „existiert, feuert nie" beim ersten Lauf aufgefallen statt im
+     * dritten Review.
+     */
+    res.json({
+      advice: refreshed,
+      matched: matchCount,
+      bulkClosed: bulkClose != null,
+      hinweise: parsed.hinweise,
+      ausgaenge: {
+        bestaetigt: abgleich.bestaetigt,
+        unterzahlungen: abgleich.unterzahlungen,
+        ungeprueft: abgleich.ungeprueft,
+        hinweise: parsed.hinweise.length,
+      },
+    });
     return;
   }
 

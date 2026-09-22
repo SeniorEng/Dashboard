@@ -49,11 +49,11 @@ let lfd = 0;
 /** Kopfzeile eines Blocks: keine Belegnummer, trägt den ZAHLbetrag. */
 function kopf(
   recNr: string, forderung: string, zahlung: string,
-  extra: Partial<{ skonto: string; kuerzung: string }> = {},
+  extra: Partial<{ skonto: string; kuerzung: string; vorgang: string }> = {},
 ) {
   lfd += 1;
   return [`${lfd}`, "TST01278", "100000000", "Testkasse", "200000000", "DE00000000000000000000",
-    "", "V-1", recNr, "01.08.2026", forderung, zahlung,
+    "", extra.vorgang ?? "V-1", recNr, "01.08.2026", forderung, zahlung,
     extra.skonto ?? "0.00", extra.kuerzung ?? "0.00", "15.09.2026"].join(",");
 }
 /** Belegzeile: Belegnummer gefüllt, nur die Forderung, dieselbe `ZEM_RecNr`. */
@@ -191,7 +191,7 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
     expect(() => parseAvisCsv(verwaist)).toThrow(/ohne vorangehende Kopfzeile/);
   });
 
-  it("AP-10 – eine doppelte Belegnummer wird abgelehnt", () => {
+  it("AP-10 – eine doppelte Belegnummer IM SELBEN BLOCK wird abgelehnt", () => {
     // Gate-2-Befund G: eine verdoppelte Zeile lief mit `abweichung = 0` durch.
     // Der datei-interne Vergleich kann das per Konstruktion nicht sehen —
     // beide Seiten verdoppeln sich mit.
@@ -201,6 +201,188 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
       beleg("RE-2026-9100", "B-1", "70.00"),
     );
     expect(() => parseAvisCsv(doppelt)).toThrow(/Belegnummer mehrfach/);
+  });
+
+  it("AP-27 – ein verdoppelter Block wird abgelehnt", () => {
+    // ── Der Fall, den mein eigener Hotfix aufgegeben hatte ──
+    // Die Verengung auf den Block klang schlüssig: „eine verdoppelte Zeile
+    // steht per Definition im selben Block". Sie tut es NICHT — die
+    // Blockgrenze ist „Zeile ohne ZEM_BelegNr", also eröffnet eine
+    // verdoppelte KOPFZEILE einen neuen Block. Eine zweimal angehängte Datei
+    // lief mit doppeltem Betrag durch (`posten=4 gesamt=20000` statt 10000).
+    //
+    // Ich hatte einen Fehlalarm gegen einen Fehlschluss getauscht, und die
+    // Zusage daran war wieder eine ungemessene Annahme — dieselbe Klasse wie
+    // der dateiweite Riegel, nur mit umgekehrtem Vorzeichen.
+    //
+    // Der Riegel fasst bewusst ENG: gleiche Rechnung, gleicher Zahlbetrag,
+    // gleiche Belege. Das schärfere Paar (ZEM_RecNr, ZEM_BelegNr) trüge nur,
+    // wenn ZEM_RecNr je Datei eindeutig ist — und das ist NICHT gemessen.
+    const blockDoppelt = datei(
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+    );
+    expect(() => parseAvisCsv(blockDoppelt)).toThrow(/Block mehrfach/);
+
+    // Auch die zweimal angehängte Datei — der realistische Auslöser.
+    const dateiDoppelt = datei(
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9002", "30.00", "30.00"), beleg("RE-2026-9002", "1", "30.00"),
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9002", "30.00", "30.00"), beleg("RE-2026-9002", "1", "30.00"),
+    );
+    expect(() => parseAvisCsv(dateiDoppelt)).toThrow(/Block mehrfach/);
+  });
+
+  it("AP-29 – eine kanonische Nummer in zwei Blöcken wird GEMELDET, nicht abgelehnt", () => {
+    // ── Der dritte Ausgang, und warum er hier richtig ist ──
+    // Gemessen über 29 Dateien: `ZEM_RecNr` wiederholt sich über Blöcke hinweg
+    // in genau zwei Dateien — beide Male Altbestand (`2026-03-06`,
+    // `2026-04-06/4`), also kein Schlüssel, sondern ein Zeitraum, und beide
+    // Male mit verschiedenen Beträgen. Ein Riegel auf das Paar
+    // (RecNr, BelegNr) hätte diese zwei INTAKTEN Dateien abgelehnt.
+    //
+    // Bei kanonischen Nummern kommt es in den gemessenen Dateien nicht vor.
+    // Dort wäre ein Riegel scharf — aber er träfe auch den Fall, den 12
+    // Dateien nicht ausschließen: zwei Tranchen auf dieselbe Rechnung. Die
+    // sieht aus der Datei heraus genauso aus wie eine Teilverdopplung.
+    //
+    // Melden statt riegeln: selten genug, dass ein Mensch hinsieht, und
+    // mehrdeutig genug, dass eine Maschine nicht entscheiden sollte.
+    const zweiTranchen = datei(
+      kopf("RE-2026-9001", "70.00", "70.00", { vorgang: "V-A" }), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9001", "30.00", "30.00", { vorgang: "V-B" }), beleg("RE-2026-9001", "1", "30.00"),
+    );
+    const r = parseAvisCsv(zweiTranchen);
+    expect(r.items, "die Datei wurde abgelehnt statt gemeldet").toHaveLength(2);
+    expect(r.header.gesamtBetragCents).toBe(10000);
+    expect(r.hinweise).toHaveLength(1);
+    expect(r.hinweise[0]).toContain("RE-2026-9001");
+    expect(r.hinweise[0]).toMatch(/Tranchen|Teilverdopplung/);
+  });
+
+  it("AP-30 – eine ALTBESTANDS-Nummer in zwei Blöcken ist kein Hinweis wert", () => {
+    // `2026-03-06` ist ein Datum, kein Schlüssel. Dass es sich wiederholt, ist
+    // erwartbar und bedeutungslos — gemessen in `Avis_ICL01201.csv`. Ein
+    // Hinweis hier wäre Rauschen, und Rauschen macht Hinweise wertlos.
+    const altbestand = datei(
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "V-A" }), beleg("2026-03-06", "1", "70.00"),
+      kopf("2026-03-06", "30.00", "30.00", { vorgang: "V-B" }), beleg("2026-03-06", "1", "30.00"),
+    );
+    const r = parseAvisCsv(altbestand);
+    expect(r.items).toHaveLength(2);
+    expect(r.hinweise, "Altbestands-Wiederholung als Auffälligkeit gemeldet").toEqual([]);
+  });
+
+  it("AP-31 – zwei echte Vorgänge mit gleicher Nummer und gleichem Betrag laufen durch", () => {
+    // ── Die dritte Wiederholung desselben Musters, gefunden im Review ──
+    // Ich hatte geschrieben: „dieselbe Rechnung zweimal mit demselben Betrag
+    // im selben Avis hat unter keiner Lesart einen legitimen Fall." Die
+    // Messung sagte aber nur, dass gleiche Beträge in DIESEN 29 Dateien nicht
+    // vorkommen — daraus folgt nicht „nie".
+    //
+    // Und im Altbestand ist `ZEM_RecNr` ein ZEITRAUM, kein Schlüssel: zwei
+    // Blöcke mit gleichem Zeitraum, gleichem Standardbetrag und je `BelegNr=1`
+    // sind dann die intakte Monatsdatei mit zwei Vorgängen. Mein Riegel hat
+    // sie abgelehnt.
+    //
+    // `ZEM_VorgangsNr` trennt die Fälle — gemessen über alle 66 Blöcke: nie
+    // leer, blockweit konstant, 0 Mal dieselbe Nummer in zwei Blöcken.
+    const zweiVorgaenge = datei(
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "2505802877" }),
+      beleg("2026-03-06", "1", "70.00"),
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "2505809999" }),
+      beleg("2026-03-06", "1", "70.00"),
+    );
+    const r = parseAvisCsv(zweiVorgaenge);
+    expect(r.items, "zwei echte Vorgänge als Verdopplung abgelehnt").toHaveLength(2);
+    expect(r.header.gesamtBetragCents).toBe(14000);
+  });
+
+  it("AP-32 – dieselbe VorgangsNr zweimal ist weiterhin eine Verdopplung", () => {
+    // Die Gegenprobe zu AP-31: eine zweimal angehängte Datei wiederholt die
+    // VorgangsNr mitsamt allem anderen. Ein zusätzliches Feld im
+    // Identitäts-Schlüssel kann nur WENIGER ablehnen — es darf den Riegel
+    // nicht stumpf machen.
+    const verdoppelt = datei(
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "2505802877" }),
+      beleg("2026-03-06", "1", "70.00"),
+      kopf("2026-03-06", "70.00", "70.00", { vorgang: "2505802877" }),
+      beleg("2026-03-06", "1", "70.00"),
+    );
+    expect(() => parseAvisCsv(verdoppelt)).toThrow(/Block mehrfach/);
+  });
+
+  it("AP-33 – der Hinweis greift auf der KANONISIERTEN Nummer, nicht am Rohwert", () => {
+    // Der Parser kanonisiert `ZEM_RecNr` über `extractReInvoiceNumber` (O→0,
+    // eingeschobene Leerzeichen). Die erste Fassung prüfte mit einem eigenen
+    // Regex gegen den ROHWERT — ein dritter Block für eine Frage, für die
+    // `avis-match.ts` ausdrücklich eine SSoT führt.
+    //
+    // Ausgeführt im Review: bei `RE-2026-O212` verwarf der Test beide Blöcke
+    // als „Altbestand" und verschluckte den Hinweis. Der Mechanismus, der
+    // Altbestand schonen soll, schluckte eine echte kanonische Nummer.
+    const mitBuchstabeO = datei(
+      kopf("RE-2026-O212", "70.00", "70.00", { vorgang: "V-A" }),
+      beleg("RE-2026-O212", "1", "70.00"),
+      kopf("RE-2026-0212", "30.00", "30.00", { vorgang: "V-B" }),
+      beleg("RE-2026-0212", "1", "30.00"),
+    );
+    const r = parseAvisCsv(mitBuchstabeO);
+    expect(r.items.map(i => i.rechnungsNummer)).toEqual(["RE-2026-0212", "RE-2026-0212"]);
+    expect(r.hinweise, "der Hinweis wurde am Rohwert vorbei verschluckt").toHaveLength(1);
+    expect(r.hinweise[0]).toContain("RE-2026-0212");
+  });
+
+  it("AP-28 – eine Fehlermeldung zitiert KEINEN Zellinhalt", () => {
+    // Die Meldung landet als 400 im Toast. Bei einem Feldversatz in der
+    // komma-getrennten Datei steht an der Betragsposition irgendein anderer
+    // Zellinhalt — und diese Dateien tragen Versichertennamen und -nummern.
+    // Feldname und Länge genügen, um die Stelle zu finden.
+    const versatz = datei(
+      kopf("RE-2026-9001", "70.00", "Musterfrau Erika"),
+      beleg("RE-2026-9001", "1", "70.00"),
+    );
+    try {
+      parseAvisCsv(versatz);
+      throw new Error("hätte abbrechen müssen");
+    } catch (e) {
+      const m = (e as Error).message;
+      expect(m, "der Zellinhalt steht in der Meldung").not.toContain("Musterfrau");
+      expect(m).toContain("KTR_BTR_Zahlg");
+      // Die Länge lokalisiert in einer Datei mit 66 Blöcken nichts und ist
+      // überdies die NACH `trim()`. `LfdNr` trifft die Zeile genau.
+      expect(m, "ohne Ortsangabe ist die Stelle nicht zu finden").toMatch(/LfdNr \d+/);
+    }
+  });
+
+  it("AP-26 – dieselbe Belegnummer in VERSCHIEDENEN Blöcken ist normal", () => {
+    // ── Am 22.09.2026 in Prod aufgefallen ──
+    // `Avis_ICL01278.csv` wurde abgelehnt. Nicht weil die Datei kaputt war —
+    // sie ist die, deren Aufbau vollständig vermessen vorliegt —, sondern weil
+    // der Dublettenriegel dateiweit prüfte.
+    //
+    // `ZEM_BelegNr` ist die Position INNERHALB einer Avis-Position, kein
+    // Schlüssel der Datei: im Fixture `ICL01159` laufen die Nummern 1..5
+    // innerhalb EINES Blocks. Eine Datei mit vier 1:1-Blöcken trägt damit
+    // viermal die `1`.
+    //
+    // Der Gate-2-Review hatte genau das benannt („eine Annahme mehr, als
+    // gemessen wurde"); ich hatte es als „fail-loud ist die richtige Seite"
+    // abgetan. **Ein Riegel auf einer ungemessenen Annahme trifft den
+    // Normalfall, nicht den Fehler** — er lehnte jede intakte Mehrblock-Datei
+    // ab.
+    const vierBloecke = datei(
+      kopf("RE-2026-0517", "70.00", "70.00"),   beleg("RE-2026-0517", "1", "70.00"),
+      kopf("RE-2026-0508", "123.49", "123.49"), beleg("RE-2026-0508", "1", "123.49"),
+      kopf("RE-2026-0510", "76.29", "76.29"),   beleg("RE-2026-0510", "1", "76.29"),
+      kopf("RE-2026-0532", "14.56", "14.56"),   beleg("RE-2026-0532", "1", "14.56"),
+    );
+    const { items, header, pruefsumme } = parseAvisCsv(vierBloecke);
+    expect(items).toHaveLength(4);
+    expect(header.gesamtBetragCents, "die Vorhersage für ICL01278").toBe(28434);
+    expect(pruefsumme.abweichungCents).toBe(0);
+    expect(items.map(i => i.betragCents)).toEqual([7000, 12349, 7629, 1456]);
   });
 });
 
