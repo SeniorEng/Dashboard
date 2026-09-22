@@ -403,16 +403,56 @@ describe("Der datei-interne Konsistenzhinweis — was er kann und was nicht", ()
     expect(pruefsumme.abweichungCents, "der fehlende Beleg bleibt unbemerkt").not.toBe(0);
   });
 
-  it("AP-13 – er vergleicht NICHT Forderung gegen Zahlung", () => {
-    // Die beiden dürfen auseinanderliegen — das ist eine Kürzung, und sie ist
-    // ein Geschäftsfall. Ein Hinweis, der bei jedem legitimen Fall anschlägt,
-    // wird weggesehen; dann ist er schlimmer als keiner.
+  it("AP-13 – eine Kürzung erzeugt KEINE Abweichung (echte Dateistruktur)", () => {
+    // ── Der fünfte Fall desselben Musters, gefunden vom VORSCHAU-LAUF ──
+    // Dieser Test stand hier mit einem erfundenen Fixture: Kopfzeile fordert
+    // 117,19 und zahlt 58,16, Belegzeile trägt die VOLLE Forderung. So sieht
+    // die echte Datei nicht aus.
+    //
+    // `Avis_ICL01267.csv`, die einzige Kürzung im ganzen Bestand, ist zwei
+    // Zeilen lang — und die Belegzeile trägt den GEKÜRZTEN Betrag:
+    //
+    //   Kopfzeile    Forderg 117.19   Zahlg 58.16
+    //   Belegzeile   Forderg  58.16
+    //
+    // Der Test bewachte damit eine Zusage, die die Daten nicht hergeben, und
+    // der Vergleich „Kopf-Forderung gegen Beleg-Forderung" meldete im echten
+    // Lauf 5903. Auf dem Kürzungs-Pfad war die Zahl damit nicht mehr von einem
+    // Parse-Fehler zu unterscheiden.
+    //
+    // Gefunden hat das weder ich noch ein Review, sondern der Lauf gegen echte
+    // Daten — vor dem Schreiben, nicht danach.
     const unterzahlung = datei(
       kopf("RE-2026-0213", "117.19", "58.16"),
-      beleg("RE-2026-0213", "B-1", "117.19"),
+      beleg("RE-2026-0213", "1", "58.16"),
     );
-    const { pruefsumme } = parseAvisCsv(unterzahlung);
+    const { pruefsumme, items } = parseAvisCsv(unterzahlung);
     expect(pruefsumme.abweichungCents, "die Kürzung wird als Unstimmigkeit gemeldet").toBe(0);
+    // Der Betrag ist von alledem unberührt — er kommt aus `KTR_BTR_Zahlg`.
+    expect(items[0].betragCents).toBe(5816);
+  });
+
+  it("AP-34 – die andere Lesart bleibt zulässig, ein verlorener Beleg nicht", () => {
+    // Zwei Lesarten sind erlaubt, weil nur EINE gemessen ist: die Belegsumme
+    // darf die Forderung ODER den Zahlbetrag der Kopfzeile treffen. Aus einem
+    // einzigen Kürzungs-Fall eine Konvention zu machen, wäre der Fehler, der
+    // an diesem Vorgang schon fünfmal passiert ist.
+    //
+    // Aufgegeben wird dadurch nichts: eine verlorene oder verdoppelte
+    // Belegzeile verfehlt BEIDE Zahlen.
+    const andereLesart = datei(
+      kopf("RE-2026-0213", "117.19", "58.16"),
+      beleg("RE-2026-0213", "1", "117.19"),
+    );
+    expect(parseAvisCsv(andereLesart).pruefsumme.abweichungCents,
+      "die zweite Lesart wird als Unstimmigkeit gemeldet").toBe(0);
+
+    const belegVerloren = datei(
+      kopf("RE-2026-9100", "100.00", "100.00"),
+      beleg("RE-2026-9100", "1", "70.00"),
+    );
+    expect(parseAvisCsv(belegVerloren).pruefsumme.abweichungCents,
+      "der verlorene Beleg bleibt unbemerkt").toBe(3000);
   });
 
   it("AP-14 – und er ist per Konstruktion blind gegen einen SKALENFEHLER", () => {
