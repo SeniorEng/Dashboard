@@ -337,7 +337,34 @@ function BudgetPot45b({
   const budgetExceeded = data.availableAfterPlannedCents < 0;
   const shortfallMonthLabel = formatShortfallMonth(data.plannedShortfallMonth);
 
-  const hasData = data.totalAllocatedCents > 0;
+  /**
+   * „Keine Zuweisung" und „Zuweisung über 0 €" sind zwei verschiedene Dinge.
+   *
+   * `totalAllocatedCents > 0` warf beides zusammen und zeigte „Noch keine
+   * Zuweisungen vorhanden" — genau die leere Zeile, die Alriks Entscheidung
+   * ausdrücklich ausschließt: **ein 0-€-Startwert wird angezeigt wie jeder
+   * andere Betrag.** Abwesenheit und festgestellte Null dürfen nicht gleich
+   * aussehen, sonst setzt der nächste Bearbeiter einen Wert darüber.
+   *
+   * Dieselbe fachliche Regel wie die vier 0-€-Schranken in Server und
+   * Startwert-Editor, nur eine Schicht höher — und sie blieb stehen, weil
+   * niemand nach ihr gesucht hat (P1 `6hXp9qMrXH2WGVVG`).
+   *
+   * ── Warum `isCurrentlyActive` und nicht ein sauberes „hat Zuweisungen" ──
+   * `BudgetOverview45bDTO` führt **kein** Feld, das die Existenz von
+   * Zuweisungen von ihrer Höhe trennt. Der Client KANN die Frage aus dieser
+   * Antwort nicht beantworten — das ist eine Lücke im Schema, nicht in dieser
+   * Komponente (als FINDING im PR). `isCurrentlyActive` ist das genaueste hier
+   * verfügbare Signal für „dieser Topf ist eingerichtet" und entspricht dem,
+   * was die §45a-Karte zwei Blöcke weiter mit `monthlyBudgetCents > 0` macht.
+   *
+   * Die Betrags-Prüfungen sind zusätzlich `!== 0` statt `> 0`: ein inaktiver
+   * Topf mit historischen Zahlen bleibt lesbar.
+   */
+  const hasData = data.isCurrentlyActive
+    || data.totalAllocatedCents !== 0
+    || data.totalUsedCents !== 0
+    || data.carryoverCents !== 0;
 
   if (!hasData) {
     return (
