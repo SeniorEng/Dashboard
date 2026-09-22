@@ -1066,9 +1066,25 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
        * Zeilen, `[1]` traegt die Belegnummer). Nur dort wird gelesen; sonst
        * bleibt das Feld leer.
        *
-       * Ein leeres Feld kostet eine Anzeigezeile. Ein falsch gefuelltes sieht
-       * benutzbar aus — Cowork hat am 22.09. einen Dublettenriegel auf genau
-       * diesem Feld vermutet, weil dort eine Nummer stand.
+       * ── Und das kostet NICHTS, auch das ist gemessen ──────────────────
+       * Die naheliegende Erweiterung waere gewesen: `[1]` lesen, wann immer
+       * eine IBAN gefunden wurde — denn BARMER-Layouts tragen eine, AOK-
+       * Layouts `EUR`. Die Messung ueber alle 53 Dateien sagt dazu zweierlei:
+       *
+       *  - Sicher waere sie: in keiner der 30 IBAN-Zeilen steht bei `[1]` die
+       *    Kostentraeger-IK.
+       *  - **Nutzlos waere sie trotzdem:** 19 der 30 sind Breite 6 (hier schon
+       *    gelesen), und in den uebrigen 11 ist `[1]` durchgehend TEXT. Die
+       *    Regel haette also bei genau den Zeilen, die sie zurueckgewinnen
+       *    sollte, einen Text als Belegnummer eingetragen.
+       *
+       * In Breite 7 gibt es keine Belegnummer, die man verlieren koennte.
+       *
+       * Die Korrelation „BARMER traegt IBAN" belegt eben NICHT, dass `[1]`
+       * dort eine Belegnummer ist — sie war die Sorte Regel, die an diesem
+       * Vorgang achtmal danebenging. Ein falsch gefuelltes Feld sieht
+       * benutzbar aus; am 22.09. wurde ein Dublettenriegel auf genau diesem
+       * Feld vermutet, weil dort eine Nummer stand.
        */
       headerData.belegNummer = parts.length === 6 ? (parts[1] || null) : null;
     }
