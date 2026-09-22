@@ -455,6 +455,70 @@ describe("Der datei-interne Konsistenzhinweis — was er kann und was nicht", ()
       "der verlorene Beleg bleibt unbemerkt").toBe(3000);
   });
 
+  it("AP-35 – wo nur EINE Lesart aufgeht, wird es gemeldet", () => {
+    // ── Der Satz „gibt nichts auf" war falsch, gefunden im Review ──
+    // Die zweite Lesart fügt einen ZWEITEN NULLPUNKT hinzu, und der liegt
+    // genau dort, wo der plausibelste Dateifehler landet: die Kasse skontiert
+    // oder kürzt GENAU die Positionen, die die Differenz ausmachen — fällt
+    // eine davon weg, trifft die Belegsumme exakt den Zahlbetrag.
+    //
+    //   Kopf  Forderg 100.00  Zahlg 95.00  Skonto 5.00
+    //   Beleg 1  95.00
+    //   Beleg 2   5.00        ← geht verloren   → Abweichung 0 statt 500
+    //
+    // Der Satz war nur dort wahr, wo die Doppel-Lesart gar nichts tut
+    // (Forderung = Zahlbetrag, 65 von 66), und falsch überall dort, wo sie
+    // wirkt. AP-34 prüfte ihn mit einer Kopfzeile 100.00/100.00 — also in der
+    // Region, in der er nicht fallen KANN.
+    //
+    // Eine Lesart zu streichen wäre wieder der Sprung von einer Datenmenge zur
+    // Konvention. Also wird der Graubereich sichtbar gemacht statt geschlossen.
+    const skontoBlockVollstaendig = datei(
+      kopf("RE-2026-9100", "100.00", "95.00", { skonto: "5.00" }),
+      beleg("RE-2026-9100", "1", "95.00"),
+      beleg("RE-2026-9100", "2", "5.00"),
+    );
+    const ohneSkontoZeile = datei(
+      kopf("RE-2026-9100", "100.00", "95.00", { skonto: "5.00" }),
+      beleg("RE-2026-9100", "1", "95.00"),
+    );
+
+    // Beide melden 0 — die verlorene Zeile ist aus der Zahl NICHT ablesbar.
+    expect(parseAvisCsv(ohneSkontoZeile).pruefsumme.abweichungCents).toBe(0);
+
+    // Aber beide tragen einen Hinweis: der Block geht nur unter EINER Lesart
+    // auf, und welche stimmt, weiss niemand.
+    for (const [name, csv] of [["vollständig", skontoBlockVollstaendig],
+                               ["ohne Skonto-Zeile", ohneSkontoZeile]] as const) {
+      const h = parseAvisCsv(csv).hinweise;
+      expect(h, `${name}: der Graubereich bleibt still`).toHaveLength(1);
+      expect(h[0]).toMatch(/nur gegen (den Zahlbetrag|die Forderung)/);
+    }
+  });
+
+  it("AP-36 – eine leere Kopf-Forderung bricht ab statt lautlos aufzugehen", () => {
+    // `parseBetragCents` bildet "" auf 0 ab. Unter der Zahlbetrags-Lesart ging
+    // eine leere Kopf-Forderung deshalb durch, solange die Belegsumme den
+    // Zahlbetrag trifft — also im gemessenen Normalfall immer. Damit wäre
+    // genau das weg, was die Prüfsumme noch leisten soll.
+    const ohneForderung = datei(
+      kopf("RE-2026-9100", "", "70.00"),
+      beleg("RE-2026-9100", "1", "70.00"),
+    );
+    expect(() => parseAvisCsv(ohneForderung)).toThrow(/ZEM_BTR_Forderg/);
+  });
+
+  it("AP-37 – ein Block ohne Belegzeile wird gemeldet, nicht übergangen", () => {
+    // Er fällt aus der Prüfung heraus (`filter(posten.length > 0)`) — gemessen
+    // kommt er in 0 von 66 Blöcken vor. Eine ungemessene Form still zu
+    // übergehen ist das Muster, das hier sechsmal danebenging; ein Riegel
+    // darauf wäre wieder eine Annahme über die Messung hinaus.
+    const ohneBeleg = datei(kopf("RE-2026-9100", "100.00", "100.00"));
+    const r = parseAvisCsv(ohneBeleg);
+    expect(r.hinweise).toHaveLength(1);
+    expect(r.hinweise[0]).toMatch(/keine Belegzeile/);
+  });
+
   it("AP-14 – und er ist per Konstruktion blind gegen einen SKALENFEHLER", () => {
     // Der Beleg, warum der Riegel die Datei verlassen musste: beide Zahlen
     // kommen durch denselben `parseBetragCents`-Aufruf und skalieren mit.

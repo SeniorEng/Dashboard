@@ -282,7 +282,12 @@ describe("Avis-Import — der Riegel hängt an der Rechnung", () => {
     const davaso = [
       "LfdNr,AVISNr,KTR_IK,KTR_Name,ZEM_IK,ZEM_IBAN,ZEM_BelegNr,ZEM_VorgangsNr,ZEM_RecNr,ZEM_RecDatum,ZEM_BTR_Forderg,KTR_BTR_Zahlg,KTR_BTR_Skonto,KTR_BTR_DTA_Kuerzg,Datum_ZahlungAusfuehrg",
       `1,TST,100000000,Testkasse,200000000,DE00,,V-1,${nummer},01.08.2017,100.00,95.00,5.00,0.00,15.09.2017`,
-      `2,TST,100000000,Testkasse,200000000,DE00,B-1,V-1,${nummer},01.08.2017,100.00,,0.00,,`,
+      // Belegzeile trägt den REDUZIERTEN Betrag — so sieht `Avis_ICL01267.csv`
+      // aus, die einzige gemessene Kürzung. Die erfundene Variante (volle
+      // Forderung auf der Belegzeile) stand hier bis zum Vorschau-Lauf vom
+      // 22.09.2026 und widersprach den echten Daten; `AP-13` trug denselben
+      // Fehler und wurde mit derselben Begründung korrigiert.
+      `2,TST,100000000,Testkasse,200000000,DE00,B-1,V-1,${nummer},01.08.2017,95.00,,0.00,,`,
     ].join("\n");
 
     const res = await sende(davaso, { dryRun: true });
@@ -312,7 +317,8 @@ describe("Avis-Import — der Riegel hängt an der Rechnung", () => {
     const davaso = [
       "LfdNr,AVISNr,KTR_IK,KTR_Name,ZEM_IK,ZEM_IBAN,ZEM_BelegNr,ZEM_VorgangsNr,ZEM_RecNr,ZEM_RecDatum,ZEM_BTR_Forderg,KTR_BTR_Zahlg,KTR_BTR_Skonto,KTR_BTR_DTA_Kuerzg,Datum_ZahlungAusfuehrg",
       `1,TST,100000000,Testkasse,200000000,DE00,,V-1,${nummer},01.08.2017,100.00,80.00,0.00,20.00,15.09.2017`,
-      `2,TST,100000000,Testkasse,200000000,DE00,B-1,V-1,${nummer},01.08.2017,100.00,,0.00,,`,
+      // Auch hier die echte Struktur: Belegzeile mit dem gekürzten Betrag.
+      `2,TST,100000000,Testkasse,200000000,DE00,B-1,V-1,${nummer},01.08.2017,80.00,,0.00,,`,
     ].join("\n");
 
     const res = await sende(davaso, { dryRun: true });
