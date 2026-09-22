@@ -1609,6 +1609,11 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
         // und `ausAnderenZeilen` sagen, was verglichen wurde; ein grünes
         // Ergebnis ohne sichtbaren Vergleich gilt nicht als bestanden.
         pruefsumme: parsed.pruefsumme,
+        // Auffälligkeiten, die nicht blockieren — der dritte Ausgang neben
+        // „abgelehnt" und „in Ordnung". Ein Riegel wäre hier falsch (er träfe
+        // den seltenen echten Fall mit), Schweigen auch: dann entscheidet
+        // niemand, weil niemand es sieht.
+        hinweise: parsed.hinweise,
         itemCount: parsed.items.length,
         items: parsed.items,
       });

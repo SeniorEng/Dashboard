@@ -234,6 +234,46 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
     expect(() => parseAvisCsv(dateiDoppelt)).toThrow(/Block mehrfach/);
   });
 
+  it("AP-29 – eine kanonische Nummer in zwei Blöcken wird GEMELDET, nicht abgelehnt", () => {
+    // ── Der dritte Ausgang, und warum er hier richtig ist ──
+    // Gemessen über 29 Dateien: `ZEM_RecNr` wiederholt sich über Blöcke hinweg
+    // in genau zwei Dateien — beide Male Altbestand (`2026-03-06`,
+    // `2026-04-06/4`), also kein Schlüssel, sondern ein Zeitraum, und beide
+    // Male mit verschiedenen Beträgen. Ein Riegel auf das Paar
+    // (RecNr, BelegNr) hätte diese zwei INTAKTEN Dateien abgelehnt.
+    //
+    // Bei kanonischen Nummern kommt es in den gemessenen Dateien nicht vor.
+    // Dort wäre ein Riegel scharf — aber er träfe auch den Fall, den 12
+    // Dateien nicht ausschließen: zwei Tranchen auf dieselbe Rechnung. Die
+    // sieht aus der Datei heraus genauso aus wie eine Teilverdopplung.
+    //
+    // Melden statt riegeln: selten genug, dass ein Mensch hinsieht, und
+    // mehrdeutig genug, dass eine Maschine nicht entscheiden sollte.
+    const zweiTranchen = datei(
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9001", "30.00", "30.00"), beleg("RE-2026-9001", "1", "30.00"),
+    );
+    const r = parseAvisCsv(zweiTranchen);
+    expect(r.items, "die Datei wurde abgelehnt statt gemeldet").toHaveLength(2);
+    expect(r.header.gesamtBetragCents).toBe(10000);
+    expect(r.hinweise).toHaveLength(1);
+    expect(r.hinweise[0]).toContain("RE-2026-9001");
+    expect(r.hinweise[0]).toMatch(/Tranchen|Teilverdopplung/);
+  });
+
+  it("AP-30 – eine ALTBESTANDS-Nummer in zwei Blöcken ist kein Hinweis wert", () => {
+    // `2026-03-06` ist ein Datum, kein Schlüssel. Dass es sich wiederholt, ist
+    // erwartbar und bedeutungslos — gemessen in `Avis_ICL01201.csv`. Ein
+    // Hinweis hier wäre Rauschen, und Rauschen macht Hinweise wertlos.
+    const altbestand = datei(
+      kopf("2026-03-06", "70.00", "70.00"), beleg("2026-03-06", "1", "70.00"),
+      kopf("2026-03-06", "30.00", "30.00"), beleg("2026-03-06", "1", "30.00"),
+    );
+    const r = parseAvisCsv(altbestand);
+    expect(r.items).toHaveLength(2);
+    expect(r.hinweise, "Altbestands-Wiederholung als Auffälligkeit gemeldet").toEqual([]);
+  });
+
   it("AP-28 – eine Fehlermeldung zitiert KEINEN Zellinhalt", () => {
     // Die Meldung landet als 400 im Toast. Bei einem Feldversatz in der
     // komma-getrennten Datei steht an der Betragsposition irgendein anderer

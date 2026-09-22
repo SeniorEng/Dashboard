@@ -99,6 +99,16 @@ interface ParsedAvis {
   header: ParsedAvisHeader;
   items: ParsedAvisItem[];
   pruefsumme: AvisPruefsumme;
+  /**
+   * Auffaelligkeiten, die NICHT blockieren.
+   *
+   * Der dritte Ausgang neben „abgelehnt" und „in Ordnung": etwas ist
+   * ungewoehnlich, hat aber eine legitime Lesart. Ein Riegel waere hier
+   * falsch — er traefe den seltenen echten Fall genauso wie den Fehler —,
+   * und Schweigen waere es auch: dann entscheidet niemand, weil niemand es
+   * sieht. Die Vorschau zeigt sie an.
+   */
+  hinweise: string[];
 }
 
 /**
@@ -588,9 +598,44 @@ function parseDavaso(csvContent: string): ParsedAvis {
 
   const hatPosten = bloecke.some(b => b.posten.length > 0);
 
+  /**
+   * Eine KANONISCHE Rechnungsnummer in mehreren Bloecken — Hinweis, kein Riegel.
+   *
+   * ── Warum nicht abgelehnt ───────────────────────────────────────────────
+   * Gemessen ueber alle 29 Dateien: `ZEM_RecNr` wiederholt sich in genau zwei
+   * Dateien ueber Bloecke hinweg, beide Male mit verschiedenen Betraegen und
+   * Posten — und beide Male ist die Nummer Altbestand (`2026-03-06`,
+   * `2026-04-06/4`). Dort ist `ZEM_RecNr` kein Schluessel, sondern ein
+   * Zeitraum; die Wiederholung ist erwartbar und bedeutungslos. Ein Riegel auf
+   * das Paar (RecNr, BelegNr) haette diese zwei intakten Dateien abgelehnt.
+   *
+   * In den 12 Dateien mit KANONISCHEN Nummern kommt keine Mehrfach-RecNr vor.
+   * Dort waere ein Riegel scharf — aber er traefe auch den Fall, den 12
+   * Dateien nicht ausschliessen koennen: eine Kasse, die dieselbe Rechnung in
+   * zwei Tranchen innerhalb eines Avis zahlt. Die sieht genauso aus wie eine
+   * Teilverdopplung, und aus der Datei heraus ist sie nicht zu unterscheiden.
+   *
+   * Die echte Verdopplung — zweimal angehaengte oder konkatenierte Datei —
+   * erzeugt IDENTISCHE Bloecke und wird oben abgelehnt. Was hier bleibt, ist
+   * der Graubereich, und fuer den ist Melden die richtige Antwort: er ist
+   * selten genug, dass ein Mensch hinsehen kann, und mehrdeutig genug, dass
+   * eine Maschine nicht entscheiden sollte.
+   */
+  const KANONISCH = /^RE-\d{4}-\d+$/;
+  const recNummern = bloecke.map(b => getField(b.kopf, "ZEM_RecNr"));
+  const mehrfachKanonisch = [...new Set(
+    recNummern.filter((r, i) => KANONISCH.test(r) && recNummern.indexOf(r) !== i),
+  )];
+  const hinweise = mehrfachKanonisch.map(r =>
+    `Rechnung ${r} kommt in mehreren Bloecken vor. In den gemessenen Dateien `
+    + "gibt es das bei kanonischen Nummern nicht — bitte pruefen, ob es zwei "
+    + "Tranchen sind oder eine Teilverdopplung.",
+  );
+
   return {
     header: headerData,
     items,
+    hinweise,
     pruefsumme: {
       ausPostenCents: forderungPosten,
       ausgewiesenCents: hatPosten ? forderungKopf : null,
@@ -719,6 +764,7 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
   return {
     header: headerData,
     items,
+    hinweise: [],
     pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, "Summenzeile 3;", true),
   };
 }
