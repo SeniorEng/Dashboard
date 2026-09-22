@@ -156,4 +156,72 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       await cleanupCustomer(id);
     }
   });
+
+  it("VD-5 – ein Übertrag, dessen `year` über dem Reset liegt, darf den Anspruch nicht ERHÖHEN", async () => {
+    /**
+     * Alriks Auflage vor dem Scharfschalten.
+     *
+     * Die Entwarnung lautete: die Verdrängung kann den Anspruch nicht erhöhen,
+     * weil `enumStart = max(allocStart, Reset+1)` und der Shift eines
+     * verdrängten Übertrags bei `(a.year, 1) <= (resetYear, 1)` liegt.
+     *
+     * **Diese Herleitung steht auf einer Annahme, die der Code nicht erzwingt:**
+     * `carryover.year === Jahr(carryover.validFrom)`. Der `allocStart`-Shift
+     * liest `a.year`, die Verdrängung liest `a.validFrom` — **zwei
+     * verschiedene Felder für zwei Entscheidungen über dieselbe Zeile.**
+     *
+     * Laufen sie auseinander, wird ein Übertrag verdrängt (validFrom vor dem
+     * Reset), dessen Shift ÜBER dem Reset lag — und mit ihm fällt eine
+     * Schranke weg, die den Anspruch gedeckelt hat.
+     *
+     * Der Fall kommt im Bestand nicht vor (Mess-Lauf: bei allen 20 Kunden
+     * `resetCutoff > accrualFloor`). Das macht ihn nicht unmöglich, nur
+     * ungetestet — und genau das ist der Grund für diesen Test.
+     */
+    const c = await createTestCustomer({
+      pflegegrad: 3, billingType: "pflegekasse_gesetzlich", acceptsPrivatePayment: false,
+    });
+    const id = c.id as number;
+    try {
+      await db.delete(customerCareLevelHistory).where(eq(customerCareLevelHistory.customerId, id));
+      await db.insert(customerBudgetTypeSettings).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null,
+        validFrom: `${ANKER_JAHR}-01-01`, validTo: null,
+      });
+      // Startwert 06/2026 — der Reset.
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        year: ANKER_JAHR, month: 6, amountCents: 131_00, source: "initial_balance",
+        validFrom: `${ANKER_JAHR}-06-01`, expiresAt: null, notes: "VD5-Startwert",
+      });
+      // Der inkonsistente Übertrag: `year` ZWEI Jahre über dem Reset,
+      // `validFrom` ein Jahr DARUNTER. Der Shift zieht auf 2028, die
+      // Verdrängung greift wegen validFrom < resetCutoff.
+      // Der Betrag ist KLEIN und der Stichtag SPAET — beides mit Absicht.
+      // Die erste Fassung dieses Tests nahm 500 EUR und den 15.08.: sie bestand,
+      // weil der weggefallene Uebertrag (500) groesser war als die freigelegte
+      // Aufstockung (262). Das war ein Zufall der Betraege, kein Nachweis.
+      // Gemessen kippt es bei 50 EUR und Dezember: 181,00 -> 524,00.
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        year: ANKER_JAHR + 2, month: null, amountCents: 50_00, source: "carryover",
+        validFrom: `${ANKER_JAHR - 1}-01-01`, expiresAt: `${ANKER_JAHR + 2}-06-30`,
+        notes: "VD5-inkonsistenter-Uebertrag",
+      });
+
+      const stichtag = `${ANKER_JAHR}-12-15`;
+      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+      const neu = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
+      );
+
+      // Die Zusage, die vor dem Scharfschalten tragen muss: die Verdrängung
+      // nimmt weg, sie gibt nie dazu.
+      expect(neu, `die Verdrängung hat den Anspruch ERHÖHT (${heute} -> ${neu})`)
+        .toBeLessThanOrEqual(heute);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
 });

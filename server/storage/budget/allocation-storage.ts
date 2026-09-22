@@ -818,11 +818,37 @@ async function calculateAllocated45b(
   // Argument ueber wenige Kunden und kein Beweis. Deshalb gibt der
   // Mess-Aufruf `accrualFloorDate` mit aus: sonst ist eine Differenz im
   // Anspruch nicht von dieser Nebenwirkung zu unterscheiden.
-  const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null }) =>
+  const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null; year: number }) =>
     a.source === "carryover" &&
     a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
     (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)) &&
-    (!opts.resetDisplacesAllSources || !resetCutoffDate || a.validFrom >= resetCutoffDate);
+    (!opts.resetDisplacesAllSources || !resetCutoffDate
+      || a.validFrom >= resetCutoffDate
+      // ── VD-5: verdraengt wird nur, wenn BEIDE Anker vor dem Reset liegen ──
+      //
+      // Der `allocStart`-Shift liest `a.year`, die Verdraengung las `a.validFrom`
+      // — **zwei verschiedene Felder fuer zwei Entscheidungen ueber dieselbe
+      // Zeile.** Laufen sie auseinander, faellt mit dem Uebertrag eine Schranke
+      // weg, die mit dem Reset nichts zu tun hatte.
+      //
+      // Gemessen, nicht hergeleitet (Startwert 06/2026, Uebertrag mit
+      // `year = 2028`, `validFrom = 2025-01-01`):
+      //
+      //   Uebertrag 500 EUR, Stichtag 08/2026   631,00 -> 393,00   -238,00
+      //   Uebertrag  50 EUR, Stichtag 12/2026   181,00 -> 524,00   +343,00
+      //   Uebertrag   5 EUR, Stichtag 12/2026   136,00 -> 524,00   +388,00
+      //
+      // Die Verdraengung GIBT also dazu, sobald der weggefallene Uebertrag
+      // kleiner ist als die dadurch freigelegte Monatsaufstockung. Die
+      // Entwarnung („kann den Anspruch nicht erhoehen") stammte aus einer
+      // Herleitung; ihr erster Testfall bestand nur, weil 500 > 262 war.
+      //
+      // Die zusaetzliche Bedingung ist eine VERENGUNG — sie kann nur weniger
+      // verdraengen, nie mehr, erzeugt also keinen neuen Fehlalarm. Auf
+      // konsistenten Daten (`year === Jahr(validFrom)`, von allen vier
+      // Schreibpfaden eingehalten) ist sie wirkungslos: dort folgt
+      // `a.year <= resetYear` bereits aus `validFrom < resetCutoffDate`.
+      || a.year > resetYear);
   const validCarryoverTargetYears = existingAllocations
     .filter(carryoverCounted)
     .map(a => a.year);
