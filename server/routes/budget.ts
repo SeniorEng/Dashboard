@@ -502,8 +502,27 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
   res.json(allocations);
 }));
 
+/**
+ * `min(0)` — ein Startwert von 0 EUR ist zulaessig (Alrik, 22.09.2026).
+ *
+ * Der Startwert ist eine INVENTUR: man stellt den Bestand fest, statt die
+ * Bewegungen zu rekonstruieren. Der haeufigste Anlass ist Dauerbetrieb, kein
+ * Uebergangsproblem — **rechnet ein anderer Pflegedienst gegen §45b ab, ist
+ * das Budget verbraucht, und in EngelDesk entsteht dazu nie eine Buchung.**
+ * Bekannt ist dann oft nur der Restbestand aus der Kassenauskunft, und der
+ * kann null sein.
+ *
+ * **Eine Inventur, die „null" nicht sagen kann, ist keine.** `min(1)` zwang
+ * genau dort zur Luege, wo die Feststellung am eindeutigsten ist.
+ *
+ * Der Lesepfad traegt das bereits: `initialBalanceMonths` filtert auf die
+ * EXISTENZ der Zeile, nicht auf den Betrag, und `amountCents` kommt in
+ * `anchor-45b.ts` kein einziges Mal vor. Ein 0-Startwert setzt also den Anker,
+ * loest den Reset aus, verdraengt Frueheres und traegt 0 zur Summe bei —
+ * genau die Semantik, die „aufgebraucht" braucht (P1 6hXp9qMrXH2WGVVG).
+ */
 const initialBalanceSchema = z.object({
-  amountCents: z.number().min(1),
+  amountCents: z.number().int().min(0, "Betrag darf nicht negativ sein"),
   validFrom: z.string().regex(/^\d{4}-\d{2}$/),
 });
 
@@ -719,8 +738,20 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
 // Audit-Action-Name `carryover_set`). Delete teilt sich mit dem Startwert den
 // `DELETE /:customerId/initial-balance/:allocationId`-Pfad, da dort beide
 // Quellen (`initial_balance`, `carryover`) bereits behandelt werden.
+/**
+ * `min(0)` — ein Uebertrag von 0 EUR ist ebenfalls zulaessig (Alrik, 22.09.2026).
+ *
+ * Ausdruecklich als EIGENER Vorgang begruendet, nicht als dieselbe Regel wie
+ * beim Startwert: „im Vorjahr ist nichts uebrig geblieben" ist eine andere
+ * Feststellung als „der Bestand wurde zu null inventarisiert". Dass beide
+ * Schranken fallen, heisst nicht, dass es ein Fall ist.
+ *
+ * Gemeinsam ist der Grund, warum die Schranke schadet: eine festgestellte Null
+ * und eine fehlende Angabe duerfen nicht gleich aussehen. Sonst setzt der
+ * naechste Bearbeiter einen Wert darueber (P1 6hXp9qMrXH2WGVVG).
+ */
 const carryoverSchema = z.object({
-  amountCents: z.number().int().min(1, "Betrag muss größer als 0 € sein"),
+  amountCents: z.number().int().min(0, "Betrag darf nicht negativ sein"),
   sourceYear: z.number().int().min(2020, "Bezugsjahr muss zwischen 2020 und dem Vorjahr liegen").max(2100),
 });
 

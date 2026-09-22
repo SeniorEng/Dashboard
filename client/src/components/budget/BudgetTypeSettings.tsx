@@ -776,7 +776,13 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
   const saveMutation = useMutation({
     mutationFn: async () => {
       const amountCents = euroStringToCents(amount);
-      if (!amountCents || amountCents <= 0) throw new Error("Bitte einen gültigen Betrag eingeben");
+      // `!amountCents` war eine TRUTHINESS-Prüfung: für `0` ist sie `true`.
+      // Damit war eine festgestellte Null von einer fehlenden Eingabe nicht zu
+      // unterscheiden — und 0 € ist seit Alriks Entscheidung (22.09.2026) ein
+      // gültiger Wert, nicht ein Tippfehler. Geprüft wird jetzt, ob eine Zahl
+      // ANKAM (`== null`), nicht ob sie wahr ist (P1 6hXp9qMrXH2WGVVG).
+      if (amountCents == null) throw new Error("Bitte einen gültigen Betrag eingeben");
+      if (amountCents < 0) throw new Error("Der Betrag darf nicht negativ sein");
       // Task #964 — Prior-Year-§45b-Startwert ist ein Übertrag; Server lehnt ihn
       // ebenfalls ab. Hier früh blocken, damit die Fehlermeldung sofort erscheint.
       const guardError = budgetType === "entlastungsbetrag_45b"
@@ -822,7 +828,12 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
 
   const latestAllocation = allocations?.[0];
   const hasHistory = !!allocations && allocations.length > 0;
-  const hasValidInput = amount && (euroStringToCents(amount) ?? 0) > 0;
+  // `?? 0` verschluckte den Unterschied zwischen „nichts eingegeben" und
+  // „0,00 € eingegeben" und schaltete den Speichern-Knopf in beiden Fällen ab.
+  // Die clientseitigen Schranken waren die härteren: der Nutzer kam gar nicht
+  // bis zur Server-Validierung (P1 6hXp9qMrXH2WGVVG).
+  const eingegebeneCents = amount ? euroStringToCents(amount) : null;
+  const hasValidInput = eingegebeneCents != null && eingegebeneCents >= 0;
 
   const selectedYear = parseInt(month.split("-")[0]);
   const selectedMonthNum = parseInt(month.split("-")[1]);
@@ -1165,7 +1176,13 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const amountCents = euroStringToCents(amount);
-      if (!amountCents || amountCents <= 0) throw new Error("Bitte einen gültigen Betrag eingeben");
+      // `!amountCents` war eine TRUTHINESS-Prüfung: für `0` ist sie `true`.
+      // Damit war eine festgestellte Null von einer fehlenden Eingabe nicht zu
+      // unterscheiden — und 0 € ist seit Alriks Entscheidung (22.09.2026) ein
+      // gültiger Wert, nicht ein Tippfehler. Geprüft wird jetzt, ob eine Zahl
+      // ANKAM (`== null`), nicht ob sie wahr ist (P1 6hXp9qMrXH2WGVVG).
+      if (amountCents == null) throw new Error("Bitte einen gültigen Betrag eingeben");
+      if (amountCents < 0) throw new Error("Der Betrag darf nicht negativ sein");
       return unwrapResult(await api.post(`/budget/${customerId}/carryover/${budgetType}`, {
         amountCents,
         sourceYear,
@@ -1214,7 +1231,12 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
   });
 
   const sourceYearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 1 - i);
-  const hasValidInput = amount && (euroStringToCents(amount) ?? 0) > 0;
+  // `?? 0` verschluckte den Unterschied zwischen „nichts eingegeben" und
+  // „0,00 € eingegeben" und schaltete den Speichern-Knopf in beiden Fällen ab.
+  // Die clientseitigen Schranken waren die härteren: der Nutzer kam gar nicht
+  // bis zur Server-Validierung (P1 6hXp9qMrXH2WGVVG).
+  const eingegebeneCents = amount ? euroStringToCents(amount) : null;
+  const hasValidInput = eingegebeneCents != null && eingegebeneCents >= 0;
   const existsForSelectedYear = carryovers.some(c => (c.year ?? 0) - 1 === sourceYear);
   const targetYear = sourceYear + 1;
 

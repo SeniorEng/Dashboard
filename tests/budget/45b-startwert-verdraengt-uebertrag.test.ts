@@ -1,0 +1,159 @@
+import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
+import { db } from "../../server/lib/db";
+import { budgetAllocations, customerBudgetTypeSettings, customerCareLevelHistory } from "@shared/schema";
+import { createTestCustomer, cleanupCustomer } from "../test-utils";
+import {
+  calculateAllocatedCents,
+  getExcluded45bConsumption,
+} from "../../server/storage/budget/allocation-storage";
+import { readBudgetTypeSettings } from "../../server/storage/budget/preferences-storage";
+import { todayISO } from "@shared/utils/datetime";
+
+/**
+ * P1 `6hXp9qMrXH2WGVVG` — der §45b-Startwert verdrängt den Übertrag nicht.
+ *
+ * ── Der Fall ────────────────────────────────────────────────────────────
+ * Ein Startwert ist eine **Inventur**: er sagt nicht „hier kommt etwas dazu",
+ * sondern „ab hier gilt dieser Bestand". Die Verbrauchsseite hält sich daran —
+ * der Reader blendet jede Buchung vor dem Reset-Monat aus. Die Anspruchsseite
+ * nicht: `carryoverCounted` prüft ausschließlich das Zeitfenster.
+ *
+ * Bei Bernd Funke (Kunde 89) ergab das zu jedem Juni-Stichtag
+ * `131,00 € + 1.179,00 € = 1.310,00 €` bei einem Topf, der 131,00 € haben
+ * sollte — und eine Rechnung über 194,20 € lief vollständig in den
+ * Entlastungsbetrag.
+ *
+ * ── Was hier NICHT neu gebaut wird ──────────────────────────────────────
+ * Die Verdrängung existiert bereits, zweimal:
+ *  - **IB-Supersession** (#959/#1392) — Übertrag für T sperrt Startwert T-1.
+ *    Zweck ist Doppelzählung, nicht Inventur.
+ *  - **Reset-Semantik** (#1812) — nur der Startwert des spätesten wirksamen
+ *    Reset-Monats zählt. Das IST die Inventur-Regel, aber `ibCounted` prüft
+ *    `source === "initial_balance"`, also greift sie nur auf einer Quelle.
+ *
+ * Das Flag `resetDisplacesAllSources` erweitert deshalb **dieselbe Grenze**
+ * (`resetCutoffDate`) auf die zweite Quelle, statt eine zweite Verdrängung
+ * danebenzustellen.
+ */
+
+const ANKER_JAHR = 2026;
+
+async function kundeFunke(): Promise<number> {
+  const c = await createTestCustomer({
+    pflegegrad: 3,
+    billingType: "pflegekasse_gesetzlich",
+    acceptsPrivatePayment: false,
+  });
+  const id = c.id as number;
+  // Ohne Pflegegrad-Historie würde der Anker auf den 01.01. des LAUFENDEN
+  // Jahres gebodet (Muster aus `45b-year-pool-carryover-shift`).
+  await db.delete(customerCareLevelHistory).where(eq(customerCareLevelHistory.customerId, id));
+  await db.insert(customerBudgetTypeSettings).values({
+    customerId: id, budgetType: "entlastungsbetrag_45b",
+    enabled: true, priority: 1,
+    monthlyLimitCents: null, yearlyLimitCents: null,
+    validFrom: `${ANKER_JAHR}-01-01`, validTo: null,
+  });
+  // Übertrag aus 2025, gültig 01.01.–30.06.2026 — beginnt VOR dem Startwert.
+  await db.insert(budgetAllocations).values({
+    customerId: id, budgetType: "entlastungsbetrag_45b",
+    year: ANKER_JAHR, month: null, amountCents: 1_179_00, source: "carryover",
+    validFrom: `${ANKER_JAHR}-01-01`, expiresAt: `${ANKER_JAHR}-06-30`,
+    notes: "Funke-Uebertrag 2025",
+  });
+  // Startwert ab 06/2026 — die Inventur.
+  await db.insert(budgetAllocations).values({
+    customerId: id, budgetType: "entlastungsbetrag_45b",
+    year: ANKER_JAHR, month: 6, amountCents: 131_00, source: "initial_balance",
+    validFrom: `${ANKER_JAHR}-06-01`, expiresAt: null,
+    notes: "Funke-Startwert 06/2026",
+  });
+  return id;
+}
+
+describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung", () => {
+  it("VD-1 – der Übertrag zählt ohne Flag mit und mit Flag nicht mehr", async () => {
+    const id = await kundeFunke();
+    try {
+      const stichtag = `${ANKER_JAHR}-06-15`;
+      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+      const neu = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
+      );
+
+      // Die Differenz ist GENAU der Übertrag — nicht mehr und nicht weniger.
+      // Wäre sie größer, hätte das Flag über `latestValidCarryoverYear` auch
+      // den `allocStart`-Shift und damit die Monatsaufstockung verschoben.
+      expect(heute - neu, "die Verdrängung trifft nicht genau den Übertrag").toBe(1_179_00);
+      expect(neu, "der Startwert selbst darf nicht mitverdrängt werden")
+        .toBeGreaterThanOrEqual(131_00);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("VD-2 – ein Stichtag VOR dem Startwert bleibt unverändert", async () => {
+    // Ein rein zukünftiger Startwert ist noch nicht wirksam und löst keinen
+    // Reset aus. Rückwirkende Reads (GoBD) müssen unberührt bleiben — sonst
+    // ändert die Korrektur die Vergangenheit.
+    const id = await kundeFunke();
+    try {
+      const vorher = `${ANKER_JAHR}-03-15`;
+      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: vorher });
+      const neu = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: vorher, resetDisplacesAllSources: true },
+      );
+      expect(neu, "ein Stichtag vor dem Reset darf sich nicht ändern").toBe(heute);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("VD-3 – der verdrängte Übertrag landet in der Ausschlussliste", async () => {
+    // Die Symmetrie ist der eigentliche Punkt: ein Übertrag, der aus dem
+    // Anspruch fällt, muss auch aus der Verbrauchs-Korrektur fallen. Sonst
+    // senkt die Verdrängung den Anspruch und zieht den zugehörigen Verbrauch
+    // weiter ab — die Drift, vor der `getExcluded45bConsumption` warnt.
+    const id = await kundeFunke();
+    try {
+      const stichtag = `${ANKER_JAHR}-06-15`;
+      const typeSettings = await readBudgetTypeSettings(
+        id, { kind: "forDate", asOfDate: todayISO() },
+      );
+      const exHeute = await getExcluded45bConsumption(id, stichtag, db, typeSettings);
+      const exNeu = await getExcluded45bConsumption(
+        id, stichtag, db, typeSettings, { resetDisplacesAllSources: true },
+      );
+
+      const zusaetzlich = exNeu.excludedSpecialAllocationIds
+        .filter(x => !exHeute.excludedSpecialAllocationIds.includes(x));
+      expect(zusaetzlich.length,
+        "der verdrängte Übertrag fehlt in der Ausschlussliste — Anspruch und "
+        + "Verbrauch folgen dann verschiedenen Grenzen").toBe(1);
+
+      const [zeile] = await db.select().from(budgetAllocations)
+        .where(eq(budgetAllocations.id, zusaetzlich[0]));
+      expect(zeile.source, "ausgeschlossen wurde nicht der Übertrag").toBe("carryover");
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("VD-4 – ohne Flag ändert sich nichts", async () => {
+    // Der Default muss das heutige Verhalten sein — sonst wäre die Messung
+    // aus Schritt 2 keine Messung, sondern schon die Änderung.
+    const id = await kundeFunke();
+    try {
+      for (const stichtag of [`${ANKER_JAHR}-03-15`, `${ANKER_JAHR}-06-15`, `${ANKER_JAHR}-08-15`]) {
+        const ohneOpt = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+        const explizitFalse = await calculateAllocatedCents(
+          id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: false },
+        );
+        expect(explizitFalse, `Default weicht ab bei ${stichtag}`).toBe(ohneOpt);
+      }
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+});
