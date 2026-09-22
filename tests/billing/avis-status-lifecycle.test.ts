@@ -43,6 +43,7 @@ import {
 } from "../../shared/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { withGobdMutation } from "../helpers/gobd";
+import { parseBetragCents } from "../../server/services/avis-parser";
 
 interface Seeded {
   customerId: number;
@@ -94,17 +95,29 @@ async function insertQontoTx(opts: { amountCents: number }): Promise<number> {
 /**
  * Barmer-CSV (Zeilentypen 1/2/3 mit Semikolon). Pro Rechnungsnummer eine
  * "2;"-Position; das Zahlungsdatum kommt aus der "3;"-Summenzeile.
+ *
+ * Die `3;`-Summe wird AUS DEN POSTEN gebildet, nicht danebengesetzt. Vorher
+ * stand dort `opts.amountEuro` — bei einem Posten stimmt das zufällig, bei
+ * zwei Posten à 70,00 € behauptete die Datei eine Überweisung von 70,00 € für
+ * 140,00 € Forderung. Der Prüfsummen-Riegel (P1 6hXqFcc2hRQfC9qp) hat genau
+ * das abgelehnt, und er hatte recht: eine Kasse schickt keine solche Datei.
+ * Ein Fixture, das der echten Datei widerspricht, prüft nichts — es hält nur
+ * den Riegel für kaputt, den es selbst verletzt.
  */
 function buildBarmerCsv(opts: {
   invoiceNumbers: string[];
   amountEuro: string;
   zahlungsDatum: string;
 }): string {
+  const proPostenCents = parseBetragCents(opts.amountEuro, "komma");
+  const summeCents = proPostenCents * opts.invoiceNumbers.length;
+  const summeEuro = (summeCents / 100).toFixed(2).replace(".", ",");
+
   const lines = ["1;IK123456789"];
   for (const num of opts.invoiceNumbers) {
     lines.push(`2;Sammelueberweisung;${num};${opts.zahlungsDatum};${opts.amountEuro}`);
   }
-  lines.push(`3;BELEG-${uniqueId()};${opts.zahlungsDatum};${opts.amountEuro};DE00123456780000000000`);
+  lines.push(`3;BELEG-${uniqueId()};${opts.zahlungsDatum};${summeEuro};DE00123456780000000000`);
   return lines.join("\n");
 }
 
@@ -416,8 +429,26 @@ describe("Task #1687 — Avis-Import: strukturell + robustes Matching", () => {
     expect(await countAudit("invoice_avis_received", invoiceId)).toBe(1);
   });
 
-  it("Betrags-Fallback: garble Referenz ⇒ genau EINE offene Rechnung mit exaktem Brutto", async () => {
-    // Einmaliger Betrag ⇒ genau ein Kandidat für den Betrags-Fallback.
+  it("KEINE Selbstbindung: unauflösbare Referenz wird NICHT über den Betrag gebunden", async () => {
+    // ── ERSETZT „Betrags-Fallback: garble Referenz ⇒ genau EINE offene
+    //    Rechnung mit exaktem Brutto" (P1 6hXqFcc2hRQfC9qp, Gate 2 S2) ──
+    //
+    // Der alte Test nagelte fest, dass ein Posten ohne auflösbare
+    // Rechnungsnummer über seinen BETRAG gebunden wird. Genau das ist ein
+    // Zirkelschluss: die so gefundene Rechnung ist per Konstruktion
+    // betragsgleich, `mark-paid` klassifiziert sie deshalb als `exact`, und
+    // `autoCloseAdviceFromTransactions` kann sie beim Import auf `bezahlt`
+    // heben — ohne dass irgendetwas den Betrag je unabhängig geprüft hätte.
+    //
+    // Derselbe Zirkelschluss, den `pruefeGegenRechnungen` an der Vordertür
+    // ausschließt, indem es AUSSCHLIESSLICH über die Referenz auflöst. Ihn an
+    // der Hintertür stehenzulassen wäre die schlechteste Variante: verboten,
+    // wo er sichtbar ist, erlaubt, wo er es nicht ist.
+    //
+    // Entscheidung Alrik, 22.09.2026. Die Kosten sind gemessen: 41 von 66
+    // DAVASO-Kopfzeilen nennen keine auflösbare Nummer, alle aus dem Bestand
+    // vor Juli 2026. Die bleiben unzugeordnet und werden von Hand verknüpft;
+    // der aktuelle Rückstand trägt 15 von 15 kanonische Nummern.
     const invoiceId = await insertInvoice({ amountCents: 81237, invoiceNumber: nextInvoiceNumber() });
 
     // Referenz ist Excel-Exponential-Müll ⇒ keine Rechnungsnummer extrahierbar.
@@ -428,10 +459,11 @@ describe("Task #1687 — Avis-Import: strukturell + robustes Matching", () => {
       verwendungszweck: "Kein Bezug",
     });
     const { matched } = await createAdviceWithRawCsv(csv);
-    expect(matched).toBe(1); // über exakten Bruttobetrag zugeordnet.
 
+    expect(matched, "über den Betrag gebunden, obwohl die Referenz fehlt").toBe(0);
     expect((await getInvoiceStatus(invoiceId)).status).toBe("versendet");
-    expect(await countAudit("invoice_avis_received", invoiceId)).toBe(1);
+    expect(await countAudit("invoice_avis_received", invoiceId),
+      "Zuordnung protokolliert, obwohl nicht zugeordnet wurde").toBe(0);
   });
 
   it("GET leitet Unterzahlung (Kürzung) pro Position am Lesepfad ab", async () => {

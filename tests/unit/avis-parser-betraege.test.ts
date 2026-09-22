@@ -1,0 +1,406 @@
+/**
+ * P1 6hXqFcc2hRQfC9qp — der DAVASO-Pfad, zweimal falsch gelesen.
+ *
+ * ── Fehler 1: der Faktor 100 ────────────────────────────────────────────
+ * Am 21.09.2026 wurden zwei IKK-Avise über den DAVASO-Pfad importiert — das
+ * erste Mal, dass dieser Pfad in Prod lief. Jeder Posten stand exakt
+ * hundertfach zu hoch; die Differenz zur Rechnungssumme war centgenau die
+ * „Überzahlung", die das UI anzeigte (28.149,66 € bzw. 56.960,64 €).
+ *
+ * Ursache: `parseEuroCents` nahm die deutsche Konvention global an und strich
+ * JEDEN Punkt als Tausendertrenner. DAVASO schreibt `70.00` → `7000` → mal 100
+ * → 700.000 Cent. Dass es nur DAVASO trifft, ist eine Kopplung: DAVASO ist
+ * komma-getrennt, kann also keine unquotierten Dezimalkommas tragen; die
+ * Kassen-Familie ist semikolon-getrennt und benutzt Kommas.
+ *
+ * ── Fehler 2: die falsche Spalte, in der falschen Zeile ─────────────────
+ * DAVASO ist in BLÖCKEN aufgebaut — eine Rechnung je Block:
+ *
+ *   Kopfzeile     keine `ZEM_BelegNr`, trägt `ZEM_RecNr`, **`KTR_BTR_Zahlg`**,
+ *                 Skonto, Kürzung, Zahldatum
+ *   Belegzeilen   `ZEM_BelegNr` gefüllt, tragen ihren Anteil der FORDERUNG
+ *                 und dieselbe `ZEM_RecNr` wie ihre Kopfzeile
+ *
+ * Der Parser sammelte die Posten aus den Belegzeilen und nahm deren
+ * **Forderung**. Ein Avis sagt aber, was GEZAHLT wurde.
+ *
+ * An 29 Dateien gemessen: `ZEM_RecNr` auf 66/66 Kopfzeilen und 114/114
+ * Belegzeilen, je Block genau eine Nummer, 0 Abweichungen; `ZEM_BelegNr`
+ * exakt komplementär (Kopf 0, Beleg 114). Blockgrößen: N=1 **54×**, N=2 2×,
+ * N=3 1×, N=5 3×, N=6 4×, N=7 2×.
+ *
+ * **54 von 66 sind 1:1 — genau dort fällt der Spaltenfehler nicht auf.**
+ *
+ * ── Die Fixtures ───────────────────────────────────────────────────────
+ * ANONYMISIERT: echte Feldnamen, echte Struktur, **erfundene Namen und
+ * Nummern**. Wo Beträge aus einer Messung stammen, steht es dran — Avis-Dateien
+ * tragen Versichertennamen und -nummern und gehören nicht ins Repo.
+ */
+import { describe, it, expect } from "vitest";
+import { parseAvisCsv, parseBetragCents } from "../../server/services/avis-parser";
+
+const SPALTEN = [
+  "LfdNr", "AVISNr", "KTR_IK", "KTR_Name", "ZEM_IK", "ZEM_IBAN", "ZEM_BelegNr",
+  "ZEM_VorgangsNr", "ZEM_RecNr", "ZEM_RecDatum", "ZEM_BTR_Forderg", "KTR_BTR_Zahlg",
+  "KTR_BTR_Skonto", "KTR_BTR_DTA_Kuerzg", "Datum_ZahlungAusfuehrg",
+];
+
+let lfd = 0;
+/** Kopfzeile eines Blocks: keine Belegnummer, trägt den ZAHLbetrag. */
+function kopf(
+  recNr: string, forderung: string, zahlung: string,
+  extra: Partial<{ skonto: string; kuerzung: string }> = {},
+) {
+  lfd += 1;
+  return [`${lfd}`, "TST01278", "100000000", "Testkasse", "200000000", "DE00000000000000000000",
+    "", "V-1", recNr, "01.08.2026", forderung, zahlung,
+    extra.skonto ?? "0.00", extra.kuerzung ?? "0.00", "15.09.2026"].join(",");
+}
+/** Belegzeile: Belegnummer gefüllt, nur die Forderung, dieselbe `ZEM_RecNr`. */
+function beleg(recNr: string, belegNr: string, forderung: string) {
+  lfd += 1;
+  return [`${lfd}`, "TST01278", "100000000", "Testkasse", "200000000", "DE00000000000000000000",
+    belegNr, "V-1", recNr, "01.08.2026", forderung, "", "0.00", "", ""].join(",");
+}
+function datei(...zeilen: string[]) {
+  lfd = 0;
+  return [SPALTEN.join(","), ...zeilen].join("\n");
+}
+
+/**
+ * Vier Blöcke à N=1 — die Form von 54 der 66 gemessenen Blöcke, und die der
+ * beiden Prod-Dateien vom 21.09. Die Beträge sind die vier aus dem Vorfall.
+ */
+const DAVASO_1ZU1 = datei(
+  kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "B-1", "70.00"),
+  kopf("RE-2026-9002", "123.49", "123.49"), beleg("RE-2026-9002", "B-2", "123.49"),
+  kopf("RE-2026-9003", "76.29", "76.29"), beleg("RE-2026-9003", "B-3", "76.29"),
+  kopf("RE-2026-9004", "14.56", "14.56"), beleg("RE-2026-9004", "B-4", "14.56"),
+);
+
+/** Ein Block mit fünf Belegen — die Form des Repo-Fixtures `ICL01159` (N=5, 3× gemessen). */
+const DAVASO_BLOCK_N5 = datei(
+  kopf("RE-2026-9100", "692.12", "692.12"),
+  beleg("RE-2026-9100", "1", "127.32"),
+  beleg("RE-2026-9100", "2", "230.61"),
+  beleg("RE-2026-9100", "3", "68.73"),
+  beleg("RE-2026-9100", "4", "87.46"),
+  beleg("RE-2026-9100", "5", "178.00"),
+);
+
+/** Kassen-CSV: Semikolon-getrennt, Komma als Dezimaltrennung, eine `3;`-Summenzeile. */
+const KASSEN = [
+  "1;200000000;Testempfaenger;",
+  "2;RE-2026-9101 Beispiel;RE-2026-9101;01.09.2026;150,00;+;EUR;",
+  "2;RE-2026-9102 Beispiel;RE-2026-9102;01.09.2026;1.234,90;+;EUR;",
+  "3;BELEG-1;15.09.2026;1.384,90;DE00000000000000000000;",
+].join("\n");
+
+describe("Avis-Beträge — Dezimalkonvention", () => {
+  it("AP-1 – DAVASO: der Punkt ist die Dezimaltrennung, nicht ein Tausenderpunkt", () => {
+    const { items } = parseAvisCsv(DAVASO_1ZU1);
+    expect(items.map(i => i.betragCents)).toEqual([7000, 12349, 7629, 1456]);
+  });
+
+  it("AP-2 – die Gegenprobe zum Vorfall: KEIN Wert ist um Faktor 100 daneben", () => {
+    // Wäre die alte Fassung zurück, stünden hier 700000 / 1234900 / 762900 /
+    // 145600 — genau diese Zahlen standen am 21.09. in Prod.
+    const { items } = parseAvisCsv(DAVASO_1ZU1);
+    const falsch = [700000, 1234900, 762900, 145600];
+    for (const [i, item] of items.entries()) {
+      expect(item.betragCents, `Posten ${i + 1} ist um Faktor 100 zu gross`).not.toBe(falsch[i]);
+    }
+  });
+
+  it("AP-3 – Kassen-CSV: das Komma trennt, der Punkt gruppiert", () => {
+    const { items } = parseAvisCsv(KASSEN);
+    expect(items.map(i => i.betragCents)).toEqual([15000, 123490]);
+  });
+
+  it("AP-4 – die Konvention wird übergeben, nicht geraten", () => {
+    // `1.234` ist ohne Konvention nicht entscheidbar — deutsche Tausender oder
+    // 1,234 mit Punkt? Genau diese Mehrdeutigkeit hat den Fehler ermöglicht,
+    // deshalb gibt es keine Heuristik pro Wert.
+    expect(parseBetragCents("1.234", "komma")).toBe(123400);
+    expect(parseBetragCents("1.234", "punkt")).toBe(123);
+    expect(parseBetragCents("1,234.56", "punkt")).toBe(123456);
+    expect(parseBetragCents("1.234,56", "komma")).toBe(123456);
+  });
+});
+
+describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
+  it("AP-5 – ein Block mit fünf Belegen ist EIN Posten, nicht fünf", () => {
+    // Alle Belege eines Blocks tragen dieselbe `ZEM_RecNr` — sie gehören zu
+    // EINER Rechnung. Der alte Parser machte daraus fünf Posten, und der
+    // Regressionstest hat das als „5 Positionen" eingefroren.
+    const { items, header } = parseAvisCsv(DAVASO_BLOCK_N5);
+    expect(items).toHaveLength(1);
+    expect(items[0].rechnungsNummer).toBe("RE-2026-9100");
+    expect(items[0].betragCents).toBe(69212);
+    expect(items[0].belegNr, "die Belege des Blocks gehen verloren").toBe("1, 2, 3, 4, 5");
+    expect(header.gesamtBetragCents).toBe(69212);
+  });
+
+  it("AP-6 – der Posten trägt den ZAHLbetrag, nicht die Forderung", () => {
+    // ── Der gemessene Fall: Avis_ICL01267.csv, RE-2026-0213 ──
+    // Gefordert 117,19 €, gezahlt 58,16 €, Skonto 0, Kürzung 0. Eine von 66
+    // Kopfzeilen weicht ab — und sie liegt im aktuellen Rückstand.
+    //
+    // Der alte Aufbau hätte 117,19 € gebucht, der Rechnungsabgleich hätte
+    // `bestaetigt` gemeldet, und die Unterzahlung von 59,03 € wäre unsichtbar
+    // geblieben. Bei 65 von 66 Zeilen sind beide Zahlen gleich — deshalb ist
+    // es nie aufgefallen.
+    const unterzahlung = datei(
+      kopf("RE-2026-0213", "117.19", "58.16"),
+      beleg("RE-2026-0213", "B-1", "117.19"),
+    );
+    const { items, header } = parseAvisCsv(unterzahlung);
+    expect(items).toHaveLength(1);
+    expect(items[0].betragCents, "die Forderung statt der Zahlung gelesen").toBe(5816);
+    expect(items[0].betragCents).not.toBe(11719);
+    expect(header.gesamtBetragCents, "der Gesamtbetrag ist nicht der Bankbetrag").toBe(5816);
+  });
+
+  it("AP-7 – der Gesamtbetrag ist die Summe der Zahlbeträge (= der Bankbetrag)", () => {
+    // Genau diese Größe braucht die Triple-Equality des Bulk-Matchers.
+    // Gemessen an Avis 24/25: gespeichert waren 700.000 bzw. 1.168.400 —
+    // jeweils der erste Block, ×100.
+    const { header } = parseAvisCsv(DAVASO_1ZU1);
+    expect(header.gesamtBetragCents).toBe(7000 + 12349 + 7629 + 1456);
+    expect(header.gesamtBetragCents, "der Gesamtbetrag ist wieder Block 1").not.toBe(7000);
+  });
+
+  it("AP-8 – Skonto und Kürzung kommen von der Kopfzeile des EIGENEN Blocks", () => {
+    // Nicht von einer Belegzeile (dort stehen sie nicht) und nicht vom ersten
+    // Block (dann gälte dessen Abzug für alle).
+    const mitAbzug = datei(
+      kopf("RE-2026-9001", "100.00", "95.00", { skonto: "5.00" }),
+      beleg("RE-2026-9001", "B-1", "100.00"),
+      kopf("RE-2026-9002", "50.00", "50.00"),
+      beleg("RE-2026-9002", "B-2", "50.00"),
+    );
+    const { items } = parseAvisCsv(mitAbzug);
+    expect(items.map(i => i.skontoCents)).toEqual([500, 0]);
+    expect(items.map(i => i.betragCents)).toEqual([9500, 5000]);
+  });
+
+  it("AP-9 – eine Belegzeile ohne Kopfzeile ist ein Abbruch, keine Randnotiz", () => {
+    // Sie gehörte zu keiner Rechnung — still gelesen wäre es eine Forderung
+    // ohne Zahlung im Avis. In 29 gemessenen Dateien kommt das nicht vor.
+    const verwaist = datei(beleg("RE-2026-9001", "B-1", "70.00"));
+    expect(() => parseAvisCsv(verwaist)).toThrow(/ohne vorangehende Kopfzeile/);
+  });
+
+  it("AP-10 – eine doppelte Belegnummer wird abgelehnt", () => {
+    // Gate-2-Befund G: eine verdoppelte Zeile lief mit `abweichung = 0` durch.
+    // Der datei-interne Vergleich kann das per Konstruktion nicht sehen —
+    // beide Seiten verdoppeln sich mit.
+    const doppelt = datei(
+      kopf("RE-2026-9100", "140.00", "140.00"),
+      beleg("RE-2026-9100", "B-1", "70.00"),
+      beleg("RE-2026-9100", "B-1", "70.00"),
+    );
+    expect(() => parseAvisCsv(doppelt)).toThrow(/Belegnummer mehrfach/);
+  });
+});
+
+describe("Der datei-interne Konsistenzhinweis — was er kann und was nicht", () => {
+  it("AP-11 – Forderung der Kopfzeile gegen die ihrer Belege", () => {
+    // Verschiedene Zeilen, und sie müssen aufgehen: ein verlorener oder
+    // verdoppelter Beleg fällt damit auf.
+    const { pruefsumme } = parseAvisCsv(DAVASO_BLOCK_N5);
+    expect(pruefsumme.ausPostenCents).toBe(69212);
+    expect(pruefsumme.ausgewiesenCents).toBe(69212);
+    expect(pruefsumme.abweichungCents).toBe(0);
+    expect(pruefsumme.ausAnderenZeilen).toBe(true);
+  });
+
+  it("AP-12 – ein fehlender Beleg fällt auf", () => {
+    const ohneEinen = DAVASO_BLOCK_N5.split("\n").filter(z => !z.includes(",178.00,")).join("\n");
+    const { pruefsumme } = parseAvisCsv(ohneEinen);
+    expect(pruefsumme.abweichungCents, "der fehlende Beleg bleibt unbemerkt").not.toBe(0);
+  });
+
+  it("AP-13 – er vergleicht NICHT Forderung gegen Zahlung", () => {
+    // Die beiden dürfen auseinanderliegen — das ist eine Kürzung, und sie ist
+    // ein Geschäftsfall. Ein Hinweis, der bei jedem legitimen Fall anschlägt,
+    // wird weggesehen; dann ist er schlimmer als keiner.
+    const unterzahlung = datei(
+      kopf("RE-2026-0213", "117.19", "58.16"),
+      beleg("RE-2026-0213", "B-1", "117.19"),
+    );
+    const { pruefsumme } = parseAvisCsv(unterzahlung);
+    expect(pruefsumme.abweichungCents, "die Kürzung wird als Unstimmigkeit gemeldet").toBe(0);
+  });
+
+  it("AP-14 – und er ist per Konstruktion blind gegen einen SKALENFEHLER", () => {
+    // Der Beleg, warum der Riegel die Datei verlassen musste: beide Zahlen
+    // kommen durch denselben `parseBetragCents`-Aufruf und skalieren mit.
+    //
+    // Dieser Test darf NICHT dadurch grün werden, dass jemand den
+    // datei-internen Vergleich „repariert". Er hält fest, was diese Prüfung
+    // NICHT kann, damit sie nie wieder als der Riegel ausgegeben wird
+    // (siehe `server/services/avis-rechnungsabgleich.ts`).
+    const skaliert = datei(
+      kopf("RE-2026-9001", "7000.00", "7000.00"),
+      beleg("RE-2026-9001", "B-1", "7000.00"),
+    );
+    const { pruefsumme, items } = parseAvisCsv(skaliert);
+    expect(pruefsumme.abweichungCents, "der datei-interne Vergleich fängt Skalenfehler").toBe(0);
+    expect(items[0].betragCents).toBe(700000);
+  });
+});
+
+describe("Avis-Dateien aus der Praxis — Verpackung, Spalten, Fremddateien", () => {
+  const BOM = "﻿";
+
+  it("AP-15 – BOM und CRLF ändern am Ergebnis nichts (Kassen-Familie)", () => {
+    // Die Windows-Verpackung, in der 22 BARMER-Dateien ankommen. Ein
+    // unbehandeltes BOM macht aus `1;` ein `﻿1;` — die Formaterkennung
+    // fiele durch, und die Datei wäre „Format nicht erkannt" statt eingelesen.
+    const roh = parseAvisCsv(KASSEN);
+    const verpackt = parseAvisCsv(BOM + KASSEN.replace(/\n/g, "\r\n"));
+    expect(verpackt.header.format).toBe("kassen-csv");
+    expect(verpackt.items.map(i => i.betragCents)).toEqual(roh.items.map(i => i.betragCents));
+    expect(verpackt.header.zahlungsempfaengerIban, "das CR hängt am letzten Feld")
+      .toBe(roh.header.zahlungsempfaengerIban);
+  });
+
+  it("AP-16 – BOM und CRLF ändern am Ergebnis nichts (DAVASO)", () => {
+    const roh = parseAvisCsv(DAVASO_1ZU1);
+    const verpackt = parseAvisCsv(BOM + DAVASO_1ZU1.replace(/\n/g, "\r\n"));
+    expect(verpackt.header.format).toBe("davaso");
+    expect(verpackt.items.map(i => i.betragCents)).toEqual(roh.items.map(i => i.betragCents));
+    expect(verpackt.pruefsumme.abweichungCents).toBe(0);
+  });
+
+  it("AP-17 – DAVASO wird über SPALTENNAMEN gelesen, nicht über Positionen", () => {
+    // Das Regressions-Sample im Repo führt zusätzlich `AvisPos` an zweiter
+    // Stelle. Eine feste Index-Lesung würde dort still das Nachbarfeld
+    // greifen — beim Betrag hieße das: ein Datum als Geldbetrag.
+    const mitZusatzspalte = DAVASO_1ZU1.split("\n").map((z, i) =>
+      i === 0 ? z.replace("LfdNr,", "LfdNr,AvisPos,") : z.replace(/^(\d+),/, "$1,1,"),
+    ).join("\n");
+    const r = parseAvisCsv(mitZusatzspalte);
+    expect(r.items.map(i => i.betragCents)).toEqual([7000, 12349, 7629, 1456]);
+    expect(r.header.kostentraegerName).toBe("Testkasse");
+    expect(r.pruefsumme.abweichungCents).toBe(0);
+  });
+
+  it("AP-19 – die Rechnungsnummer wird kanonisiert wie im Kassen-Pfad", () => {
+    // Der Kassen-Pfad normalisiert seit jeher (O→0, eingeschobene Leerzeichen
+    // wie in `RE-2026- 0212`); DAVASO nahm `ZEM_RecNr` roh. Zwei Arten,
+    // dieselbe Frage zu beantworten — und eine Nummer mit so einer Eigenheit
+    // fände der Rechnungsabgleich nicht. Das Ergebnis wäre `ungeprueft`: kein
+    // falscher Betrag, aber eine ausgelassene Prüfung, die wie ein Befund
+    // aussieht.
+    const mitLeerzeichen = datei(
+      kopf("RE-2026- 0213", "117.19", "58.16"),
+      beleg("RE-2026- 0213", "B-1", "117.19"),
+    );
+    expect(parseAvisCsv(mitLeerzeichen).items[0].rechnungsNummer).toBe("RE-2026-0213");
+  });
+
+  it("AP-20 – der Altbestand bleibt stehen, statt „repariert“ zu werden", () => {
+    // 41 von 66 gemessenen Kopfzeilen nennen keine EngelDesk-Nummer, sondern
+    // ein Muster wie `2026-01-123` oder ein Datum — der Bestand vor Juli 2026.
+    // Das ist keine kaputte Rechnungsnummer, das ist die Realität von damals.
+    //
+    // Ein Parser, der daraus etwas macht, das wie eine Nummer aussieht,
+    // ERFINDET Daten; einer, der sie verwirft, verschweigt sie. Sie bleibt roh
+    // und landet sichtbar im `ungeprueft`-Ausgang des Rechnungsabgleichs.
+    const altbestand = datei(
+      kopf("2026-01-02", "692.12", "692.12"),
+      beleg("2026-01-02", "1", "692.12"),
+    );
+    expect(parseAvisCsv(altbestand).items[0].rechnungsNummer).toBe("2026-01-02");
+  });
+
+  it("AP-18 – eine fremde Datei wird laut abgelehnt, nicht leer eingelesen", () => {
+    // Der gefährliche Ausgang wäre nicht der Fehler, sondern ein Avis mit null
+    // Posten und 0,00 € — formal angelegt, inhaltlich nichts, und niemandem
+    // fällt auf, dass die Datei nie ankam.
+    expect(() => parseAvisCsv("Datum;Betrag;Text\n01.09.2026;150,00;Irgendwas"))
+      .toThrow(/Format nicht erkannt/);
+    expect(() => parseAvisCsv("")).toThrow();
+  });
+});
+
+/**
+ * Gate 2, zweiter Durchgang (S1/S6). Die Frage war: bricht die Bauform bei
+ * einer abweichenden Datei LAUT ab, oder liest sie still etwas Falsches?
+ *
+ * Die Antwort war „still" — und das ist der gefährlichere Ausgang. Ein
+ * vollständig falsch gelesenes Avis wäre mit lauter Nullposten angelegt
+ * worden, der datei-interne Hinweis hätte grün gemeldet (0 gegen 0), und der
+ * Rechnungsabgleich hätte `unterzahlung` gesagt — die blockiert bewusst nicht.
+ * „66 von 66 unterzahlt" wäre von echten Kürzungen nur durch Hinsehen zu
+ * unterscheiden gewesen.
+ */
+describe("DAVASO — eine abweichende Datei bricht ab, statt still zu lügen", () => {
+  it("AP-21 – eine fehlende Pflichtspalte ist ein Abbruch", () => {
+    // `getField` liefert für eine unbekannte Spalte `""` — und `""` ist von
+    // einem echten Leerwert nicht zu unterscheiden. Der Riegel steht deshalb
+    // am Header, wo der Fehler entsteht.
+    const umbenannt = DAVASO_1ZU1.replace("KTR_BTR_Zahlg", "KTR_BTR_Zahlung");
+    expect(() => parseAvisCsv(umbenannt)).toThrow(/Pflichtspalten/);
+
+    const ohneBeleg = DAVASO_1ZU1.replace("ZEM_BelegNr", "ZEM_Beleg_Nr");
+    expect(() => parseAvisCsv(ohneBeleg)).toThrow(/Pflichtspalten/);
+  });
+
+  it("AP-22 – eine Kopfzeile ohne Zahlbetrag ist ein Abbruch, kein 0-ct-Posten", () => {
+    const leer = datei(
+      kopf("RE-2026-9001", "70.00", ""),
+      beleg("RE-2026-9001", "B-1", "70.00"),
+    );
+    expect(() => parseAvisCsv(leer)).toThrow(/KTR_BTR_Zahlg/);
+  });
+
+  it("AP-23 – unlesbar bricht ab, `0.00` bleibt erlaubt", () => {
+    // Die Unterscheidung, die `parseBetragCents` nicht treffen konnte: es
+    // bildet `""` UND `NaN` auf 0 ab. Ein Avis über 0,00 € ist denkbar; ein
+    // Avis, dessen Betrag niemand lesen konnte, ist es nicht.
+    const muell = datei(
+      kopf("RE-2026-9001", "70.00", "n.a."),
+      beleg("RE-2026-9001", "B-1", "70.00"),
+    );
+    expect(() => parseAvisCsv(muell)).toThrow(/kein Betrag/);
+
+    const null_euro = datei(
+      kopf("RE-2026-9001", "0.00", "0.00"),
+      beleg("RE-2026-9001", "B-1", "0.00"),
+    );
+    expect(parseAvisCsv(null_euro).items[0].betragCents).toBe(0);
+  });
+
+  it("AP-24 – eine Belegzeile im falschen Block bricht ab", () => {
+    // Die gemessene Invariante (114 von 114: Belegzeile trägt dieselbe
+    // `ZEM_RecNr` wie ihre Kopfzeile) lag gratis da und wurde nicht geprüft.
+    // Sie ist der einzige Weg, einen falschen Block-Zuschlag zu bemerken —
+    // betragsneutral, aber die Belegnummern stünden danach persistiert an der
+    // falschen Rechnung.
+    const falschZugeordnet = datei(
+      kopf("RE-2026-9001", "70.00", "70.00"),
+      beleg("RE-2026-9002", "B-1", "70.00"),      // gehört zu einem anderen Block
+    );
+    expect(() => parseAvisCsv(falschZugeordnet)).toThrow(/Block-Zuordnung/);
+  });
+
+  it("AP-25 – die Prüfsumme je Block hebt sich nicht mehr auf", () => {
+    // Global summiert glichen sich zwei entgegengesetzte Fehler aus: ein Block
+    // mit einem Beleg zu viel, einer mit einem zu wenig, Differenz 0. Der
+    // Docblock versprach, ein verlorener Posten falle auf — global tat er das
+    // nicht.
+    const gegenlaeufig = datei(
+      kopf("RE-2026-9001", "100.00", "100.00"),
+      beleg("RE-2026-9001", "B-1", "110.00"),     // 10,00 € zu viel
+      kopf("RE-2026-9002", "100.00", "100.00"),
+      beleg("RE-2026-9002", "B-2", "90.00"),      // 10,00 € zu wenig
+    );
+    const { pruefsumme } = parseAvisCsv(gegenlaeufig);
+    expect(pruefsumme.ausPostenCents, "global gleichen sich die Fehler aus").toBe(20000);
+    expect(pruefsumme.ausgewiesenCents).toBe(20000);
+    expect(pruefsumme.abweichungCents, "die Fehler gleichen sich wieder aus").toBe(2000);
+  });
+});
