@@ -36,7 +36,7 @@
  *   tsx server/scripts/diff-45b-verdraengung.ts --all          # auch Kunden ohne Differenz
  *   tsx server/scripts/diff-45b-verdraengung.ts 2026-06-15 2026-07-15
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { budgetAllocations } from "@shared/schema";
 import {
@@ -72,6 +72,37 @@ async function main() {
     ));
   const kunden = [...new Set(zeilen.map(z => z.customerId))].sort((a, b) => a - b);
 
+  /**
+   * Die Annahme, auf der die VD-5-Verengung ruht — hier geprueft, nicht
+   * vorausgesetzt.
+   *
+   * Verdraengt wird nur, wenn `validFrom` UND `year` vor dem Reset liegen.
+   * Auf konsistenten Daten (`year === Jahr(valid_from)`) ist die zweite
+   * Bedingung wirkungslos, die Verengung aendert also nichts. Weicht auch nur
+   * EINE Zeile ab, kann sie wirken — und dann ist ein Vergleich mit einem
+   * frueheren Mess-Lauf nicht mehr aussagekraeftig.
+   *
+   * Das steht hier, weil genau diese Sorte Annahme bei VD-5 versagt hat: die
+   * Entwarnung war hergeleitet und falsch. Eine Herleitung, die man billig
+   * pruefen kann, gehoert geprueft.
+   */
+  const [{ abweichend }] = await db
+    .select({ abweichend: sql<number>`count(*)::int` })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      eq(budgetAllocations.source, "carryover"),
+      isNull(budgetAllocations.deletedAt),
+      sql`${budgetAllocations.year} <> EXTRACT(YEAR FROM ${budgetAllocations.validFrom}::date)`,
+    ));
+  console.log(`Uebertraege mit year <> Jahr(valid_from): ${abweichend}`);
+  if (abweichend > 0) {
+    console.log("  \u26a0 Die VD-5-Verengung KANN hier wirken. Ein Vergleich mit einem");
+    console.log("    Mess-Lauf vor dem Fix ist dann nicht mehr aussagekraeftig.");
+  } else {
+    console.log("  Konsistent — die VD-5-Verengung ist auf diesem Bestand wirkungslos.");
+  }
+  console.log("");
   console.log(`Kunden mit aktiver initial_balance-Zeile: ${kunden.length}`);
   console.log(`Stichtage: ${stichtage.join(", ")}`);
   console.log("");

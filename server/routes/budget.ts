@@ -308,6 +308,22 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   // Kostenschätzung NICHT mehr von der späteren Buchung im selben oder einem
   // zurückliegenden/zukünftigen Monat.
   const { getAvailableForDate } = await import("../storage/budget/import-availability");
+  /**
+   * KEINE Monatsend-Projektion hier — und das ist ein Befund, keine
+   * Unterlassung (Replit #1916).
+   *
+   * Der naheliegende Fix waere gewesen, hier wie `planHold` bis zum
+   * Monatsende zu projizieren. **Ausgefuehrt bricht das `#424`:** der
+   * Verbrauchspfad `createConsumptionTransaction` projiziert NICHT, und die
+   * dort gesicherte Invariante lautet „Vorschau == was die Buchung
+   * durchlaesst" (gemessen 127.200 statt 114.100).
+   *
+   * Es gibt also ZWEI Tore mit verschiedenen Stichtagen — `planHold`
+   * (projiziert) und `createConsumptionTransaction` (projiziert nicht). Die
+   * Vorschau kann nicht zu beiden gleich sein. Welches maßgeblich ist, ist
+   * eine fachliche Frage und keine, die man in der Kostenschaetzung
+   * entscheidet.
+   */
   const dateAware = await getAvailableForDate(customerId, date);
 
   // Task #876 — Serving-Pfad auf den unified Reader vereinheitlicht. Gelesen

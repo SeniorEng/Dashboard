@@ -78,6 +78,7 @@ import type { DbClient } from "./types";
 import { readBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
 import { calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
 import { activeHoldsCents, netConsumedUpToDate } from "./unified-reader";
+import { lastDayOfMonth, parseLocalDate } from "@shared/utils/datetime";
 import { resolve45bActivation } from "@shared/domain/budgets";
 import {
   computeNetAvailable45b,
@@ -99,6 +100,18 @@ export interface NetAvailable45bOptions {
    * (Forecast-Pfad). Default `false` (Lese-/Buchungspfad: nur bis "heute").
    */
   readonly projectFuture?: boolean;
+  /**
+   * Inventur-Lesart (P1 `6hXp9qMrXH2WGVVG`): der juengste zum Stichtag
+   * wirksame Startwert verdraengt jede Zuweisung, deren Gueltigkeit frueher
+   * beginnt.
+   *
+   * Muss aus DEMSELBEN Grund symmetrisch laufen wie `projectFuture`:
+   * verdraengt das Flag einen Uebertrag aus `Allocated`, faellt dessen ID in
+   * `excludedSpecialAllocationIds` — aber nur, wenn BEIDE Aufrufe unten
+   * dieselbe Regel fahren. Sonst saenke es den Anspruch und zoege den
+   * zugehoerigen Verbrauch weiter ab.
+   */
+  readonly resetDisplacesAllSources?: boolean;
   /** Optional vorab geladene §45b-Type-Settings (spart einen DB-Roundtrip). */
   readonly typeSettings?: CustomerBudgetTypeSetting[];
   /**
@@ -129,6 +142,7 @@ export async function netAvailable45bAt(
 ): Promise<NetAvailable45bResult> {
   const d = tx ?? db;
   const projectFuture = options.projectFuture ?? false;
+  const resetDisplacesAllSources = options.resetDisplacesAllSources ?? false;
 
   const [typeSettings, preferences, customerRows] = await Promise.all([
     options.typeSettings
@@ -165,14 +179,14 @@ export async function netAvailable45bAt(
     calculateAllocatedCents(
       customerId,
       BUDGET_TYPE_45B,
-      { asOfDate, projectFuture },
+      { asOfDate, projectFuture, resetDisplacesAllSources },
       tx,
       preferences,
       typeSettings,
     ),
     activeHoldsCents(customerId, BUDGET_TYPE_45B, asOfDate, "year", d),
     netConsumedUpToDate(customerId, BUDGET_TYPE_45B, asOfDate, d),
-    getExcluded45bConsumption(customerId, asOfDate, d, typeSettings, { projectFuture }),
+    getExcluded45bConsumption(customerId, asOfDate, d, typeSettings, { projectFuture, resetDisplacesAllSources }),
   ]);
 
   // Schluss-Arithmetik (Floor + Holds-Kontext) läuft über die EINE pure SSoT-Mathe.
@@ -186,4 +200,44 @@ export async function netAvailable45bAt(
     excludedConsumedNetCents: excluded.excludedConsumedNetCents,
     holds: options.holds,
   });
+}
+
+/**
+ * Projizierte §45b-Verfuegbarkeit fuer einen Termin im laufenden Monat.
+ *
+ * ── Warum das hier steht und nicht zweimal (Replit #1916) ───────────────
+ * Die Reservierung (`planHold`) rechnete diese Groesse INLINE: Anspruch bis
+ * MONATSENDE mit `projectFuture: true`, minus dem bereits gebuchten Net und
+ * den aktiven Holds. Die Vorab-Pruefung im Terminformular las dagegen die
+ * ungeprojizierte Verfuegbarkeit zum Termindatum.
+ *
+ * **Damit sperrte das Formular Termine, die der Server angenommen haette** —
+ * geschaeftsblockierend (Kunde 157 konnte fuer Oktober nichts buchen). Zwei
+ * Antworten auf „passt dieser Termin noch in den Topf?", und die strengere
+ * stand vor dem Nutzer.
+ *
+ * Die Zusage ist bewusst asymmetrisch formuliert: der Anspruch wird projiziert,
+ * Verbrauch und Holds kommen aus dem uebergebenen Topf — genau wie im
+ * In-Lock-Read der Reservierung (Overdraft-Garantie: aktive Holds des Jahres
+ * werden weiter abgezogen, der projizierte Anspruch ist die einzige Aenderung).
+ */
+export async function projected45bAvailableCents(
+  customerId: number,
+  transactionDate: string,
+  pot: { enabled: boolean; inRange: boolean; availableCents: number; consumedNetCents: number; holdsActiveCents: number },
+  tx?: DbClient,
+  typeSettings?: CustomerBudgetTypeSetting[],
+): Promise<number> {
+  if (!pot.enabled || !pot.inRange) return pot.availableCents;
+  const apptDate = parseLocalDate(transactionDate);
+  const monthEnd = lastDayOfMonth(apptDate.getFullYear(), apptDate.getMonth() + 1);
+  const projectedAllocated = await calculateAllocatedCents(
+    customerId,
+    BUDGET_TYPE_45B,
+    { asOfDate: monthEnd, projectFuture: true },
+    tx,
+    undefined,
+    typeSettings,
+  );
+  return Math.max(0, projectedAllocated - pot.consumedNetCents - pot.holdsActiveCents);
 }

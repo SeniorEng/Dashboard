@@ -144,6 +144,28 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "budget-allocation-window",
+    question: "Zählt diese Budget-Zuweisung zum Stichtag? (Gültigkeitsfenster + Reset-Verdrängung)",
+    canonical: [
+      // Reines Prädikat für den TS-Pfad UND Drizzle-Bedingung für die
+      // SQL-Pfade — aus derselben Beschreibung, damit beide Welten nicht
+      // auseinanderlaufen können.
+      { symbol: "allocationValidAt", module: "server/storage/budget/allocation-window.ts" },
+      { symbol: "allocationValidAtWhere", module: "server/storage/budget/allocation-window.ts" },
+      { symbol: "displacedByReset", module: "server/storage/budget/allocation-window.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Sucht das MUSTER (`validFrom <=` zusammen mit `expiresAt >=`), nicht
+        // die bekannten Fundstellen: sechs Fassungen derselben Regel waren der
+        // Anlass, und die naechste entsteht dort, wo heute niemand hinsieht.
+        test: "tests/architecture/allocation-window-single-source.test.ts",
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "budget-availability-45b",
     question: "Wie viel §45b-Entlastungsbetrag ist am Stichtag verfügbar? (eigene Jahres-Mathematik)",
     canonical: [

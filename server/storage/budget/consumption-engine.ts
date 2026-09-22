@@ -21,6 +21,7 @@ import { isPrivatePaymentAllowed, isSelbstzahlerBillingType } from "@shared/doma
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
+import { allocationValidAtWhere } from "./allocation-window";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
 import { auditService } from "../../services/audit";
 
@@ -165,11 +166,7 @@ export async function computeFifoAvailability(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),
       isNull(budgetAllocations.deletedAt),
-      lte(budgetAllocations.validFrom, today),
-      or(
-        isNull(budgetAllocations.expiresAt),
-        gte(budgetAllocations.expiresAt, today)
-      ),
+      allocationValidAtWhere(today),
       sql`${budgetAllocations.source} IN ('carryover', 'initial_balance', 'manual_adjustment')`
     ))
     .orderBy(
