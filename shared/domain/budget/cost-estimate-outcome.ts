@@ -63,6 +63,20 @@ export interface CostEstimateInput {
   acceptsPrivatePayment: boolean;
   /** Kunde ist `billingType=selbstzahler` (Privatabrechnung — kein Budget-Pfad). */
   isSelbstzahler: boolean;
+  /**
+   * Kunde hat KEINEN Ausweichtopf: Pflegegrad 1 und keine Privatzahlung.
+   *
+   * Der Zusatzsatz stammt von Alrik und ist **keine Fehlermeldung, sondern
+   * eine Aussage ueber Leistungsansprueche**, die eine Mitarbeiterin
+   * gegenueber dem Kunden vertritt. Deshalb steht er woertlich so, wie er
+   * freigegeben wurde — nicht in einer selbst formulierten Fassung.
+   *
+   * Das Kriterium ist ebenfalls Alriks: Pflegegrad 1, keine Privatzahlung.
+   * Eine breitere Fassung („kein anderer Topf mit Kapazitaet") traefe mehr
+   * Faelle — das waere aber eine Ausweitung der Zusage und gehoert gefragt,
+   * nicht gebaut (FINDING im PR).
+   */
+  hasNoFallbackBudget?: boolean;
 }
 
 export interface CostEstimateOutcome {
@@ -125,7 +139,8 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
         + `Termin kostet ${formatEuroDE(totalCostCents)}). `
         + `Heute fehlen davon noch ${fehltHeute} — sie kommen mit der `
         + `Monatsaufstockung. Der Termin kann angelegt werden; die Beträge `
-        + `beziehen sich auf den Monat des Termins.`,
+        + `beziehen sich auf den Monat des Termins.`
+        + (input.hasNoFallbackBudget ? " Kein Ausweichbudget verfügbar." : ""),
       isHardBlock: false,
       privateCents: 0,
       vatCents: 0,

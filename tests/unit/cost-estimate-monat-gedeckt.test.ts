@@ -103,4 +103,30 @@ describe("Kostenschätzung — projizieren, aber warnen statt sperren", () => {
     expect(o.isHardBlock).toBe(false);
     expect(o.privateCents, "privat berechnet wird gegen den heutigen Stand statt gegen den Monat").toBe(122_00);
   });
+
+  it("MG-6 – ohne Ausweichtopf steht der Satz dabei, sonst nicht", () => {
+    // Alriks Satz, wörtlich: "Kein Ausweichbudget verfügbar." Er ist KEINE
+    // Fehlermeldung, sondern eine Aussage über Leistungsansprüche, die eine
+    // Mitarbeiterin gegenüber dem Kunden vertritt. Deshalb steht er so, wie
+    // er freigegeben wurde — und nur dort, wo er zutrifft.
+    const ohneAusweich = classifyCostEstimate({
+      ...BASIS,
+      totalCostCents: 100_00,
+      availableCents: 47_00,
+      projectedAvailableCents: 178_00,
+      hasNoFallbackBudget: true,
+    });
+    expect(ohneAusweich.warning).toContain("Kein Ausweichbudget verfügbar.");
+
+    // Gegenprobe: wer einen Ausweichtopf hat, bekommt den Satz NICHT — sonst
+    // stünde eine falsche Auskunft über Leistungsansprüche im Formular.
+    const mitAusweich = classifyCostEstimate({
+      ...BASIS,
+      totalCostCents: 100_00,
+      availableCents: 47_00,
+      projectedAvailableCents: 178_00,
+      hasNoFallbackBudget: false,
+    });
+    expect(mitAusweich.warning).not.toContain("Ausweichbudget");
+  });
 });
