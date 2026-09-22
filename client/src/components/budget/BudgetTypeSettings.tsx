@@ -72,6 +72,37 @@ interface InitialBalanceAllocation {
   month?: number | null;
 }
 
+/**
+ * Eine ersetzte Zuweisung: Betrag durchgestrichen, Grund daneben.
+ *
+ * ── Warum als gemeinsamer Helfer (Gate 2 zu #166, B2) ──────────────────
+ * Die erste Fassung rief die Kennzeichnung NUR im Uebertrags-Abschnitt.
+ * Der Server lieferte den ersetzten STARTWERT korrekt als ersetzt — und der
+ * Client zeigte ihn weiter als gleichberechtigten Betrag. Genau der Fall, mit
+ * dem der PR begruendet war („wirkt sofort"), kam nicht auf den Schirm.
+ *
+ * Aufgefallen ist es nicht am Test: `EK-1` prueft die API-ANTWORT, nicht die
+ * Anzeige. Eine Zusage ueber das UI, die eine Ebene tiefer geprueft wird,
+ * haelt genau so lange, bis jemand die obere Ebene vergisst.
+ */
+export function BetragMitVerdraengung({
+  allocation, testId, klasse,
+}: {
+  allocation: InitialBalanceAllocation;
+  testId: string;
+  klasse: string;
+}) {
+  if (!allocation.ersetztDurchStartwertMonat) {
+    return <span className={klasse}>{formatCurrency(allocation.amountCents)}</span>;
+  }
+  return (
+    <span className="text-xs text-gray-500 flex items-center gap-1.5" data-testid={testId}>
+      <span className="line-through">{formatCurrency(allocation.amountCents)}</span>
+      <span>ersetzt durch Startwert {allocation.ersetztDurchStartwertMonat}</span>
+    </span>
+  );
+}
+
 interface CareLevelHistoryEntry {
   validFrom: string;
 }
@@ -904,7 +935,11 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
             )}
           </span>
           <div className="flex items-center gap-2">
-            <span className={`font-semibold ${latestAllocation.source === "carryover" ? "text-amber-700" : "text-teal-700"}`}>{formatCurrency(latestAllocation.amountCents)}</span>
+            <BetragMitVerdraengung
+              allocation={latestAllocation}
+              testId={`text-allocation-superseded-${budgetType}-latest`}
+              klasse={`font-semibold ${latestAllocation.source === "carryover" ? "text-amber-700" : "text-teal-700"}`}
+            />
             {deleteConfirmId === latestAllocation.id ? (
               <div className="flex items-center gap-1">
                 <button
@@ -1106,7 +1141,11 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
                 {alloc.notes && <span className="text-gray-500">{alloc.notes}</span>}
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-700">{formatCurrency(alloc.amountCents)}</span>
+                <BetragMitVerdraengung
+                  allocation={alloc}
+                  testId={`text-allocation-superseded-${budgetType}-${alloc.id}`}
+                  klasse="font-medium text-gray-700"
+                />
                 {deleteConfirmId === alloc.id ? (
                   <div className="flex items-center gap-1">
                     <button
@@ -1287,17 +1326,11 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
                     * naheliegende und die falsche Handlung — dann ist die
                     * Historie weg.
                     */}
-                  {c.ersetztDurchStartwertMonat ? (
-                    <span
-                      className="text-xs text-gray-500 flex items-center gap-1.5"
-                      data-testid={`text-carryover-superseded-${budgetType}-${src}`}
-                    >
-                      <span className="line-through">{formatCurrency(c.amountCents)}</span>
-                      <span>ersetzt durch Startwert {c.ersetztDurchStartwertMonat}</span>
-                    </span>
-                  ) : (
-                    <span className="font-semibold text-amber-700">{formatCurrency(c.amountCents)}</span>
-                  )}
+                  <BetragMitVerdraengung
+                    allocation={c}
+                    testId={`text-carryover-superseded-${budgetType}-${src}`}
+                    klasse="font-semibold text-amber-700"
+                  />
                   {deleteConfirmId === c.id ? (
                     <div className="flex flex-col items-end gap-1">
                       {deleteUsageLoading ? (

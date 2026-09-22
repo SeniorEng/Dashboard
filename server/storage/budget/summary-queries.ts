@@ -6,7 +6,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime";
 import { clampToStatutoryMax, resolve45bActivation } from "@shared/domain/budgets";
 import { db } from "../../lib/db";

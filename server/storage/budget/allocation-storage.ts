@@ -497,8 +497,13 @@ export async function calculateAllocatedCents(
         .filter(a => a.year === opts.year)
         .reduce((sum, a) => sum + a.amountCents, 0);
     } else if (opts.asOfDate) {
+      // Die SIEBTE Fassung desselben Praedikats (Gate 2 zu #166, S7) — sie
+      // stand direkt neben der umgestellten, in reinem TypeScript statt
+      // Drizzle, und der Waechter konnte sie in seiner ersten Fassung per
+      // Konstruktion nicht sehen. Die Zahl „sechs" im Docblock von
+      // `allocation-window.ts` war damit selbst zu niedrig.
       calculated += manualAdjustments
-        .filter(a => a.validFrom <= opts.asOfDate! && (!a.expiresAt || a.expiresAt >= opts.asOfDate!))
+        .filter(a => allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, opts.asOfDate!))
         .reduce((sum, a) => sum + a.amountCents, 0);
     } else {
       calculated += manualAdjustments.reduce((sum, a) => sum + a.amountCents, 0);
@@ -819,17 +824,35 @@ async function calculateAllocated45b(
   // Argument ueber wenige Kunden und kein Beweis. Deshalb gibt der
   // Mess-Aufruf `accrualFloorDate` mit aus: sonst ist eine Differenz im
   // Anspruch nicht von dieser Nebenwirkung zu unterscheiden.
+  /**
+   * ── Die Default-Stichtage sind ASYMMETRISCH, und das bleibt so ────────
+   * Ohne `asOfDate` gilt fuer `validFrom` das Jahresende, fuer `expiresAt`
+   * der Jahresanfang. Das stand vorher so hier.
+   *
+   * Eine erste Fassung dieser Umstellung rief `allocationValidAt(row, A)` und
+   * stellte die `expiresAt`-Bedingung mit dem zweiten Default daneben. Weil
+   * `allocationValidAt` `expiresAt >= A` bereits selbst prueft und `A >= B`
+   * gilt, war die zweite Bedingung redundant — die Fassung war **strikt
+   * strenger**. Gemessen fiel ein Uebertrag mit `expiresAt = <Jahr>-06-30`
+   * (die §45b-Regelfrist!) heraus: 117.900 statt 235.800.
+   *
+   * Der Kommentar daneben behauptete, die Asymmetrie bleibe erhalten. Sie
+   * blieb nicht. Heute erreicht kein produktiver 45b-Aufrufer diesen Zweig
+   * ohne `asOfDate` — der Befund waere also latent geblieben, und genau
+   * deshalb steht er hier: eine Verhaltensaenderung, die ein Kommentar als
+   * nicht stattgefunden ausweist, faellt beim naechsten Umbau niemandem auf
+   * (Gate 2 zu #166, S2).
+   *
+   * `allocationValidAt` bildet die SYMMETRISCHE Regel ab und wird deshalb
+   * hier NICHT benutzt. Die Asymmetrie ist eine Eigenheit dieses einen
+   * Aufrufers und gehoert nicht in die SSoT; sie gehoert aufgeloest, aber in
+   * einem eigenen Schritt mit eigener Messung (FINDING im PR).
+   */
+  const fensterBis = opts.asOfDate ?? `${curYear}-12-31`;
+  const verfallAb = opts.asOfDate ?? `${curYear}-01-01`;
   const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null; year: number }) =>
     a.source === "carryover" &&
-    allocationValidAt(
-      // Die Asymmetrie der Default-Stichtage bleibt erhalten: ohne `asOfDate`
-      // gilt fuer `validFrom` das Jahresende, fuer `expiresAt` der
-      // Jahresanfang. Sie stand vorher hier und wird nicht stillschweigend
-      // eingeebnet — wer sie aendert, aendert den Bestand.
-      { validFrom: a.validFrom, expiresAt: a.expiresAt },
-      opts.asOfDate ?? `${curYear}-12-31`,
-    ) &&
-    (a.expiresAt == null || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)) &&
+    allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, fensterBis, verfallAb) &&
     (!opts.resetDisplacesAllSources
       || !displacedByReset(a, resetCutoffDate ? { cutoffDate: resetCutoffDate, year: resetYear } : null));
   const validCarryoverTargetYears = existingAllocations

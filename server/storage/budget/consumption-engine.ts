@@ -6,7 +6,7 @@ import {
   type BudgetTransaction,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, asc, inArray } from "drizzle-orm";
 import { parseLocalDate, todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import type { DbClient, CascadeResult } from "./types";

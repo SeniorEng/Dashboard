@@ -541,26 +541,45 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
     return;
   }
   const { read45bAllocationDiagnostics } = await import("../storage/budget/allocation-storage");
-  const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: todayISO() });
+  const { allocationValidAt, displacedByReset } = await import("../storage/budget/allocation-window");
+  const heute = todayISO();
+  const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: heute });
   const ausgeschlossen = new Set(diagnose.excludedSpecialAllocationIds);
+  const resetAnker = diagnose.resetCutoffDate
+    ? { cutoffDate: diagnose.resetCutoffDate, year: Number(diagnose.resetCutoffDate.slice(0, 4)) }
+    : null;
   const resetMonat = diagnose.resetCutoffDate
     ? `${diagnose.resetCutoffDate.slice(5, 7)}/${diagnose.resetCutoffDate.slice(0, 4)}`
     : null;
 
   res.json(allocations.map(a => {
     const zaehltNicht = ausgeschlossen.has(a.id);
+    /**
+     * Der GRUND wird gefragt, nicht erschlossen (Gate 2 zu #166, B1).
+     *
+     * Die erste Fassung las „zaehlt nicht" plus „`validFrom` vor dem Reset"
+     * als „also ersetzt". **Ausgefuehrt war das in JEDEM heute sichtbaren Fall
+     * falsch:** solange das Flag aus ist, kann ein Uebertrag nur aus einem
+     * Grund herausfallen — er ist VERFALLEN. Die Zeile meldete dann
+     * „ersetzt durch Startwert 03/2026" direkt neben „verfaellt 30.06.2026".
+     * Zwei widersprechende Auskuenfte, an genau der Stelle, an der jemand
+     * nachsieht, warum eine Zahl nicht stimmt.
+     *
+     * Jetzt beide Bedingungen aus der SSoT, und die erste schliesst den
+     * Verfall aus: die Zeile muss im Gueltigkeitsfenster LIEGEN und vom Reset
+     * verdraengt SEIN. Ein verfallener Uebertrag faellt an der ersten,
+     * unabhaengig davon, ob ein Startwert existiert.
+     */
+    const imFenster = allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, heute);
+    const vomResetVerdraengt = displacedByReset(
+      { validFrom: a.validFrom, expiresAt: a.expiresAt, year: a.year },
+      resetAnker,
+    );
     return {
       ...a,
       zaehltNicht,
-      // Nur wenn der Reset der Grund ist: eine Zeile kann auch aus anderen
-      // Gruenden herausfallen (Verfall, IB-Supersession). „Ersetzt durch
-      // Startwert" zu behaupten, wo in Wahrheit der Uebertrag verfallen ist,
-      // waere eine falsche Auskunft an genau der Stelle, an der jemand
-      // nachsieht, warum eine Zahl nicht stimmt.
       ersetztDurchStartwertMonat:
-        zaehltNicht && resetMonat && a.validFrom < (diagnose.resetCutoffDate ?? "")
-          ? resetMonat
-          : null,
+        zaehltNicht && resetMonat && imFenster && vomResetVerdraengt ? resetMonat : null,
     };
   }));
 }));

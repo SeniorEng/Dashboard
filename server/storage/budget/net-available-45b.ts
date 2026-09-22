@@ -142,7 +142,19 @@ export async function netAvailable45bAt(
 ): Promise<NetAvailable45bResult> {
   const d = tx ?? db;
   const projectFuture = options.projectFuture ?? false;
-  const resetDisplacesAllSources = options.resetDisplacesAllSources ?? false;
+  /**
+   * KEIN `?? false` (Gate 2 zu #166, S6).
+   *
+   * Ein Default hier macht aus „nicht gesetzt" ein ausdrueckliches `false`,
+   * das nach unten weitergereicht wird — und ueberschreibt damit jeden
+   * spaeteren Default-Wechsel in `calculateAllocated45b`. Der erklaerte
+   * naechste Schritt ist aber genau der: **am Default drehen, nicht an neun
+   * Aufrufstellen.** Mit dem Pinning haette es keinen Ort gegeben, an dem ein
+   * Default-Flip wirkt.
+   *
+   * `undefined` bleibt `undefined` und faellt unten auf den dortigen Default.
+   */
+  const resetDisplacesAllSources = options.resetDisplacesAllSources;
 
   const [typeSettings, preferences, customerRows] = await Promise.all([
     options.typeSettings

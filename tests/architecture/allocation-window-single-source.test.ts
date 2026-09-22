@@ -26,7 +26,11 @@ import { join } from "path";
  */
 
 const SSOT = "server/storage/budget/allocation-window.ts";
-const WURZELN = ["server/storage/budget", "server/services", "server/routes"];
+// Gate 2 zu #166, S7: die erste Fassung scannte drei Wurzeln. `budgetAllocations`
+// wird in 18 Dateien ausserhalb davon benutzt — `server/lib`, `server/startup`,
+// `server/scripts`, und `server/storage` auf oberster Ebene fiel durch, weil die
+// Wurzel `server/storage/budget` hiess.
+const WURZELN = ["server/storage", "server/services", "server/routes", "server/lib", "server/startup"];
 
 /** Einzige erlaubte Fundstelle: die SSoT selbst. */
 const ERLAUBT = new Set([SSOT]);
@@ -53,10 +57,16 @@ function dateienUnter(wurzel: string): string[] {
  * und dann ist er schlimmer als keiner, weil er Sicherheit vortäuscht.
  */
 function hatHandgeschriebenesFenster(inhalt: string): boolean {
-  if (!inhalt.includes("budgetAllocations")) return false;
-  const untereGrenze = /lte\(\s*budgetAllocations\.validFrom/.test(inhalt);
-  const obereGrenze = /gte\(\s*budgetAllocations\.expiresAt/.test(inhalt);
-  return untereGrenze && obereGrenze;
+  if (!inhalt.includes("budgetAllocations") && !inhalt.includes("validFrom")) return false;
+  // Drizzle-Form.
+  const drizzle = /lte\(\s*budgetAllocations\.validFrom/.test(inhalt)
+    && /gte\(\s*budgetAllocations\.expiresAt/.test(inhalt);
+  // TS-Form — die SIEBTE Fassung stand direkt neben der umgestellten, in
+  // reinem TypeScript statt Drizzle, und der Waechter konnte sie per
+  // Konstruktion nicht sehen (Gate 2 zu #166, S7):
+  //   a.validFrom <= x && (!a.expiresAt || a.expiresAt >= x)
+  const ts = /\.validFrom\s*<=/.test(inhalt) && /\.expiresAt\s*>=/.test(inhalt);
+  return drizzle || ts;
 }
 
 describe("Budget-Gültigkeitsfenster — eine SSoT, kein Nachbau", () => {
@@ -87,7 +97,14 @@ describe("Budget-Gültigkeitsfenster — eine SSoT, kein Nachbau", () => {
         or(isNull(budgetAllocations.expiresAt), gte(budgetAllocations.expiresAt, asOf)),
       );
     `;
-    expect(hatHandgeschriebenesFenster(nachbau), "der Wächter sieht den Nachbau nicht").toBe(true);
+    expect(hatHandgeschriebenesFenster(nachbau), "der Wächter sieht den Drizzle-Nachbau nicht").toBe(true);
+
+    // Und die TS-Form, die er in der ersten Fassung nicht sehen KONNTE.
+    const tsNachbau = `
+      const gueltig = rows.filter(a =>
+        a.validFrom <= asOf && (!a.expiresAt || a.expiresAt >= asOf));
+    `;
+    expect(hatHandgeschriebenesFenster(tsNachbau), "der Wächter sieht die TS-Form nicht").toBe(true);
     expect(hatHandgeschriebenesFenster("const x = 1;")).toBe(false);
   });
 

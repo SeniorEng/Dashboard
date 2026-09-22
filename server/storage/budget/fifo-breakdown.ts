@@ -22,7 +22,7 @@
  */
 import { allocationValidAtWhere } from "./allocation-window";
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
-import { and, eq, gte, lte, or, isNull, inArray, sql } from "drizzle-orm";
+import { and, eq, lte, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { appointmentsRepo, budgetAllocationsRepo } from "../../repos";
 import { todayISO } from "@shared/utils/datetime";

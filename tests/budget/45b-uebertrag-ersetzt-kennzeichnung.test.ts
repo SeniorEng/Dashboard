@@ -90,23 +90,43 @@ describe("§45b — ersetzter Übertrag ist als ersetzt gekennzeichnet", () => {
     }
   });
 
-  it("EK-2 – ein verfallener Übertrag wird NICHT als ersetzt ausgegeben", async () => {
-    // Die Gegenprobe, und der Grund für die enge Bedingung: eine Zeile kann aus
-    // mehreren Gründen herausfallen. „Ersetzt durch Startwert" zu behaupten, wo
-    // in Wahrheit der Übertrag verfallen ist, wäre eine falsche Auskunft an
-    // genau der Stelle, an der jemand nachsieht, warum eine Zahl nicht stimmt.
+  it("EK-2 – ein verfallener Übertrag NEBEN einem Startwert wird nicht als ersetzt ausgegeben", async () => {
+    /**
+     * Die Gegenprobe — und die erste Fassung erreichte den Zweig gar nicht.
+     *
+     * Sie legte einen verfallenen Übertrag **ohne jeden Startwert** an. Damit
+     * ist `hasReset === false`, `resetCutoffDate === null`, und die Bedingung
+     * konnte nie zuschlagen: der Test war inhaltlich eine Kopie von EK-3 mit
+     * anderer Quelle. **Geprüft wurde die Konstellation, nicht die
+     * Eigenschaft** (Gate 2 zu #166, B1).
+     *
+     * Jetzt steht der Startwert daneben, der Reset ist wirksam, und der
+     * Übertrag beginnt VOR ihm — also erfüllt er alles, was die alte
+     * Bedingung verlangte. Er fällt trotzdem nicht wegen des Resets heraus,
+     * sondern weil er **verfallen** ist. Genau das muss die Antwort sagen.
+     */
     const id = await kundeMitTopf();
     try {
-      await db.insert(budgetAllocations).values({
-        customerId: id, budgetType: "entlastungsbetrag_45b", year: JAHR, month: null,
-        amountCents: 300_00, source: "carryover",
-        validFrom: `${JAHR}-01-01`, expiresAt: `${JAHR}-01-31`, notes: "EK2-verfallen",
-      });
+      await db.insert(budgetAllocations).values([
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b", year: JAHR, month: null,
+          amountCents: 300_00, source: "carryover",
+          validFrom: `${JAHR}-01-01`, expiresAt: `${JAHR}-01-31`, notes: "EK2-verfallen",
+        },
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b", year: JAHR, month: 3,
+          amountCents: 131_00, source: "initial_balance",
+          validFrom: `${JAHR}-03-01`, expiresAt: null, notes: "EK2-startwert",
+        },
+      ]);
 
-      const [zeile] = await holeAllocations(id);
-      expect(zeile.zaehltNicht, "ein verfallener Übertrag zählt noch mit").toBe(true);
-      expect(zeile.ersetztDurchStartwertMonat,
-        "ein VERFALLENER Übertrag wird als ersetzt-durch-Startwert ausgegeben")
+      const zeilen = await holeAllocations(id);
+      const uebertrag = zeilen.find(z => z.source === "carryover");
+      expect(uebertrag, "der Übertrag fehlt in der Antwort").toBeTruthy();
+      expect(uebertrag!.zaehltNicht, "ein verfallener Übertrag zählt noch mit").toBe(true);
+      expect(uebertrag!.ersetztDurchStartwertMonat,
+        "ein VERFALLENER Übertrag wird als ersetzt-durch-Startwert ausgegeben — "
+        + "die Zeile trüge dann zwei widersprechende Begründungen nebeneinander")
         .toBeNull();
     } finally {
       await cleanupCustomer(id);

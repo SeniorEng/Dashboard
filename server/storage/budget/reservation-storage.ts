@@ -51,7 +51,7 @@ import {
   type CappedBudgetPot,
 } from "./unified-reader";
 import { projected45bAvailableCents as projected45bAvailable } from "./net-available-45b";
-import { lastDayOfMonth, parseLocalDate } from "@shared/utils/datetime";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 const STATUTORY_POTS: CappedBudgetPot[] = [
   "entlastungsbetrag_45b",

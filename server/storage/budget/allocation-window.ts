@@ -2,10 +2,12 @@
  * SSoT: „Zaehlt diese Budget-Zuweisung zum Stichtag?"
  *
  * ── Warum es diese Datei gibt (P1 `6hXp9qMrXH2WGVVG`, Punkt 2) ──────────
- * Dieselbe fachliche Frage wurde an SECHS Stellen beantwortet — einmal als
- * TS-Closure in `calculateAllocated45b`, fuenfmal als handgeschriebenes SQL:
+ * Dieselbe fachliche Frage wurde an SIEBEN Stellen beantwortet — zweimal in
+ * TypeScript innerhalb von `calculateAllocated45b`, fuenfmal als
+ * handgeschriebenes SQL:
  *
  *   allocation-storage.ts   `carryoverCounted`   (die massgebliche Fassung)
+ *   allocation-storage.ts   `manual_adjustment`-Zweig (TS, vierte Quelle)
  *   fifo-breakdown.ts       Uebertrags-Filter
  *   summary-queries.ts      `getTotalCarryoverCents`
  *   summary-queries.ts      `getAvailableCarryoverCents`
@@ -58,9 +60,27 @@ export interface ResetAnchor {
  *
  * `expiresAt === null` heisst „laeuft nicht ab" — nicht „abgelaufen".
  */
-export function allocationValidAt(row: AllocationWindowRow, asOfDate: string): boolean {
+export function allocationValidAt(
+  row: AllocationWindowRow,
+  asOfDate: string,
+  /**
+   * Stichtag fuer die VERFALLS-Seite, falls er vom Fenster-Stichtag abweicht.
+   *
+   * Normalfall: identisch. `calculateAllocated45b` hat ohne `asOfDate` eine
+   * geerbte **Asymmetrie** — `validFrom` gegen das Jahresende, `expiresAt`
+   * gegen den Jahresanfang. Sie steht hier als Parameter, statt beim Aufrufer
+   * als handgeschriebener Vergleich: sonst faellt genau dieser Aufrufer aus
+   * der SSoT heraus, und der Waechter kann ihn nicht mehr schuetzen.
+   *
+   * Die erste Fassung dieser Umstellung hat die Asymmetrie eingeebnet und
+   * damit ein Verhalten geaendert, das ein Kommentar als unveraendert auswies
+   * (Gate 2 zu #166, S2). Sichtbar als Parameter kann das nicht mehr still
+   * passieren.
+   */
+  verfallStichtag: string = asOfDate,
+): boolean {
   if (row.validFrom > asOfDate) return false;
-  return row.expiresAt == null || row.expiresAt >= asOfDate;
+  return row.expiresAt == null || row.expiresAt >= verfallStichtag;
 }
 
 /** Dieselbe Regel als Drizzle-Bedingung, fuer die SQL-Pfade. */
