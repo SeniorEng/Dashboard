@@ -291,10 +291,24 @@ export function useAdviceMutations({ onCreateSuccess }: { onCreateSuccess: () =>
         ...(result.hinweise ?? []),
       ].filter(Boolean) as string[];
 
+      /**
+       * Hinweise sind KEIN Fehler — der Toast bleibt neutral.
+       *
+       * Die erste Fassung setzte `variant: "destructive"`, sobald irgendein
+       * Hinweis dabei war. Damit hätte der erfolgreiche Import eines intakten
+       * gekürzten Avis eine ROTE Meldung mit dem Titel „Zahlungsavis
+       * gespeichert" gezeigt (Gate 2 zu #160, 2. Durchgang). Ein Hinweis, der
+       * weggesehen wird, ist wertlos — einer, der falsch alarmiert, ist
+       * schlimmer: er macht die Farbe bedeutungslos.
+       *
+       * Getrennt wird mit ` · ` und nicht mit `\n`: `ToastDescription` hat
+       * kein `whitespace-pre-line`, ein Zeilenumbruch kollabiert im HTML
+       * ohnehin zu einem Leerzeichen. Die Hinweise sind serverseitig
+       * aggregiert (eine Zeile je Art), es bleiben also wenige.
+       */
       toast({
         title: msg,
-        description: zeilen.length > 0 ? zeilen.join("\n") : undefined,
-        variant: (result.hinweise?.length ?? 0) > 0 ? "destructive" : undefined,
+        description: zeilen.length > 0 ? zeilen.join(" · ") : undefined,
       });
       invalidateRelated(queryClient, "qonto");
       onCreateSuccess();

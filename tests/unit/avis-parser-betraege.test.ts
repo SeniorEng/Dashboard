@@ -403,16 +403,160 @@ describe("Der datei-interne Konsistenzhinweis — was er kann und was nicht", ()
     expect(pruefsumme.abweichungCents, "der fehlende Beleg bleibt unbemerkt").not.toBe(0);
   });
 
-  it("AP-13 – er vergleicht NICHT Forderung gegen Zahlung", () => {
-    // Die beiden dürfen auseinanderliegen — das ist eine Kürzung, und sie ist
-    // ein Geschäftsfall. Ein Hinweis, der bei jedem legitimen Fall anschlägt,
-    // wird weggesehen; dann ist er schlimmer als keiner.
+  it("AP-13 – eine Kürzung erzeugt KEINE Abweichung (echte Dateistruktur)", () => {
+    // ── Der fünfte Fall desselben Musters, gefunden vom VORSCHAU-LAUF ──
+    // Dieser Test stand hier mit einem erfundenen Fixture: Kopfzeile fordert
+    // 117,19 und zahlt 58,16, Belegzeile trägt die VOLLE Forderung. So sieht
+    // die echte Datei nicht aus.
+    //
+    // `Avis_ICL01267.csv`, die einzige Kürzung im ganzen Bestand, ist zwei
+    // Zeilen lang — und die Belegzeile trägt den GEKÜRZTEN Betrag:
+    //
+    //   Kopfzeile    Forderg 117.19   Zahlg 58.16
+    //   Belegzeile   Forderg  58.16
+    //
+    // Der Test bewachte damit eine Zusage, die die Daten nicht hergeben, und
+    // der Vergleich „Kopf-Forderung gegen Beleg-Forderung" meldete im echten
+    // Lauf 5903. Auf dem Kürzungs-Pfad war die Zahl damit nicht mehr von einem
+    // Parse-Fehler zu unterscheiden.
+    //
+    // Gefunden hat das weder ich noch ein Review, sondern der Lauf gegen echte
+    // Daten — vor dem Schreiben, nicht danach.
     const unterzahlung = datei(
       kopf("RE-2026-0213", "117.19", "58.16"),
-      beleg("RE-2026-0213", "B-1", "117.19"),
+      beleg("RE-2026-0213", "1", "58.16"),
     );
-    const { pruefsumme } = parseAvisCsv(unterzahlung);
+    const { pruefsumme, items } = parseAvisCsv(unterzahlung);
     expect(pruefsumme.abweichungCents, "die Kürzung wird als Unstimmigkeit gemeldet").toBe(0);
+    // Der Betrag ist von alledem unberührt — er kommt aus `KTR_BTR_Zahlg`.
+    expect(items[0].betragCents).toBe(5816);
+  });
+
+  it("AP-34 – die andere Lesart bleibt zulässig, ein verlorener Beleg nicht", () => {
+    // Zwei Lesarten sind erlaubt, weil nur EINE gemessen ist: die Belegsumme
+    // darf die Forderung ODER den Zahlbetrag der Kopfzeile treffen. Aus einem
+    // einzigen Kürzungs-Fall eine Konvention zu machen, wäre der Fehler, der
+    // an diesem Vorgang schon fünfmal passiert ist.
+    //
+    // Aufgegeben wird dadurch nichts: eine verlorene oder verdoppelte
+    // Belegzeile verfehlt BEIDE Zahlen.
+    const andereLesart = datei(
+      kopf("RE-2026-0213", "117.19", "58.16"),
+      beleg("RE-2026-0213", "1", "117.19"),
+    );
+    expect(parseAvisCsv(andereLesart).pruefsumme.abweichungCents,
+      "die zweite Lesart wird als Unstimmigkeit gemeldet").toBe(0);
+
+    const belegVerloren = datei(
+      kopf("RE-2026-9100", "100.00", "100.00"),
+      beleg("RE-2026-9100", "1", "70.00"),
+    );
+    expect(parseAvisCsv(belegVerloren).pruefsumme.abweichungCents,
+      "der verlorene Beleg bleibt unbemerkt").toBe(3000);
+  });
+
+  it("AP-35 – wo nur EINE Lesart aufgeht, wird es gemeldet", () => {
+    // ── Der Satz „gibt nichts auf" war falsch, gefunden im Review ──
+    // Die zweite Lesart fügt einen ZWEITEN NULLPUNKT hinzu, und der liegt
+    // genau dort, wo der plausibelste Dateifehler landet: die Kasse skontiert
+    // oder kürzt GENAU die Positionen, die die Differenz ausmachen — fällt
+    // eine davon weg, trifft die Belegsumme exakt den Zahlbetrag.
+    //
+    //   Kopf  Forderg 100.00  Zahlg 95.00  Skonto 5.00
+    //   Beleg 1  95.00
+    //   Beleg 2   5.00        ← geht verloren   → Abweichung 0 statt 500
+    //
+    // Der Satz war nur dort wahr, wo die Doppel-Lesart gar nichts tut
+    // (Forderung = Zahlbetrag, 65 von 66), und falsch überall dort, wo sie
+    // wirkt. AP-34 prüfte ihn mit einer Kopfzeile 100.00/100.00 — also in der
+    // Region, in der er nicht fallen KANN.
+    //
+    // Eine Lesart zu streichen wäre wieder der Sprung von einer Datenmenge zur
+    // Konvention. Also wird der Graubereich sichtbar gemacht statt geschlossen.
+    const skontoBlockVollstaendig = datei(
+      kopf("RE-2026-9100", "100.00", "95.00", { skonto: "5.00" }),
+      beleg("RE-2026-9100", "1", "95.00"),
+      beleg("RE-2026-9100", "2", "5.00"),
+    );
+    const ohneSkontoZeile = datei(
+      kopf("RE-2026-9100", "100.00", "95.00", { skonto: "5.00" }),
+      beleg("RE-2026-9100", "1", "95.00"),
+    );
+
+    // Beide melden 0 — die verlorene Zeile ist aus der Zahl NICHT ablesbar.
+    expect(parseAvisCsv(ohneSkontoZeile).pruefsumme.abweichungCents).toBe(0);
+
+    // Beide tragen einen Hinweis — und JEDER nennt die Ursache SEINES Zweigs.
+    //
+    // Die erste Fassung prüfte nur `/nur gegen (den Zahlbetrag|die Forderung)/`
+    // und akzeptierte damit beide Zweige für beide Fixtures. In genau dieser
+    // Lücke saß der Fehler, den der zweite Gate-2-Durchgang fand: der Text
+    // nannte in BEIDEN Zweigen „eine fehlende Belegzeile" — im
+    // Forderungs-Zweig die einzige Ursache, die es NICHT sein kann.
+    const vollstaendig = parseAvisCsv(skontoBlockVollstaendig).hinweise;
+    expect(vollstaendig, "der Graubereich bleibt still").toHaveLength(1);
+    expect(vollstaendig[0], "Belegsumme trifft die Forderung").toMatch(/nur gegen die FORDERUNG/);
+    expect(vollstaendig[0], "nennt die unmögliche Ursache").toMatch(/UEBERZAEHLIGE/);
+    expect(vollstaendig[0]).not.toMatch(/FEHLENDE Belegzeile/);
+
+    const unvollstaendig = parseAvisCsv(ohneSkontoZeile).hinweise;
+    expect(unvollstaendig, "der Graubereich bleibt still").toHaveLength(1);
+    expect(unvollstaendig[0], "Belegsumme trifft den Zahlbetrag").toMatch(/nur gegen den ZAHLBETRAG/);
+    expect(unvollstaendig[0], "die zutreffende Ursache fehlt").toMatch(/FEHLENDE Belegzeile/);
+  });
+
+  it("AP-38 – gleichartige Blöcke ergeben EINEN Hinweis, nicht N", () => {
+    // Die Bedingung ist kein Anomalie-Prädikat, sondern „dieser Block wurde
+    // gekürzt oder skontiert und ist in sich stimmig" — der intakte
+    // Geschäftsfall. Eine Kasse, die systematisch nur ihren Anteil zahlt,
+    // erzeugt ihn auf JEDEM Block.
+    //
+    // Zwölf gleichlautende Hinweise wären genau das Rauschen, das einen
+    // Hinweis-Kanal wertlos macht — und dann ist er schlimmer als keiner.
+    const zeilen = Array.from({ length: 12 }, (_, i) => {
+      const nr = `RE-2026-91${String(i).padStart(2, "0")}`;
+      return [kopf(nr, "100.00", "95.00", { skonto: "5.00" }), beleg(nr, "1", "95.00")];
+    }).flat();
+    const r = parseAvisCsv(datei(...zeilen));
+
+    expect(r.hinweise, "zwölf Blöcke ergeben zwölf Hinweise").toHaveLength(1);
+    expect(r.hinweise[0]).toMatch(/^12 Block/);
+    expect(r.hinweise[0], "die betroffenen Nummern fehlen").toContain("RE-2026-9100");
+    expect(r.hinweise[0]).toContain("RE-2026-9111");
+  });
+
+  it("AP-36 – eine leere Kopf-Forderung wird gemeldet, nicht abgelehnt", () => {
+    // `parseBetragCents` bildet "" auf 0 ab — unter der Zahlbetrags-Lesart
+    // ginge eine leere Kopf-Forderung lautlos durch. Sichtbar muss sie sein.
+    //
+    // ABGELEHNT wird sie aber nicht, und das war kurzzeitig anders. Der
+    // zweite Gate-2-Durchgang hat es kassiert: „leere Kopf-Forderung" und
+    // „Block ohne Belegzeile" sind mit 0 von 66 GLEICH gut belegt, und die
+    // eine bekam den Riegel, die andere die Begründung dagegen — im selben
+    // Commit, zwanzig Zeilen auseinander.
+    //
+    // Dazu speist `ZEM_BTR_Forderg` ausschließlich diesen Hinweis; das Geld
+    // kommt aus `KTR_BTR_Zahlg`. Eine Datei abzulehnen, deren Beträge
+    // vollständig lesbar sind, ist die falsche Seite von fail-loud.
+    const ohneForderung = datei(
+      kopf("RE-2026-9100", "", "70.00"),
+      beleg("RE-2026-9100", "1", "70.00"),
+    );
+    const r = parseAvisCsv(ohneForderung);
+    expect(r.items[0].betragCents, "der Betrag ist unberührt").toBe(7000);
+    expect(r.hinweise).toHaveLength(1);
+    expect(r.hinweise[0]).toMatch(/ohne ZEM_BTR_Forderg/);
+  });
+
+  it("AP-37 – ein Block ohne Belegzeile wird gemeldet, nicht übergangen", () => {
+    // Er fällt aus der Prüfung heraus (`filter(posten.length > 0)`) — gemessen
+    // kommt er in 0 von 66 Blöcken vor. Eine ungemessene Form still zu
+    // übergehen ist das Muster, das hier sechsmal danebenging; ein Riegel
+    // darauf wäre wieder eine Annahme über die Messung hinaus.
+    const ohneBeleg = datei(kopf("RE-2026-9100", "100.00", "100.00"));
+    const r = parseAvisCsv(ohneBeleg);
+    expect(r.hinweise).toHaveLength(1);
+    expect(r.hinweise[0]).toMatch(/ohne Belegzeile/);
   });
 
   it("AP-14 – und er ist per Konstruktion blind gegen einen SKALENFEHLER", () => {

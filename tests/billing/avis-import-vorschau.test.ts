@@ -282,6 +282,19 @@ describe("Avis-Import — der Riegel hängt an der Rechnung", () => {
     const davaso = [
       "LfdNr,AVISNr,KTR_IK,KTR_Name,ZEM_IK,ZEM_IBAN,ZEM_BelegNr,ZEM_VorgangsNr,ZEM_RecNr,ZEM_RecDatum,ZEM_BTR_Forderg,KTR_BTR_Zahlg,KTR_BTR_Skonto,KTR_BTR_DTA_Kuerzg,Datum_ZahlungAusfuehrg",
       `1,TST,100000000,Testkasse,200000000,DE00,,V-1,${nummer},01.08.2017,100.00,95.00,5.00,0.00,15.09.2017`,
+      // Belegzeile mit der VOLLEN Forderung — und das bleibt so.
+      //
+      // Ich hatte sie auf 95.00 „korrigiert", mit Verweis auf
+      // `Avis_ICL01267.csv`. Das war selbst ein Sprung über die Messung:
+      // ICL01267 ist eine KÜRZUNG (und weist Skonto 0 aus), dieser Fall ist
+      // ein SKONTO-Block — und für Skonto-Blöcke gibt es 0 von 66 Messpunkte.
+      // „So sieht die echte Datei aus" behauptete etwas, das niemand gesehen
+      // hat.
+      //
+      // Mit 95.00 wäre zudem `betragCents === 9500` von BEIDEN Lesarten
+      // erfüllt (Kopf-Zahlbetrag und Beleg-Forderung sind dann dieselbe Zahl)
+      // — die Zusage „der Posten kommt aus der Kopfzeile" wäre nicht mehr
+      // unterscheidbar geprüft.
       `2,TST,100000000,Testkasse,200000000,DE00,B-1,V-1,${nummer},01.08.2017,100.00,,0.00,,`,
     ].join("\n");
 
@@ -312,6 +325,9 @@ describe("Avis-Import — der Riegel hängt an der Rechnung", () => {
     const davaso = [
       "LfdNr,AVISNr,KTR_IK,KTR_Name,ZEM_IK,ZEM_IBAN,ZEM_BelegNr,ZEM_VorgangsNr,ZEM_RecNr,ZEM_RecDatum,ZEM_BTR_Forderg,KTR_BTR_Zahlg,KTR_BTR_Skonto,KTR_BTR_DTA_Kuerzg,Datum_ZahlungAusfuehrg",
       `1,TST,100000000,Testkasse,200000000,DE00,,V-1,${nummer},01.08.2017,100.00,80.00,0.00,20.00,15.09.2017`,
+      // Volle Forderung auf der Belegzeile — siehe die Begründung bei AV-6:
+      // für diesen Fall gibt es keine Messung, und die Doppel-Lesart lässt
+      // beide Formen zu.
       `2,TST,100000000,Testkasse,200000000,DE00,B-1,V-1,${nummer},01.08.2017,100.00,,0.00,,`,
     ].join("\n");
 
