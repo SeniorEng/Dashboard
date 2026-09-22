@@ -106,5 +106,20 @@ export function displacedByReset(
   reset: ResetAnchor | null,
 ): boolean {
   if (!reset) return false;
-  return row.validFrom < reset.cutoffDate && row.year <= reset.year;
+  /**
+   * `<=`, nicht `<` (Alriks Entscheidung, 22.09.2026).
+   *
+   * Eine Inventur zum 01.01. stellt den Bestand fest, und ein Uebertrag, der
+   * am selben Tag beginnt, ist Teil dessen, was festgestellt wurde.
+   *
+   * Mit `<` griff die Regel ausgerechnet im HAEUFIGSTEN Fall nie:
+   * Jahreswechsel, Uebertrag ab 01.01., Inventur im Januar — `cutoffDate` ist
+   * dann ebenfalls der 01.01., und `validFrom < cutoffDate` ist falsch.
+   * Gemessen: `ohne=157200 mit=157200`, das Flag aenderte nichts. Genau die
+   * Konstellation, fuer die der Mechanismus gemacht ist (Gate 2 zu #166, S3).
+   *
+   * **`<=` verdraengt MEHR als `<`.** Jede Messung, die mit `<` gefahren
+   * wurde, ist damit eine Untergrenze.
+   */
+  return row.validFrom <= reset.cutoffDate && row.year <= reset.year;
 }

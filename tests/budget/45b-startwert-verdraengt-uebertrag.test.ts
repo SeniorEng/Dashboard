@@ -224,4 +224,58 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       await cleanupCustomer(id);
     }
   });
+
+  it("VD-6 – ein Startwert im JANUAR verdrängt den Übertrag ab 01.01.", async () => {
+    /**
+     * Alriks Entscheidung zu S3, und der Grund dafür.
+     *
+     * Mit `<` griff die Regel ausgerechnet im häufigsten Fall nie:
+     * Jahreswechsel, Übertrag ab 01.01., Inventur im Januar. `cutoffDate` ist
+     * dann ebenfalls der 01.01., und `validFrom < cutoffDate` ist falsch.
+     * Gemessen ergab das `ohne=157200 mit=157200` — das Flag änderte nichts
+     * in genau der Konstellation, für die der Mechanismus gemacht ist.
+     *
+     * Fachlich: eine Inventur zum 01.01. stellt den Bestand fest, und ein
+     * Übertrag, der am selben Tag beginnt, ist Teil dessen, was festgestellt
+     * wurde.
+     */
+    const c = await createTestCustomer({
+      pflegegrad: 3, billingType: "pflegekasse_gesetzlich", acceptsPrivatePayment: false,
+    });
+    const id = c.id as number;
+    try {
+      await db.delete(customerCareLevelHistory).where(eq(customerCareLevelHistory.customerId, id));
+      await db.insert(customerBudgetTypeSettings).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b",
+        enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null,
+        validFrom: `${ANKER_JAHR}-01-01`, validTo: null,
+      });
+      await db.insert(budgetAllocations).values([
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b",
+          year: ANKER_JAHR, month: 1, amountCents: 131_00, source: "initial_balance",
+          validFrom: `${ANKER_JAHR}-01-01`, expiresAt: null, notes: "VD6-Januar-Inventur",
+        },
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b",
+          year: ANKER_JAHR, month: null, amountCents: 1_179_00, source: "carryover",
+          validFrom: `${ANKER_JAHR}-01-01`, expiresAt: `${ANKER_JAHR}-06-30`,
+          notes: "VD6-Uebertrag-ab-Januar",
+        },
+      ]);
+
+      const stichtag = `${ANKER_JAHR}-03-15`;
+      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+      const neu = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
+      );
+
+      expect(heute - neu,
+        "der Übertrag ab 01.01. wird vom Januar-Startwert nicht verdrängt — "
+        + "genau der Fall, für den der Mechanismus gemacht ist")
+        .toBe(1_179_00);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
 });

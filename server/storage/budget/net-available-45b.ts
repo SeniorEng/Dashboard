@@ -233,6 +233,28 @@ export async function netAvailable45bAt(
  * In-Lock-Read der Reservierung (Overdraft-Garantie: aktive Holds des Jahres
  * werden weiter abgezogen, der projizierte Anspruch ist die einzige Aenderung).
  */
+/**
+ * ⚠ **Diese Funktion nimmt `resetDisplacesAllSources` NICHT entgegen — und das
+ * ist eine Landmine fuer den naechsten Umbau.**
+ *
+ * Ihr Eingabe-`pot` stammt aus `readUnifiedBudgetAvailability`, das das Flag
+ * seit P1 `6hXp9qMrXH2WGVVG` durchreicht. `projectedAllocated` unten rechnet
+ * dagegen IMMER ohne Verdraengung.
+ *
+ * Wer also in `planHold` `readUnifiedBudgetAvailability(..., {
+ * resetDisplacesAllSources: true })` setzt, bekommt `pot.consumedNetCents`
+ * **mit** Verdraengungs-Ausschluss und `projectedAllocated` **ohne**. Das
+ * Ergebnis `max(0, projectedAllocated − consumedNet − holds)` ist dann **zu
+ * hoch** — dieselbe Drift, vor der `getExcluded45bConsumption` warnt, nur auf
+ * der Projektions-Seite.
+ *
+ * **Replit #1916 ist genau der Umbau, bei dem jemand das tun wird.** Wer das
+ * Flag hier hineinreicht, muss es an `calculateAllocatedCents` unten
+ * mitgeben; sonst rechnen Anspruch und Verbrauch verschieden.
+ *
+ * Der Befund steht auch im Body von PR #166 — aber der Naechste liest den
+ * Code, nicht den alten PR.
+ */
 export async function projected45bAvailableCents(
   customerId: number,
   transactionDate: string,
