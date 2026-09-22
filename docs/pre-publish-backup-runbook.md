@@ -113,7 +113,29 @@ Pflicht. Nach dem Backup, vor dem Klick auf „Publish":
 - Replit-Auto-Backup jüngster Snapshot: YYYY-MM-DD HH:MM UTC (≤ 1h alt: ja/nein)
 - Lokaler Ablageort: <Pfad oder Cloud-URL>
 - Durchgeführt von: <Name>
+- **NACH dem Publish: `version` aus `GET /health`** (Build-Hash) + `builtAt`
 ```
+
+### Warum der Build-Hash dazugehört
+
+**Der Eintrag hielt bisher fest, welche PRs GEMEINT waren — nicht, welcher
+Quellstand ANKAM.** Am 21.09.2026 hat das eine Runde gekostet: ein Publish lief
+87 Sekunden NACH dem Merge und baute trotzdem den Stand davor (der Workspace
+hatte ihn nicht gezogen). Der Fehler war erst sichtbar, als eine neue Route
+404 lieferte — und aufklärbar nur, weil `version` reproduzierbar ist.
+
+`GET /health` meldet `version` = sha256 über `server/`, `shared/`, `client/src`
+(alle `.ts/.tsx/.css`, sortiert, gebildet zum Build-Zeitpunkt, erste 16 Stellen).
+Derselbe Wert lässt sich für jeden Commit nachrechnen:
+
+```bash
+git archive <commit> server shared client/src | tar -x -C <leeres-verzeichnis>
+# dann die Hash-Funktion aus script/build.ts über dieses Verzeichnis laufen lassen
+```
+
+**Damit ist „ist das live?" eine Frage von fünf Sekunden statt einer
+Rekonstruktion** — und ein Publish, der den falschen Stand baut, fällt beim
+Eintragen auf statt beim nächsten Fehlerbericht.
 
 ---
 
