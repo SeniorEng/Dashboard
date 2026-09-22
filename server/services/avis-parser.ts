@@ -633,12 +633,8 @@ function parseDavaso(csvContent: string): ParsedAvis {
    * Summiert werden deshalb die BETRAEGE der Einzeldifferenzen. 0 heisst dann
    * „jeder Block geht auf" und nicht „die Fehler gleichen sich aus".
    */
-  // Strikt wie der Zahlbetrag: `parseBetragCents` bildet "" und Unlesbares auf
-  // 0 ab, und eine leere Kopf-Forderung wuerde unter der Zahlbetrags-Lesart
-  // lautlos durchgehen (Gate 2 zu #160, S3, ausgefuehrt). `0.00` bleibt erlaubt.
   const forderungKopf = bloecke.reduce(
-    (n, b) => n + parseBetragCentsStrikt(
-      getField(b.kopf, "ZEM_BTR_Forderg"), "punkt", "ZEM_BTR_Forderg", ortVon(b.kopf)), 0);
+    (n, b) => n + parseBetragCents(getField(b.kopf, "ZEM_BTR_Forderg"), "punkt"), 0);
   const forderungPosten = bloecke.reduce(
     (n, b) => n + b.posten.reduce(
       (m, r) => m + parseBetragCents(getField(r, "ZEM_BTR_Forderg"), "punkt"), 0), 0);
@@ -704,26 +700,50 @@ function parseDavaso(csvContent: string): ParsedAvis {
    *
    * Im Normalfall sind beide Zahlen gleich, dann faellt der Hinweis weg.
    */
-  const nurEineLesart: string[] = [];
+  const nurZahlbetrag: string[] = [];
+  const nurForderung: string[] = [];
+  const ohneForderung: string[] = [];
+
   const abweichungJeBlock = bloecke
     .filter(b => b.posten.length > 0)
-    .reduce((n, b) => {
-      const kopfForderung = parseBetragCentsStrikt(
-        getField(b.kopf, "ZEM_BTR_Forderg"), "punkt", "ZEM_BTR_Forderg", ortVon(b.kopf));
+    .reduce((n, b, i) => {
+      const rohForderung = getField(b.kopf, "ZEM_BTR_Forderg");
+      const kopfForderung = parseBetragCents(rohForderung, "punkt");
       const kopfZahlung = parseBetragCents(getField(b.kopf, "KTR_BTR_Zahlg"), "punkt");
       const postenF = b.posten.reduce(
         (m, r) => m + parseBetragCents(getField(r, "ZEM_BTR_Forderg"), "punkt"), 0);
+
+      // Die KANONISIERTE Nummer, nicht der Rohwert der Zelle. `items` ist
+      // index-gleich zu `bloecke`; der dritte Hinweis-Produzent nennt sie
+      // ebenfalls kanonisch, und zwei Schreibweisen derselben Nummer in einem
+      // Kanal machen ihn unlesbar.
+      const nummer = items[i]?.rechnungsNummer ?? ortVon(b.kopf);
+
+      /**
+       * Eine LEERE Kopf-Forderung wird gemeldet, nicht abgelehnt.
+       *
+       * Sie war kurzzeitig ein harter Abbruch (Gate 2 zu #160, 1. Durchgang).
+       * Der zweite Durchgang hat das zu Recht kassiert: beide Formen —
+       * „leere Kopf-Forderung" und „Block ohne Belegzeile" — sind mit
+       * 0 von 66 GLEICH gut belegt, und zwanzig Zeilen weiter stand die
+       * Begruendung gegen einen Riegel. Zwei identische Beweislagen,
+       * entgegengesetzt behandelt, im selben Commit.
+       *
+       * Dazu: `ZEM_BTR_Forderg` speist AUSSCHLIESSLICH diesen Hinweis. Das
+       * Geld kommt aus `KTR_BTR_Zahlg`. Eine Datei, deren Betraege
+       * vollstaendig lesbar sind, wegen eines fehlenden Hinweis-Eingangs
+       * abzulehnen, ist die falsche Seite von fail-loud.
+       */
+      if (!rohForderung.trim()) {
+        ohneForderung.push(nummer);
+        return n;
+      }
 
       const abstandForderung = Math.abs(postenF - kopfForderung);
       const abstandZahlung = Math.abs(postenF - kopfZahlung);
 
       if (kopfForderung !== kopfZahlung && (abstandForderung === 0) !== (abstandZahlung === 0)) {
-        nurEineLesart.push(
-          `Block ${getField(b.kopf, "ZEM_RecNr")} (${ortVon(b.kopf)}) geht nur gegen `
-          + `${abstandZahlung === 0 ? "den Zahlbetrag" : "die Forderung"} der Kopfzeile auf. `
-          + "Das ist bei einer Kuerzung normal — es kann aber auch eine fehlende "
-          + "Belegzeile sein. Bitte gegen die Datei pruefen.",
-        );
+        (abstandZahlung === 0 ? nurZahlbetrag : nurForderung).push(nummer);
       }
       return n + Math.min(abstandForderung, abstandZahlung);
     }, 0);
@@ -736,9 +756,64 @@ function parseDavaso(csvContent: string): ParsedAvis {
    * melden.
    */
   const ohneBelegzeile = bloecke
-    .filter(b => b.posten.length === 0)
-    .map(b => `Block ${getField(b.kopf, "ZEM_RecNr")} (${ortVon(b.kopf)}) hat keine `
-      + "Belegzeile. In den gemessenen Dateien kommt das nicht vor — bitte pruefen.");
+    .map((b, i) => ({ b, nummer: items[i]?.rechnungsNummer ?? ortVon(b.kopf) }))
+    .filter(x => x.b.posten.length === 0)
+    .map(x => x.nummer);
+
+  /**
+   * AGGREGIERT, nicht je Block.
+   *
+   * Die Bedingung „Forderung != Zahlbetrag und genau eine Lesart geht auf" ist
+   * kein Anomalie-Praedikat, sondern das Praedikat „dieser Block wurde
+   * gekuerzt oder skontiert und ist in sich stimmig" — der intakte
+   * Geschaeftsfall. Heute betrifft das 1 von 66 Kopfzeilen; eine Kasse, die
+   * systematisch nur ihren Anteil zahlt, erzeugt es auf JEDEM Block.
+   * Ausgefuehrt: zwoelf solche Bloecke ergaben zwoelf gleichlautende Hinweise.
+   *
+   * Ein Kanal, der reihenweise dasselbe meldet, wird weggesehen — und dann ist
+   * er schlimmer als keiner. Eine Zeile mit den betroffenen Nummern
+   * beantwortet dieselbe Frage.
+   *
+   * ── Und die URSACHE ist je Zweig eine ANDERE ────────────────────────────
+   * Der erste Entwurf nannte in beiden Zweigen „eine fehlende Belegzeile".
+   * Im Forderungs-Zweig ist das die einzige Ursache, die es NICHT sein kann:
+   * die Belegsumme trifft dort die Forderung exakt, eine fehlende Zeile macht
+   * sie kleiner. Der Bediener wurde also genau dort, wo er hinsehen soll, auf
+   * die falsche Spalte geschickt (Gate 2, 2. Durchgang, ausgefuehrt).
+   *
+   * Der Text unterscheidet ausserdem NICHT mehr pauschal „Kuerzung": das Repo
+   * trennt gewaehrten Nachlass (Skonto) und auferlegten Abzug (Kuerzung)
+   * scharf, und welcher von beiden vorliegt, sagt die Kopfzeile.
+   */
+  const liste = (n: string[]) => n.join(", ");
+  const graubereich: string[] = [];
+  if (nurZahlbetrag.length > 0) {
+    graubereich.push(
+      `${nurZahlbetrag.length} Block/Bloecke gehen nur gegen den ZAHLBETRAG der Kopfzeile `
+      + `auf (${liste(nurZahlbetrag)}). Bei einem ausgewiesenen Abzug ist das normal — `
+      + "es kann aber auch eine FEHLENDE Belegzeile sein. Bitte gegen die Datei pruefen.",
+    );
+  }
+  if (nurForderung.length > 0) {
+    graubereich.push(
+      `${nurForderung.length} Block/Bloecke gehen nur gegen die FORDERUNG der Kopfzeile `
+      + `auf (${liste(nurForderung)}). Die Belegzeilen tragen dann den ungekuerzten `
+      + "Betrag — es kann aber auch eine UEBERZAEHLIGE Belegzeile sein. Bitte pruefen.",
+    );
+  }
+  if (ohneForderung.length > 0) {
+    graubereich.push(
+      `${ohneForderung.length} Kopfzeile(n) ohne ZEM_BTR_Forderg (${liste(ohneForderung)}). `
+      + "Der Betrag ist davon unberuehrt (er kommt aus KTR_BTR_Zahlg), aber der "
+      + "datei-interne Abgleich faellt fuer diese Bloecke aus.",
+    );
+  }
+  if (ohneBelegzeile.length > 0) {
+    graubereich.push(
+      `${ohneBelegzeile.length} Block/Bloecke ohne Belegzeile (${liste(ohneBelegzeile)}). `
+      + "In den gemessenen Dateien kommt das nicht vor — bitte pruefen.",
+    );
+  }
 
   const hatPosten = bloecke.some(b => b.posten.length > 0);
 
@@ -786,7 +861,7 @@ function parseDavaso(csvContent: string): ParsedAvis {
     recNummern.filter((r, i) =>
       extractReInvoiceNumber(r) !== null && recNummern.indexOf(r) !== i),
   )];
-  const hinweise = [...nurEineLesart, ...ohneBelegzeile, ...mehrfachKanonisch.map(r =>
+  const hinweise = [...graubereich, ...mehrfachKanonisch.map(r =>
     `Rechnung ${r} kommt in mehreren Bloecken vor. In den gemessenen Dateien `
     + "gibt es das bei kanonischen Nummern nicht — bitte pruefen, ob es zwei "
     + "Tranchen sind oder eine Teilverdopplung.",

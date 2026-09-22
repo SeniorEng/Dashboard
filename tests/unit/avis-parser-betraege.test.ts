@@ -486,26 +486,66 @@ describe("Der datei-interne Konsistenzhinweis — was er kann und was nicht", ()
     // Beide melden 0 — die verlorene Zeile ist aus der Zahl NICHT ablesbar.
     expect(parseAvisCsv(ohneSkontoZeile).pruefsumme.abweichungCents).toBe(0);
 
-    // Aber beide tragen einen Hinweis: der Block geht nur unter EINER Lesart
-    // auf, und welche stimmt, weiss niemand.
-    for (const [name, csv] of [["vollständig", skontoBlockVollstaendig],
-                               ["ohne Skonto-Zeile", ohneSkontoZeile]] as const) {
-      const h = parseAvisCsv(csv).hinweise;
-      expect(h, `${name}: der Graubereich bleibt still`).toHaveLength(1);
-      expect(h[0]).toMatch(/nur gegen (den Zahlbetrag|die Forderung)/);
-    }
+    // Beide tragen einen Hinweis — und JEDER nennt die Ursache SEINES Zweigs.
+    //
+    // Die erste Fassung prüfte nur `/nur gegen (den Zahlbetrag|die Forderung)/`
+    // und akzeptierte damit beide Zweige für beide Fixtures. In genau dieser
+    // Lücke saß der Fehler, den der zweite Gate-2-Durchgang fand: der Text
+    // nannte in BEIDEN Zweigen „eine fehlende Belegzeile" — im
+    // Forderungs-Zweig die einzige Ursache, die es NICHT sein kann.
+    const vollstaendig = parseAvisCsv(skontoBlockVollstaendig).hinweise;
+    expect(vollstaendig, "der Graubereich bleibt still").toHaveLength(1);
+    expect(vollstaendig[0], "Belegsumme trifft die Forderung").toMatch(/nur gegen die FORDERUNG/);
+    expect(vollstaendig[0], "nennt die unmögliche Ursache").toMatch(/UEBERZAEHLIGE/);
+    expect(vollstaendig[0]).not.toMatch(/FEHLENDE Belegzeile/);
+
+    const unvollstaendig = parseAvisCsv(ohneSkontoZeile).hinweise;
+    expect(unvollstaendig, "der Graubereich bleibt still").toHaveLength(1);
+    expect(unvollstaendig[0], "Belegsumme trifft den Zahlbetrag").toMatch(/nur gegen den ZAHLBETRAG/);
+    expect(unvollstaendig[0], "die zutreffende Ursache fehlt").toMatch(/FEHLENDE Belegzeile/);
   });
 
-  it("AP-36 – eine leere Kopf-Forderung bricht ab statt lautlos aufzugehen", () => {
-    // `parseBetragCents` bildet "" auf 0 ab. Unter der Zahlbetrags-Lesart ging
-    // eine leere Kopf-Forderung deshalb durch, solange die Belegsumme den
-    // Zahlbetrag trifft — also im gemessenen Normalfall immer. Damit wäre
-    // genau das weg, was die Prüfsumme noch leisten soll.
+  it("AP-38 – gleichartige Blöcke ergeben EINEN Hinweis, nicht N", () => {
+    // Die Bedingung ist kein Anomalie-Prädikat, sondern „dieser Block wurde
+    // gekürzt oder skontiert und ist in sich stimmig" — der intakte
+    // Geschäftsfall. Eine Kasse, die systematisch nur ihren Anteil zahlt,
+    // erzeugt ihn auf JEDEM Block.
+    //
+    // Zwölf gleichlautende Hinweise wären genau das Rauschen, das einen
+    // Hinweis-Kanal wertlos macht — und dann ist er schlimmer als keiner.
+    const zeilen = Array.from({ length: 12 }, (_, i) => {
+      const nr = `RE-2026-91${String(i).padStart(2, "0")}`;
+      return [kopf(nr, "100.00", "95.00", { skonto: "5.00" }), beleg(nr, "1", "95.00")];
+    }).flat();
+    const r = parseAvisCsv(datei(...zeilen));
+
+    expect(r.hinweise, "zwölf Blöcke ergeben zwölf Hinweise").toHaveLength(1);
+    expect(r.hinweise[0]).toMatch(/^12 Block/);
+    expect(r.hinweise[0], "die betroffenen Nummern fehlen").toContain("RE-2026-9100");
+    expect(r.hinweise[0]).toContain("RE-2026-9111");
+  });
+
+  it("AP-36 – eine leere Kopf-Forderung wird gemeldet, nicht abgelehnt", () => {
+    // `parseBetragCents` bildet "" auf 0 ab — unter der Zahlbetrags-Lesart
+    // ginge eine leere Kopf-Forderung lautlos durch. Sichtbar muss sie sein.
+    //
+    // ABGELEHNT wird sie aber nicht, und das war kurzzeitig anders. Der
+    // zweite Gate-2-Durchgang hat es kassiert: „leere Kopf-Forderung" und
+    // „Block ohne Belegzeile" sind mit 0 von 66 GLEICH gut belegt, und die
+    // eine bekam den Riegel, die andere die Begründung dagegen — im selben
+    // Commit, zwanzig Zeilen auseinander.
+    //
+    // Dazu speist `ZEM_BTR_Forderg` ausschließlich diesen Hinweis; das Geld
+    // kommt aus `KTR_BTR_Zahlg`. Eine Datei abzulehnen, deren Beträge
+    // vollständig lesbar sind, ist die falsche Seite von fail-loud.
     const ohneForderung = datei(
       kopf("RE-2026-9100", "", "70.00"),
       beleg("RE-2026-9100", "1", "70.00"),
     );
-    expect(() => parseAvisCsv(ohneForderung)).toThrow(/ZEM_BTR_Forderg/);
+    const r = parseAvisCsv(ohneForderung);
+    expect(r.items[0].betragCents, "der Betrag ist unberührt").toBe(7000);
+    expect(r.hinweise).toHaveLength(1);
+    expect(r.hinweise[0]).toMatch(/ohne ZEM_BTR_Forderg/);
   });
 
   it("AP-37 – ein Block ohne Belegzeile wird gemeldet, nicht übergangen", () => {
@@ -516,7 +556,7 @@ describe("Der datei-interne Konsistenzhinweis — was er kann und was nicht", ()
     const ohneBeleg = datei(kopf("RE-2026-9100", "100.00", "100.00"));
     const r = parseAvisCsv(ohneBeleg);
     expect(r.hinweise).toHaveLength(1);
-    expect(r.hinweise[0]).toMatch(/keine Belegzeile/);
+    expect(r.hinweise[0]).toMatch(/ohne Belegzeile/);
   });
 
   it("AP-14 – und er ist per Konstruktion blind gegen einen SKALENFEHLER", () => {
