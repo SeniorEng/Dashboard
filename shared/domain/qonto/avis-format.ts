@@ -33,6 +33,31 @@ export class AvisParseUncertainError extends Error {
   }
 }
 
+/**
+ * Die Datei ist so aufgebaut, dass der Parser sie nicht verantworten kann.
+ *
+ * ── Warum das eine EIGENE Klasse braucht ────────────────────────────────
+ * Die Struktur-Riegel (Pflichtspalten, unlesbarer Zahlbetrag, Belegzeile ohne
+ * Kopfzeile, Belegzeile im falschen Block, doppelte Belegnummer) warfen einen
+ * nackten `Error`. `asyncHandler` faengt den ab und ersetzt ihn durch seine
+ * Standardmeldung — aus „ZEM_BelegNr fehlt" wurde ein HTTP 500 mit
+ * „Zahlungsavis konnte nicht gespeichert werden".
+ *
+ * **Damit war der Riegel im Code laut und an der Oberflaeche stumm.** Eine
+ * korrekt abgelehnte Datei sah aus wie ein kaputtes System — und das ist
+ * praktisch dasselbe Versagen, das dieser ganze Vorgang abraeumt: eine
+ * Pruefung, deren Ergebnis niemand ablesen kann, ist keine.
+ *
+ * Wer sie faengt, antwortet mit 400 und dem GRUND, nicht mit 500 und einer
+ * Verlegenheitsformel.
+ */
+export class AvisDateiaufbauError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AvisDateiaufbauError";
+  }
+}
+
 // Deutsch formatierter Geldbetrag: 49,13 · 1.234,56 · -70,00 (Komma zwingend).
 const GERMAN_AMOUNT_RE = /^-?\d{1,3}(\.\d{3})*,\d{2}$/;
 // dd.mm.yyyy (auch dd.mm.yy) — als Datum ausgeschlossen.

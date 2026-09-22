@@ -1,6 +1,7 @@
 import {
   type AvisColumnMap,
   type AvisFormat,
+  AvisDateiaufbauError,
   AvisParseUncertainError,
   buildSuggestedColumnMap,
   classifyKassenCsvFormat,
@@ -8,7 +9,7 @@ import {
 } from "../../shared/domain/qonto/avis-format";
 import { extractInvoiceNumber, extractReInvoiceNumber } from "../../shared/domain/qonto/avis-match";
 
-export { AvisParseUncertainError };
+export { AvisParseUncertainError, AvisDateiaufbauError };
 export type { AvisColumnMap };
 
 interface ParsedAvisHeader {
@@ -206,7 +207,7 @@ export function parseBetragCents(value: string, konvention: Dezimalkonvention): 
 function parseBetragCentsStrikt(value: string, konvention: Dezimalkonvention, feld: string): number {
   const roh = value.trim().replace(/\s/g, "").replace(/€/g, "");
   if (!roh) {
-    throw new Error(
+    throw new AvisDateiaufbauError(
       `Pflichtfeld ${feld} ist leer. Dateiaufbau nicht erkannt, Import abgelehnt.`,
     );
   }
@@ -215,7 +216,7 @@ function parseBetragCentsStrikt(value: string, konvention: Dezimalkonvention, fe
     : roh.replace(/,/g, "");
   const num = parseFloat(cleaned);
   if (isNaN(num)) {
-    throw new Error(
+    throw new AvisDateiaufbauError(
       `Pflichtfeld ${feld} ist kein Betrag: „${value.trim()}". `
       + "Dateiaufbau nicht erkannt, Import abgelehnt.",
     );
@@ -265,7 +266,7 @@ function toIsoDate(raw: string | null | undefined): string | null {
 
 function parseDavaso(csvContent: string): ParsedAvis {
   const lines = csvContent.replace(/^\uFEFF/, "").trim().split("\n");
-  if (lines.length < 2) throw new Error("CSV enthält keine Daten");
+  if (lines.length < 2) throw new AvisDateiaufbauError("CSV enthält keine Daten");
 
   const headerLine = lines[0];
   const delimiter = detectDelimiter(headerLine);
@@ -293,7 +294,7 @@ function parseDavaso(csvContent: string): ParsedAvis {
   const PFLICHTSPALTEN = ["ZEM_BelegNr", "ZEM_RecNr", "ZEM_BTR_Forderg", "KTR_BTR_Zahlg"] as const;
   const fehlend = PFLICHTSPALTEN.filter(c => colIdx[c] === undefined);
   if (fehlend.length > 0) {
-    throw new Error(
+    throw new AvisDateiaufbauError(
       `DAVASO-Datei ohne Pflichtspalten: ${fehlend.join(", ")}. `
       + `Gefunden: ${columns.join(", ")}. Import abgelehnt.`,
     );
@@ -358,7 +359,7 @@ function parseDavaso(csvContent: string): ParsedAvis {
         // Eine Postenzeile vor der ersten Kopfzeile gehoert zu keiner Rechnung.
         // In 29 gemessenen Dateien kommt das nicht vor; kaeme es vor, waere
         // still eine Forderung ohne Zahlung im Avis — deshalb laut.
-        throw new Error(
+        throw new AvisDateiaufbauError(
           `Postenzeile ohne vorangehende Kopfzeile (Beleg ${getField(row, "ZEM_BelegNr")}). `
           + "Dateiaufbau nicht erkannt, Import abgelehnt.",
         );
@@ -438,7 +439,7 @@ function parseDavaso(csvContent: string): ParsedAvis {
     for (const r of b.posten) {
       const postenRec = getField(r, "ZEM_RecNr");
       if (postenRec !== kopfRec) {
-        throw new Error(
+        throw new AvisDateiaufbauError(
           `Belegzeile ${getField(r, "ZEM_BelegNr")} nennt ZEM_RecNr „${postenRec}", `
           + `ihre Kopfzeile „${kopfRec}". Block-Zuordnung nicht erkannt, Import abgelehnt.`,
         );
@@ -446,13 +447,35 @@ function parseDavaso(csvContent: string): ParsedAvis {
     }
   }
 
-  const alleBelege = bloecke.flatMap(b => b.posten.map(r => getField(r, "ZEM_BelegNr")));
-  const dubletten = alleBelege.filter((b, i) => alleBelege.indexOf(b) !== i);
-  if (dubletten.length > 0) {
-    throw new Error(
-      `Belegnummer mehrfach in der Datei: ${[...new Set(dubletten)].join(", ")}. `
-      + "Eine verdoppelte Zeile wuerde den Betrag doppelt buchen. Import abgelehnt.",
-    );
+  /**
+   * Dubletten je BLOCK, nicht dateiweit.
+   *
+   * `ZEM_BelegNr` ist die Position INNERHALB einer Avis-Position, kein
+   * Schluessel der Datei. Im Repo-Fixture `ICL01159` laufen die Nummern 1..5
+   * innerhalb EINES Blocks; eine Datei mit vier 1:1-Bloecken traegt damit
+   * viermal die `1`.
+   *
+   * Dateiweit geprueft lehnte der Riegel deshalb **jede intakte Mehrblock-
+   * Datei** ab statt einer kaputten — reproduziert am Aufbau von
+   * `Avis_ICL01278.csv` (22.09.2026, Prod). Der Gate-2-Review hatte es
+   * benannt: „er lehnt auch eine Datei ab, in der dieselbe Belegnummer legitim
+   * in zwei Bloecken vorkommt; das ist von der zitierten Messung nicht
+   * gedeckt." Es war eine Annahme mehr, als gemessen wurde — und ein Riegel
+   * auf einer ungemessenen Annahme trifft den Normalfall, nicht den Fehler.
+   *
+   * Je Block geprueft faengt er weiterhin, wofuer er gebaut wurde: eine
+   * verdoppelte Zeile steht per Definition im selben Block.
+   */
+  for (const b of bloecke) {
+    const belege = b.posten.map(r => getField(r, "ZEM_BelegNr"));
+    const dubletten = belege.filter((x, i) => belege.indexOf(x) !== i);
+    if (dubletten.length > 0) {
+      throw new AvisDateiaufbauError(
+        `Belegnummer mehrfach im selben Block (${getField(b.kopf, "ZEM_RecNr")}): `
+        + `${[...new Set(dubletten)].join(", ")}. `
+        + "Eine verdoppelte Zeile wuerde den Betrag doppelt buchen. Import abgelehnt.",
+      );
+    }
   }
 
   // Der Gesamtbetrag ist die Summe der ZAHLbetraege — also das, was die Bank
@@ -643,7 +666,7 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
 export function parseAvisCsv(csvContent: string, options?: ParseAvisOptions): ParsedAvis {
   const format = detectRawFormat(csvContent);
   if (!format) {
-    throw new Error("CSV-Format nicht erkannt. Unterstützt: DAVASO (Header 'LfdNr,...') und Kassen-CSV (Zeilentypen 1/2/3 mit Semikolon).");
+    throw new AvisDateiaufbauError("CSV-Format nicht erkannt. Unterstützt: DAVASO (Header 'LfdNr,...') und Kassen-CSV (Zeilentypen 1/2/3 mit Semikolon).");
   }
   if (format === "davaso") return parseDavaso(csvContent);
   return parseKassenCsv(csvContent, options);

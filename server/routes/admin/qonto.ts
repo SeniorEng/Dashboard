@@ -4,7 +4,7 @@ import { asyncHandler, badRequest, notFound, conflict } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { qontoService } from "../../services/qonto";
 import { qontoStorage } from "../../storage/qonto";
-import { parseAvisCsv, AvisParseUncertainError } from "../../services/avis-parser";
+import { parseAvisCsv, AvisParseUncertainError, AvisDateiaufbauError } from "../../services/avis-parser";
 import {
   pruefeGegenRechnungen,
   findeRechnungUeberNummer,
@@ -1489,10 +1489,31 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
           },
         });
       }
+      /**
+       * Die Struktur-Riegel antworten mit 400 und dem GRUND.
+       *
+       * Sie warfen vorher einen nackten `Error`. `asyncHandler` ersetzt den
+       * durch seine Standardmeldung — aus „ZEM_BelegNr fehlt" wurde ein
+       * HTTP 500 „Zahlungsavis konnte nicht gespeichert werden". Der Riegel
+       * war damit im Code laut und an der Oberfläche stumm, und eine korrekt
+       * abgelehnte Datei sah aus wie ein kaputtes System.
+       *
+       * Das ist dasselbe Versagen, das dieser ganze Vorgang abräumt: eine
+       * Prüfung, deren Ergebnis niemand ablesen kann, ist keine.
+       */
+      if (err instanceof AvisDateiaufbauError) {
+        return res.status(400).json({
+          message: err.message,
+          code: "AVIS_DATEIAUFBAU",
+        });
+      }
       throw err;
     }
     if (parsed.items.length === 0) {
-      return res.status(400).json({ message: "CSV enthält keine Positionen" });
+      return res.status(400).json({
+        message: "Die Datei enthält keine Posten. Import abgelehnt.",
+        code: "AVIS_DATEIAUFBAU",
+      });
     }
 
     // ── Der Riegel: jeder Posten gegen die Rechnung, die er nennt ──
@@ -1527,9 +1548,16 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     // abbildet; sie wird gemeldet, nicht abgelehnt.
     if (abgleich.ueberzahlungen > 0) {
       const erste = abgleich.befunde.filter(b => b.status === "ueberzahlung").slice(0, 3);
+      // Die Meldung nennt ALLE vier Ausgänge, nicht nur den blockierenden.
+      // Ein Bediener soll sehen, welche Prüfung angeschlagen hat und wie die
+      // übrigen Posten stehen — sonst ist „abgelehnt" nicht von „kaputt" zu
+      // unterscheiden.
       return res.status(400).json({
-        message: `${abgleich.ueberzahlungen} von ${parsed.items.length} Posten nennen MEHR als die Rechnung. `
-          + `Import abgelehnt. Beispiele: ${erste.map(b => b.grund).join(" · ")}`,
+        message: `${abgleich.ueberzahlungen} von ${parsed.items.length} Posten nennen MEHR als die Rechnung `
+          + `— dafür gibt es keinen legitimen Fall, Import abgelehnt. `
+          + `(bestätigt ${abgleich.bestaetigt} · unterzahlt ${abgleich.unterzahlungen} `
+          + `· ohne auflösbare Rechnung ${abgleich.ungeprueft}) `
+          + `Beispiele: ${erste.map(b => b.grund).join(" · ")}`,
         code: "AVIS_RECHNUNGSABGLEICH",
         details: { abgleich, pruefsumme: parsed.pruefsumme },
       });

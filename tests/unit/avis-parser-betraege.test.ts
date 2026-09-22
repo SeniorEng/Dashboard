@@ -191,7 +191,7 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
     expect(() => parseAvisCsv(verwaist)).toThrow(/ohne vorangehende Kopfzeile/);
   });
 
-  it("AP-10 – eine doppelte Belegnummer wird abgelehnt", () => {
+  it("AP-10 – eine doppelte Belegnummer IM SELBEN BLOCK wird abgelehnt", () => {
     // Gate-2-Befund G: eine verdoppelte Zeile lief mit `abweichung = 0` durch.
     // Der datei-interne Vergleich kann das per Konstruktion nicht sehen —
     // beide Seiten verdoppeln sich mit.
@@ -201,6 +201,35 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
       beleg("RE-2026-9100", "B-1", "70.00"),
     );
     expect(() => parseAvisCsv(doppelt)).toThrow(/Belegnummer mehrfach/);
+  });
+
+  it("AP-26 – dieselbe Belegnummer in VERSCHIEDENEN Blöcken ist normal", () => {
+    // ── Am 22.09.2026 in Prod aufgefallen ──
+    // `Avis_ICL01278.csv` wurde abgelehnt. Nicht weil die Datei kaputt war —
+    // sie ist die, deren Aufbau vollständig vermessen vorliegt —, sondern weil
+    // der Dublettenriegel dateiweit prüfte.
+    //
+    // `ZEM_BelegNr` ist die Position INNERHALB einer Avis-Position, kein
+    // Schlüssel der Datei: im Fixture `ICL01159` laufen die Nummern 1..5
+    // innerhalb EINES Blocks. Eine Datei mit vier 1:1-Blöcken trägt damit
+    // viermal die `1`.
+    //
+    // Der Gate-2-Review hatte genau das benannt („eine Annahme mehr, als
+    // gemessen wurde"); ich hatte es als „fail-loud ist die richtige Seite"
+    // abgetan. **Ein Riegel auf einer ungemessenen Annahme trifft den
+    // Normalfall, nicht den Fehler** — er lehnte jede intakte Mehrblock-Datei
+    // ab.
+    const vierBloecke = datei(
+      kopf("RE-2026-0517", "70.00", "70.00"),   beleg("RE-2026-0517", "1", "70.00"),
+      kopf("RE-2026-0508", "123.49", "123.49"), beleg("RE-2026-0508", "1", "123.49"),
+      kopf("RE-2026-0510", "76.29", "76.29"),   beleg("RE-2026-0510", "1", "76.29"),
+      kopf("RE-2026-0532", "14.56", "14.56"),   beleg("RE-2026-0532", "1", "14.56"),
+    );
+    const { items, header, pruefsumme } = parseAvisCsv(vierBloecke);
+    expect(items).toHaveLength(4);
+    expect(header.gesamtBetragCents, "die Vorhersage für ICL01278").toBe(28434);
+    expect(pruefsumme.abweichungCents).toBe(0);
+    expect(items.map(i => i.betragCents)).toEqual([7000, 12349, 7629, 1456]);
   });
 });
 
