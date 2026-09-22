@@ -12,7 +12,16 @@
   "datumAnPosition": null,
   "ibanAnPosition": 2,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "BREWBFJH WSQQF",
+   "DE00469024946399878168",
+   "",
+   "EUR",
+   "212,42",
+   "20260630"
+  ]
  },
  {
   "datei": "AOK Baden Württemberg__02_ERLEDIGT__0006B49691B66BA41FD19DB0EFF92544E000.csv",
@@ -27,7 +36,16 @@
   "datumAnPosition": null,
   "ibanAnPosition": 2,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "BREWBFJH WSQQF",
+   "DE00469024946399878168",
+   "",
+   "EUR",
+   "221,54",
+   "20260702"
+  ]
  },
  {
   "datei": "AOK Baden Württemberg__02_ERLEDIGT__0006B49691B66C0C1FD18BA9944C1A52BFA5.csv",
@@ -42,7 +60,16 @@
   "datumAnPosition": null,
   "ibanAnPosition": 2,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "BREWBFJH WSQQF",
+   "DE00469024946399878168",
+   "",
+   "EUR",
+   "117,86",
+   "20260331"
+  ]
  },
  {
   "datei": "AOK Baden Württemberg__02_ERLEDIGT__0006B49691B66C181FD190D06447985E6000.csv",
@@ -57,7 +84,16 @@
   "datumAnPosition": null,
   "ibanAnPosition": 2,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "BREWBFJH WSQQF",
+   "DE00469024946399878168",
+   "",
+   "EUR",
+   "117,86",
+   "20260428"
+  ]
  },
  {
   "datei": "AOK Baden Württemberg__02_ERLEDIGT__0006B49691B66C181FD1A3A29999F1F76000.csv",
@@ -72,7 +108,16 @@
   "datumAnPosition": null,
   "ibanAnPosition": 2,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "BREWBFJH WSQQF",
+   "DE00469024946399878168",
+   "",
+   "EUR",
+   "168,13",
+   "20260731"
+  ]
  },
  {
   "datei": "AOK Baden Württemberg__02_ERLEDIGT__0006B49691B66E8C1FD19EFA03847F87E000.csv",
@@ -87,7 +132,16 @@
   "datumAnPosition": null,
   "ibanAnPosition": 2,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "BREWBFJH WSQQF",
+   "DE00469024946399878168",
+   "",
+   "EUR",
+   "216,72",
+   "20260709"
+  ]
  },
  {
   "datei": "AOK Baden Württemberg__02_ERLEDIGT__0006B49691B66ECC1FD198EE6F11F84AC000.csv",
@@ -102,7 +156,16 @@
   "datumAnPosition": null,
   "ibanAnPosition": 2,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "BREWBFJH WSQQF",
+   "DE00469024946399878168",
+   "",
+   "EUR",
+   "235,70",
+   "20260608"
+  ]
  },
  {
   "datei": "AOK Baden Württemberg__02_ERLEDIGT__06B49691B66C181FD1A59E1AE84DA4A000.csv",
@@ -117,7 +180,16 @@
   "datumAnPosition": null,
   "ibanAnPosition": 2,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "BREWBFJH WSQQF",
+   "DE00469024946399878168",
+   "",
+   "EUR",
+   "118,14",
+   "20260810"
+  ]
  },
  {
   "datei": "AOK Bayern__461438852_20260508_730002266112.csv",
@@ -132,7 +204,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "JXYYR. QZNEGQHNMZ FZEHDGUZ",
+   "YKFR YX63 1402 2651 7561 1713 44",
+   "373,25",
+   "EUR",
+   "160733477873",
+   "08.05.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260506_710008331724.csv",
@@ -147,7 +228,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "3.213,07",
+   "EUR",
+   "364004108142",
+   "06.05.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260513_760008164780.csv",
@@ -162,7 +252,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "885,65",
+   "EUR",
+   "098088647663",
+   "13.05.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260609_760008251673.csv",
@@ -177,7 +276,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "2.716,67",
+   "EUR",
+   "398432670016",
+   "09.06.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260615_750007889308.csv",
@@ -192,7 +300,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "636,00",
+   "EUR",
+   "210741064599",
+   "15.06.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260629_730008074347.csv",
@@ -207,7 +324,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "963,64",
+   "EUR",
+   "281471635772",
+   "29.06.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260704_730008086073.csv",
@@ -222,7 +348,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "154,06",
+   "EUR",
+   "450723929202",
+   "04.07.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260709_730008097090.csv",
@@ -237,7 +372,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "307,04",
+   "EUR",
+   "642043086550",
+   "09.07.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260710_765008108433.csv",
@@ -252,7 +396,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "948,26",
+   "EUR",
+   "344417005077",
+   "10.07.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260713_775008568531.csv",
@@ -267,7 +420,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "7.999,73",
+   "EUR",
+   "717028142696",
+   "13.07.2026"
+  ]
  },
  {
   "datei": "AOK Plus__01_ERLEDIGT__461438852_20260714_770008538175.csv",
@@ -282,7 +444,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "902,64",
+   "EUR",
+   "185465701213",
+   "14.07.2026"
+  ]
  },
  {
   "datei": "AOK Plus__260113_Zahlungsavis - AOK Plus.csv",
@@ -297,7 +468,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "879,25",
+   "EUR",
+   "242740093920",
+   "13.01.2026"
+  ]
  },
  {
   "datei": "AOK Plus__260123_Zahlungsavis - AOK Plus.csv",
@@ -312,7 +492,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "1.668,45",
+   "EUR",
+   "344533277053",
+   "23.01.2026"
+  ]
  },
  {
   "datei": "AOK Plus__260318_Zahlungsavis - AOK Plus.csv",
@@ -327,7 +516,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "414,83",
+   "EUR",
+   "423253691443",
+   "18.03.2026"
+  ]
  },
  {
   "datei": "AOK Plus__260414_Zahlungsavis - AOK Plus.csv",
@@ -342,7 +540,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "2.255,76",
+   "EUR",
+   "648038975636",
+   "14.04.2026"
+  ]
  },
  {
   "datei": "AOK Plus__461438852_20260428_710008308148.csv",
@@ -357,7 +564,22 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "2.949,57",
+   "EUR",
+   "5,34198KF27",
+   "28.04.2026",
+   "",
+   "",
+   "",
+   "",
+   "",
+   ""
+  ]
  },
  {
   "datei": "AOK Plus__461438852_20260721_740008431619.csv",
@@ -372,7 +594,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "446,28",
+   "EUR",
+   "602032954242",
+   "21.07.2026"
+  ]
  },
  {
   "datei": "AOK Plus__461438852_20260814_710008557698.csv",
@@ -387,7 +618,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "5.798,66",
+   "EUR",
+   "935636898178",
+   "14.08.2026"
+  ]
  },
  {
   "datei": "AOK Plus__461438852_20260817_740008474134.csv",
@@ -402,7 +642,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "3.145,43",
+   "EUR",
+   "052005448479",
+   "17.08.2026"
+  ]
  },
  {
   "datei": "BARMER__01_OFFEN__SAP-56020-00060050568711DE1FD1A486AD04884D0000-461438852.csv",
@@ -417,7 +666,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "478833995862",
+   "04.08.2026",
+   "395,41",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__01_OFFEN__SAP-56020-00060050568711DE1FD1A4A14595AE05C000-461438852.csv",
@@ -432,7 +689,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "694402636091",
+   "05.08.2026",
+   "752,34",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__01_OFFEN__SAP-56020-0006005056871C4B1FD1A9C76F1147A8A000-461438852.csv",
@@ -447,7 +712,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "182667817459",
+   "01.09.2026",
+   "1.069,88",
+   "DE00062471602494100317",
+   ""
+  ]
  },
  {
   "datei": "BARMER__01_OFFEN__SAP-56020-0006005056874D561FD1A5B719FED3F3A000-461438852.csv",
@@ -462,7 +735,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "059901467156",
+   "11.08.2026",
+   "868,42",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__01_OFFEN__SAP-56020-000600505687A9A61FD1A9FB3840F4FC0000-461438852.csv",
@@ -477,7 +758,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "725429634328",
+   "03.09.2026",
+   "235,64",
+   "DE00062471602494100317",
+   ""
+  ]
  },
  {
   "datei": "BARMER__01_OFFEN__SAP-56020-000600505687C73D1FD1A3A30B9933272000-461438852.csv",
@@ -492,7 +781,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "168820626527",
+   "31.07.2026",
+   "109,66",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__260105_Zahlungsavis_Barmer.csv",
@@ -507,7 +804,16 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "0,32211SV19",
+   "05.01.2026",
+   "131,01",
+   "DE00469024946399878168",
+   "",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__260108_Zahlungsavis_Barmer.csv",
@@ -522,7 +828,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "599041605563",
+   "07.01.2026",
+   "340,17",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-0006005056870EB31FD1A0C278356F6C6000-461438852.csv",
@@ -537,7 +851,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "969194374053",
+   "17.07.2026",
+   "398,93",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-00060050568711DE1FE187818C9782E5E6DB-461438852.csv",
@@ -552,7 +874,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "171315720361",
+   "09.03.2026",
+   "586,83",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-00060050568745321FD19EF99957F7A98000-461438852.csv",
@@ -567,7 +897,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "270945504610",
+   "09.07.2026",
+   "778,43",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-0006005056874D561FD0BAD0911AC601E2F1-461438852.csv",
@@ -582,7 +920,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "014642846792",
+   "05.01.2026",
+   "131,01",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-0006005056874D561FD190841D982A3E4D48-461438852.csv",
@@ -597,7 +943,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "211380553440",
+   "24.04.2026",
+   "1.359,53",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-0006005056876CF01FE183BC491951A0FC26-461438852.csv",
@@ -612,7 +966,16 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "3,96742BB19",
+   "19.02.2026",
+   "252,3",
+   "DE00469024946399878168",
+   "",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-000600505687D8C91FD19BE84877E2ED2000-461438852.csv",
@@ -627,7 +990,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "676824539320",
+   "23.06.2026",
+   "552,17",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-000600505687D8DC1FD0BB826DE3C1F8E8D7-461438852.csv",
@@ -642,7 +1013,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "599041605563",
+   "07.01.2026",
+   "340,17",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-000600505687D8DC1FD190FF6F44A11EA000-461438852.csv",
@@ -657,7 +1036,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "327753449820",
+   "29.04.2026",
+   "213,33",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-000600505687E36A1FD192966D6709D1C000-461438852.csv",
@@ -672,7 +1059,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "704404157322",
+   "05.05.2026",
+   "132,05",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-000600505687E36A1FD19DE368534D520000-461438852.csv",
@@ -687,7 +1082,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "604027985126",
+   "03.07.2026",
+   "678,17",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-000600505687EC9A1FD19EC7A65DDDF8E000-461438852.csv",
@@ -702,7 +1105,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "900486155203",
+   "07.07.2026",
+   "959,76",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-000600505687EEA31FD19CFDA8F1D3172000-461438852.csv",
@@ -717,7 +1128,15 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": true
+  "fuehrendesLeerzeichen": true,
+  "summenzeileRohfelder": [
+   "3",
+   "324165743382",
+   "29.06.2026",
+   "182,60",
+   "DE00469024946399878168",
+   ""
+  ]
  },
  {
   "datei": "BARMER__02_ERLEDIGT__SAP-56020-000600505687FB431FD18798F9DD06A0EE64-461438852.csv",
@@ -732,7 +1151,16 @@
   "datumAnPosition": 2,
   "ibanAnPosition": 4,
   "bom": true,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "7,12161LN67",
+   "10.03.2026",
+   "1.678,84",
+   "DE00469024946399878168",
+   "",
+   ""
+  ]
  },
  {
   "datei": "IKK Classic__00_ERLEDIGT__Avis_ICL01243.csv",
@@ -873,7 +1301,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "238,78",
+   "EUR",
+   "201660368596",
+   "20.08.2026"
+  ]
  },
  {
   "datei": "IKK Classic__461438852_20260821_775008672562.csv",
@@ -888,7 +1325,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "1.150,28",
+   "EUR",
+   "750526689351",
+   "21.08.2026"
+  ]
  },
  {
   "datei": "IKK Classic__461438852_20260909_765008237757.csv",
@@ -903,7 +1349,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "2.152,92",
+   "EUR",
+   "004643944823",
+   "09.09.2026"
+  ]
  },
  {
   "datei": "IKK Classic__461438852_20260915_775008749301.csv",
@@ -918,7 +1373,16 @@
   "datumAnPosition": 6,
   "ibanAnPosition": null,
   "bom": false,
-  "fuehrendesLeerzeichen": false
+  "fuehrendesLeerzeichen": false,
+  "summenzeileRohfelder": [
+   "3",
+   "130050598",
+   "82051000",
+   "579,15",
+   "EUR",
+   "554114051892",
+   "15.09.2026"
+  ]
  },
  {
   "datei": "IKK Classic__Avis_ICL01085.csv",
