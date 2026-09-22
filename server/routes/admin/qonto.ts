@@ -1541,7 +1541,27 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     // Nur die ÜBERzahlung blockiert, und es gibt keinen `force`-Weg daran
     // vorbei: eine Korrektur läuft über den Parser, nicht über eine
     // Übersteuerung im Einzelfall.
-    const abgleich = await pruefeGegenRechnungen(parsed.items);
+    /**
+     * Auch hier gilt „400 mit Grund", nicht nur beim Parsen.
+     *
+     * Der Catch oben umschliesst nur `parseAvisCsv`. Ein `AvisDateiaufbauError`
+     * aus dem Abgleich kaeme als 500 mit der Standardmeldung heraus — genau
+     * der Zustand, den dieser PR abraeumt (Gate 2 zu #159, S2). Heute wirft
+     * der Abgleich die Klasse nicht, der Befund ist also latent; er wird
+     * scharf, sobald ein Struktur-Riegel dorthin wandert.
+     *
+     * Sauberer waere ein Mapping in einem Error-Mapper, damit die Zusage
+     * unabhaengig davon gilt, WO der Riegel sitzt — siehe FINDING im PR.
+     */
+    let abgleich;
+    try {
+      abgleich = await pruefeGegenRechnungen(parsed.items);
+    } catch (err) {
+      if (err instanceof AvisDateiaufbauError) {
+        return res.status(400).json({ message: err.message, code: "AVIS_DATEIAUFBAU" });
+      }
+      throw err;
+    }
 
     // Nur die ÜBERzahlung blockiert. Eine Unterzahlung ist eine Kürzung durch
     // die Kasse — normaler Geschäftsfall, den der Lesepfad je Position

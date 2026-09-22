@@ -203,6 +203,58 @@ describe("DAVASO — ein Posten je BLOCK, mit dem Zahlbetrag", () => {
     expect(() => parseAvisCsv(doppelt)).toThrow(/Belegnummer mehrfach/);
   });
 
+  it("AP-27 – ein verdoppelter Block wird abgelehnt", () => {
+    // ── Der Fall, den mein eigener Hotfix aufgegeben hatte ──
+    // Die Verengung auf den Block klang schlüssig: „eine verdoppelte Zeile
+    // steht per Definition im selben Block". Sie tut es NICHT — die
+    // Blockgrenze ist „Zeile ohne ZEM_BelegNr", also eröffnet eine
+    // verdoppelte KOPFZEILE einen neuen Block. Eine zweimal angehängte Datei
+    // lief mit doppeltem Betrag durch (`posten=4 gesamt=20000` statt 10000).
+    //
+    // Ich hatte einen Fehlalarm gegen einen Fehlschluss getauscht, und die
+    // Zusage daran war wieder eine ungemessene Annahme — dieselbe Klasse wie
+    // der dateiweite Riegel, nur mit umgekehrtem Vorzeichen.
+    //
+    // Der Riegel fasst bewusst ENG: gleiche Rechnung, gleicher Zahlbetrag,
+    // gleiche Belege. Das schärfere Paar (ZEM_RecNr, ZEM_BelegNr) trüge nur,
+    // wenn ZEM_RecNr je Datei eindeutig ist — und das ist NICHT gemessen.
+    const blockDoppelt = datei(
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+    );
+    expect(() => parseAvisCsv(blockDoppelt)).toThrow(/Block mehrfach/);
+
+    // Auch die zweimal angehängte Datei — der realistische Auslöser.
+    const dateiDoppelt = datei(
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9002", "30.00", "30.00"), beleg("RE-2026-9002", "1", "30.00"),
+      kopf("RE-2026-9001", "70.00", "70.00"), beleg("RE-2026-9001", "1", "70.00"),
+      kopf("RE-2026-9002", "30.00", "30.00"), beleg("RE-2026-9002", "1", "30.00"),
+    );
+    expect(() => parseAvisCsv(dateiDoppelt)).toThrow(/Block mehrfach/);
+  });
+
+  it("AP-28 – eine Fehlermeldung zitiert KEINEN Zellinhalt", () => {
+    // Die Meldung landet als 400 im Toast. Bei einem Feldversatz in der
+    // komma-getrennten Datei steht an der Betragsposition irgendein anderer
+    // Zellinhalt — und diese Dateien tragen Versichertennamen und -nummern.
+    // Feldname und Länge genügen, um die Stelle zu finden.
+    const versatz = datei(
+      kopf("RE-2026-9001", "70.00", "Musterfrau Erika"),
+      beleg("RE-2026-9001", "1", "70.00"),
+    );
+    try {
+      parseAvisCsv(versatz);
+      throw new Error("hätte abbrechen müssen");
+    } catch (e) {
+      const m = (e as Error).message;
+      expect(m, "der Zellinhalt steht in der Meldung").not.toContain("Musterfrau");
+      expect(m).toContain("KTR_BTR_Zahlg");
+      expect(m, "ohne Längenangabe ist die Stelle nicht zu finden").toMatch(/\d+ Zeichen/);
+      expect(m).toMatch(/nicht numerisch/);
+    }
+  });
+
   it("AP-26 – dieselbe Belegnummer in VERSCHIEDENEN Blöcken ist normal", () => {
     // ── Am 22.09.2026 in Prod aufgefallen ──
     // `Avis_ICL01278.csv` wurde abgelehnt. Nicht weil die Datei kaputt war —

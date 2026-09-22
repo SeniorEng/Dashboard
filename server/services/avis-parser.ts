@@ -216,8 +216,17 @@ function parseBetragCentsStrikt(value: string, konvention: Dezimalkonvention, fe
     : roh.replace(/,/g, "");
   const num = parseFloat(cleaned);
   if (isNaN(num)) {
+    /**
+     * Den ROHWERT nicht zitieren.
+     *
+     * Er landet als 400-`message` im Toast. Bei einem Feldversatz in der
+     * komma-getrennten Datei steht an dieser Position irgendein anderer
+     * Zellinhalt — und diese Dateien tragen Versichertennamen und -nummern
+     * (Gate 2 zu #159). Feldname und Laenge genuegen, um die Stelle in der
+     * Datei zu finden; der Inhalt gehoert nicht in eine Fehlermeldung.
+     */
     throw new AvisDateiaufbauError(
-      `Pflichtfeld ${feld} ist kein Betrag: „${value.trim()}". `
+      `Pflichtfeld ${feld} ist kein Betrag (${roh.length} Zeichen, nicht numerisch). `
       + "Dateiaufbau nicht erkannt, Import abgelehnt.",
     );
   }
@@ -463,8 +472,18 @@ function parseDavaso(csvContent: string): ParsedAvis {
    * gedeckt." Es war eine Annahme mehr, als gemessen wurde — und ein Riegel
    * auf einer ungemessenen Annahme trifft den Normalfall, nicht den Fehler.
    *
-   * Je Block geprueft faengt er weiterhin, wofuer er gebaut wurde: eine
-   * verdoppelte Zeile steht per Definition im selben Block.
+   * ── ACHTUNG, und das stand hier zuerst FALSCH ──────────────────────────
+   * „Eine verdoppelte Zeile steht per Definition im selben Block" — nein. Die
+   * Blockgrenze ist „Zeile ohne `ZEM_BelegNr`", also eroeffnet eine
+   * verdoppelte KOPFZEILE einen neuen Block. Eine zweimal angehaengte Datei
+   * lief damit mit doppeltem Betrag durch (Gate 2 zu #159, ausgefuehrt:
+   * `posten=4 gesamt=20000` statt 10000). Der dateiweite Riegel aus #158 fing
+   * das zufaellig mit; die Verengung auf den Block hat es aufgegeben.
+   *
+   * Dieser Riegel hier faengt also nur noch die verdoppelte BELEGZEILE — und
+   * die aendert den Betrag gar nicht, seit die Posten aus der Kopfzeile
+   * gebildet werden. Er schuetzt die Pruefsumme, nicht das Geld. Die Meldung
+   * sagt das jetzt auch.
    */
   for (const b of bloecke) {
     const belege = b.posten.map(r => getField(r, "ZEM_BelegNr"));
@@ -473,9 +492,50 @@ function parseDavaso(csvContent: string): ParsedAvis {
       throw new AvisDateiaufbauError(
         `Belegnummer mehrfach im selben Block (${getField(b.kopf, "ZEM_RecNr")}): `
         + `${[...new Set(dubletten)].join(", ")}. `
-        + "Eine verdoppelte Zeile wuerde den Betrag doppelt buchen. Import abgelehnt.",
+        + "Die Belegzeilen eines Blocks muessen eindeutig sein. Import abgelehnt.",
       );
     }
+  }
+
+  /**
+   * Zwei VOLLSTAENDIG identische Bloecke: dieselbe Rechnung, derselbe
+   * Zahlbetrag, dieselben Belege.
+   *
+   * Der Fall, den die Verengung auf den Block aufgegeben hat (Gate 2 zu #159):
+   * eine zweimal angehaengte oder konkatenierte Datei. Sie lief mit doppeltem
+   * `gesamtBetragCents` durch, und downstream faengt sie nichts — der
+   * Rechnungsabgleich bewertet JE POSTEN, beide Dubletten sind einzeln
+   * `bestaetigt`, und `mark-paid` klassifiziert ebenfalls je Posten. Sichtbar
+   * wuerde es erst am Bankabgleich.
+   *
+   * ── Warum IDENTISCH und nicht das Paar (ZEM_RecNr, ZEM_BelegNr) ─────────
+   * Das Paar waere der schaerfere Riegel — er fienge auch Teilverdopplungen.
+   * Er traegt aber nur, wenn `ZEM_RecNr` je Datei eindeutig ist, und **das
+   * ist nicht gemessen.** Gemessen sind Gefuelltheit, Komplementaritaet,
+   * Blockgroessen und die Kopf-gegen-Beleg-Gleichheit — nicht die
+   * Eindeutigkeit der Rechnungsnummer ueber Bloecke hinweg.
+   *
+   * Genau dieser Sprung von der Messung zur Annahme hat heute schon einmal
+   * jede intakte Mehrblock-Datei abgelehnt. Deshalb hier die schwaechere,
+   * aber gedeckte Bedingung: zwei identische Bloecke haben unter KEINER
+   * Lesart einen legitimen Fall — dieselbe Rechnung zweimal mit demselben
+   * Betrag im selben Avis ist keine Teilzahlung, sondern eine Verdopplung.
+   *
+   * Sobald die Eindeutigkeit von `ZEM_RecNr` gemessen ist, gehoert der Riegel
+   * auf das Paar nachgezogen.
+   */
+  const blockSchluessel = bloecke.map(b => JSON.stringify([
+    getField(b.kopf, "ZEM_RecNr"),
+    getField(b.kopf, "KTR_BTR_Zahlg"),
+    b.posten.map(r => getField(r, "ZEM_BelegNr")).sort(),
+  ]));
+  const identisch = blockSchluessel.filter((k, i) => blockSchluessel.indexOf(k) !== i);
+  if (identisch.length > 0) {
+    const rec = JSON.parse(identisch[0])[0] as string;
+    throw new AvisDateiaufbauError(
+      `Block mehrfach in der Datei (Rechnung ${rec}): gleiche Rechnung, gleicher `
+      + "Zahlbetrag, gleiche Belege. Das wuerde den Betrag doppelt buchen. Import abgelehnt.",
+    );
   }
 
   // Der Gesamtbetrag ist die Summe der ZAHLbetraege — also das, was die Bank
