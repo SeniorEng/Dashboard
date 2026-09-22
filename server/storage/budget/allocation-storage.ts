@@ -604,6 +604,39 @@ interface Allocated45bResult {
   accrualFloorDate: string | null;
 }
 
+/**
+ * Lese-Zugang zu den Diagnose-Groessen von `calculateAllocated45b`.
+ *
+ * ERSETZT nichts — es gab bisher keinen Weg, `accrualFloorDate` und
+ * `resetCutoffDate` von aussen zu sehen. `getExcluded45bConsumption` liefert
+ * nur `{ excludedSpecialAllocationIds, excludedConsumedNetCents }`.
+ *
+ * Gebaut fuer die Messung zu P1 `6hXp9qMrXH2WGVVG` (Gate 2, S4): der Docblock
+ * des Mess-Skripts begruendete, warum `accrualFloorDate` mitausgegeben werden
+ * MUSS — eine Anspruchs-Differenz waere sonst nicht von der
+ * `latestValidCarryoverYear`-Nebenwirkung zu unterscheiden — und das Skript
+ * gab es nirgends aus. **Es konnte es auch nicht.** Eine Begruendung fuer
+ * etwas, das es nicht gibt, ist schlimmer als keine: sie wird als Nachweis
+ * gelesen.
+ *
+ * Rein lesend, keine Seiteneffekte.
+ */
+export async function read45bAllocationDiagnostics(
+  customerId: number,
+  opts: { year?: number; asOfDate?: string; projectFuture?: boolean; resetDisplacesAllSources?: boolean },
+  _tx?: DbClient,
+  _typeSettings?: CustomerBudgetTypeSetting[],
+): Promise<Allocated45bResult> {
+  const d = _tx ?? db;
+  const typeSettings = _typeSettings
+    ?? await readBudgetTypeSettings(
+      customerId,
+      { kind: "forDate", asOfDate: opts.asOfDate ?? todayISO() },
+      _tx,
+    );
+  return calculateAllocated45b(customerId, opts, d, typeSettings);
+}
+
 async function calculateAllocated45b(
   customerId: number,
   opts: { year?: number; asOfDate?: string; projectFuture?: boolean; resetDisplacesAllSources?: boolean },

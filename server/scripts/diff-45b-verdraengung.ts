@@ -42,6 +42,7 @@ import { budgetAllocations } from "@shared/schema";
 import {
   calculateAllocatedCents,
   getExcluded45bConsumption,
+  read45bAllocationDiagnostics,
 } from "../storage/budget/allocation-storage";
 import { readBudgetTypeSettings } from "../storage/budget/preferences-storage";
 import { todayISO } from "@shared/utils/datetime";
@@ -79,16 +80,46 @@ async function main() {
   let summeDifferenz = 0;
 
   for (const customerId of kunden) {
-    const typeSettings = await readBudgetTypeSettings(
-      customerId, { kind: "forDate", asOfDate: todayISO() },
-    );
-
     const zeilenAus: string[] = [];
     for (const asOfDate of stichtage) {
-      const heute = await calculateAllocatedCents(customerId, BUDGET_TYPE, { asOfDate });
+      /**
+       * Die Typ-Einstellungen JE STICHTAG aufloesen, nicht einmal fuer heute.
+       *
+       * Die erste Fassung rief `readBudgetTypeSettings(..., todayISO())` einmal
+       * vor der Schleife — und `calculateAllocatedCents` ohne `_typeSettings`
+       * loest intern ebenfalls mit `todayISO()` auf. Zwei der drei
+       * Vorgabe-Stichtage liegen in der VERGANGENHEIT; fuer jeden Kunden mit
+       * einem Phasenwechsel seither waeren die absoluten Spalten dann NICHT
+       * die Zahlen, die die App damals gezeigt hat — der Docblock behauptet
+       * aber genau das.
+       *
+       * Die Differenz waere gueltig geblieben (beide Seiten dieselben
+       * Settings), die absoluten Spalten nicht. Und zitiert werden am Ende
+       * die absoluten. Das ist die `todayISO()`-vs-`asOf`-Falle aus CLAUDE.md,
+       * diesmal im Messgeraet (Gate 2 zu #163, S5).
+       */
+      const typeSettings = await readBudgetTypeSettings(
+        customerId, { kind: "forDate", asOfDate },
+      );
+      const heute = await calculateAllocatedCents(
+        customerId, BUDGET_TYPE, { asOfDate }, undefined, undefined, typeSettings,
+      );
       const neu = await calculateAllocatedCents(
         customerId, BUDGET_TYPE, { asOfDate, resetDisplacesAllSources: true },
+        undefined, undefined, typeSettings,
       );
+
+      // S4 — die Nebenwirkung, die der Docblock oben begruendet, jetzt auch
+      // WIRKLICH sichtbar: verschiebt das Flag ueber `latestValidCarryoverYear`
+      // den `allocStart`, aendert sich `accrualFloorDate`. Ohne diese Spalte
+      // ist eine Differenz nicht von der Nebenwirkung zu unterscheiden.
+      const diagHeute = await read45bAllocationDiagnostics(
+        customerId, { asOfDate }, undefined, typeSettings,
+      );
+      const diagNeu = await read45bAllocationDiagnostics(
+        customerId, { asOfDate, resetDisplacesAllSources: true }, undefined, typeSettings,
+      );
+      const floorVerschoben = diagHeute.accrualFloorDate !== diagNeu.accrualFloorDate;
 
       // Die Ausschlussliste je Regel — Cowork braucht sie für Schritt 3.
       // Verbrauch gegen eine ausgeschlossene Allocation ist ABSICHTLICH
@@ -100,14 +131,24 @@ async function main() {
       );
       const zusaetzlichAusgeschlossen = exNeu.excludedSpecialAllocationIds
         .filter(id => !exHeute.excludedSpecialAllocationIds.includes(id));
+      // N3 — auch die GEGENRICHTUNG. Nach der Herleitung kann eine ID die
+      // Liste unter dem Flag nicht verlassen; die Herleitung steht aber auf
+      // der Annahme `carryover.year === Jahr(carryover.validFrom)`. Kippt sie,
+      // soll es die Messung sehen und nicht stillschweigend uebergehen.
+      const wiederAufgenommen = exHeute.excludedSpecialAllocationIds
+        .filter(id => !exNeu.excludedSpecialAllocationIds.includes(id));
 
       const diff = neu - heute;
-      if (diff !== 0 || alle) {
+      if (diff !== 0 || floorVerschoben || wiederAufgenommen.length > 0 || alle) {
         zeilenAus.push(
           `    ${asOfDate}  heute ${euro(heute).padStart(10)}  neu ${euro(neu).padStart(10)}`
           + `  Differenz ${euro(diff).padStart(10)}`
           + `  | zusätzlich ausgeschlossen: [${zusaetzlichAusgeschlossen.join(", ") || "—"}]`
-          + `  | Verbrauch-Korrektur ${euro(exNeu.excludedConsumedNetCents - exHeute.excludedConsumedNetCents)}`,
+          + (wiederAufgenommen.length > 0 ? `  | ⚠ WIEDER AUFGENOMMEN: [${wiederAufgenommen.join(", ")}]` : "")
+          + `  | Verbrauch-Korrektur ${euro(exNeu.excludedConsumedNetCents - exHeute.excludedConsumedNetCents)}`
+          + `  | accrualFloor ${diagHeute.accrualFloorDate ?? "—"}`
+          + (floorVerschoben ? ` ⚠→ ${diagNeu.accrualFloorDate ?? "—"}` : "")
+          + `  | resetCutoff ${diagNeu.resetCutoffDate ?? "—"}`,
         );
       }
       if (diff !== 0) summeDifferenz += diff;
