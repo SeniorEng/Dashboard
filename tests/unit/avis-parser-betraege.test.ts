@@ -797,10 +797,82 @@ describe("Kassen-CSV — Kopffelder strukturell erkannt", () => {
       .toBe("DE92100101237314306198");
   });
 
-  it("AP-43 – der Betrag bleibt unberührt", () => {
-    // Er wird seit Task #1687 strukturell erkannt und ist laut Messung der
-    // einzige Wert, der heute überall stimmt. Dieser Umbau fasst ihn nicht an.
+  it("AP-43 – der Betrag bleibt unberührt, ist aber NICHT strukturell erkannt", () => {
+    // ── Richtigstellung: der Kommentar hier behauptete das Gegenteil ──
+    // „Der Betrag wird seit #1687 strukturell erkannt und ist der einzige
+    // Wert, der überall stimmt" — das gilt für die `2;`-Zeilen.
+    // `detectAmountFieldIndex` läuft NUR im `lineType === "2"`-Zweig; der
+    // Gesamtbetrag der `3;`-Zeile liest weiterhin `parts[3]`.
     const aok = kasse("3;130050598;82051000;5798,66;EUR;TEXT;24.04.2026;;;;;;");
     expect(parseAvisCsv(aok).header.gesamtBetragCents).toBe(579866);
+
+    // Und so sieht der Fall aus, den `parts[3]` nicht kann: laut Messung ist
+    // `[3]` in 8 von 53 Zeilen leer, der Betrag steht dann bei `[5]`.
+    // `|| "0"` macht daraus eine 0 — die als ausgewiesene Summe gilt.
+    //
+    // Vorbestehend, nicht von diesem PR erzeugt, und bewusst NICHT hier
+    // behoben: der Umbau braucht eine eigene Messung (gibt es Zeilen mit ZWEI
+    // Komma-Dezimalfeldern?). Der Test hält den Ist-Zustand fest, damit die
+    // Lücke sichtbar bleibt statt als „geprüft" zu gelten — siehe FINDING im PR.
+    const betragBeiFuenf = kasse("3;123456789;ABC;;07.01.2026;49,13;775335315683;");
+    expect(parseAvisCsv(betragBeiFuenf).header.gesamtBetragCents,
+      "der Betrag bei [5] wird jetzt gefunden — dann gehört dieser Test umgeschrieben")
+      .toBe(0);
+  });
+
+  it("AP-44 – die AOK-Zeile mit SECHS Feldern schreibt die IK nicht", () => {
+    // ── B1 aus Gate 2: `parts.length === 6` war der falsche Zeuge ──
+    // Diese Zeile liegt seit Task #1687 als Fixture im Repo
+    // (`avis-parser-regression.test.ts`) — und die erste Fassung des Fixes
+    // schrieb dort weiterhin die Kostenträger-IK als Belegnummer, also genau
+    // den Defekt, gegen den dieser PR gebaut ist.
+    //
+    // Der Denkfehler war die Deckung der Messung: der IK-Gegencheck lief über
+    // die 30 IBAN-Zeilen; diese trägt bei [4] `EUR` und ist keine.
+    const sechsFelder = kasse("3;130050598;82051000;301,26;EUR;");
+    const h = parseAvisCsv(sechsFelder).header;
+    expect(h.belegNummer, "die IK steht als Belegnummer").toBeNull();
+    expect(h.zahlungsDatum).toBeNull();
+    expect(h.zahlungsempfaengerIban).toBeNull();
+  });
+
+  it("AP-45 – der Layout-Zeuge hängt nicht am abschließenden Semikolon", () => {
+    // Die alte „6" bedeutete fünf Felder PLUS Schluss-Semikolon. Dieselbe
+    // BARMER-Zeile ohne es hatte sieben Felder und verlor die Belegnummer —
+    // obwohl `[1]` dieselbe Rolle trägt.
+    const mit = kasse("3;769501965926;07.01.2026;340,17;DE92100101237314306198;");
+    const ohne = kasse("3;769501965926;07.01.2026;340,17;DE92100101237314306198");
+    for (const [name, csv] of [["mit", mit], ["ohne", ohne]] as const) {
+      expect(parseAvisCsv(csv).header.belegNummer, `${name} Schluss-Semikolon`)
+        .toBe("769501965926");
+    }
+  });
+
+  it("AP-46 – die IBAN: normalisiert gesucht, bei Mehrdeutigkeit null", () => {
+    // Für das DATUM gibt es eine Eindeutigkeits-Messung („keine der 53 Zeilen
+    // trägt zwei"). Für die IBAN gibt es KEINE — „der erste Treffer gewinnt"
+    // wäre dort eine Annahme ohne Messung. Sie wiegt schwer, weil die IBAN bei
+    // der Kassen-Familie der einzige Diskriminator ist und ein rückwirkendes
+    // Auto-Close gatet.
+    const mitLeerzeichen = kasse("3;769501965926;07.01.2026;340,17;DE92 1001 0123 7314 3061 98;");
+    expect(parseAvisCsv(mitLeerzeichen).header.zahlungsempfaengerIban)
+      .toBe("DE92100101237314306198");
+
+    const zweiKandidaten = kasse("3;RE20260212000123;07.01.2026;340,17;DE92100101237314306198;");
+    expect(parseAvisCsv(zweiKandidaten).header.zahlungsempfaengerIban,
+      "bei zwei Kandidaten gewinnt der erste").toBeNull();
+  });
+
+  it("AP-47 – ein unmögliches Datum ist kein Datum", () => {
+    // `32.13.2026` passierte das Muster und wurde zu `2026-13-32`;
+    // `parseLocalDate` rollt das still zu Februar 2027 durch. Die Zusage
+    // „null oder gültiges ISO" trägt erst mit der Bereichsprüfung.
+    const unmoeglich = kasse("3;769501965926;32.13.2026;340,17;DE92100101237314306198;");
+    const r = parseAvisCsv(unmoeglich);
+    expect(r.header.zahlungsDatum).toBeNull();
+    // Und es wird gemeldet, nicht verschwiegen — sonst fällt es erst dem auf,
+    // der Wochen später abschließen will.
+    expect(r.hinweise.some(h => /Zahlungsdatum/.test(h)),
+      "die Vorschau schweigt über das fehlende Datum").toBe(true);
   });
 });

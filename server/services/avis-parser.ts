@@ -8,6 +8,7 @@ import {
   detectAmountFieldIndex,
 } from "../../shared/domain/qonto/avis-format";
 import { extractInvoiceNumber, extractReInvoiceNumber } from "../../shared/domain/qonto/avis-match";
+import { normalizeIban } from "../../shared/domain/qonto/monitored-ibans";
 
 export { AvisParseUncertainError, AvisDateiaufbauError };
 export type { AvisColumnMap };
@@ -338,9 +339,21 @@ function toIsoDate(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const w = raw.trim();
   const de = w.match(DEUTSCHES_DATUM);
-  if (de) return `${de[3]}-${de[2]}-${de[1]}`;
-  if (ISO_DATUM.test(w)) return w;
-  return null;
+  const iso = de ? `${de[3]}-${de[2]}-${de[1]}` : (ISO_DATUM.test(w) ? w : null);
+  if (!iso) return null;
+
+  /**
+   * Bereich pruefen, nicht nur die Form.
+   *
+   * Der Docblock verspricht „`null` oder gueltiges ISO". Ohne diese Pruefung
+   * passiert `32.13.2026` das Muster und wird zu `2026-13-32`; `parseLocalDate`
+   * rollt das still zu Februar 2027 durch — kein `Invalid Date`, kein Laut.
+   * Die Zusage traegt erst mit dem Bereich (Gate 2 zu #161, S5).
+   */
+  const [j, m, t] = iso.split("-").map(Number);
+  const d = new Date(Date.UTC(j, m - 1, t));
+  const gueltig = d.getUTCFullYear() === j && d.getUTCMonth() === m - 1 && d.getUTCDate() === t;
+  return gueltig ? iso : null;
 }
 
 function parseDavaso(csvContent: string): ParsedAvis {
@@ -1036,9 +1049,22 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
        * uneinheitlich. „Breite als Schluessel" war mein erster Vorschlag und
        * ist durch die Messung widerlegt.
        *
-       * Der Betrag wird seit Task #1687 strukturell erkannt und ist laut
-       * derselben Messung der einzige Wert, der heute ueberall stimmt. Die
-       * uebrigen Kopffelder folgen jetzt demselben Weg.
+       * Die uebrigen Kopffelder folgen jetzt demselben Weg, den der Betrag der
+       * POSTEN-Zeilen seit Task #1687 geht.
+       *
+       * ── Eine Richtigstellung, die hier stand ────────────────────────────
+       * „Der Betrag wird strukturell erkannt und ist der einzige Wert, der
+       * heute ueberall stimmt" — das galt fuer die `2;`-Zeilen, NICHT fuer
+       * diese. `detectAmountFieldIndex` laeuft ausschliesslich im
+       * `lineType === "2"`-Zweig; der Gesamtbetrag unten liest weiterhin
+       * `parts[3]`. Laut Messung ist `[3]` in 8 von 53 Zeilen leer, der Betrag
+       * steht dann bei `[5]` — und `|| "0"` macht daraus eine 0, die als
+       * ausgewiesene Summe gilt (Gate 2 zu #161, B3, ausgefuehrt).
+       *
+       * Das ist ein VORBESTEHENDER Fehler, aber die falsche Behauptung stand
+       * hier und ein Test hat sie festgehalten. Als FINDING [P1] im PR; der
+       * Umbau braucht eine eigene Messung (gibt es Zeilen mit ZWEI
+       * Komma-Dezimalfeldern?) und gehoert nicht ungemessen hinterher.
        */
       const felder = parts.slice(1);
 
@@ -1046,8 +1072,30 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
       // Datums-Felder, und `82051000` faellt durch beide Datumsmuster.
       headerData.zahlungsDatum = toIsoDate(felder.find(istDatumsFeld) ?? null);
 
-      // Die IBAN ebenso — `EUR` ist keine.
-      headerData.zahlungsempfaengerIban = felder.find(f => IBAN_FELD.test(f.trim())) ?? null;
+      /**
+       * Die IBAN: normalisiert gesucht, und nur bei GENAU EINEM Treffer.
+       *
+       * Zwei Befunde aus Gate 2 (#161, S1/S2), beide ausgefuehrt:
+       *
+       *  - `DE92 1001 0123 7314 3061 98` fiel durch, weil auf dem Rohwert
+       *    getestet wurde. `normalizeIban` liegt seit jeher daneben und ist
+       *    genau dafuer da.
+       *  - `RE20260212000123` bestand das Muster und wurde zur IBAN. Fuer das
+       *    DATUM gibt es eine Eindeutigkeits-Messung („keine der 53 Zeilen
+       *    traegt zwei"); fuer die IBAN gibt es KEINE. „Der erste Treffer
+       *    gewinnt" waere dort eine Annahme ohne Messung.
+       *
+       * Das wiegt schwer, weil `zahlungsempfaengerIban` bei der Kassen-Familie
+       * der EINZIGE Diskriminator ist (`avisNummer` ist dort immer `null`) und
+       * ueber `adviceDiscriminatorMatches` ein rueckwirkendes Auto-Close gatet.
+       * Ein falsch erkanntes Feld kann eine Buchung ausloesen.
+       *
+       * Mehrdeutig heisst deshalb `null`, nicht „der erste".
+       */
+      const ibanKandidaten = felder
+        .map(f => normalizeIban(f))
+        .filter(f => IBAN_FELD.test(f));
+      headerData.zahlungsempfaengerIban = ibanKandidaten.length === 1 ? ibanKandidaten[0] : null;
 
       headerData.gesamtBetragCents = parseBetragCents(parts[3] || "0", "komma");
       gesamtbetragGefunden = true;
@@ -1086,7 +1134,29 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
        * benutzbar aus; am 22.09. wurde ein Dublettenriegel auf genau diesem
        * Feld vermutet, weil dort eine Nummer stand.
        */
-      headerData.belegNummer = parts.length === 6 ? (parts[1] || null) : null;
+      /**
+       * ── B1 aus Gate 2 (#161): `parts.length === 6` war der falsche Zeuge ──
+       * Im Repo liegt eine AOK-`3;`-Zeile mit SECHS Feldern:
+       * `3;130050598;82051000;301,26;EUR;` — dort schrieb die Regel weiterhin
+       * die Kostentraeger-IK als Belegnummer, also genau den Defekt, gegen den
+       * dieser PR gebaut ist.
+       *
+       * Der Denkfehler war die Deckung: der IK-Gegencheck („in keiner der 30
+       * IBAN-Zeilen steht bei [1] die IK") lief ueber die IBAN-Zeilen. Diese
+       * traegt bei [4] `EUR`, ist also keine. Ich habe „19 von 19 einheitlich"
+       * als durch den IK-Check gedeckt gelesen — zwei verschiedene Mengen.
+       *
+       * Und die Feldzahl zaehlt ohnehin ein Trennzeichen-Artefakt mit: die
+       * „6" bedeutet fuenf Felder plus abschliessendes Semikolon.
+       *
+       * Der Zeuge ist jetzt das LAYOUT selbst, aus den bereits strukturell
+       * gefundenen Positionen: Datum bei [2] UND IBAN bei [4]. Das trifft die
+       * BARMER-Form und schliesst die AOK-Form aus — unabhaengig davon, wie
+       * viele Semikolons die Zeile beendet.
+       */
+      const barmerLayout = istDatumsFeld(parts[2] ?? "")
+        && IBAN_FELD.test(normalizeIban(parts[4] ?? ""));
+      headerData.belegNummer = barmerLayout ? (parts[1] || null) : null;
     }
   }
 
@@ -1105,10 +1175,33 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
   // Rechnungsabgleich da.
   const ausgewiesen = gesamtbetragGefunden ? headerData.gesamtBetragCents : null;
 
+  /**
+   * Ein Avis ohne lesbares Zahlungsdatum ist importierbar, aber nicht
+   * buchbar — `mark-paid` lehnt ohne Datum ab (Gate 2 zu #161, B2).
+   *
+   * Das gehoert in die VORSCHAU, nicht erst an den Knopf: sonst faellt es
+   * demjenigen auf die Fuesse, der Wochen spaeter abschliessen will, und
+   * nicht dem, der die Datei gerade vor sich hat. Genau so ist Avis 41
+   * entstanden.
+   */
+  const kassenHinweise: string[] = [];
+  if (gesamtbetragGefunden && !headerData.zahlungsDatum) {
+    kassenHinweise.push(
+      "Kein lesbares Zahlungsdatum in der Summenzeile. Der Avis kann importiert, "
+      + "aber nicht als bezahlt markiert werden — bitte die Datei pruefen.",
+    );
+  }
+  if (gesamtbetragGefunden && !headerData.zahlungsempfaengerIban) {
+    kassenHinweise.push(
+      "Keine eindeutige IBAN in der Summenzeile. Sie ist bei der Kassen-Familie "
+      + "das einzige Unterscheidungsmerkmal fuer den Sammel-Abgleich.",
+    );
+  }
+
   return {
     header: headerData,
     items,
-    hinweise: [],
+    hinweise: kassenHinweise,
     pruefsumme: bildePruefsumme(items, headerData, ausgewiesen, "Summenzeile 3;", true),
   };
 }
