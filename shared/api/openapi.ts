@@ -726,6 +726,8 @@ export const BudgetOverview45bDTOSchema = component(
     currentMonthAvailableCents: z.number().int(),
     monthlyLimitCents: z.number().int().nullable(),
     carryoverCents: z.number().int(),
+    carryoverVerdraengtCents: z.number().int(),
+    carryoverErsetztDurchStartwertMonat: nullableString(),
     carryoverExpiresAt: nullableString(),
     currentYearAllocatedCents: z.number().int(),
     isCurrentlyActive: z.boolean(),

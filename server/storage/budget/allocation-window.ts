@@ -108,6 +108,25 @@ export function allocationValidAtWhere(asOfDate: string): SQL | undefined {
 }
 
 /**
+ * Der EINE Schalter fuer die Inventur-Lesart.
+ *
+ * ── Warum eine Konstante und keine neunte Aufrufstelle ──────────────────
+ * Der Default-Umschwung (Punkt 5 der Reihenfolge in `6hXp9qMrXH2WGVVG`)
+ * soll „am Default" passieren, nicht an jeder Aufrufstelle. Damit das
+ * traegt, muessen ALLE Stellen, die die Frage beantworten, dieselbe Quelle
+ * lesen — sonst bewegt sich beim Flip die eine und die andere nicht.
+ *
+ * Genau das war gemessen der Fall: `totalAllocatedCents` folgt dem Default
+ * in `calculateAllocated45b`, die Uebertrags-Abfrage in `getBudgetSummary`
+ * aber nicht. Gerendert zeigte die Karte dann „Gesamt zugewiesen 131,00
+ * EUR" und daneben „Uebertrag 1.179,00 EUR" — der Widerspruch, gegen den
+ * das ganze Ticket laeuft, eine Schicht hoeher.
+ *
+ * Umschalten heisst: diese Zeile. Nicht neun.
+ */
+export const RESET_DISPLACES_ALL_SOURCES_DEFAULT = false;
+
+/**
  * Verdraengt der Startwert-Reset diese Zuweisung?
  *
  * Nur wenn **BEIDE** Anker vor dem Reset liegen (VD-5). Das ist eine

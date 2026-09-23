@@ -31,6 +31,13 @@ export interface BudgetOverview45bDTO {
    */
   monthlyLimitCents: number | null;
   carryoverCents: number;
+  /**
+   * Der vom §45b-Startwert ERSETZTE Übertrag (E4: verdrängen, nicht löschen).
+   * `0`, solange die Inventur-Lesart nicht greift.
+   */
+  carryoverVerdraengtCents: number;
+  /** `MM/JJJJ` des Startwerts, der ihn ersetzt hat. `null` = keiner. */
+  carryoverErsetztDurchStartwertMonat: string | null;
   /** ISO-Datum (YYYY-MM-DD), an dem der Carryover verfällt. */
   carryoverExpiresAt: string | null;
   currentYearAllocatedCents: number;

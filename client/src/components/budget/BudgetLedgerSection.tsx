@@ -440,14 +440,32 @@ function BudgetPot45b({
             </p>
             {hasExpiredUsage && (
               <p className="text-xs text-amber-600 mt-1" data-testid="text-45b-used-expired">
-                + {formatCurrency(expiredUsedCents)} aus abgeschlossenem Zeitraum
+                {/*
+                  „verfallen ODER ersetzt" — beide Faelle, nicht nur der erste.
+                  Die vorige Fassung hiess „aus abgeschlossenem Zeitraum". Das
+                  traf den verfallenen Uebertrag; fuer einen vom Startwert
+                  ERSETZTEN Uebertrag ist es irrefuehrend, weil der Verbrauch
+                  im Reset-Monat selbst liegen kann (gemessen: Buchung am
+                  10.06. bei Reset zum 01.06.). Eine Beschriftung, die den
+                  haeufigeren Fall nicht nennt, wird auf ihn gelesen.
+                */}
+                + {formatCurrency(expiredUsedCents)} gegen verfallenes oder ersetztes Guthaben
               </p>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {data.carryoverCents > 0 && (
+      {/*
+        E4 an der ZWEITEN Stelle: verdraengen, nicht verschwinden lassen.
+        Greift die Inventur-Lesart, faellt `carryoverCents` auf 0 — die Karte
+        waere dann weg, waehrend „Gesamt zugewiesen" gesunken ist. Gemessen
+        zeigte sie „zugewiesen 131,00 EUR" und daneben unveraendert
+        „Uebertrag 1.179,00 EUR"; faellt sie stattdessen kommentarlos aus,
+        bleibt die Frage „wo ist mein Uebertrag hin?" — genau die, die E4 in
+        den Budget-Einstellungen bereits beantwortet.
+      */}
+      {(data.carryoverCents > 0 || data.carryoverVerdraengtCents > 0) && (
         <Card className={`border ${
           data.carryoverExpiresAt && parseLocalDate(data.carryoverExpiresAt) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
             ? "bg-amber-50 border-amber-200"
@@ -460,9 +478,33 @@ function BudgetPot45b({
                 <AlertTriangle className={`${iconSize.sm} text-amber-600`} />
               )}
             </div>
+            {/*
+              Beide Betraege, nicht entweder-oder.
+              Eine Zwischenfassung zeigte bei `carryoverVerdraengtCents > 0`
+              NUR den durchgestrichenen Betrag — ein daneben noch lebender
+              Uebertrag waere vom Schirm verschwunden, waehrend darunter
+              weiter „Verfaellt am ..." steht, das sich auf ihn bezieht
+              (Gate 2 zu #180, S3). Mit den heutigen Schreibpfaden tritt die
+              Teil-Verdraengung nicht auf; eine Zeile mit
+              `year != Jahr(validFrom)` bricht diese Annahme aber, und davon
+              gibt es im Bestand 26 (Ticket `6hcCCrWgXCH2XxXp`).
+            */}
             <p className="text-2xl font-bold text-gray-700 mt-1" data-testid="text-45b-carryover">
               {formatCurrency(data.carryoverCents)}
             </p>
+            {data.carryoverVerdraengtCents > 0 && (
+              <>
+                <p
+                  className="text-lg font-semibold text-gray-400 mt-1 line-through"
+                  data-testid="text-45b-carryover-verdraengt"
+                >
+                  {formatCurrency(data.carryoverVerdraengtCents)}
+                </p>
+                <p className="text-xs text-gray-600 mt-1" data-testid="text-45b-carryover-ersetzt">
+                  ersetzt durch Startwert {data.carryoverErsetztDurchStartwertMonat}
+                </p>
+              </>
+            )}
             {data.carryoverExpiresAt && (
               <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
                 <Calendar className="w-3 h-3" />

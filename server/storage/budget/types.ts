@@ -10,6 +10,18 @@ export interface BudgetSummary {
   plannedCents: number;
   availableAfterPlannedCents: number;
   carryoverCents: number;
+  /**
+   * Der vom Startwert-Reset ERSETZTE Uebertrag (E4: verdraengen, nicht
+   * loeschen). `0`, solange die Inventur-Lesart nicht greift.
+   *
+   * Steht NEBEN `carryoverCents`, nicht darin: der ersetzte Betrag faellt aus
+   * dem Anspruch, soll aber sichtbar bleiben. Ohne dieses Feld faellt die
+   * Uebertrags-Karte beim Default-Umschwung kommentarlos auf 0 — und genau
+   * die Frage „wo ist mein Uebertrag hin?" sollte E4 beantworten.
+   */
+  carryoverVerdraengtCents: number;
+  /** `MM/JJJJ` des Startwerts, der ihn ersetzt hat. `null` = keiner. */
+  carryoverErsetztDurchStartwertMonat: string | null;
   carryoverExpiresAt: string | null;
   currentYearAllocatedCents: number;
   monthlyLimitCents: number | null;

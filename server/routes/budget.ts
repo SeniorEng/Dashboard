@@ -463,6 +463,8 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
       currentMonthAvailableCents: s45b.currentMonthAvailableCents,
       monthlyLimitCents: s45b.monthlyLimitCents,
       carryoverCents: s45b.carryoverCents,
+      carryoverVerdraengtCents: s45b.carryoverVerdraengtCents,
+      carryoverErsetztDurchStartwertMonat: s45b.carryoverErsetztDurchStartwertMonat,
       carryoverExpiresAt: s45b.carryoverExpiresAt,
       currentYearAllocatedCents: s45b.currentYearAllocatedCents,
       isCurrentlyActive: s45b.isCurrentlyActive,

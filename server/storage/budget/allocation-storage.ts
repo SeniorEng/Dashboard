@@ -26,6 +26,7 @@ import {
   allocationValidAt,
   displacedByReset,
   resetAnchorFrom,
+  RESET_DISPLACES_ALL_SOURCES_DEFAULT,
   type ResetAnchor,
 } from "./allocation-window";
 import { getEarliestCareLevelStart } from "../customer-mgmt/care-level";
@@ -466,7 +467,11 @@ export async function getCustomerBudgetAmounts(customerId: number, _tx?: DbClien
  * Funktion zweimal aufrufen und die Differenz ausweisen — per Konstruktion
  * deckungsgleich mit dem, was die App anzeigt.
  *
- * Default `false`: ohne ausdrueckliches Setzen aendert sich nichts.
+ * Der Default steht NICHT hier, sondern in
+ * `RESET_DISPLACES_ALL_SOURCES_DEFAULT` (allocation-window.ts) — eine zweite
+ * Aussage darueber waere genau die Doppelung, die dieser Mechanismus
+ * beseitigt. Solange die Konstante `false` ist, aendert sich ohne
+ * ausdrueckliches Setzen nichts.
  */
 export async function calculateAllocatedCents(
   customerId: number,
@@ -903,7 +908,7 @@ async function calculateAllocated45b(
   const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null; year: number }) =>
     a.source === "carryover" &&
     allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, fensterBis, verfallAb) &&
-    (!opts.resetDisplacesAllSources
+    (!(opts.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
       || !displacedByReset(a, resetAnchor));
   const validCarryoverTargetYears = existingAllocations
     .filter(carryoverCounted)

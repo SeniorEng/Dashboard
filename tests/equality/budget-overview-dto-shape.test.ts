@@ -40,6 +40,10 @@ const EXPECTED_KEYS: Record<keyof BudgetOverviewDTO, string[]> = {
     "currentMonthAvailableCents",
     "monthlyLimitCents",
     "carryoverCents",
+    // E4 an der Uebersichtskarte: der vom Startwert ersetzte Uebertrag bleibt
+    // sichtbar, statt kommentarlos auf 0 zu fallen.
+    "carryoverVerdraengtCents",
+    "carryoverErsetztDurchStartwertMonat",
     "carryoverExpiresAt",
     "currentYearAllocatedCents",
     "isCurrentlyActive",

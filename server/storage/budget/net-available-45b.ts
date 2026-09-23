@@ -238,8 +238,14 @@ export async function netAvailable45bAt(
  * ist eine Landmine fuer den naechsten Umbau.**
  *
  * Ihr Eingabe-`pot` stammt aus `readUnifiedBudgetAvailability`, das das Flag
- * seit P1 `6hXp9qMrXH2WGVVG` durchreicht. `projectedAllocated` unten rechnet
- * dagegen IMMER ohne Verdraengung.
+ * seit P1 `6hXp9qMrXH2WGVVG` durchreicht. `projectedAllocated` unten setzt es
+ * nicht selbst und folgt damit dem gemeinsamen
+ * `RESET_DISPLACES_ALL_SOURCES_DEFAULT`.
+ *
+ * Hier stand frueher „rechnet dagegen IMMER ohne Verdraengung". Das galt,
+ * solange es keinen gemeinsamen Default gab; seit #180 ist es falsch — und
+ * zwar in der gefaehrlichen Richtung: beim Umlegen der Konstante bewegt sich
+ * `projectedAllocated` mit, waehrend der Satz das Gegenteil behauptet.
  *
  * Wer also in `planHold` `readUnifiedBudgetAvailability(..., {
  * resetDisplacesAllSources: true })` setzt, bekommt `pot.consumedNetCents`
