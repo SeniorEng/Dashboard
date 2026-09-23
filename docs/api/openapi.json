@@ -339,9 +339,16 @@
           "carryoverCents": {
             "type": "integer"
           },
+          "carryoverErsetztDurchStartwertMonat": {
+            "nullable": true,
+            "type": "string"
+          },
           "carryoverExpiresAt": {
             "nullable": true,
             "type": "string"
+          },
+          "carryoverVerdraengtCents": {
+            "type": "integer"
           },
           "currentMonthAvailableCents": {
             "type": "integer"
@@ -383,6 +390,8 @@
           "currentMonthAvailableCents",
           "monthlyLimitCents",
           "carryoverCents",
+          "carryoverVerdraengtCents",
+          "carryoverErsetztDurchStartwertMonat",
           "carryoverExpiresAt",
           "currentYearAllocatedCents",
           "isCurrentlyActive",
