@@ -7,7 +7,7 @@ import {
   customerNeedsAssessments,
   customers,
 } from "@shared/schema";
-import { eq, and, isNull, desc, asc } from "drizzle-orm";
+import { eq, and, isNull, desc, asc, lte, gte, or } from "drizzle-orm";
 import { parseLocalDate, formatDateISO } from "@shared/utils/datetime";
 import { db, type DbOrTx } from "../../lib/db";
 
@@ -39,6 +39,49 @@ export async function getEarliestCareLevelStart(
     .orderBy(asc(customerCareLevelHistory.validFrom))
     .limit(1);
   return rows[0]?.validFrom ?? null;
+}
+
+/**
+ * Pflegegrad ZUM STICHTAG — SSoT fuer jede Aussage, die sich auf ein Datum
+ * bezieht.
+ *
+ * ── Warum das gebraucht wird (Replit #1916, Gate 2) ────────────────────
+ * `customers.pflegegrad` traegt den AKTUELLEN Grad. Wer damit eine Aussage
+ * ueber einen Termin im naechsten Monat trifft, liest „heute" statt „as-of" —
+ * die Falle, vor der CLAUDE.md warnt und die in diesem Repo bereits dreimal
+ * aufgetreten ist.
+ *
+ * Konkret: Alriks Satz „Kein Ausweichbudget verfuegbar." haengt an Pflegegrad
+ * 1. Wird der Kunde zum 01.10. hochgestuft und ein Oktober-Termin angelegt,
+ * stuende der Satz falsch da — **und er ist ausdruecklich keine
+ * Fehlermeldung, sondern eine Aussage ueber Leistungsansprueche**, die eine
+ * Mitarbeiterin gegenueber dem Kunden vertritt.
+ *
+ * `null`, wenn zum Stichtag keine Historienzeile gilt. Der Aufrufer
+ * entscheidet, was das heisst — hier wird NICHT still auf den aktuellen Grad
+ * zurueckgefallen.
+ */
+export async function getCareLevelAt(
+  customerId: number,
+  asOfDate: string,
+  executor: Pick<typeof db, "select"> = db,
+): Promise<number | null> {
+  const rows = await executor
+    .select({ pflegegrad: customerCareLevelHistory.pflegegrad })
+    .from(customerCareLevelHistory)
+    .where(and(
+      eq(customerCareLevelHistory.customerId, customerId),
+      lte(customerCareLevelHistory.validFrom, asOfDate),
+      or(
+        isNull(customerCareLevelHistory.validTo),
+        gte(customerCareLevelHistory.validTo, asOfDate),
+      ),
+    ))
+    // Bei ueberlappenden Zeilen gewinnt die spaetere — dieselbe Wahl wie
+    // `getCustomerCurrentCareLevel` (dort `desc(validFrom)`).
+    .orderBy(desc(customerCareLevelHistory.validFrom))
+    .limit(1);
+  return rows[0]?.pflegegrad ?? null;
 }
 
 export async function getCustomerCurrentCareLevel(customerId: number): Promise<CustomerCareLevelHistory | undefined> {

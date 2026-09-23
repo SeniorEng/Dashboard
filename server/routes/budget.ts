@@ -341,6 +341,9 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 
   const totalAvailable = dateAware.totalCents;
 
+  const { getCareLevelAt } = await import("../storage/customer-mgmt/care-level");
+  const pflegegradAmStichtag = await getCareLevelAt(customerId, date);
+
   const outcome = classifyCostEstimate({
     totalCostCents,
     availableCents: totalAvailable,
@@ -348,7 +351,14 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     // Alriks Kriterium, woertlich: Pflegegrad 1 und keine Privatzahlung. Bei
     // PG 1 gibt es weder Umwandlung (§45a) noch Verhinderungspflege
     // (§39/§42a) — es bleibt allein der Entlastungsbetrag.
-    pflegegrad1OhnePrivatzahlung: customer?.pflegegrad === 1 && !acceptsPrivatePayment,
+    //
+    // ZUM STICHTAG gelesen, nicht „heute": `customers.pflegegrad` traegt den
+    // aktuellen Grad. Bei einer Hochstufung zum 01.10. und einem
+    // Oktober-Termin stuende der Satz sonst falsch da — und er ist
+    // ausdruecklich eine Aussage ueber LEISTUNGSANSPRUECHE, keine
+    // Fehlermeldung. Faellt die Historie leer aus, faellt der Satz weg
+    // (`null !== 1`): lieber keine Aussage als eine ungedeckte.
+    pflegegrad1OhnePrivatzahlung: pflegegradAmStichtag === 1 && !acceptsPrivatePayment,
     weightedVatRate,
     acceptsPrivatePayment,
     isSelbstzahler: false,
