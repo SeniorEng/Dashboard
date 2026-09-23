@@ -114,7 +114,11 @@ export async function readBudget45bFifoBreakdown(
     .sort()[0] ?? null;
 
   // ---- 3) Übertrags-Konsum (FIFO via allocation_id, per-Allocation gekappt) ----
-  // availableCarry == getAvailableCarryoverCents(...) (gleiche Mathematik).
+  // Die EINZIGE Fassung dieser Pro-Allocation-Rest-Mathematik. Der Kommentar
+  // verwies hier frueher auf `getAvailableCarryoverCents` in summary-queries.ts
+  // („gleiche Mathematik") — die Funktion hatte seit ihrer Entstehung keinen
+  // Aufrufer und ist entfernt. Eine zweite, tote Fassung derselben Rechnung
+  // ist die naechste Stelle, an der eine Regel auseinanderlaeuft.
   let availableCarry = 0;
   if (carryoverIds.length > 0) {
     const [consumed, reversed] = await Promise.all([

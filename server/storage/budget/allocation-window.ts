@@ -10,11 +10,18 @@
  *   allocation-storage.ts   `manual_adjustment`-Zweig (TS, vierte Quelle)
  *   fifo-breakdown.ts       Uebertrags-Filter
  *   summary-queries.ts      `getTotalCarryoverCents`
- *   summary-queries.ts      `getAvailableCarryoverCents`
  *   summary-queries.ts      `allocValidWhere`
  *   consumption-engine.ts   Spezial-Allocations
  *
- * Alle fuenf SQL-Fassungen bilden **nur das Zeitfenster** nach. Solange die
+ * Eine siebte stand hier bis zum 23.09.2026: `getAvailableCarryoverCents`.
+ * Sie war **tot** — nicht exportiert, und im einzigen Bereich, in dem sie
+ * erreichbar war, kam ihr Name genau einmal vor: in ihrer eigenen Signatur.
+ * Sie duplizierte die Pro-Allocation-Rest-Mathematik, die `fifo-breakdown`
+ * inline fuehrt, und wurde entfernt. Weder `knip` noch `eslint` sahen sie:
+ * das eine sucht unbenutzte EXPORTE, das andere greift bei modulprivaten
+ * Funktionen hier nicht.
+ *
+ * Alle SQL-Fassungen bilden **nur das Zeitfenster** nach. Solange die
  * massgebliche Fassung auch nur das Zeitfenster war, waren sie deckungsgleich
  * — und damit unauffaellig. Mit der Reset-Verdraengung ist sie es nicht mehr:
  * gemessen ergaebe `allocatedCur = A − allocatedCarry` dann **−1.048,00 EUR**,

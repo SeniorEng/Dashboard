@@ -6,7 +6,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, asc } from "drizzle-orm";
 import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime";
 import { clampToStatutoryMax, resolve45bActivation } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
@@ -60,64 +60,6 @@ export async function getTotalCarryoverCents(
     ));
 
   return Number(carryoverAllocations[0]?.total ?? 0);
-}
-
-async function getAvailableCarryoverCents(
-  customerId: number,
-  asOfDate: string,
-  _tx?: DbClient,
-  opts?: { resetDisplacesAllSources?: boolean },
-): Promise<number> {
-  const d = _tx ?? db;
-  const resetAnchor = opts?.resetDisplacesAllSources
-    ? await readResetAnchor(customerId, asOfDate, d)
-    : null;
-  const carryoverAllocations = await budgetAllocationsRepo.selectFrom(d)
-    .where(and(
-      eq(budgetAllocations.customerId, customerId),
-      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
-      eq(budgetAllocations.source, "carryover"),
-      isNull(budgetAllocations.deletedAt),
-      allocationValidAtWhere(asOfDate),
-      notDisplacedByResetWhere(resetAnchor)
-    ));
-
-  if (carryoverAllocations.length === 0) return 0;
-
-  const allocationIds = carryoverAllocations.map(a => a.id);
-  const consumed = await d.select({
-    allocationId: budgetTransactions.allocationId,
-    total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-  })
-    .from(budgetTransactions)
-    .where(and(
-      inArray(budgetTransactions.allocationId, allocationIds),
-      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
-    ))
-    .groupBy(budgetTransactions.allocationId);
-
-  const reversed = await d.select({
-    allocationId: budgetTransactions.allocationId,
-    total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-  })
-    .from(budgetTransactions)
-    .where(and(
-      inArray(budgetTransactions.allocationId, allocationIds),
-      eq(budgetTransactions.transactionType, "reversal")
-    ))
-    .groupBy(budgetTransactions.allocationId);
-
-  const consumedMap = new Map(consumed.map(c => [c.allocationId, Number(c.total)]));
-  const reversalMap = new Map(reversed.map(r => [r.allocationId, Number(r.total)]));
-
-  let totalAvailable = 0;
-  for (const alloc of carryoverAllocations) {
-    const used = consumedMap.get(alloc.id) ?? 0;
-    const rev = reversalMap.get(alloc.id) ?? 0;
-    totalAvailable += Math.max(0, alloc.amountCents - Math.max(0, used - rev));
-  }
-
-  return totalAvailable;
 }
 
 export async function getBudgetSummary(
