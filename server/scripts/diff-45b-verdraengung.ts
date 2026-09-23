@@ -19,6 +19,21 @@
  * heutiger Regel, einmal mit `resetDisplacesAllSources` — und weist die
  * Differenz aus. Per Konstruktion deckungsgleich mit dem, was die App anzeigt.
  *
+ * ── Drei Groessen, nicht zwei ───────────────────────────────────────────
+ * Schritt 2 verlangt Anspruch, Verbrauch UND **Verfuegbarkeit**. Die ersten
+ * beiden standen hier von Anfang an; die dritte fehlte.
+ *
+ * Sie laesst sich NICHT aus den beiden anderen ableiten: `availableCents`
+ * kommt aus `netAvailable45bAt` und traegt Floor, Holds und die
+ * Exklusions-Korrektur, die `Anspruch − Verbrauch` nicht kennt. Wer sie
+ * nachrechnet, baut den Reader nach — genau der Fehler, an dem der erste
+ * Mess-Anlauf gescheitert ist, nur eine Ebene hoeher.
+ *
+ * Dazu die Probe auf Vorbedingung 1: `readBudget45bFifoBreakdown` mit
+ * scharfem Flag darf auf echten Daten **keinen negativen Topf** liefern. Im
+ * Test ist das `SQ-1`; hier ist es die Kontrolle am Bestand, denn ein
+ * negativer Topf verschwindet im Client ueber `p.allocatedCents > 0`.
+ *
  * ── Warum `accrualFloorDate` mit ausgegeben wird ────────────────────────
  * Die Verdrängung hängt in `carryoverCounted`, und das Prädikat speist DREI
  * Verbraucher: `carryoverTotal` (gewollt), `supersededIbYears` und
@@ -45,6 +60,8 @@ import {
   read45bAllocationDiagnostics,
 } from "../storage/budget/allocation-storage";
 import { readBudgetTypeSettings } from "../storage/budget/preferences-storage";
+import { netAvailable45bAt } from "../storage/budget/net-available-45b";
+import { readBudget45bFifoBreakdown } from "../storage/budget/fifo-breakdown";
 import { todayISO } from "@shared/utils/datetime";
 
 const BUDGET_TYPE = "entlastungsbetrag_45b";
@@ -109,6 +126,8 @@ async function main() {
 
   let betroffen = 0;
   let summeDifferenz = 0;
+  let summeVerfuegbarkeit = 0;
+  const kundenMitNegativemTopf = new Set<number>();
 
   for (const customerId of kunden) {
     const zeilenAus: string[] = [];
@@ -169,20 +188,45 @@ async function main() {
       const wiederAufgenommen = exHeute.excludedSpecialAllocationIds
         .filter(id => !exNeu.excludedSpecialAllocationIds.includes(id));
 
+      // Die dritte Groesse: was am Ende auf der Karte steht.
+      const verfHeute = (await netAvailable45bAt(
+        customerId, asOfDate, { typeSettings },
+      )).availableCents;
+      const verfNeu = (await netAvailable45bAt(
+        customerId, asOfDate, { typeSettings, resetDisplacesAllSources: true },
+      )).availableCents;
+
+      // Probe auf Vorbedingung 1 am echten Bestand: kein negativer Topf.
+      const breakdown = await readBudget45bFifoBreakdown(customerId, asOfDate, {
+        resetDisplacesAllSources: true,
+      });
+      const negativeToepfe = breakdown.pots
+        .filter(t => t.allocatedCents < 0)
+        .map(t => `${t.potType}=${euro(t.allocatedCents)}`);
+
       const diff = neu - heute;
-      if (diff !== 0 || floorVerschoben || wiederAufgenommen.length > 0 || alle) {
+      const diffVerf = verfNeu - verfHeute;
+      if (diff !== 0 || diffVerf !== 0 || negativeToepfe.length > 0
+          || floorVerschoben || wiederAufgenommen.length > 0 || alle) {
         zeilenAus.push(
-          `    ${asOfDate}  heute ${euro(heute).padStart(10)}  neu ${euro(neu).padStart(10)}`
-          + `  Differenz ${euro(diff).padStart(10)}`
+          `    ${asOfDate}  Anspruch ${euro(heute).padStart(10)} → ${euro(neu).padStart(10)}`
+          + ` (${euro(diff).padStart(10)})`
+          + `  | Verfügbar ${euro(verfHeute).padStart(10)} → ${euro(verfNeu).padStart(10)}`
+          + ` (${euro(diffVerf).padStart(10)})`
+          + (negativeToepfe.length > 0
+              ? `  | ⚠ NEGATIVER TOPF: ${negativeToepfe.join(", ")}`
+              : "")
           + `  | zusätzlich ausgeschlossen: [${zusaetzlichAusgeschlossen.join(", ") || "—"}]`
           + (wiederAufgenommen.length > 0 ? `  | ⚠ WIEDER AUFGENOMMEN: [${wiederAufgenommen.join(", ")}]` : "")
           + `  | Verbrauch-Korrektur ${euro(exNeu.excludedConsumedNetCents - exHeute.excludedConsumedNetCents)}`
           + `  | accrualFloor ${diagHeute.accrualFloorDate ?? "—"}`
           + (floorVerschoben ? ` ⚠→ ${diagNeu.accrualFloorDate ?? "—"}` : "")
-          + `  | resetCutoff ${diagNeu.resetCutoffDate ?? "—"}`,
+          + `  | resetCutoff ${diagNeu.resetAnchor?.cutoffDate ?? "—"}`,
         );
       }
       if (diff !== 0) summeDifferenz += diff;
+      if (diffVerf !== 0) summeVerfuegbarkeit += diffVerf;
+      if (negativeToepfe.length > 0) kundenMitNegativemTopf.add(customerId);
     }
 
     if (zeilenAus.length > 0) {
@@ -194,7 +238,17 @@ async function main() {
 
   console.log("");
   console.log(`Kunden mit Differenz: ${betroffen} von ${kunden.length}`);
-  console.log(`Summe der Differenzen über alle Stichtage: ${euro(summeDifferenz)} €`);
+  console.log(`Summe der ANSPRUCHS-Differenzen über alle Stichtage: ${euro(summeDifferenz)} €`);
+  console.log(`Summe der VERFÜGBARKEITS-Differenzen über alle Stichtage: ${euro(summeVerfuegbarkeit)} €`);
+  console.log("");
+  if (kundenMitNegativemTopf.size === 0) {
+    console.log("Kein negativer Topf bei scharfem Flag — Vorbedingung 1 trägt auf diesem Bestand.");
+  } else {
+    console.log(`⚠ ${kundenMitNegativemTopf.size} Kunde(n) mit NEGATIVEM Topf: `
+      + `${[...kundenMitNegativemTopf].join(", ")}`);
+    console.log("  Vorbedingung 1 trägt hier NICHT. Die Zahlen oben nicht verwenden,");
+    console.log("  bevor das erklärt ist — im Client verschwindet so ein Topf lautlos.");
+  }
   console.log("");
   console.log("Hinweis: die Summe addiert MEHRERE Stichtage desselben Kunden und ist");
   console.log("deshalb KEIN Schadensbetrag — sie zeigt nur, wo die Regel greift.");

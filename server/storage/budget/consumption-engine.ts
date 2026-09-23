@@ -157,6 +157,29 @@ export async function computeFifoAvailability(
   budgetType: string,
   transactionDate: string,
   _tx?: DbClient,
+  /**
+   * `resetDisplacesAllSources` — der BUCHUNGS-Pfad.
+   *
+   * ── Hier gibt es KEINE eigene SQL-Bedingung, und das ist Absicht ───────
+   * Eine erste Fassung haengte `notDisplacedByResetWhere` an die
+   * `specialAllocations`-Abfrage. Das war ein ZWEITER Mechanismus neben dem,
+   * der unten ohnehin laeuft: `excludedSpecialAllocationIds` entfernt den
+   * verdraengten Uebertrag bereits, und zwar aus derselben SSoT wie
+   * `totalAllocated`.
+   *
+   * Schlimmer als redundant war es **falsch**: das Flag ging nur an die
+   * SQL-Bedingung, nicht an die beiden SSoT-Aufrufe darunter. Gemessen gab
+   * `totalAvailable` dann **1.310,00 EUR** frei, waehrend `netAvailable45bAt`
+   * fuer denselben Kunden und Stichtag **131,00 EUR** meldete — der
+   * verdraengte Uebertrag war aus `specialAllocations` gefiltert, floss aber
+   * ueber `totalAllocated` weiter in die Kapazitaet und landete beim Buchen im
+   * `allocation_id = NULL`-Leg, das keine Exklusion mehr greift (Gate 2 zu
+   * #174, B1).
+   *
+   * Das Flag geht deshalb an die Stellen, die die Frage beantworten, und an
+   * keine zweite.
+   */
+  opts?: { resetDisplacesAllSources?: boolean },
 ): Promise<FifoAvailability> {
   const d = _tx ?? db;
   const today = transactionDate;
@@ -182,7 +205,11 @@ export async function computeFifoAvailability(
   // (append-only Historisierung), damit Buchungen NIE die heutige Konfiguration
   // für ein historisches Datum verwenden.
   const historicalTypeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today }, _tx);
-  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx, undefined, historicalTypeSettings);
+  const totalAllocated = await calculateAllocatedCents(
+    customerId, budgetType,
+    { asOfDate: today, resetDisplacesAllSources: opts?.resetDisplacesAllSources },
+    _tx, undefined, historicalTypeSettings,
+  );
 
   // Task #1306 — §45b-Symmetrie (gleicher Fix wie im unified-reader): Verbrauch,
   // der gegen einen aus `Allocated` herausgefallenen Topf (abgelaufener Übertrag
@@ -194,7 +221,10 @@ export async function computeFifoAvailability(
   // totalNetConsumed ab. Exklusions-IDs aus derselben SSoT wie `totalAllocated`.
   let excludedConsumedNetCents = 0;
   if (budgetType === "entlastungsbetrag_45b") {
-    const excluded = await getExcluded45bConsumption(customerId, today, d, historicalTypeSettings);
+    const excluded = await getExcluded45bConsumption(
+      customerId, today, d, historicalTypeSettings,
+      { resetDisplacesAllSources: opts?.resetDisplacesAllSources },
+    );
     excludedConsumedNetCents = excluded.excludedConsumedNetCents;
     if (excluded.excludedSpecialAllocationIds.length > 0) {
       const excludedSet = new Set(excluded.excludedSpecialAllocationIds);

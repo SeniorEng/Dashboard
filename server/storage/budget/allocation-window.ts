@@ -10,11 +10,18 @@
  *   allocation-storage.ts   `manual_adjustment`-Zweig (TS, vierte Quelle)
  *   fifo-breakdown.ts       Uebertrags-Filter
  *   summary-queries.ts      `getTotalCarryoverCents`
- *   summary-queries.ts      `getAvailableCarryoverCents`
  *   summary-queries.ts      `allocValidWhere`
  *   consumption-engine.ts   Spezial-Allocations
  *
- * Alle fuenf SQL-Fassungen bilden **nur das Zeitfenster** nach. Solange die
+ * Eine siebte stand hier bis zum 23.09.2026: `getAvailableCarryoverCents`.
+ * Sie war **tot** — nicht exportiert, und im einzigen Bereich, in dem sie
+ * erreichbar war, kam ihr Name genau einmal vor: in ihrer eigenen Signatur.
+ * Sie duplizierte die Pro-Allocation-Rest-Mathematik, die `fifo-breakdown`
+ * inline fuehrt, und wurde entfernt. Weder `knip` noch `eslint` sahen sie:
+ * das eine sucht unbenutzte EXPORTE, das andere greift bei modulprivaten
+ * Funktionen hier nicht.
+ *
+ * Alle SQL-Fassungen bilden **nur das Zeitfenster** nach. Solange die
  * massgebliche Fassung auch nur das Zeitfenster war, waren sie deckungsgleich
  * — und damit unauffaellig. Mit der Reset-Verdraengung ist sie es nicht mehr:
  * gemessen ergaebe `allocatedCur = A − allocatedCarry` dann **−1.048,00 EUR**,
@@ -30,7 +37,7 @@
  * beantworten andere Fragen (Reset-Baseline bzw. Doppelzaehlung) und haben je
  * genau einen Aufrufer.
  */
-import { and, gte, isNull, lte, or, type SQL } from "drizzle-orm";
+import { and, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
 import { budgetAllocations } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
@@ -53,6 +60,15 @@ export interface ResetAnchor {
   cutoffDate: string;
   /** Jahr desselben Startwerts. */
   year: number;
+  /**
+   * Monat desselben Startwerts (1–12).
+   *
+   * Steht hier, statt beim Aufrufer aus `cutoffDate` zurueckgeparst zu werden.
+   * Dieselbe Begruendung wie bei `resetYear` in `Allocated45bResult`: die
+   * Groesse existiert bei der Berechnung bereits, und eine zweite Ableitung
+   * haelt nur so lange, wie das Datumsformat bleibt.
+   */
+  month: number;
 }
 
 /**
@@ -122,4 +138,87 @@ export function displacedByReset(
    * wurde, ist damit eine Untergrenze.
    */
   return row.validFrom <= reset.cutoffDate && row.year <= reset.year;
+}
+
+/**
+ * Dieselbe Regel als Drizzle-Bedingung — sie laesst durch, was `displacedByReset`
+ * NICHT verdraengt.
+ *
+ * ── Warum es diese Funktion gibt ────────────────────────────────────────
+ * #166 hat fuenf handgeschriebene SQL-Fassungen auf `allocationValidAtWhere`
+ * gezogen. Das vereinheitlichte das ZEITFENSTER — die Verdraengung blieb
+ * aussen vor, weil sie bis dahin nur im TS-Pfad existierte. Solange das Flag
+ * aus ist, faellt das nicht auf; mit scharfer Verdraengung faellt
+ * `allocatedCur = A − allocatedCarry` auf **−1.048,00 EUR** (gemessen, `SQ-1`),
+ * und der Client filtert den negativen Topf ueber `p.allocatedCents > 0` still
+ * weg. Der Fehler zeigt sich dann nicht als falsche Zahl, sondern als
+ * FEHLENDE Zeile — und die sieht aus wie „kein Uebertrag vorhanden".
+ *
+ * `undefined` bei `reset === null`: keine Bedingung, nicht „nichts zaehlt".
+ * Das entspricht `displacedByReset(row, null) === false`.
+ *
+ * ── NUR neben einem `source = 'carryover'`-Filter verwenden ────────────
+ * Diese Bedingung ist die exakte Spiegelung von `displacedByReset`, und die
+ * hat KEINE Quellen-Pruefung: im TS-Pfad steht sie innerhalb von
+ * `carryoverCounted`, also hinter `source === "carryover"`. Die Quellen-Grenze
+ * gehoert deshalb genauso auch hier zum Aufrufer.
+ *
+ * **Warum das wichtig ist:** der Startwert erfuellt die Bedingung woertlich —
+ * fuer ihn gilt `validFrom == cutoffDate` und `year == reset.year`. In einer
+ * Abfrage ohne Quellen-Filter wuerde die Inventur sich selbst loeschen.
+ *
+ * Eine Zwischenfassung trug die Grenze (`source <> 'carryover'`) in dieser
+ * Funktion. Das war gut gemeint und in zweierlei Hinsicht falsch: es machte
+ * zwei als Spiegel benannte Funktionen ungleich, und es war nach dem
+ * B1-Fix von keinem Aufrufer mehr erreichbar — alle drei filtern auf
+ * `carryover`. Eine Bedingung, die kein Aufruf je ausloest, ist keine
+ * Absicherung, sondern eine Zusage ohne Beleg (Gate 2 zu #174).
+ */
+export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undefined {
+  if (!reset) return undefined;
+  // Negation von `validFrom <= cutoff AND year <= resetYear`.
+  return or(
+    gt(budgetAllocations.validFrom, reset.cutoffDate),
+    gt(budgetAllocations.year, reset.year),
+  );
+}
+
+/**
+ * Welcher Startwert ist der Reset-Anker? — die Regel, einmal.
+ *
+ * Der SPAETESTE zum Stichtag bereits wirksame Startwert-Monat ist die neue
+ * Basis (#1812). Ein rein zukuenftiger Startwert loest keinen Reset aus, damit
+ * rueckwirkende Reads korrekt bleiben.
+ *
+ * Stand vorher als Schleife in `calculateAllocated45b`. Sie muss jetzt von
+ * ZWEI Seiten gelesen werden — dem TS-Pfad und den SQL-Pfaden —, und genau an
+ * dieser Stelle entstuende sonst die sechste Fassung derselben Frage.
+ *
+ * **Der `{year}`-Pool-Modus hat keinen Reset** und ruft diese Funktion gar
+ * nicht erst; das bleibt beim Aufrufer, weil es eine Aussage ueber die
+ * gestellte FRAGE ist („wie hoch war der Anspruch des Jahres Y?") und nicht
+ * ueber die Zuweisungen.
+ */
+export function resetAnchorFrom(
+  initialBalanceMonths: readonly { year: number; month: number }[],
+  resetDateLimit: string,
+): ResetAnchor | null {
+  let jahr = 0;
+  let monat = 0;
+  let gefunden = false;
+  for (const ib of initialBalanceMonths) {
+    const beginn = `${ib.year}-${String(ib.month).padStart(2, "0")}-01`;
+    if (beginn > resetDateLimit) continue;
+    if (!gefunden || ib.year > jahr || (ib.year === jahr && ib.month > monat)) {
+      jahr = ib.year;
+      monat = ib.month;
+      gefunden = true;
+    }
+  }
+  if (!gefunden) return null;
+  return {
+    cutoffDate: `${jahr}-${String(monat).padStart(2, "0")}-01`,
+    year: jahr,
+    month: monat,
+  };
 }

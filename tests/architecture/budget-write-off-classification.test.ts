@@ -35,7 +35,9 @@ type WriteOffView = "allocation-view" | "window-view" | "schema-only" | "both";
 const ALLOWLIST: Record<string, WriteOffView> = {
   // Topf-Aggregat: `getBudgetSummary` (§45b) summiert
   //   consumption + write_off + manual_adjustment − reversal.
-  // Zusätzlich `getAvailableCarryoverCents` (Pro-Allocation-Rest).
+  // (Die frühere zweite Stelle `getAvailableCarryoverCents` war toter Code
+  //  ohne Aufrufer und ist am 23.09.2026 entfernt — der Eintrag hier bleibt
+  //  gültig, weil `getBudgetSummary` `write_off` weiterhin selbst summiert.)
   "server/storage/budget/summary-queries.ts": "allocation-view",
 
   // Topf-Summe (`totalNetConsumed`) zählt write_off mit — Topf-Sicht.
@@ -48,8 +50,9 @@ const ALLOWLIST: Record<string, WriteOffView> = {
   // Task #1129 — §45b FIFO-Aufschlüsselung (read-only Visualisierung). Der
   // Übertrags-Verbrauch pro Carryover-Allokation summiert
   //   transactionType IN ('consumption', 'write_off')
-  // — exakt die Topf-/Allocation-Sicht von `getAvailableCarryoverCents`
-  // (write_off hat den Topf entwertet, zählt also als Used). Reine FIFO-
+  // — die Topf-/Allocation-Sicht (write_off hat den Topf entwertet, zählt
+  // also als Used). Seit der Entfernung von `getAvailableCarryoverCents`
+  // ist dies die EINZIGE Fassung dieser Rechnung. Reine FIFO-
   // Verteilung auf die zwei Töpfe, keine eigene Cap-/Fenster-Mathematik.
   "server/storage/budget/fifo-breakdown.ts": "allocation-view",
 

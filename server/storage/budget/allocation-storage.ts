@@ -22,7 +22,12 @@ import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
-import { allocationValidAt, displacedByReset } from "./allocation-window";
+import {
+  allocationValidAt,
+  displacedByReset,
+  resetAnchorFrom,
+  type ResetAnchor,
+} from "./allocation-window";
 import { getEarliestCareLevelStart } from "../customer-mgmt/care-level";
 import {
   carryoverWindowFor,
@@ -595,17 +600,19 @@ interface Allocated45bResult {
   // in der neuen Startwert-Basis abgebildet und darf NICHT erneut abgezogen
   // werden (`getExcluded45bConsumption`). `null`, wenn kein Reset wirksam ist
   // bzw. im `{year}`-Pool-Modus.
-  resetCutoffDate: string | null;
   /**
-   * Jahr desselben Reset-Startwerts.
+   * ERSETZT die frueheren Einzelfelder `resetCutoffDate` + `resetYear`.
    *
-   * Wird MITGEGEBEN statt beim Aufrufer aus `resetCutoffDate` abgeleitet
-   * (Gate 2 zu #166): die Groesse existiert hier bereits als `resetYear`, und
-   * eine zweite Ableitung waere genau das, was dieser PR an sechs Stellen
-   * beseitigt — dieselbe Frage zweimal beantwortet, wobei die zweite Antwort
-   * nur haelt, solange das Datumsformat bleibt.
+   * Die beiden zwangen jeden externen Leser, den Anker wieder zusammenzusetzen
+   * — und den Monat aus dem Datum zu schneiden, weil er gar nicht mitkam.
+   * Genau das tat `server/routes/budget.ts`. Ein Ergebnis, das eine Groesse in
+   * Einzelteilen herausgibt, erzeugt beim Empfaenger die Ableitung, die es
+   * vermeiden wollte (Gate 2 zu #174, S3).
+   *
+   * `null` heisst: kein Reset wirksam — im `{year}`-Pool-Modus und im
+   * `ineligible`-Fall.
    */
-  resetYear: number | null;
+  resetAnchor: ResetAnchor | null;
   // Task #1927 — Monatsanfang, ab dem Monatsaufstockungen zum Topf beitragen
   // (`enumStart` nach ALLEN Shifts: Anker, Übertrag, Settings-Fenster,
   // Verfalls-Boden, Startwert-Reset).
@@ -651,6 +658,42 @@ export async function read45bAllocationDiagnostics(
       _tx,
     );
   return calculateAllocated45b(customerId, opts, d, typeSettings);
+}
+
+/**
+ * Der Reset-Anker eines Kunden zum Stichtag — fuer die SQL-Pfade.
+ *
+ * ERSETZT die Alternative, den Anker an jeder der fuenf SQL-Stellen erneut
+ * abzuleiten. Die Auswahlregel selbst liegt in `resetAnchorFrom`; hier steht
+ * nur, WELCHE Zeilen sie zu sehen bekommt — dieselben, die
+ * `calculateAllocated45b` als `initialBalanceMonths` filtert
+ * (`source = 'initial_balance'`, Monat gesetzt, nicht geloescht).
+ *
+ * Bewusst KEIN Aufruf von `read45bAllocationDiagnostics`: das waere die ganze
+ * Anspruchsrechnung ein zweites Mal, nur um zwei Zahlen abzuholen.
+ *
+ * Rein lesend.
+ */
+export async function readResetAnchor(
+  customerId: number,
+  asOfDate: string,
+  _tx?: DbClient,
+): Promise<ResetAnchor | null> {
+  const d = _tx ?? db;
+  const zeilen = await budgetAllocationsRepo.selectColumnsFrom({
+    year: budgetAllocations.year,
+    month: budgetAllocations.month,
+  }, d)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+      eq(budgetAllocations.source, "initial_balance"),
+      isNull(budgetAllocations.deletedAt),
+    ));
+  const monate = zeilen
+    .filter((z): z is { year: number; month: number } => z.month != null)
+    .map((z) => ({ year: z.year, month: z.month }));
+  return resetAnchorFrom(monate, asOfDate);
 }
 
 async function calculateAllocated45b(
@@ -720,7 +763,7 @@ async function calculateAllocated45b(
   if (anchor.kind === "ineligible") {
     // Kein Anspruch, also auch kein Aufstockungs-Boden: es gibt keine Monate,
     // die herausfallen koennten.
-    return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetCutoffDate: null, resetYear: null, accrualFloorDate: null };
+    return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetAnchor: null, accrualFloorDate: null };
   }
   const budgetStartDate: string = anchor.anchorIso;
 
@@ -749,23 +792,20 @@ async function calculateAllocated45b(
   // Ein rein zukuenftiger Startwert (M-Start > Stichtag) ist noch nicht wirksam
   // und loest keinen Reset aus (rueckwirkende Reads bleiben korrekt). Im
   // `{year}`-Pool-Modus gibt es keinen Reset (out of scope, s.u.).
+  //
+  // Die Auswahlregel selbst steht in `resetAnchorFrom` (allocation-window.ts).
+  // Sie stand frueher als Schleife hier — seit die SQL-Pfade denselben Anker
+  // brauchen (Vorbedingung 1), waere sie sonst die sechste Fassung derselben
+  // Frage. Der `{year}`-Gate bleibt hier: er ist eine Aussage ueber die
+  // gestellte Frage, nicht ueber die Zuweisungen.
   const resetDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
-  let resetYear = 0, resetMonth = 0;
-  let hasReset = false;
-  if (opts.year == null) {
-    for (const ib of initialBalanceMonths) {
-      const ibStart = `${ib.year}-${String(ib.month).padStart(2, "0")}-01`;
-      if (ibStart > resetDateLimit) continue;
-      if (!hasReset || ib.year > resetYear || (ib.year === resetYear && ib.month > resetMonth)) {
-        resetYear = ib.year;
-        resetMonth = ib.month;
-        hasReset = true;
-      }
-    }
-  }
-  const resetCutoffDate = hasReset
-    ? `${resetYear}-${String(resetMonth).padStart(2, "0")}-01`
+  const resetAnchor = opts.year == null
+    ? resetAnchorFrom(initialBalanceMonths, resetDateLimit)
     : null;
+  const hasReset = resetAnchor != null;
+  const resetYear = resetAnchor?.year ?? 0;
+  const resetMonth = resetAnchor?.month ?? 0;
+  const resetCutoffDate = resetAnchor?.cutoffDate ?? null;
 
   // Task #1812 — §45b-Startwert = Reset/Re-Baseline (nicht mehr additiv).
   // Der `allocStart`-Shift auf den Monat NACH dem Startwert wird NICHT mehr hier
@@ -864,7 +904,7 @@ async function calculateAllocated45b(
     a.source === "carryover" &&
     allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, fensterBis, verfallAb) &&
     (!opts.resetDisplacesAllSources
-      || !displacedByReset(a, resetCutoffDate ? { cutoffDate: resetCutoffDate, year: resetYear } : null));
+      || !displacedByReset(a, resetAnchor));
   const validCarryoverTargetYears = existingAllocations
     .filter(carryoverCounted)
     .map(a => a.year);
@@ -1134,8 +1174,7 @@ async function calculateAllocated45b(
     return {
       allocatedCents: yearMonthlyTotal + sumInitialBalancesForYear(existingAllocations, opts.year),
       excludedSpecialAllocationIds: [],
-      resetCutoffDate: null,
-      resetYear: null,
+      resetAnchor: null,
       // Pool-Modus (Uebertrags-Berechnung), kein Lesepfad: dort muss das volle
       // Quelljahr sichtbar bleiben, ein Boden waere fachlich falsch.
       accrualFloorDate: null,
@@ -1209,8 +1248,7 @@ async function calculateAllocated45b(
   return {
     allocatedCents: totalCalculated + initialBalanceTotal + carryoverTotal,
     excludedSpecialAllocationIds,
-    resetCutoffDate,
-    resetYear: hasReset ? resetYear : null,
+    resetAnchor,
     accrualFloorDate,
   };
 }
@@ -1240,7 +1278,7 @@ export async function getExcluded45bConsumption(
   // (z.B. Forecast-Projektion in `getBudgetSummary` rechnet mit
   // `projectFuture: true`). Default (undefined) = bisheriges Verhalten der
   // Lese-/Buchungs-Pfade (`unified-reader`, `consumption-engine`).
-  const { excludedSpecialAllocationIds, resetCutoffDate, accrualFloorDate } = await calculateAllocated45b(
+  const { excludedSpecialAllocationIds, resetAnchor, accrualFloorDate } = await calculateAllocated45b(
     customerId,
     // `resetDisplacesAllSources` MUSS aus demselben Grund mitlaufen wie
     // `projectFuture` (P1 6hXp9qMrXH2WGVVG): verdraengt das Flag einen
@@ -1258,7 +1296,7 @@ export async function getExcluded45bConsumption(
   // `ineligible`-Fall. Das ist gewollt — die Alternative waere eine zusaetzliche
   // Query nach dem fruehesten `transaction_date`, also genau der Roundtrip, den
   // der Kurzschluss sparen soll. Er bleibt als Ineligible-Ausstieg stehen.
-  if (excludedSpecialAllocationIds.length === 0 && !resetCutoffDate && !accrualFloorDate) {
+  if (excludedSpecialAllocationIds.length === 0 && !resetAnchor && !accrualFloorDate) {
     return { excludedSpecialAllocationIds, excludedConsumedNetCents: 0 };
   }
 
@@ -1292,8 +1330,8 @@ export async function getExcluded45bConsumption(
     excludedSpecialAllocationIds.length > 0
       ? inArray(budgetTransactions.allocationId, excludedSpecialAllocationIds)
       : undefined,
-    resetCutoffDate
-      ? lt(budgetTransactions.transactionDate, resetCutoffDate)
+    resetAnchor
+      ? lt(budgetTransactions.transactionDate, resetAnchor.cutoffDate)
       : undefined,
     accrualFloorDate
       ? and(

@@ -6,7 +6,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, asc } from "drizzle-orm";
 import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime";
 import { clampToStatutoryMax, resolve45bActivation } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
@@ -14,12 +14,12 @@ import { customersRepo } from "../../repos";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import type { AppointmentBudgetFit } from "@shared/types";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
-import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow } from "./allocation-storage";
+import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow, readResetAnchor } from "./allocation-storage";
 import { netAvailable45bAt } from "./net-available-45b";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { computeCapSlot } from "./cap-calculator";
 import { readUnifiedBudgetAvailability, type PotAvailability, type UnifiedBudgetAvailability } from "./unified-reader";
-import { allocationValidAtWhere } from "./allocation-window";
+import { allocationValidAtWhere, notDisplacedByResetWhere } from "./allocation-window";
 import { budgetAllocationsRepo } from "../../repos";
 
 // Hinweis (Task #603): §45b bleibt ein Jahrestopf — KEIN harter Monats-Cap.
@@ -28,8 +28,25 @@ import { budgetAllocationsRepo } from "../../repos";
 // reduziert. Ist kein Wert konfiguriert, liefert das Summary `null` (entspricht
 // dem gesetzlichen Default 131 €/Monat).
 
-export async function getTotalCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
+/**
+ * Summe der zum Stichtag zaehlenden Uebertraege.
+ *
+ * `resetDisplacesAllSources` muss hier ankommen, weil diese Zahl von
+ * `allocatedCents` ABGEZOGEN wird (`fifo-breakdown`: `allocatedCur = A −
+ * allocatedCarry`). Kennt die eine Seite die Verdraengung und die andere
+ * nicht, kippt der laufende Topf ins Negative — gemessen −1.048,00 EUR — und
+ * der Client filtert ihn ueber `p.allocatedCents > 0` still weg.
+ */
+export async function getTotalCarryoverCents(
+  customerId: number,
+  asOfDate: string,
+  _tx?: DbClient,
+  opts?: { resetDisplacesAllSources?: boolean },
+): Promise<number> {
   const d = _tx ?? db;
+  const resetAnchor = opts?.resetDisplacesAllSources
+    ? await readResetAnchor(customerId, asOfDate, d)
+    : null;
   const carryoverAllocations = await budgetAllocationsRepo.selectColumnsFrom({
     total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
   }, d)
@@ -38,62 +55,19 @@ export async function getTotalCarryoverCents(customerId: number, asOfDate: strin
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       eq(budgetAllocations.source, "carryover"),
       isNull(budgetAllocations.deletedAt),
-      allocationValidAtWhere(asOfDate)
+      allocationValidAtWhere(asOfDate),
+      notDisplacedByResetWhere(resetAnchor)
     ));
 
   return Number(carryoverAllocations[0]?.total ?? 0);
 }
 
-async function getAvailableCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
-  const d = _tx ?? db;
-  const carryoverAllocations = await budgetAllocationsRepo.selectFrom(d)
-    .where(and(
-      eq(budgetAllocations.customerId, customerId),
-      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
-      eq(budgetAllocations.source, "carryover"),
-      isNull(budgetAllocations.deletedAt),
-      allocationValidAtWhere(asOfDate)
-    ));
-
-  if (carryoverAllocations.length === 0) return 0;
-
-  const allocationIds = carryoverAllocations.map(a => a.id);
-  const consumed = await d.select({
-    allocationId: budgetTransactions.allocationId,
-    total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-  })
-    .from(budgetTransactions)
-    .where(and(
-      inArray(budgetTransactions.allocationId, allocationIds),
-      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
-    ))
-    .groupBy(budgetTransactions.allocationId);
-
-  const reversed = await d.select({
-    allocationId: budgetTransactions.allocationId,
-    total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-  })
-    .from(budgetTransactions)
-    .where(and(
-      inArray(budgetTransactions.allocationId, allocationIds),
-      eq(budgetTransactions.transactionType, "reversal")
-    ))
-    .groupBy(budgetTransactions.allocationId);
-
-  const consumedMap = new Map(consumed.map(c => [c.allocationId, Number(c.total)]));
-  const reversalMap = new Map(reversed.map(r => [r.allocationId, Number(r.total)]));
-
-  let totalAvailable = 0;
-  for (const alloc of carryoverAllocations) {
-    const used = consumedMap.get(alloc.id) ?? 0;
-    const rev = reversalMap.get(alloc.id) ?? 0;
-    totalAvailable += Math.max(0, alloc.amountCents - Math.max(0, used - rev));
-  }
-
-  return totalAvailable;
-}
-
-export async function getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate: string = todayISO()): Promise<BudgetSummary> {
+export async function getBudgetSummary(
+  customerId: number,
+  _preferences?: CustomerBudgetPreferences | undefined,
+  _typeSettings?: CustomerBudgetTypeSetting[],
+  asOfDate: string = todayISO(),
+): Promise<BudgetSummary> {
   const [preferences, typeSettings, customerRows] = await Promise.all([
     _preferences !== undefined ? _preferences : getBudgetPreferences(customerId),
     _typeSettings ?? readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }),
