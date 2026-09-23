@@ -151,6 +151,50 @@ function poolerHostHinweis(host: string): string | null {
   return teile.join(".");
 }
 
+/**
+ * ── Die Ursache steht in `cause`, NICHT in `message` ──────────────────────
+ *
+ * Drizzle verpackt jeden Abfragefehler: `message` lautet `Failed query: <SQL>`
+ * plus der vollstaendige Anweisungstext. Die Angabe, die die Faelle TRENNT,
+ * steht eine Ebene tiefer.
+ *
+ * Gemessen am 23.09.2026 gegen eine lokale DB hinter einem Proxy mit
+ * Verbindungsobergrenze:
+ *
+ *     message : Failed query: SELECT
+ *     cause   : Error: timeout exceeded when trying to connect
+ *     Pool    : total=15 idle=5 waiting=0
+ *
+ * Die erste Zeile allein haette den Lauf als „irgendeine Abfrage ging nicht"
+ * protokolliert — genau der Zustand, in dem dieses Ticket seit dem 17.09.
+ * steckt. Das Skript verspricht in seiner eigenen Anleitung, Lauf 1 hole „die
+ * Fehlermeldung, die bisher fehlt"; ohne `cause` konnte es dieses Versprechen
+ * nicht einloesen.
+ *
+ * Der SQL-Text wird auf die erste Zeile gekuerzt — ausser es gibt keine
+ * `cause`. Dann ist die Meldung alles, was da ist, und wird vollstaendig
+ * ausgegeben.
+ */
+function erstZeile(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+  const hatUrsache = (e as { cause?: unknown }).cause != null;
+  return hatUrsache ? e.message.split("\n")[0] : e.message;
+}
+
+function ursacheKette(e: unknown): string {
+  let ursache: unknown = (e as { cause?: unknown } | null)?.cause;
+  const zeilen: string[] = [];
+  for (let tiefe = 1; ursache != null && tiefe <= 3; tiefe += 1) {
+    const u = ursache as { name?: string; message?: string; code?: string; cause?: unknown };
+    zeilen.push(
+      `\n            Ursache ${tiefe}: ${u.name ?? "Fehler"}: ${u.message ?? String(ursache)}`
+        + (u.code ? ` (code=${u.code})` : ""),
+    );
+    ursache = u.cause;
+  }
+  return zeilen.join("");
+}
+
 // ── Semaphor: deckelt, wie viele Abfragen gleichzeitig unterwegs sind ─────
 function semaphor(max: number) {
   let offen = 0;
@@ -216,10 +260,13 @@ const proxy = new Proxy(db, {
           fertig += 1;
           return r;
         } catch (e) {
-          // DIE Zeile, wegen der es dieses Skript gibt.
+          // DIE Zeilen, wegen der es dieses Skript gibt.
           console.error(
             `\n[${seit()}s] ABFRAGE #${i} SCHEITERT nach ${Date.now() - start}ms`
-              + `\n            ${e instanceof Error ? e.message : String(e)}`
+              + `\n            ${erstZeile(e)}`
+              + ursacheKette(e)
+              + `\n            Pool: total=${pool.totalCount} idle=${pool.idleCount}`
+              + ` waiting=${pool.waitingCount}`
               + `\n            (gestartet: ${gestartet}, fertig: ${fertig}, offen: ${offen})`,
           );
           throw e;
@@ -230,6 +277,33 @@ const proxy = new Proxy(db, {
       return drossel ? drossel(lauf) : lauf();
     };
   },
+});
+
+/**
+ * ── Der `catch` unten wird auf dem Fehlerpfad NIE erreicht ────────────────
+ *
+ * `drizzle-kit` faengt den Fehler selbst und ruft direkt `process.exit(1)`
+ * (`drizzle-kit/api.mjs:3439`, Version 0.31.10):
+ *
+ *     } catch (err2) { terminal.reject(err2); process.exit(1); }
+ *
+ * Damit endet der Prozess, BEVOR die Ablehnung bei uns ankommt — kein `throw`,
+ * kein `uncaughtException`, kein `unhandledRejection` (alle drei gemessen).
+ * Ein `try`/`catch` um `pushSchema` kann das nicht abfangen.
+ *
+ * Deshalb haengt die Bedienhilfe hier am Prozess-Ausgang statt im `catch`.
+ * Ohne sie endet der Lauf wortlos — und genau so ist er am 17.09. viermal
+ * geendet.
+ */
+let durchgelaufen = false;
+process.on("exit", (code) => {
+  if (durchgelaufen || code === 0) return;
+  console.error("");
+  console.error(`ABGEBROCHEN nach ${seit()}s bei ${gestartet} gestarteten Abfragen.`);
+  console.error(`  zuletzt: ${fertig} fertig, ${offen} offen, Spitze ${spitze}`);
+  console.error("");
+  console.error("Bitte die Ausgabe VOLLSTAENDIG ins Ticket 6hWvrJgff5xr9hfp kopieren —");
+  console.error("entscheidend sind die `Ursache`- und `Pool`-Zeilen oben.");
 });
 
 const puls = setInterval(() => {
@@ -258,6 +332,7 @@ try {
   console.log(`  Spitzen-Gleichz.: ${spitze}`);
   console.log(`  langsamste 3    : ${dauern.slice(0, 3).join(" ms, ")} ms`);
   console.log(`  anstehende DDL  : ${ergebnis.statementsToExecute.length}`);
+  durchgelaufen = true;
 } catch (e) {
   console.error("");
   console.error(`ABGEBROCHEN nach ${seit()}s bei ${gestartet} gestarteten Abfragen.`);
