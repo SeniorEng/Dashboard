@@ -58,13 +58,26 @@ function ausSsot(input: {
     projectedAvailableCents: input.projectedAvailableCents,
     warning: o.warning,
     isHardBlock: o.isHardBlock,
-    kind: o.kind,
   };
 }
 
 afterEach(() => cleanup());
 
 describe("Kostenschätzung-Anzeige — Kopf und Text aus derselben Zahl", () => {
+  /**
+   * ── Geprüft wird der TEXT, nicht die Kennung (Gate 2 zu #167, S-A) ───
+   *
+   * Eine frühere Fassung hing an `data-testid="budget-warning-monat"` — einer
+   * Verzweigung, die eingeführt wurde, **damit der Test unterscheiden kann**.
+   * Der Test prüfte dann sie. Ausgeführt blieb er grün, obwohl der Kopf
+   * „im Termin-Monat verfügbar: 47,00 €" zeigte: der Prüfgegenstand existierte
+   * nur für den Test.
+   *
+   * Das ist die fünfte Form von „grün ohne Aussage" und die tückischste, weil
+   * sie beim Schreiben wie Sorgfalt aussieht. Die Verzweigung ist raus, die
+   * Zusagen stehen auf dem gerenderten Text.
+   */
+
   it("MA-1 – der Kopf nennt die MONATS-Zahl, nicht die heutige", () => {
     render(
       <CostEstimatePreview
@@ -72,12 +85,12 @@ describe("Kostenschätzung-Anzeige — Kopf und Text aus derselben Zahl", () => 
         costEstimate={ausSsot({ totalCostCents: 100_00, availableCents: 47_00, projectedAvailableCents: 178_00 })}
       />,
     );
-    const kasten = screen.getByTestId("budget-warning-monat");
+    const kasten = screen.getByTestId("budget-warning");
     expect(kasten.textContent).toContain("im Termin-Monat verfügbar: 178,00");
-    expect(kasten.textContent).not.toContain("— verfügbar: 47,00");
+    expect(kasten.textContent).not.toContain("47,00");
   });
 
-  it("MA-2 – kein harter Block: der Kasten ist die Warnung, nicht die Sperre", () => {
+  it("MA-2 – kein harter Block, und der Kopf trägt das richtige Label", () => {
     render(
       <CostEstimatePreview
         billingType="pflegekasse_gesetzlich"
@@ -85,16 +98,10 @@ describe("Kostenschätzung-Anzeige — Kopf und Text aus derselben Zahl", () => 
       />,
     );
     expect(screen.queryByTestId("budget-hard-block"), "der Termin wird weiterhin gesperrt").toBeNull();
-    expect(screen.getByTestId("budget-warning-monat")).toBeTruthy();
+    expect(screen.getByTestId("budget-warning").textContent).toContain("im Termin-Monat verfügbar");
   });
 
   it("MA-3 – Privatzahler: Kopf und Text nennen DIESELBE Zahl", () => {
-    /**
-     * Der Fall, den die erste Fassung nicht sehen konnte (Gate 2 zu #167, B1):
-     * sie tippte den Warntext mit der alten Mathematik ab. Hier kommt er aus
-     * der SSoT — 300 − 178 = 122 privat, und der Kopf muss dieselben 178
-     * nennen, nicht die heutigen 47.
-     */
     render(
       <CostEstimatePreview
         billingType="pflegekasse_gesetzlich"
@@ -129,11 +136,14 @@ describe("Kostenschätzung-Anzeige — Kopf und Text aus derselben Zahl", () => 
       .not.toContain("2.358,00");
   });
 
-  it("MA-5 – ohne projizierte Zahl kein irreführender Kopf", () => {
-    // Vertragsguard der Komponente: der Typ erlaubt die Kombination, der
-    // Produktivpfad erzeugt sie nicht (`kind === "erst_im_monat_gedeckt"`
-    // setzt voraus, dass die Projektion da war). Deshalb hier von Hand
-    // gebaut — und ausdrücklich als Vertrag, nicht als Produktivfall.
+  it("MA-5 – ohne projizierte Zahl: heutige Zahl UND passendes Label", () => {
+    /**
+     * Der Rückfall-Vertrag der Komponente. Die frühere Fassung prüfte nur die
+     * Test-Kennung und blieb grün, wenn der Kopf „im Termin-Monat verfügbar:
+     * 47,00 €" zeigte — also genau das Irreführende, das sie abfangen soll.
+     *
+     * Jetzt beide Hälften: die richtige ZAHL und das richtige LABEL.
+     */
     render(
       <CostEstimatePreview
         billingType="pflegekasse_gesetzlich"
@@ -141,13 +151,28 @@ describe("Kostenschätzung-Anzeige — Kopf und Text aus derselben Zahl", () => 
           totalCents: 100_00,
           availableCents: 47_00,
           isHardBlock: false,
-          kind: "erst_im_monat_gedeckt",
-          warning: "Im Termin-Monat reicht das Budget.",
+          warning: "Budget reicht nicht — es fehlen 53,00 €.",
         }}
       />,
     );
-    expect(screen.queryByTestId("budget-warning-monat"),
-      "der Kopf nennt eine Monatszahl, die es nicht gibt").toBeNull();
-    expect(screen.getByTestId("budget-warning")).toBeTruthy();
+    const kasten = screen.getByTestId("budget-warning");
+    expect(kasten.textContent).toContain("verfügbar: 47,00");
+    expect(kasten.textContent, "das Monats-Label steht ohne Monats-Zahl da")
+      .not.toContain("im Termin-Monat");
+  });
+
+  it("MA-6 – der grüne Kasten trägt dieselbe Zahl und dasselbe Label", () => {
+    // Der Zweig, den Bediener am HÄUFIGSTEN sehen — und den bisher keine
+    // Testdatei gerendert hat (Gate 2 zu #167, S-D). Das Label hat sich hier
+    // mit geändert.
+    render(
+      <CostEstimatePreview
+        billingType="pflegekasse_gesetzlich"
+        costEstimate={ausSsot({ totalCostCents: 30_00, availableCents: 47_00, projectedAvailableCents: 178_00 })}
+      />,
+    );
+    const kasten = screen.getByTestId("budget-cost-estimate");
+    expect(kasten.textContent).toContain("im Termin-Monat verfügbar: 178,00");
+    expect(kasten.textContent).not.toContain("47,00");
   });
 });

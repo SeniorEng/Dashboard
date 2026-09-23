@@ -8,8 +8,6 @@ export type CostEstimate = {
   noPricing?: boolean;
   availableCents?: number;
   isHardBlock?: boolean;
-  /** Welcher Ausgang der SSoT — der Client rechnet ihn NICHT nach. */
-  kind?: "selbstzahler" | "ok" | "erst_im_monat_gedeckt" | "soft_private" | "hard_block";
   /** Verfügbar mit Projektion bis Monatsende (Replit #1916). */
   projectedAvailableCents?: number;
   isSelbstzahler?: boolean;
@@ -100,8 +98,6 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
     ? formatEuroDE(cost.projectedAvailableCents!, { withCurrency: false })
     : availEuro;
   const verfuegbarLabel = zeigtMonatszahl ? "im Termin-Monat verfügbar" : "verfügbar";
-  // Nur für die Test-Kennung: welcher Kasten ist es fachlich?
-  const istMonatsFall = cost.kind === "erst_im_monat_gedeckt" && zeigtMonatszahl;
 
   if (cost.isHardBlock) {
     return (
@@ -125,7 +121,7 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
    */
   if (cost.warning) {
     return (
-      <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid={istMonatsFall ? "budget-warning-monat" : "budget-warning"}>
+      <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
         <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
         <div>
           <p className="text-amber-800 font-semibold">

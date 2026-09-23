@@ -374,19 +374,26 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     warning: outcome.warning,
     isHardBlock: outcome.isHardBlock,
     /**
-     * `kind` und die projizierte Zahl gehen mit ueber die Leitung.
+     * Die PROJIZIERTE Zahl geht mit ueber die Leitung — `kind` nicht.
      *
-     * Ohne sie kann der Client die zwei NICHT-blockierenden Faelle nicht
-     * unterscheiden — „privat berechnet" und „reicht erst im Monat" saehen
-     * gleich aus. Schlimmer: der Amber-Kopf zeigt „verfuegbar: X" aus
-     * `availableCents` (ungeprojiziert), waehrend der Warntext die
-     * Monatszahl nennt. **Zwei verschiedene „verfuegbar" in einem Kasten.**
+     * Der Kopf des Kastens muss dieselbe Zahl nennen wie der Warntext; ohne
+     * sie zeigte er „verfuegbar: 47,00" ueber einem Text, der 178,00 nennt.
+     * Das ist der Grund, aus dem dieses Feld existiert.
      *
-     * Drei-Schichten-Pflicht (CLAUDE.md): die Unterscheidung sitzt im Server
-     * (`classifyCostEstimate`), muss also hier transportiert werden, sonst
-     * KANN der Client sie nicht treffen.
+     * ── Warum `kind` NICHT (Gate 2 zu #167, S-B) ────────────────────────
+     * Eine fruehere Fassung schickte es mit der Begruendung, der Client
+     * koenne sonst die zwei nicht-blockierenden Faelle nicht unterscheiden.
+     * **Seit die Kopfzahl an `projectedAvailableCents` haengt, stimmt das
+     * nicht mehr**: beide rendern denselben Kasten mit demselben Kopf und
+     * unterscheiden sich nur durch den `warning`-Text, der ohnehin von hier
+     * kommt.
+     *
+     * Uebrig blieb ein Feld im oeffentlichen Response-Schema, dessen einziger
+     * Verbraucher eine `data-testid`-Verzweigung war — **und der Test pruefte
+     * dann sie.** Der Pruefgegenstand existierte nur fuer den Test. Nach der
+     * Ersetzungs-Regel ist ein Feld, das nichts ersetzt und nichts bewirkt,
+     * nicht zu bauen.
      */
-    kind: outcome.kind,
     projectedAvailableCents: dateAware.projectedTotalCents,
     privateCents: outcome.privateCents,
     vatCents: outcome.vatCents,

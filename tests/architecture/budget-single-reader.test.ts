@@ -298,3 +298,47 @@ describe("Architektur — EIN Budget-Verfügbarkeits-Reader (Task #874 I1)", () 
     expect(excludedCallRe.test("import { getExcluded45bConsumption } from './allocation-storage';")).toBe(false);
   });
 });
+
+/**
+ * Task Replit #1916 — die PROJIZIERTE §45b-Verfügbarkeit hat seit dem
+ * Vorschau-Fix zwei produktive Aufrufer und ist damit geteilte Logik.
+ *
+ * Die Schwesterfunktion `netAvailable45bAt` steht oben mit Aufruf-Rand; diese
+ * war unbewacht. Sie beantwortet eine EIGENE Frage — nicht „was ist heute
+ * verfügbar?", sondern **„welcher §45b-Stand gilt für das ANLEGE-Tor?"** —
+ * und genau daran hing der Fehler, den #1916 behebt.
+ */
+describe("Projizierte §45b-Verfügbarkeit — ein Rechenweg, zwei erlaubte Aufrufer", () => {
+  const ALLOWLIST_PROJ = new Set<string>(
+    ssotGuardAllowlist("budget-projected-45b", "ALLOWLIST_PROJECTED_45B"),
+  );
+
+  it("`projected45bAvailableCents` wird nur am Anlege-Rand gerufen", () => {
+    const scanRoots = ["server", "shared", "client"].map((p) => join(ROOT, p));
+    const hits = new Set<string>();
+    const callRe = /projected45bAvailableCents\s*\(/;
+
+    for (const root of scanRoots) {
+      try { statSync(root); } catch { continue; }
+      for (const file of walk(root)) {
+        const rel = relative(ROOT, file).split(sep).join("/");
+        if (rel.startsWith("tests/")) continue;
+        if (rel.startsWith("server/scripts/")) continue;
+        const content = readFileSync(file, "utf-8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/\/\/.*$/gm, "");
+        if (!callRe.test(content)) continue;
+        hits.add(rel);
+      }
+    }
+
+    const verstoesse = [...hits].filter(h => !ALLOWLIST_PROJ.has(h)).sort();
+    expect(
+      verstoesse,
+      "Die projizierte §45b-Verfügbarkeit wird außerhalb des Anlege-Randes "
+      + "gerechnet. Zwei Aufrufer, die auseinanderlaufen, sind genau der "
+      + "Fehler, den #1916 behoben hat — die Vorschau prüfte gegen einen "
+      + "anderen Stichtag als das Tor.",
+    ).toEqual([]);
+  });
+});

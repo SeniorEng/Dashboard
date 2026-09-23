@@ -166,6 +166,29 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "budget-projected-45b",
+    question: "Welcher §45b-Stand gilt für das ANLEGE-Tor? (Projektion bis Monatsende)",
+    canonical: [
+      { symbol: "projected45bAvailableCents", module: "server/storage/budget/net-available-45b.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Eigene Frage, eigener Rand: „was ist heute verfügbar?" beantwortet
+        // `netAvailable45bAt`. Diese hier beantwortet „womit entscheidet
+        // `planHold`?" — und genau daran hing #1916.
+        test: SINGLE_READER_GUARD,
+        allowlistName: "ALLOWLIST_PROJECTED_45B",
+        allowlist: [
+          "server/storage/budget/net-available-45b.ts",
+          "server/storage/budget/reservation-storage.ts",
+          "server/storage/budget/import-availability.ts",
+        ],
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "budget-availability-45b",
     question: "Wie viel §45b-Entlastungsbetrag ist am Stichtag verfügbar? (eigene Jahres-Mathematik)",
     canonical: [

@@ -176,14 +176,13 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
    * `#424`-Zusage haengt am Feld, nicht an dieser Entscheidung.
    */
   const massgeblich = input.projectedAvailableCents ?? availableCents;
-  const projiziert = massgeblich;
 
   if (totalCostCents <= massgeblich && totalCostCents > availableCents) {
     const fehltHeute = formatEuroDE(totalCostCents - availableCents);
     return {
       kind: "erst_im_monat_gedeckt",
       warning:
-        `Im Termin-Monat reicht das Budget (${formatEuroDE(projiziert)} verfügbar, `
+        `Im Termin-Monat reicht das Budget (${formatEuroDE(massgeblich)} verfügbar, `
         + `Termin kostet ${formatEuroDE(totalCostCents)}). `
         + `Heute fehlen davon noch ${fehltHeute} — sie kommen mit der `
         // NICHT „der Termin kann angelegt werden" — siehe Docblock oben.
