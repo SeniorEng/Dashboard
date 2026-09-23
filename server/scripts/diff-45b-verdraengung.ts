@@ -114,6 +114,34 @@ async function main() {
     ));
   console.log(`Uebertraege mit year <> Jahr(valid_from): ${abweichend}`);
   if (abweichend > 0) {
+    // Nur ZAEHLEN reicht nicht: `+1` ist die dokumentierte Zieljahr-Semantik
+    // (ein Uebertrag fuer Zieljahr T wird im Jahr T-1 materialisiert), alles
+    // andere ist ein Datenbefund. `carryoverTargetYear`
+    // (shared/domain/budget/halfyear-45b.ts) haelt ausdruecklich fest, dass
+    // offen ist, welches der beiden Modelle dem Produktions-Roll entspricht.
+    const verteilung = await db
+      .select({
+        delta: sql<number>`(${budgetAllocations.year} - EXTRACT(YEAR FROM ${budgetAllocations.validFrom}::date))::int`,
+        anzahl: sql<number>`count(*)::int`,
+      })
+      .from(budgetAllocations)
+      .where(and(
+        eq(budgetAllocations.budgetType, BUDGET_TYPE),
+        eq(budgetAllocations.source, "carryover"),
+        isNull(budgetAllocations.deletedAt),
+        sql`${budgetAllocations.year} <> EXTRACT(YEAR FROM ${budgetAllocations.validFrom}::date)`,
+      ))
+      .groupBy(sql`1`)
+      .orderBy(sql`1`);
+    for (const v of verteilung) {
+      const deutung = v.delta === 1
+        ? "dokumentierte Zieljahr-Semantik (Uebertrag fuer T, materialisiert in T-1)"
+        : "NICHT durch die Zieljahr-Semantik erklaert — Datenbefund";
+      console.log(`    year − Jahr(valid_from) = ${v.delta >= 0 ? "+" : ""}${v.delta}: `
+        + `${v.anzahl} Zeile(n) — ${deutung}`);
+    }
+  }
+  if (abweichend > 0) {
     console.log("  \u26a0 Die VD-5-Verengung KANN hier wirken. Ein Vergleich mit einem");
     console.log("    Mess-Lauf vor dem Fix ist dann nicht mehr aussagekraeftig.");
   } else {
@@ -128,6 +156,7 @@ async function main() {
   let summeDifferenz = 0;
   let summeVerfuegbarkeit = 0;
   const kundenMitNegativemTopf = new Set<number>();
+  const kundenMitBestandsTopf = new Set<number>();
 
   for (const customerId of kunden) {
     const zeilenAus: string[] = [];
@@ -196,13 +225,30 @@ async function main() {
         customerId, asOfDate, { typeSettings, resetDisplacesAllSources: true },
       )).availableCents;
 
-      // Probe auf Vorbedingung 1 am echten Bestand: kein negativer Topf.
-      const breakdown = await readBudget45bFifoBreakdown(customerId, asOfDate, {
+      /**
+       * Probe auf Vorbedingung 1 — BEIDSEITIG.
+       *
+       * Die erste Fassung rechnete den Breakdown nur MIT Flag und meldete
+       * „NEGATIVER TOPF, Zahlen nicht verwenden". Am Prod-Lauf vom 23.09.2026
+       * hat sie bei Kunde 164 gegriffen — und konnte die entscheidende Frage
+       * nicht beantworten: liegt es an der Verdraengung oder war es vorher
+       * schon so?
+       *
+       * Eine Warnung, die das nicht unterscheidet, schickt die Messung zurueck
+       * an den Anfang. Deshalb jetzt beide Seiten: nur ein Topf, der OHNE Flag
+       * nicht negativ ist, geht auf die Verdraengung.
+       */
+      const bdOhne = await readBudget45bFifoBreakdown(customerId, asOfDate);
+      const bdMit = await readBudget45bFifoBreakdown(customerId, asOfDate, {
         resetDisplacesAllSources: true,
       });
-      const negativeToepfe = breakdown.pots
-        .filter(t => t.allocatedCents < 0)
-        .map(t => `${t.potType}=${euro(t.allocatedCents)}`);
+      const negOhne = bdOhne.pots.filter(t => t.allocatedCents < 0);
+      const negMit = bdMit.pots.filter(t => t.allocatedCents < 0);
+      const negativeToepfe = negMit.map(t => `${t.potType}=${euro(t.allocatedCents)}`);
+      // NEU durch die Verdraengung — das ist der Fall, der blockiert.
+      const negativNeu = negMit.filter(
+        t => !negOhne.some(o => o.potType === t.potType),
+      ).map(t => `${t.potType}=${euro(t.allocatedCents)}`);
 
       const diff = neu - heute;
       const diffVerf = verfNeu - verfHeute;
@@ -213,9 +259,11 @@ async function main() {
           + ` (${euro(diff).padStart(10)})`
           + `  | Verfügbar ${euro(verfHeute).padStart(10)} → ${euro(verfNeu).padStart(10)}`
           + ` (${euro(diffVerf).padStart(10)})`
-          + (negativeToepfe.length > 0
-              ? `  | ⚠ NEGATIVER TOPF: ${negativeToepfe.join(", ")}`
-              : "")
+          + (negativNeu.length > 0
+              ? `  | ⛔ NEGATIVER TOPF DURCH DIE VERDRÄNGUNG: ${negativNeu.join(", ")}`
+              : negativeToepfe.length > 0
+                ? `  | ℹ negativer Topf, aber AUCH OHNE Flag (Bestand): ${negativeToepfe.join(", ")}`
+                : "")
           + `  | zusätzlich ausgeschlossen: [${zusaetzlichAusgeschlossen.join(", ") || "—"}]`
           + (wiederAufgenommen.length > 0 ? `  | ⚠ WIEDER AUFGENOMMEN: [${wiederAufgenommen.join(", ")}]` : "")
           + `  | Verbrauch-Korrektur ${euro(exNeu.excludedConsumedNetCents - exHeute.excludedConsumedNetCents)}`
@@ -226,7 +274,8 @@ async function main() {
       }
       if (diff !== 0) summeDifferenz += diff;
       if (diffVerf !== 0) summeVerfuegbarkeit += diffVerf;
-      if (negativeToepfe.length > 0) kundenMitNegativemTopf.add(customerId);
+      if (negativNeu.length > 0) kundenMitNegativemTopf.add(customerId);
+      if (negativeToepfe.length > 0 && negativNeu.length === 0) kundenMitBestandsTopf.add(customerId);
     }
 
     if (zeilenAus.length > 0) {
@@ -241,12 +290,23 @@ async function main() {
   console.log(`Summe der ANSPRUCHS-Differenzen über alle Stichtage: ${euro(summeDifferenz)} €`);
   console.log(`Summe der VERFÜGBARKEITS-Differenzen über alle Stichtage: ${euro(summeVerfuegbarkeit)} €`);
   console.log("");
+  if (kundenMitBestandsTopf.size > 0) {
+    console.log(`ℹ ${kundenMitBestandsTopf.size} Kunde(n) mit negativem Topf AUCH OHNE Flag: `
+      + `${[...kundenMitBestandsTopf].join(", ")}`);
+    console.log("  Bestandsproblem, nicht von der Verdrängung erzeugt. Haeufigste Ursache:");
+    console.log("  eine NEGATIVE `manual_adjustment`-Zeile. `calculateAllocatedCents` addiert");
+    console.log("  sie NACH `calculateAllocated45b`, `fifo-breakdown` rechnet");
+    console.log("  `allocatedCur = A − allocatedCarry` — der Abzug landet damit vollstaendig");
+    console.log("  im laufenden Topf. Eigener Befund, blockiert diese Messung NICHT.");
+    console.log("");
+  }
   if (kundenMitNegativemTopf.size === 0) {
-    console.log("Kein negativer Topf bei scharfem Flag — Vorbedingung 1 trägt auf diesem Bestand.");
+    console.log("Kein negativer Topf DURCH DIE VERDRÄNGUNG — Vorbedingung 1 trägt auf diesem Bestand.");
   } else {
     console.log(`⚠ ${kundenMitNegativemTopf.size} Kunde(n) mit NEGATIVEM Topf: `
       + `${[...kundenMitNegativemTopf].join(", ")}`);
-    console.log("  Vorbedingung 1 trägt hier NICHT. Die Zahlen oben nicht verwenden,");
+    console.log("  Vorbedingung 1 trägt hier NICHT — der Topf ist OHNE Flag nicht negativ.");
+    console.log("  Die Zahlen oben nicht verwenden,");
     console.log("  bevor das erklärt ist — im Client verschwindet so ein Topf lautlos.");
   }
   console.log("");
