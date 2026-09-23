@@ -308,18 +308,3 @@ export const budgetMigrations = pgTable("budget_migrations", {
 
 export type BudgetMigration = typeof budgetMigrations.$inferSelect;
 
-// Budget summary for customer detail view
-export interface BudgetSummary {
-  customerId: number;
-  totalAllocatedCents: number;
-  totalUsedCents: number;
-  availableCents: number;
-  carryoverCents: number;
-  carryoverExpiresAt: string | null;
-  currentYearAllocatedCents: number;
-  monthlyLimitCents: number | null;
-  currentMonthUsedCents: number;
-  /** Im laufenden Kalendermonat noch buchbar (Cap- und Topf-aware). Siehe BudgetSummary in `server/storage/budget/types.ts`. */
-  currentMonthAvailableCents: number;
-  isCurrentlyActive: boolean;
-}
