@@ -240,6 +240,56 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   Arbeiten auffällt, im **PR-Body als `FINDING: … [P1/P2/P3]`** vermerken —
   Alrik/Cowork übernimmt ihn in die Long-List. Den laufenden Task NICHT
   entgleisen lassen.
+- **Mutations-Gegencheck — Pflicht für jeden Test, der eine Zusage sichert.**
+  Ein solcher Test muss **einmal rot gesehen worden sein**. Praktisch: die
+  geprüfte Stelle mutieren (Bedingung umdrehen, Konstante ändern, den Fix
+  zurücknehmen), Test laufen lassen, Rot bestätigen, zurücksetzen. Im
+  Commit/PR vermerken: *„mutations-gegengeprüft"*.
+
+  **Warum:** ein grüner Test ohne Aussage ist von einem grünen Test mit Aussage
+  nicht zu unterscheiden. Am 22./23.09.2026 sind binnen 24 Stunden **drei
+  verschiedene Wege** dorthin aufgetreten:
+  - **Zufall der Zahlen** — die Fixture-Werte erfüllen die Zusage auch ohne den
+    Fix (`VD-5`: der verdrängte Übertrag war 500 €, die freigelegte
+    Aufstockung 262 € — bei 50 € kippte es).
+  - **Falsche Ebene** — geprüft wird die Schicht *unter* der Behauptung
+    (`EK-1` prüfte die API-Antwort, behauptet war etwas über die Anzeige).
+  - **Unerreichbare Konstellation** — der Gegenfall kann im Szenario gar nicht
+    auftreten (der `#424`-Zusatz: kein Übertrag, `+1` Monat im selben
+    Halbjahr).
+
+  **Der Gegencheck fängt alle drei, weil er nicht am Mechanismus ansetzt,
+  sondern am Ergebnis.** Man muss nicht wissen, *warum* ein Test nichts sagt —
+  es genügt festzustellen, dass er beim Verletzen der Zusage grün bleibt.
+
+  Gilt für Zusagen, nicht für jeden Test: ein Smoke-Test, der „rendert
+  überhaupt" prüft, braucht das nicht. Ein Test, dessen Name eine Invariante
+  behauptet („… darf nie …", „… bleibt unverändert", „… wird nicht …"),
+  braucht es immer.
+- **Ein Testhaken ist kein Zeuge.** Entsteht etwas **FÜR** den Test — eine
+  `data-testid`-Verzweigung, ein Flag, ein Extra-Feld in der Antwort —, dann
+  ist es ab diesem Moment **Teil des Prüflings, nicht des Maßstabs**. Ein Test,
+  der darauf prüft, bestätigt sich selbst.
+
+  Gemessen am 23.09.2026: ein Anzeige-Test hieß „ohne projizierte Zahl kein
+  irreführender Kopf" und prüfte ausschließlich die `data-testid`. Die
+  Verzweigung war eingeführt worden, damit er unterscheiden kann. Ausgeführt
+  blieb er **grün**, während der Kopf „im Termin-Monat verfügbar: 47,00 €"
+  zeigte — genau das Irreführende, das er abfangen sollte.
+
+  **Die allgemeine Antwort: die Zusage auf das stellen, was der Nutzer
+  bekommt.** Gerenderter Text, HTTP-Antwort, geschriebene Zeile — nicht die
+  Hilfskonstruktion, die man für die Prüfung gebaut hat.
+
+  Und der saubere Nebeneffekt, wenn man es so herum macht: fällt ein Feld auf,
+  dessen einziger Verbraucher ein Testhaken war, gehört es nach der
+  Ersetzungs-Regel ohnehin nicht dorthin. In genau diesem Fall fiel damit ein
+  Feld aus dem öffentlichen Response-Schema.
+
+  Diese Form ist **tückischer als die drei oben**, weil sie beim Schreiben wie
+  Sorgfalt aussieht: man baut eine Unterscheidung ein, um genau prüfen zu
+  können. Der Mutations-Gegencheck fängt sie trotzdem — er fragt nicht, worauf
+  der Test schaut, sondern ob er rot wird.
 - **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
   kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
   Der `tests`-CI-Job hat **keinen roten Altbestand mehr** (Stand 08.08.2026,
