@@ -73,11 +73,15 @@ async function kundeFunke(): Promise<number> {
 }
 
 describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung", () => {
-  it("VD-1 – der Übertrag zählt ohne Flag mit und mit Flag nicht mehr", async () => {
+  it("VD-1 – in der alten Lesart zählt der Übertrag mit, in der Inventur-Lesart nicht mehr", async () => {
     const id = await kundeFunke();
     try {
       const stichtag = `${ANKER_JAHR}-06-15`;
-      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+      // Die ALTE (additive) Lesart wird seit dem Scharfschalten ausdruecklich
+      // angefordert — sie ist nicht mehr der Default.
+      const alt = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: false },
+      );
       const neu = await calculateAllocatedCents(
         id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
       );
@@ -85,7 +89,7 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       // Die Differenz ist GENAU der Übertrag — nicht mehr und nicht weniger.
       // Wäre sie größer, hätte das Flag über `latestValidCarryoverYear` auch
       // den `allocStart`-Shift und damit die Monatsaufstockung verschoben.
-      expect(heute - neu, "die Verdrängung trifft nicht genau den Übertrag").toBe(1_179_00);
+      expect(alt - neu, "die Verdrängung trifft nicht genau den Übertrag").toBe(1_179_00);
       expect(neu, "der Startwert selbst darf nicht mitverdrängt werden")
         .toBeGreaterThanOrEqual(131_00);
     } finally {
@@ -100,7 +104,9 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
     const id = await kundeFunke();
     try {
       const vorher = `${ANKER_JAHR}-03-15`;
-      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: vorher });
+      const heute = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: vorher, resetDisplacesAllSources: false },
+      );
       const neu = await calculateAllocatedCents(
         id, "entlastungsbetrag_45b", { asOfDate: vorher, resetDisplacesAllSources: true },
       );
@@ -121,7 +127,9 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       const typeSettings = await readBudgetTypeSettings(
         id, { kind: "forDate", asOfDate: todayISO() },
       );
-      const exHeute = await getExcluded45bConsumption(id, stichtag, db, typeSettings);
+      const exHeute = await getExcluded45bConsumption(
+        id, stichtag, db, typeSettings, { resetDisplacesAllSources: false },
+      );
       const exNeu = await getExcluded45bConsumption(
         id, stichtag, db, typeSettings, { resetDisplacesAllSources: true },
       );
@@ -140,17 +148,38 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
     }
   });
 
-  it("VD-4 – ohne Flag ändert sich nichts", async () => {
-    // Der Default muss das heutige Verhalten sein — sonst wäre die Messung
-    // aus Schritt 2 keine Messung, sondern schon die Änderung.
+  it("VD-4 – der Default IST die Inventur-Lesart, und der Schalter trennt beide Richtungen", async () => {
+    /**
+     * Diese Zusage ist mit dem Scharfschalten gekippt.
+     *
+     * Vorher hiess sie „ohne Flag aendert sich nichts" und begruendete das mit
+     * der Messung aus Schritt 2. Die ist gefahren und ausgewertet (21 Kunden,
+     * Σ −20.395,73 €); der Default ist seither `true`.
+     *
+     * Der Test behauptet jetzt zwei Dinge, die BEIDE gebraucht werden:
+     *  1. ohne Optionen gilt die Inventur-Lesart — sonst waere der Flip nicht
+     *     angekommen;
+     *  2. `false` stellt die alte Lesart vollstaendig wieder her — sonst waere
+     *     der Schalter eine Einbahnstrasse und ein Rueckbau nicht pruefbar.
+     */
     const id = await kundeFunke();
     try {
       for (const stichtag of [`${ANKER_JAHR}-03-15`, `${ANKER_JAHR}-06-15`, `${ANKER_JAHR}-08-15`]) {
         const ohneOpt = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+        const explizitTrue = await calculateAllocatedCents(
+          id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
+        );
         const explizitFalse = await calculateAllocatedCents(
           id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: false },
         );
-        expect(explizitFalse, `Default weicht ab bei ${stichtag}`).toBe(ohneOpt);
+        expect(ohneOpt, `der Default ist nicht die Inventur-Lesart bei ${stichtag}`)
+          .toBe(explizitTrue);
+        // Die Gegenrichtung: ohne sie waere (1) auch dadurch erfuellt, dass
+        // das Flag ueberhaupt nichts tut.
+        if (stichtag === `${ANKER_JAHR}-06-15`) {
+          expect(explizitFalse, `\`false\` stellt die alte Lesart nicht wieder her`)
+            .toBe(explizitTrue + 1_179_00);
+        }
       }
     } finally {
       await cleanupCustomer(id);
@@ -265,12 +294,14 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       ]);
 
       const stichtag = `${ANKER_JAHR}-03-15`;
-      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+      const alt = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: false },
+      );
       const neu = await calculateAllocatedCents(
         id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
       );
 
-      expect(heute - neu,
+      expect(alt - neu,
         "der Übertrag ab 01.01. wird vom Januar-Startwert nicht verdrängt — "
         + "genau der Fall, für den der Mechanismus gemacht ist")
         .toBe(1_179_00);

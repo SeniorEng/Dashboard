@@ -150,9 +150,48 @@ describe("Task #704 — §45b zeitliche Projektion (projectFuture)", () => {
         "entlastungsbetrag_45b",
         { asOfDate: afterExpiry, projectFuture: true },
       );
-      // Differenz = (1 Monatsaufstockung Juli) − (Carryover-Wegfall)
-      // = MONTHLY_45B_CENTS − carryoverAmount.
-      expect(allocAfterExpiry - allocBeforeExpiry).toBe(MONTHLY_45B_CENTS - carryoverAmount);
+      /**
+       * Seit dem Scharfschalten der Inventur-Lesart (23.09.2026) kostet der
+       * Verfall dieses Uebertrags NICHTS mehr — er war zum 30.06. schon nicht
+       * mehr im Anspruch.
+       *
+       * Die Fixture hat einen **0-€-Startwert ab 01.01.** (`initialBalance:
+       * { amountCents: 0, validFrom: startDate }`). Das ist nach Alriks
+       * Entscheidung vom 22.09.2026 eine festgestellte Null, und mit `<=`
+       * verdraengt eine Inventur zum 01.01. einen Uebertrag, der am selben Tag
+       * beginnt. Der Uebertrag ist also bereits VOR dem Verfallsstichtag weg.
+       *
+       * Differenz = nur die Juli-Aufstockung. Vorher stand hier
+       * `MONTHLY_45B_CENTS − carryoverAmount` — das war die additive Lesart.
+       *
+       * **Die Zusage des Tests bleibt dieselbe:** ein verfallener Uebertrag
+       * darf in der projizierten Allokation nicht weiterzaehlen. Sie ist nur
+       * nicht mehr an DIESEM Uebertrag ablesbar, weil er aus einem anderen
+       * Grund schon draussen ist. Deshalb steht darunter die Gegenprobe ohne
+       * 0-€-Startwert — sonst pruefte der Fall die Verfalls-Regel gar nicht
+       * mehr.
+       */
+      expect(
+        allocAfterExpiry - allocBeforeExpiry,
+        "der Verfall kostet etwas, obwohl der Uebertrag vom 0-€-Startwert "
+        + "bereits verdraengt ist",
+      ).toBe(MONTHLY_45B_CENTS);
+
+      // Gegenprobe: dieselbe Lage in der ALTEN Lesart. Dort zaehlt der
+      // Uebertrag bis zum Verfall mit, die Differenz traegt ihn also.
+      const altVor = await calculateAllocatedCents(
+        scenario.customerId, "entlastungsbetrag_45b",
+        { asOfDate: beforeExpiry, projectFuture: true, resetDisplacesAllSources: false },
+      );
+      const altNach = await calculateAllocatedCents(
+        scenario.customerId, "entlastungsbetrag_45b",
+        { asOfDate: afterExpiry, projectFuture: true, resetDisplacesAllSources: false },
+      );
+      expect(
+        altNach - altVor,
+        "in der alten Lesart traegt der Verfall den Uebertrag nicht mehr — "
+        + "dann prueft dieser Fall die Verfalls-Regel nirgends",
+      ).toBe(MONTHLY_45B_CENTS - carryoverAmount);
     } finally {
       await scenario.cleanup();
     }

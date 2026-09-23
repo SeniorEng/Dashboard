@@ -85,6 +85,44 @@ interface InitialBalanceAllocation {
  * Anzeige. Eine Zusage ueber das UI, die eine Ebene tiefer geprueft wird,
  * haelt genau so lange, bis jemand die obere Ebene vergisst.
  */
+/**
+ * PFLICHT-Warnung: dieser Startwert verdrängt einen noch gültigen Übertrag.
+ *
+ * Eigene Komponente aus demselben Grund wie `BetragMitVerdraengung`: sie ist
+ * die EINE Fassung dieses Satzes und für sich prüfbar. Inline im Editor wäre
+ * sie nur über den vollen Komponentenbaum erreichbar — und eine Zusage über
+ * eine Anzeige, die man nicht rendern kann, ist keine.
+ *
+ * Sie RECHNET nicht: welche Überträge verdrängt werden, entscheidet
+ * `displacedByReset` auf dem Server. Der Client liest nur
+ * (Drei-Schichten-Pflicht, #164).
+ */
+export function VerdraengungsWarnung({
+  verdraengung,
+  testId,
+}: {
+  verdraengung?: { verdraengt: Array<{ year: number; amountCents: number }>; summeCents: number };
+  testId: string;
+}) {
+  if (!verdraengung || verdraengung.verdraengt.length === 0) return null;
+  const einer = verdraengung.verdraengt.length === 1 ? verdraengung.verdraengt[0] : null;
+  return (
+    <div
+      className="flex items-start gap-2 mt-1 p-2 rounded bg-amber-50 border border-amber-300 text-xs text-amber-900"
+      data-testid={testId}
+    >
+      <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+      <span>
+        {einer
+          ? `Damit entfällt der Übertrag aus ${einer.year} über ${formatCurrency(einer.amountCents)}.`
+          : `Damit entfallen ${verdraengung.verdraengt.length} Überträge über zusammen ${formatCurrency(verdraengung.summeCents)}.`}
+        {" "}Der Startwert ersetzt den Bestand — der Übertrag bleibt in der
+        Historie sichtbar, zählt aber nicht mehr mit.
+      </span>
+    </div>
+  );
+}
+
 export function BetragMitVerdraengung({
   allocation, testId, klasse,
 }: {
@@ -876,6 +914,8 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
   const eingegebeneCents = amount ? euroStringToCents(amount) : null;
   const hasValidInput = eingegebeneCents != null && eingegebeneCents >= 0;
 
+
+
   const selectedYear = parseInt(month.split("-")[0]);
   const selectedMonthNum = parseInt(month.split("-")[1]);
   const currentYear = new Date().getFullYear();
@@ -889,6 +929,30 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
   // Server-konsistenter Guard blockt das Speichern, falls doch ein Vorjahr
   // im State landet. (§45a/§39 nutzen diese Sektion nicht.)
   const is45b = budgetType === "entlastungsbetrag_45b";
+
+  /**
+   * PFLICHT-Warnung: dieser Startwert verdrängt einen noch gültigen Übertrag.
+   *
+   * Dieselbe Form wie die 0-€-Übertrags-Warnung (Alrik, 22.09.2026) — nur
+   * trägt diese den BETRAG, der wegfällt, und den muss der Server liefern:
+   * welche Überträge verdrängt werden, entscheidet `displacedByReset`, und die
+   * Regel gehört nicht in eine vierte Fassung im Client
+   * (Drei-Schichten-Pflicht, #164).
+   *
+   * Der Endpunkt rechnet zum ERSTEN des Startwert-Monats, nicht zu „heute":
+   * gefragt ist, was die Inventur im Moment ihres Wirksamwerdens ersetzt.
+   */
+  const { data: verdraengung } = useQuery<{
+    verdraengt: Array<{ year: number; amountCents: number }>;
+    summeCents: number;
+  }>({
+    queryKey: ["initial-balance-verdraengung", customerId, budgetType, month],
+    queryFn: async () => unwrapResult(await api.get(
+      `/budget/${customerId}/initial-balance-verdraengung/${budgetType}?validFrom=${month}`,
+    )),
+    enabled: is45b && /^\d{4}-\d{2}$/.test(month),
+    staleTime: 30000,
+  });
   const priorYearError = is45b
     ? validate45bInitialBalanceNotPriorYear(month, currentYear)
     : null;
@@ -1088,6 +1152,10 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <p>{max45bStartValueExceededMessage(start45bCap)}</p>
           </div>
+        )}
+
+        {hasValidInput && !priorYearError && !exceedsCap && (
+          <VerdraengungsWarnung verdraengung={verdraengung} testId={`warning-initial-balance-verdraengt-${budgetType}`} />
         )}
 
         {hasValidInput && !priorYearError && !exceedsCap && (

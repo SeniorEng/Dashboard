@@ -761,6 +761,93 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
   res.json(allocations);
 }));
 
+/**
+ * Was wuerde ein Startwert ab `validFrom` (YYYY-MM) verdraengen?
+ *
+ * ── Warum das der Server beantwortet und nicht der Client ────────────────
+ * Drei-Schichten-Pflicht (#164), und die Antwort fiel gegen den Client:
+ *
+ *  - **Server**: der Schreib-Handler rechnete die Verdraengung nicht; das
+ *    `GET /initial-balances/:budgetType` kennzeichnet nur BESTEHENDE Zeilen
+ *    nach dem AKTUELLEN Reset. Keiner der beiden beantwortet „was wuerde ein
+ *    noch nicht gespeicherter Startwert ersetzen?".
+ *  - **Midlayer**: die Antwort des Schreib-Handlers liefert rohe Allocations
+ *    ohne die Kennzeichnung — die Information kam also nie beim Client an.
+ *  - **Client**: haette sie aus den Uebertrags-Zeilen selbst ableiten muessen.
+ *    Das heisst `displacedByReset` ein viertes Mal, und zwar dort, wo es
+ *    niemand als Regel erkennt.
+ *
+ * Deshalb hier, ueber dieselbe SSoT (`resetAnchorFrom` + `displacedByReset`),
+ * die auch der Anspruchspfad benutzt.
+ *
+ * ── Stichtag ist der ERSTE DES STARTWERT-MONATS ──────────────────────────
+ * Nicht „heute": gefragt ist, was die Inventur im Moment ihres Wirksamwerdens
+ * ersetzt. Ein Uebertrag, der bis zum 30.06. laeuft, ist am 01.06. noch
+ * gueltig und wird von einem Juni-Startwert ersetzt — am 01.07. waere er
+ * ohnehin verfallen und die Warnung waere falsch.
+ *
+ * Rein lesend.
+ */
+router.get("/:customerId/initial-balance-verdraengung/:budgetType", checkCustomerAccess, asyncHandler("Verdrängungs-Vorschau konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+  const budgetType = req.params.budgetType;
+  const validFrom = String(req.query.validFrom ?? "");
+  if (!/^\d{4}-\d{2}$/.test(validFrom)) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      code: "BUDGET_VERDRAENGUNG_VALID_FROM",
+      message: "`validFrom` muss im Format YYYY-MM angegeben werden.",
+    });
+    return;
+  }
+  if (budgetType !== "entlastungsbetrag_45b") {
+    res.json({ verdraengt: [], summeCents: 0 });
+    return;
+  }
+
+  const { resetAnchorFrom, displacedByReset, allocationValidAt } =
+    await import("../storage/budget/allocation-window");
+  const { db: database } = await import("../lib/db");
+  const { budgetAllocations: allocTable } = await import("@shared/schema");
+  const { and: und, eq: ist, isNull: istNull } = await import("drizzle-orm");
+
+  const [jahrStr, monatStr] = validFrom.split("-");
+  const stichtag = `${validFrom}-01`;
+  const anker = resetAnchorFrom(
+    [{ year: Number(jahrStr), month: Number(monatStr) }],
+    stichtag,
+  );
+
+  const uebertraege = await database
+    .select({
+      id: allocTable.id,
+      year: allocTable.year,
+      amountCents: allocTable.amountCents,
+      validFrom: allocTable.validFrom,
+      expiresAt: allocTable.expiresAt,
+    })
+    .from(allocTable)
+    .where(und(
+      ist(allocTable.customerId, customerId),
+      ist(allocTable.budgetType, "entlastungsbetrag_45b"),
+      ist(allocTable.source, "carryover"),
+      istNull(allocTable.deletedAt),
+    ));
+
+  const verdraengt = uebertraege
+    .filter(z => allocationValidAt({ validFrom: z.validFrom, expiresAt: z.expiresAt }, stichtag))
+    .filter(z => displacedByReset(
+      { validFrom: z.validFrom, expiresAt: z.expiresAt, year: z.year }, anker,
+    ))
+    .map(z => ({ year: z.year, amountCents: z.amountCents }));
+
+  res.json({
+    verdraengt,
+    summeCents: verdraengt.reduce((n, z) => n + z.amountCents, 0),
+  });
+}));
+
 // Task #686: Vor dem Soft-Delete einer Carryover-/Initial-Balance-Allokation
 // will das Admin-UI warnen, wenn schon Termine gegen genau diese Allokation
 // gebucht wurden. `allocationId` an `budget_transactions` ist die Quelle der

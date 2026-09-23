@@ -147,6 +147,43 @@ async function main() {
   } else {
     console.log("  Konsistent — die VD-5-Verengung ist auf diesem Bestand wirkungslos.");
   }
+  /**
+   * 0-EUR-Startwerte — die Frage aus dem Flip-Durchgang, als FESTSTELLUNG.
+   *
+   * Ein 0-EUR-Startwert ist nach Alriks Entscheidung vom 22.09.2026 eine
+   * festgestellte Null, und mit `<=` verdraengt eine Inventur zum 01.01. einen
+   * Uebertrag, der am selben Tag beginnt. Beide Regeln sind einzeln
+   * entschieden; zusammen heissen sie: **der Uebertrag ist vollstaendig weg.**
+   *
+   * Beim Prod-Lauf vom 23.09.2026 war „keiner der 21 hat einen 0-EUR-Startwert"
+   * aus den kleinsten `neu`-Werten ABGELEITET. Diese Abfrage macht daraus eine
+   * Messung — die Ableitung traegt, solange kein Kunde einen 0-EUR-Startwert
+   * neben einem gueltigen Uebertrag hat, und genau das steht hier.
+   */
+  const nullStartwerte = await db
+    .select({ customerId: budgetAllocations.customerId, validFrom: budgetAllocations.validFrom })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      eq(budgetAllocations.source, "initial_balance"),
+      eq(budgetAllocations.amountCents, 0),
+      isNull(budgetAllocations.deletedAt),
+    ));
+  console.log("");
+  if (nullStartwerte.length === 0) {
+    console.log("0-EUR-Startwerte: keine. Die Kombination „festgestellte Null + <=\" tritt");
+    console.log("  im Bestand nicht auf.");
+  } else {
+    console.log(`\u26a0 0-EUR-Startwerte: ${nullStartwerte.length} Zeile(n) bei `
+      + `${new Set(nullStartwerte.map(z => z.customerId)).size} Kunde(n):`);
+    for (const z of nullStartwerte.slice(0, 20)) {
+      console.log(`    Kunde ${z.customerId}, ab ${z.validFrom}`);
+    }
+    console.log("  Bei diesen Kunden heisst die Verdraengung NICHT „Startwert statt");
+    console.log("  Uebertrag\", sondern „nichts statt Uebertrag\" — ein anderer Sachverhalt");
+    console.log("  als bei Kunde 89. Vor einer Umbuchung einzeln ansehen.");
+  }
+
   console.log("");
   console.log(`Kunden mit aktiver initial_balance-Zeile: ${kunden.length}`);
   console.log(`Stichtage: ${stichtage.join(", ")}`);

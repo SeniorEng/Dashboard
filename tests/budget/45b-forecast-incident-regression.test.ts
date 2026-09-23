@@ -156,14 +156,48 @@ describe("Task #1395 — §45b Forecast Prod-Inzident (Übertrag + Startwert, Ju
 
     const net = await netAvailable45bAt(h.customerId, JUNE_HORIZON, { projectFuture: true, holds: "ignore" });
 
-    // Übertrag (1.572) + Startwert (250) + 1× Monats-Aufstockung Juni (65,50) = 1.887,50 €.
-    expect(net.allocatedCents).toBe(CARRYOVER_CENTS + INITIAL_BALANCE_CENTS + MONTHLY_45B_CENTS);
-    // Am 30.06. ist der Übertrag noch gültig → die #1340-Exklusion ist leer.
+    /**
+     * ── Seit dem Scharfschalten der Inventur-Lesart (23.09.2026) ─────────
+     * Der Startwert 250 € ab MAI ersetzt den Übertrag aus dem Vorjahr. Die
+     * Allokation ist damit Startwert + Juni-Aufstockung = 315,50 € statt der
+     * additiven 1.887,50 €.
+     *
+     * **Der Inzident selbst kehrt dadurch NICHT zurück** — und das ist die
+     * Zusage dieses Tests, nicht die Größenordnung. Seine Signatur war ein
+     * NEGATIVER Forecast aus einer Asymmetrie: Übertrag fällt aus der
+     * Allokation, sein Verbrauch bleibt stehen. Genau das wird unten geprüft.
+     *
+     * Warum die Exklusion hier leer BLEIBT: die Buchung läuft seit dem Flip
+     * selbst unter der scharfen Regel und landet gar nicht mehr auf dem
+     * verdrängten Übertrag. Buchung und Anzeige folgen derselben Grenze —
+     * damit kann die Asymmetrie für NEUE Buchungen nicht mehr entstehen.
+     * (Für Altbuchungen aus der Zeit davor greift `excludedSpecialAllocationIds`.)
+     */
+    expect(
+      net.allocatedCents,
+      "die Allokation trägt nicht Startwert + Aufstockung",
+    ).toBe(INITIAL_BALANCE_CENTS + MONTHLY_45B_CENTS);
+
+    // Der Kern des Inzidents, unverändert: keine Doppelbelastung.
     expect(net.excludedConsumedNetCents).toBe(0);
-    // Der Verbrauch wird genau einmal abgezogen (keine Doppelbelastung).
-    expect(net.consumedNetCents).toBe(consumed);
-    // Vorzeichenbehaftete Verfügbarkeit (Alrik-Gate #95) ist deutlich positiv.
-    expect(net.allocatedCents - net.consumedNetCents).toBeGreaterThan(150000);
+    expect(net.consumedNetCents, "der Verbrauch wird nicht genau einmal abgezogen").toBe(consumed);
+
+    // Und die Gegenprobe in der ALTEN Lesart — ohne sie wäre nicht zu sehen,
+    // dass sich die Zahl durch die Verdrängung geändert hat und nicht durch
+    // einen Fehler in der Aufstockung.
+    const alt = await netAvailable45bAt(h.customerId, JUNE_HORIZON, {
+      projectFuture: true, holds: "ignore", resetDisplacesAllSources: false,
+    });
+    expect(
+      alt.allocatedCents,
+      "in der alten Lesart fehlt der Übertrag ebenfalls — dann liegt es nicht an der Verdrängung",
+    ).toBe(CARRYOVER_CENTS + INITIAL_BALANCE_CENTS + MONTHLY_45B_CENTS);
+
+    // Vorzeichenbehaftete Verfügbarkeit (Alrik-Gate #95) bleibt positiv.
+    expect(
+      net.allocatedCents - net.consumedNetCents,
+      "die vorzeichenbehaftete Verfügbarkeit ist negativ — das IST die Inzident-Signatur",
+    ).toBeGreaterThan(0);
   });
 
   it("„Verfügbar (nach Planung)“ bleibt stark positiv und meldet KEINEN Fehlbetrag (nie -184,02 €)", async () => {
@@ -217,7 +251,24 @@ describe("Task #1395 — §45b Forecast Prod-Inzident (Übertrag + Startwert, Ju
     // Aufstockung − Verbrauch) und ist damit weit GRÖSSER als die Monatsrate.
     // (Stünde hier ≤ MONTHLY_45B_CENTS, wäre der alte Fenster-Cap zurück.)
     expect(s45b.availableCents).toBeGreaterThan(MONTHLY_45B_CENTS);
-    expect(s45b.availableCents).toBeGreaterThan(150000);
+    /**
+     * Hier stand `> 150000`. Diese Schwelle kodierte die additive Lesart
+     * (Übertrag 1.572 € im Topf) und nicht die Zusage des Tests.
+     *
+     * Die Zusage ist: „bleibt stark positiv und meldet KEINEN Fehlbetrag (nie
+     * -184,02 €)". Seit dem Scharfschalten trägt der Topf den Übertrag nicht
+     * mehr — geprüft wird deshalb, was der Titel behauptet, nicht die alte
+     * Größenordnung.
+     */
+    expect(s45b.availableCents, "der Topf ist leer oder negativ").toBeGreaterThan(0);
+    expect(
+      s45b.availableAfterPlannedCents,
+      "„Verfügbar (nach Planung)“ ist negativ — genau die Inzident-Signatur",
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      s45b.availableAfterPlannedCents,
+      "der -184,02-€-Regressionswert ist zurück",
+    ).not.toBe(-18402);
     // „Verfügbar (diesen Monat)" spiegelt denselben ungekappten Topf-Rest 1:1.
     expect(s45b.currentMonthAvailableCents).toBe(Math.max(0, s45b.availableCents));
   });

@@ -129,12 +129,16 @@ describe("§45b-Verdrängung — Anspruch und Übertrags-Summe aus derselben Reg
     // Hier steht, WELCHE der beiden Seiten sich bewegen muss.
     const id = await kundeMitStartwertUndUebertrag();
     try {
-      const ohne = await getTotalCarryoverCents(id, STICHTAG);
+      // Die alte Lesart ausdruecklich — der Default ist seit dem
+      // Scharfschalten die Inventur-Lesart.
+      const ohne = await getTotalCarryoverCents(id, STICHTAG, undefined, {
+        resetDisplacesAllSources: false,
+      });
       const mit = await getTotalCarryoverCents(id, STICHTAG, undefined, {
         resetDisplacesAllSources: true,
       });
 
-      expect(ohne, "ohne Flag zählt der Übertrag unverändert mit").toBe(UEBERTRAG_CENTS);
+      expect(ohne, "mit `false` zählt der Übertrag nicht mehr unverändert mit").toBe(UEBERTRAG_CENTS);
       expect(
         mit,
         "mit Flag zählt der vom Startwert ersetzte Übertrag weiterhin mit",

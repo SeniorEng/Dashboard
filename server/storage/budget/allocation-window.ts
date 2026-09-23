@@ -124,7 +124,7 @@ export function allocationValidAtWhere(asOfDate: string): SQL | undefined {
  *
  * Umschalten heisst: diese Zeile. Nicht neun.
  */
-export const RESET_DISPLACES_ALL_SOURCES_DEFAULT = false;
+export const RESET_DISPLACES_ALL_SOURCES_DEFAULT = true;
 
 /**
  * Verdraengt der Startwert-Reset diese Zuweisung?
