@@ -137,20 +137,33 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
    * sperrt den Knopf über genau dieses Feld, und er soll ihn hier nicht mehr
    * sperren.
    *
-   * ── Warum „die Budget-Sperre entfällt" und nicht „der Termin kann
-   *    angelegt werden" (Gate 2 zu #167, S1) ──────────────────────────
+   * ── „voraussichtlich" ist nicht verhandelbar ────────────────────────
    * Die Vorschau rechnet NICHT mit derselben Kostenbasis wie `planHold`:
    * das Formular schickt nur Leistungen, `getPlannedHoldInputs` gibt dem Tor
    * zusätzlich Fahrt- und Kunden-Kilometer, und beim Zwei-Kräfte-Einsatz
    * reserviert `planHold` ZWEIMAL die vollen Kosten.
    *
-   * Solange die Vorschau nur sperrte, war das folgenlos. Eine aktive Zusage
-   * („kann angelegt werden") wäre aber ausgerechnet in dem Regime falsch, in
-   * dem das Budget gerade eben reicht — also dort, wo ein km-Posten oder das
-   * zweite Bein in ein 422 kippt.
+   * Solange die Vorschau nur sperrte, war das folgenlos. Eine Zusage wäre
+   * aber ausgerechnet in dem Regime falsch, in dem das Budget gerade eben
+   * reicht — also dort, wo ein km-Posten oder das zweite Bein in ein 422
+   * kippt.
    *
-   * Der Satz beschreibt deshalb, was die Vorschau WEISS (die Sperre entfällt),
-   * nicht, was sie nicht wissen kann (dass das Speichern gelingt).
+   * **„Budget reicht" ohne Vorbehalt wäre genau diese Zusage.** Das eine
+   * Wort trägt den ganzen Unterschied; wer es wegkürzt, verspricht etwas,
+   * das die Vorschau nicht wissen kann.
+   *
+   * ── Was Alrik gestrichen hat, und warum das richtig ist ──────────────
+   * Eine frühere Fassung nannte zusätzlich „Heute fehlen davon noch X €"
+   * und „sie kommen mit der Monatsaufstockung", und schloss mit „Die
+   * Budget-Sperre entfällt damit."
+   *
+   * Alle drei erklären das SYSTEM statt die LAGE: die Zusammensetzung des
+   * Topfes, einen Fachbegriff, und das Verhalten der Sperre. **Die
+   * Mitarbeiterin trägt einen Termin ein, sie rechnet nicht nach.**
+   *
+   * Geblieben sind die zwei Zahlen, die sie braucht, und die Monatsbindung
+   * („im Termin-Monat") — eine eigene Anforderung aus #1916, weil sich die
+   * Zahl sonst auf den falschen Zeitraum lesen lässt.
    */
   /**
    * Massgeblich ist die PROJIZIERTE Zahl — nicht das Maximum.
@@ -178,20 +191,14 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
   const massgeblich = input.projectedAvailableCents ?? availableCents;
 
   if (totalCostCents <= massgeblich && totalCostCents > availableCents) {
-    const fehltHeute = formatEuroDE(totalCostCents - availableCents);
     return {
       kind: "erst_im_monat_gedeckt",
       warning:
-        `Im Termin-Monat reicht das Budget (${formatEuroDE(massgeblich)} verfügbar, `
-        + `Termin kostet ${formatEuroDE(totalCostCents)}). `
-        + `Heute fehlen davon noch ${fehltHeute} — sie kommen mit der `
-        // NICHT „der Termin kann angelegt werden" — siehe Docblock oben.
-        // Die Vorschau kennt die Fahrt-Kilometer nicht und weiss nichts vom
-        // Zwei-Kraefte-Einsatz, bei dem `planHold` ZWEIMAL reserviert. Sie
-        // kann das Gelingen des Speicherns also nicht zusagen. Wer den Satz
-        // „hilfreicher" macht, macht ihn falsch.
-        + `Monatsaufstockung. Die Budget-Sperre entfällt damit; die Beträge `
-        + `beziehen sich auf den Monat des Termins.`
+        // „voraussichtlich" NICHT wegkürzen — siehe Docblock oben. Ohne das
+        // Wort ist der Satz eine Zusage über etwas, das die Vorschau nicht
+        // wissen kann (Fahrt-Kilometer, Zwei-Kräfte-Einsatz).
+        `Budget reicht voraussichtlich — Termin kostet ${formatEuroDE(totalCostCents)}, `
+        + `im Termin-Monat verfügbar: ${formatEuroDE(massgeblich)}.`
         + (input.pflegegrad1OhnePrivatzahlung ? " Kein Ausweichbudget verfügbar." : ""),
       isHardBlock: false,
       privateCents: 0,

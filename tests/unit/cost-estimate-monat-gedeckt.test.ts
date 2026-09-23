@@ -31,8 +31,8 @@ describe("Kostenschätzung — projizieren, aber warnen statt sperren", () => {
   it("MG-1 – projiziert reicht, heute nicht: anlegbar mit Warnung", () => {
     const o = classifyCostEstimate({
       ...BASIS,
-      totalCostCents: 100_00,
-      availableCents: 47_00,        // Stand heute
+      totalCostCents: 57_00,           // Alriks Muster-Zahlen
+      availableCents: 47_00,           // Stand heute
       projectedAvailableCents: 178_00, // mit der Aufstockung des Termin-Monats
     });
 
@@ -40,19 +40,32 @@ describe("Kostenschätzung — projizieren, aber warnen statt sperren", () => {
     // Das Entscheidende: der Knopf bleibt offen. Der Client sperrt über
     // genau dieses Feld.
     expect(o.isHardBlock, "der Termin bleibt gesperrt — genau der gemeldete Fehler").toBe(false);
-    // Die Warnung nennt ZAHLEN, keine Vermutung, und sagt, worauf sie sich
-    // beziehen. „Reicht schon noch" wäre wertlos.
-    expect(o.warning).toContain("178,00");
-    expect(o.warning).toContain("100,00");
-    expect(o.warning, "die Differenz zu heute fehlt").toContain("53,00");
-    expect(o.warning, "der Monatsbezug fehlt").toContain("Monat des Termins");
-    // Und: eine AUSSAGE, keine Zusage. Die Vorschau rechnet nicht mit
-    // derselben Kostenbasis wie `planHold` (km fehlen, Zwei-Kräfte-Einsatz
-    // reserviert doppelt) — sie kann den Erfolg des Speicherns nicht
-    // versprechen, nur das Wegfallen der Sperre (Gate 2 zu #167, S1).
-    expect(o.warning).toContain("Budget-Sperre entfällt");
-    expect(o.warning, "die Vorschau verspricht etwas, das sie nicht weiß")
-      .not.toContain("kann angelegt werden");
+    // Die Warnung nennt die zwei Zahlen, die die Mitarbeiterin braucht —
+    // Terminkosten und Monats-Verfügbarkeit. Die frühere Fassung erklärte
+    // zusätzlich die Zusammensetzung des Topfes („heute fehlen noch X",
+    // „kommen mit der Monatsaufstockung"); das beschreibt das System statt
+    // die Lage, und wer einen Termin einträgt, rechnet nicht nach.
+    expect(o.warning).toContain("57,00");   // Terminkosten
+    expect(o.warning).toContain("178,00");  // im Termin-Monat verfügbar
+    // Die Monatsbindung der Zahl ist eine eigene Anforderung aus #1916 —
+    // ohne sie liest sich der Betrag auf den falschen Zeitraum.
+    expect(o.warning, "der Monatsbezug fehlt").toContain("im Termin-Monat verfügbar");
+
+    /**
+     * Und „voraussichtlich" — das Wort trägt den ganzen Unterschied.
+     *
+     * Die Vorschau rechnet nicht mit derselben Kostenbasis wie `planHold`:
+     * Fahrt-Kilometer fehlen, und beim Zwei-Kräfte-Einsatz reserviert
+     * `planHold` ZWEIMAL. „Budget reicht" ohne Vorbehalt wäre eine Zusage
+     * über etwas, das die Vorschau nicht wissen kann.
+     *
+     * Dieser Test steht hier, damit das Wort nicht beim nächsten Kürzen
+     * verschwindet — die Begründung allein im Docblock hat schon einmal
+     * nicht gereicht.
+     */
+    expect(o.warning, "„voraussichtlich“ fehlt — der Satz ist damit eine Zusage")
+      .toContain("voraussichtlich");
+    expect(o.warning).not.toContain("kann angelegt werden");
   });
 
   it("MG-2 – projiziert reicht NICHT: harter Stopp bleibt", () => {
