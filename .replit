@@ -14,7 +14,7 @@ deploymentTarget = "autoscale"
 # beendet den Build mit exit!=0, Replit bricht den Deploy ab, die laufende
 # Version bleibt oben. Derselbe Aufruf steht als Pre-Deployment-Command in
 # Coolify — ein Skript, zwei Hooks.
-build = ["sh", "-c", "npm run build"]
+build = ["sh", "-c", "npm run build && bash scripts/migrate.sh --force"]
 run = [
   "sh",
   "-c",
