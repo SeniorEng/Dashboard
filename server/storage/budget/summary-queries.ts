@@ -14,12 +14,12 @@ import { customersRepo } from "../../repos";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import type { AppointmentBudgetFit } from "@shared/types";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
-import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow } from "./allocation-storage";
+import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow, readResetAnchor } from "./allocation-storage";
 import { netAvailable45bAt } from "./net-available-45b";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { computeCapSlot } from "./cap-calculator";
 import { readUnifiedBudgetAvailability, type PotAvailability, type UnifiedBudgetAvailability } from "./unified-reader";
-import { allocationValidAtWhere } from "./allocation-window";
+import { allocationValidAtWhere, notDisplacedByResetWhere } from "./allocation-window";
 import { budgetAllocationsRepo } from "../../repos";
 
 // Hinweis (Task #603): §45b bleibt ein Jahrestopf — KEIN harter Monats-Cap.
@@ -28,8 +28,25 @@ import { budgetAllocationsRepo } from "../../repos";
 // reduziert. Ist kein Wert konfiguriert, liefert das Summary `null` (entspricht
 // dem gesetzlichen Default 131 €/Monat).
 
-export async function getTotalCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
+/**
+ * Summe der zum Stichtag zaehlenden Uebertraege.
+ *
+ * `resetDisplacesAllSources` muss hier ankommen, weil diese Zahl von
+ * `allocatedCents` ABGEZOGEN wird (`fifo-breakdown`: `allocatedCur = A −
+ * allocatedCarry`). Kennt die eine Seite die Verdraengung und die andere
+ * nicht, kippt der laufende Topf ins Negative — gemessen −1.048,00 EUR — und
+ * der Client filtert ihn ueber `p.allocatedCents > 0` still weg.
+ */
+export async function getTotalCarryoverCents(
+  customerId: number,
+  asOfDate: string,
+  _tx?: DbClient,
+  opts?: { resetDisplacesAllSources?: boolean },
+): Promise<number> {
   const d = _tx ?? db;
+  const resetAnchor = opts?.resetDisplacesAllSources
+    ? await readResetAnchor(customerId, asOfDate, d)
+    : null;
   const carryoverAllocations = await budgetAllocationsRepo.selectColumnsFrom({
     total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
   }, d)
@@ -38,21 +55,31 @@ export async function getTotalCarryoverCents(customerId: number, asOfDate: strin
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       eq(budgetAllocations.source, "carryover"),
       isNull(budgetAllocations.deletedAt),
-      allocationValidAtWhere(asOfDate)
+      allocationValidAtWhere(asOfDate),
+      notDisplacedByResetWhere(resetAnchor)
     ));
 
   return Number(carryoverAllocations[0]?.total ?? 0);
 }
 
-async function getAvailableCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
+async function getAvailableCarryoverCents(
+  customerId: number,
+  asOfDate: string,
+  _tx?: DbClient,
+  opts?: { resetDisplacesAllSources?: boolean },
+): Promise<number> {
   const d = _tx ?? db;
+  const resetAnchor = opts?.resetDisplacesAllSources
+    ? await readResetAnchor(customerId, asOfDate, d)
+    : null;
   const carryoverAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       eq(budgetAllocations.source, "carryover"),
       isNull(budgetAllocations.deletedAt),
-      allocationValidAtWhere(asOfDate)
+      allocationValidAtWhere(asOfDate),
+      notDisplacedByResetWhere(resetAnchor)
     ));
 
   if (carryoverAllocations.length === 0) return 0;
@@ -93,7 +120,20 @@ async function getAvailableCarryoverCents(customerId: number, asOfDate: string, 
   return totalAvailable;
 }
 
-export async function getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate: string = todayISO()): Promise<BudgetSummary> {
+export async function getBudgetSummary(
+  customerId: number,
+  _preferences?: CustomerBudgetPreferences | undefined,
+  _typeSettings?: CustomerBudgetTypeSetting[],
+  asOfDate: string = todayISO(),
+  /**
+   * `resetDisplacesAllSources` — muss an BEIDE Seiten gehen.
+   *
+   * `totalAllocatedCents` kommt aus `calculateAllocatedCents`, `carryoverCents`
+   * aus der Abfrage darunter. Bekaeme nur eine von beiden das Flag, meldete das
+   * Summary einen Uebertrag, den der Anspruch nicht mehr enthaelt.
+   */
+  opts?: { resetDisplacesAllSources?: boolean },
+): Promise<BudgetSummary> {
   const [preferences, typeSettings, customerRows] = await Promise.all([
     _preferences !== undefined ? _preferences : getBudgetPreferences(customerId),
     _typeSettings ?? readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }),
@@ -110,15 +150,27 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   const currentMonth = todayDate.getMonth() + 1;
   const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
 
+  // Der Anker einmal fuer alle Abfragen dieses Aufrufs — `notDisplacedByResetWhere`
+  // traegt die Quellen-Grenze selbst, `allocValidWhere` darf deshalb weiterhin
+  // ueber ALLE Quellen laufen.
+  const resetAnchor = opts?.resetDisplacesAllSources
+    ? await readResetAnchor(customerId, today)
+    : null;
+
   const allocValidWhere = and(
     eq(budgetAllocations.customerId, customerId),
     eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
     isNull(budgetAllocations.deletedAt),
     allocationValidAtWhere(today),
+    notDisplacedByResetWhere(resetAnchor),
   );
 
   const [totalAllocatedCents, currentYearAllocatedCents, txResult, carryoverResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([
-    calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { asOfDate: today }, undefined, preferences, typeSettings),
+    calculateAllocatedCents(
+      customerId, "entlastungsbetrag_45b",
+      { asOfDate: today, resetDisplacesAllSources: opts?.resetDisplacesAllSources },
+      undefined, preferences, typeSettings,
+    ),
 
     calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: currentYear, asOfDate: today }, undefined, preferences, typeSettings),
 

@@ -20,13 +20,14 @@
  *  existiert — die bekannte manual_adjustment-Schatten-Drift ist Phase-6-Thema
  *  und wird hier bewusst NICHT übermalt.)
  */
-import { allocationValidAtWhere } from "./allocation-window";
+import { allocationValidAtWhere, notDisplacedByResetWhere } from "./allocation-window";
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
 import { and, eq, lte, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { appointmentsRepo, budgetAllocationsRepo } from "../../repos";
 import { todayISO } from "@shared/utils/datetime";
 import { readUnifiedBudgetAvailability } from "./unified-reader";
+import { readResetAnchor } from "./allocation-storage";
 import { activeInvoiceCondition } from "../../lib/appointment-invoiced";
 
 export type Budget45bFifoPotType = "carryover" | "current_year";
@@ -59,9 +60,24 @@ type ConsumedStates = { billed: number; documented: number };
 export async function readBudget45bFifoBreakdown(
   customerId: number,
   asOfDate: string = todayISO(),
+  /**
+   * `resetDisplacesAllSources` MUSS hier ankommen und an BEIDE Quellen unten
+   * weitergereicht werden.
+   *
+   * `allocatedCur = A − allocatedCarry` zieht zwei Zahlen voneinander ab, die
+   * aus verschiedenen Ecken kommen: `A` aus `calculateAllocated45b` (kennt die
+   * Verdraengung), `allocatedCarry` aus handgeschriebenem SQL (kannte sie
+   * nicht). Gemessen fiel `allocatedCur` damit auf **−1.048,00 EUR** — und der
+   * Client filtert einen negativen Topf ueber `p.allocatedCents > 0` still
+   * weg. Der Fehler zeigt sich dann als FEHLENDE Zeile, was aussieht wie
+   * „kein Uebertrag vorhanden".
+   */
+  opts?: { resetDisplacesAllSources?: boolean },
 ): Promise<Budget45bFifoBreakdown> {
   // ---- 1) Summen aus dem EINEN Verfügbarkeits-Reader (SSoT) ----
-  const unified = await readUnifiedBudgetAvailability(customerId, asOfDate);
+  const unified = await readUnifiedBudgetAvailability(customerId, asOfDate, undefined, {
+    resetDisplacesAllSources: opts?.resetDisplacesAllSources,
+  });
   const pot = unified.pots.entlastungsbetrag_45b;
   const A = pot.allocatedCents;
   const C = pot.consumedNetCents;
@@ -69,6 +85,9 @@ export async function readBudget45bFifoBreakdown(
   const V = pot.availableCents;
 
   // ---- 2) Übertrags-Allocations (identischer Filter wie FIFO-Engine) ----
+  const resetAnchor = opts?.resetDisplacesAllSources
+    ? await readResetAnchor(customerId, asOfDate)
+    : null;
   const carryoverAllocations = await budgetAllocationsRepo
     .selectColumnsFrom({ id: budgetAllocations.id, amountCents: budgetAllocations.amountCents, expiresAt: budgetAllocations.expiresAt })
     .where(and(
@@ -82,6 +101,9 @@ export async function readBudget45bFifoBreakdown(
       // Gleichschritt haengt statt an einer gemeinsamen Funktion, gilt nur so
       // lange, bis jemand eine Seite anfasst.
       allocationValidAtWhere(asOfDate),
+      // Und dieselbe Verdraengung wie `A` oben — sonst subtrahieren sich zwei
+      // Zahlen, die verschiedene Regeln kennen.
+      notDisplacedByResetWhere(resetAnchor),
     ));
 
   const carryoverIds = carryoverAllocations.map(a => a.id);

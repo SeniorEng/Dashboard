@@ -22,7 +22,12 @@ import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
-import { allocationValidAt, displacedByReset } from "./allocation-window";
+import {
+  allocationValidAt,
+  displacedByReset,
+  resetAnchorFrom,
+  type ResetAnchor,
+} from "./allocation-window";
 import { getEarliestCareLevelStart } from "../customer-mgmt/care-level";
 import {
   carryoverWindowFor,
@@ -653,6 +658,42 @@ export async function read45bAllocationDiagnostics(
   return calculateAllocated45b(customerId, opts, d, typeSettings);
 }
 
+/**
+ * Der Reset-Anker eines Kunden zum Stichtag — fuer die SQL-Pfade.
+ *
+ * ERSETZT die Alternative, den Anker an jeder der fuenf SQL-Stellen erneut
+ * abzuleiten. Die Auswahlregel selbst liegt in `resetAnchorFrom`; hier steht
+ * nur, WELCHE Zeilen sie zu sehen bekommt — dieselben, die
+ * `calculateAllocated45b` als `initialBalanceMonths` filtert
+ * (`source = 'initial_balance'`, Monat gesetzt, nicht geloescht).
+ *
+ * Bewusst KEIN Aufruf von `read45bAllocationDiagnostics`: das waere die ganze
+ * Anspruchsrechnung ein zweites Mal, nur um zwei Zahlen abzuholen.
+ *
+ * Rein lesend.
+ */
+export async function readResetAnchor(
+  customerId: number,
+  asOfDate: string,
+  _tx?: DbClient,
+): Promise<ResetAnchor | null> {
+  const d = _tx ?? db;
+  const zeilen = await budgetAllocationsRepo.selectColumnsFrom({
+    year: budgetAllocations.year,
+    month: budgetAllocations.month,
+  }, d)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+      eq(budgetAllocations.source, "initial_balance"),
+      isNull(budgetAllocations.deletedAt),
+    ));
+  const monate = zeilen
+    .filter((z): z is { year: number; month: number } => z.month != null)
+    .map((z) => ({ year: z.year, month: z.month }));
+  return resetAnchorFrom(monate, asOfDate);
+}
+
 async function calculateAllocated45b(
   customerId: number,
   opts: { year?: number; asOfDate?: string; projectFuture?: boolean; resetDisplacesAllSources?: boolean },
@@ -749,23 +790,20 @@ async function calculateAllocated45b(
   // Ein rein zukuenftiger Startwert (M-Start > Stichtag) ist noch nicht wirksam
   // und loest keinen Reset aus (rueckwirkende Reads bleiben korrekt). Im
   // `{year}`-Pool-Modus gibt es keinen Reset (out of scope, s.u.).
+  //
+  // Die Auswahlregel selbst steht in `resetAnchorFrom` (allocation-window.ts).
+  // Sie stand frueher als Schleife hier — seit die SQL-Pfade denselben Anker
+  // brauchen (Vorbedingung 1), waere sie sonst die sechste Fassung derselben
+  // Frage. Der `{year}`-Gate bleibt hier: er ist eine Aussage ueber die
+  // gestellte Frage, nicht ueber die Zuweisungen.
   const resetDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
-  let resetYear = 0, resetMonth = 0;
-  let hasReset = false;
-  if (opts.year == null) {
-    for (const ib of initialBalanceMonths) {
-      const ibStart = `${ib.year}-${String(ib.month).padStart(2, "0")}-01`;
-      if (ibStart > resetDateLimit) continue;
-      if (!hasReset || ib.year > resetYear || (ib.year === resetYear && ib.month > resetMonth)) {
-        resetYear = ib.year;
-        resetMonth = ib.month;
-        hasReset = true;
-      }
-    }
-  }
-  const resetCutoffDate = hasReset
-    ? `${resetYear}-${String(resetMonth).padStart(2, "0")}-01`
+  const resetAnchor = opts.year == null
+    ? resetAnchorFrom(initialBalanceMonths, resetDateLimit)
     : null;
+  const hasReset = resetAnchor != null;
+  const resetYear = resetAnchor?.year ?? 0;
+  const resetMonth = resetAnchor?.month ?? 0;
+  const resetCutoffDate = resetAnchor?.cutoffDate ?? null;
 
   // Task #1812 — §45b-Startwert = Reset/Re-Baseline (nicht mehr additiv).
   // Der `allocStart`-Shift auf den Monat NACH dem Startwert wird NICHT mehr hier
@@ -864,7 +902,7 @@ async function calculateAllocated45b(
     a.source === "carryover" &&
     allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, fensterBis, verfallAb) &&
     (!opts.resetDisplacesAllSources
-      || !displacedByReset(a, resetCutoffDate ? { cutoffDate: resetCutoffDate, year: resetYear } : null));
+      || !displacedByReset(a, resetAnchor));
   const validCarryoverTargetYears = existingAllocations
     .filter(carryoverCounted)
     .map(a => a.year);

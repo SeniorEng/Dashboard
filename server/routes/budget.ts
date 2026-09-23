@@ -583,20 +583,28 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
     res.json(allocations.map(a => ({ ...a, zaehltNicht: false, ersetztDurchStartwertMonat: null })));
     return;
   }
-  const { read45bAllocationDiagnostics } = await import("../storage/budget/allocation-storage");
+  const { read45bAllocationDiagnostics, readResetAnchor } = await import("../storage/budget/allocation-storage");
   const { allocationValidAt, displacedByReset } = await import("../storage/budget/allocation-window");
   const heute = todayISO();
   const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: heute });
   const ausgeschlossen = new Set(diagnose.excludedSpecialAllocationIds);
-  // `resetYear` kommt aus der Diagnose, nicht aus `resetCutoffDate.slice(0, 4)`.
-  // Die Ableitung waere rechnerisch richtig und trotzdem die siebte Stelle,
-  // an der dieselbe Groesse ein zweites Mal entsteht — sie haelt nur, solange
-  // das Datumsformat bleibt (Gate 2 zu #166).
-  const resetAnker = diagnose.resetCutoffDate != null && diagnose.resetYear != null
-    ? { cutoffDate: diagnose.resetCutoffDate, year: diagnose.resetYear }
-    : null;
-  const resetMonat = diagnose.resetCutoffDate
-    ? `${diagnose.resetCutoffDate.slice(5, 7)}/${diagnose.resetCutoffDate.slice(0, 4)}`
+  /**
+   * Der Anker kommt aus `readResetAnchor` — derselben Funktion, die auch die
+   * SQL-Pfade fragen.
+   *
+   * Vorher wurde er hier aus `diagnose.resetCutoffDate` + `diagnose.resetYear`
+   * zusammengesetzt und der Monat per `slice(5, 7)` herausgeschnitten. Das
+   * war rechnerisch richtig und trotzdem eine eigene Ableitung: sie haelt nur,
+   * solange das Datumsformat bleibt, und sie konnte von den SQL-Pfaden
+   * abweichen, ohne dass es jemand merkt.
+   *
+   * Gleiche Eingaben wie die Diagnose oben (`asOfDate: heute`, kein
+   * `{year}`-Modus) — also per Konstruktion derselbe Anker, nicht nur
+   * zufaellig derselbe Wert.
+   */
+  const resetAnker = await readResetAnchor(customerId, heute);
+  const resetMonat = resetAnker
+    ? `${String(resetAnker.month).padStart(2, "0")}/${resetAnker.year}`
     : null;
 
   res.json(allocations.map(a => {

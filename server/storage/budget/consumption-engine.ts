@@ -13,7 +13,7 @@ import type { DbClient, CascadeResult } from "./types";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
-import { syncCarryoverAndExpiry, calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
+import { syncCarryoverAndExpiry, calculateAllocatedCents, getExcluded45bConsumption, readResetAnchor } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { resolveEffectivePotConfig, resolvePotEligibilityAt } from "@shared/domain/budgets";
 import { planCascade } from "@shared/domain/budget/plan-cascade";
@@ -21,7 +21,7 @@ import { isPrivatePaymentAllowed, isSelbstzahlerBillingType } from "@shared/doma
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
-import { allocationValidAtWhere } from "./allocation-window";
+import { allocationValidAtWhere, notDisplacedByResetWhere } from "./allocation-window";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
 import { auditService } from "../../services/audit";
 
@@ -157,9 +157,26 @@ export async function computeFifoAvailability(
   budgetType: string,
   transactionDate: string,
   _tx?: DbClient,
+  /**
+   * `resetDisplacesAllSources` — der BUCHUNGS-Pfad.
+   *
+   * Die vier uebrigen Stellen sind Lesepfade; diese hier entscheidet, gegen
+   * welchen Topf tatsaechlich gebucht wird. Bliebe sie aussen vor, koennte die
+   * Kaskade weiterhin einen Uebertrag belasten, den der Anspruch nicht mehr
+   * fuehrt — genau die Wirkungskette aus dem Stammticket (#1915), nur mit
+   * umgekehrtem Vorzeichen.
+   *
+   * Der Anker wird nur fuer §45b geholt: `readResetAnchor` ist eine
+   * §45b-Frage, und die Inventur-Lesart gibt es fuer die anderen Toepfe nicht.
+   */
+  opts?: { resetDisplacesAllSources?: boolean },
 ): Promise<FifoAvailability> {
   const d = _tx ?? db;
   const today = transactionDate;
+
+  const resetAnchor = opts?.resetDisplacesAllSources && budgetType === "entlastungsbetrag_45b"
+    ? await readResetAnchor(customerId, today, d)
+    : null;
 
   let specialAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
@@ -167,6 +184,7 @@ export async function computeFifoAvailability(
       eq(budgetAllocations.budgetType, budgetType),
       isNull(budgetAllocations.deletedAt),
       allocationValidAtWhere(today),
+      notDisplacedByResetWhere(resetAnchor),
       sql`${budgetAllocations.source} IN ('carryover', 'initial_balance', 'manual_adjustment')`
     ))
     .orderBy(
