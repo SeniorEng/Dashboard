@@ -66,17 +66,6 @@ export interface CustomerListParams extends PaginationParams {
   sortOrder?: string;
 }
 
-interface BudgetSummaryInfo {
-  customerId: number;
-  totalAllocatedCents: number;
-  totalUsedCents: number;
-  availableCents: number;
-  carryoverCents: number;
-  carryoverExpiresAt: string | null;
-  currentYearAllocatedCents: number;
-  monthlyLimitCents: number | null;
-  currentMonthUsedCents: number;
-}
 
 interface CustomerNeedsAssessmentInfo {
   id: number;
