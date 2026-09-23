@@ -290,6 +290,30 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   Sorgfalt aussieht: man baut eine Unterscheidung ein, um genau prüfen zu
   können. Der Mutations-Gegencheck fängt sie trotzdem — er fragt nicht, worauf
   der Test schaut, sondern ob er rot wird.
+- **Rot ohne Aussage — die Gegenklasse.** Bis hierhin geht es um Prüfungen, die
+  grün bleiben, ohne etwas zu sichern. Der umgekehrte Fall kostet genauso:
+  **eine Probe schlägt an, kann aber nicht sagen, ob das Gemessene die Ursache
+  ist.** Sie blockiert dann, ohne eine Erkenntnis zu liefern — und das ist
+  schlimmer als kein Signal, weil die Arbeit trotzdem stehenbleibt.
+
+  Gemessen am 23.09.2026: das §45b-Mess-Skript prüfte „entsteht bei scharfem
+  Flag ein negativer Topf?" und meldete bei einem Produktivkunden
+  `NEGATIVER TOPF, Zahlen nicht verwenden`. Die Probe rechnete den Wert
+  **nur mit Flag**. Ob die neue Regel ihn verursacht hatte oder ob er vorher
+  schon so war, konnte sie nicht sagen — nachgemessen war er **ohne Flag
+  identisch** (eine negative Handkorrektur, bestehendes Problem). Die Messung
+  stand einen halben Tag still, ohne dass es etwas zu klären gab.
+
+  **Die Regel: eine Probe, die eine URSACHE behauptet, muss beide Seiten
+  messen.** „X tritt auf" ist keine Aussage über X als Ursache; dafür braucht
+  es „X tritt auf, ohne die Änderung aber nicht". Praktisch heißt das: den
+  Vergleichswert ohne die Änderung mitrechnen und im Befund unterscheiden
+  zwischen *durch die Änderung entstanden* (blockiert) und *auch vorher schon
+  da* (Bestand, blockiert nicht).
+
+  Der Mutations-Gegencheck fängt diese Form **nicht** — er fragt, ob eine
+  Prüfung rot werden kann, nicht ob ihr Rot etwas bedeutet. Deshalb steht sie
+  hier als eigener Punkt und nicht als Unterfall.
 - **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
   kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
   Der `tests`-CI-Job hat **keinen roten Altbestand mehr** (Stand 08.08.2026,
