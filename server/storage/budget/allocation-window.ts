@@ -112,10 +112,34 @@ export function allocationValidAtWhere(asOfDate: string): SQL | undefined {
  *
  * Nur wenn **BEIDE** Anker vor dem Reset liegen (VD-5). Das ist eine
  * VERENGUNG gegenueber „`validFrom` vor dem Reset": sie kann nur weniger
- * verdraengen, nie mehr, und ist auf konsistenten Daten
- * (`year === Jahr(validFrom)`, von allen vier Schreibpfaden eingehalten)
- * wirkungslos — dort folgt `year <= reset.year` bereits aus
- * `validFrom < reset.cutoffDate`.
+ * verdraengen, nie mehr.
+ *
+ * ── WANN sie ueberhaupt greift ──────────────────────────────────────────
+ * `reset.year` ist per Konstruktion `Jahr(reset.cutoffDate)` — der Anker baut
+ * beide aus derselben Zahl. Ist die erste Bedingung erfuellt, folgt daraus
+ * `Jahr(validFrom) <= reset.year`.
+ *
+ * Fuer jede Zeile mit `year <= Jahr(validFrom)` ist die zweite Bedingung damit
+ * **automatisch** erfuellt: die Verengung kann dort nichts verhindern. Sie
+ * greift erst, wenn `year` GROESSER ist als das Jahr des `validFrom`.
+ *
+ * Durchgerechnet (153 verdraengende Konstellationen je Delta, wobei
+ * Delta = `year − Jahr(validFrom)`):
+ *
+ *     Delta −2 / −1 / 0 :  0 verhindert
+ *     Delta +1          : 33 verhindert
+ *     Delta +2          : 93 verhindert
+ *
+ * **Im Produktivbestand (Stand 23.09.2026) kommen nur Delta 0 und Delta −1
+ * vor — die Verengung wirkt dort auf KEINE Zeile.** Delta +1, die im
+ * `carryoverTargetYear`-Docblock beschriebene Zieljahr-Semantik, tritt kein
+ * einziges Mal auf (Ticket `6hcCCrWgXCH2XxXp`).
+ *
+ * Diese Praezisierung steht hier, weil die vorige Fassung („wirkungslos auf
+ * konsistenten Daten, `year === Jahr(validFrom)`") zwar zutraf, aber zu eng
+ * gefasst war: sie liess offen, was bei Delta −1 passiert, und genau daraus
+ * ist die falsche Annahme entstanden, die 26 Prod-Zeilen seien betroffen und
+ * die Messung deshalb eine Untergrenze. Sie ist es nicht.
  */
 export function displacedByReset(
   row: AllocationWindowRow & { year: number },
