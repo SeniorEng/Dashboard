@@ -314,6 +314,38 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   Der Mutations-Gegencheck fängt diese Form **nicht** — er fragt, ob eine
   Prüfung rot werden kann, nicht ob ihr Rot etwas bedeutet. Deshalb steht sie
   hier als eigener Punkt und nicht als Unterfall.
+- **Ein Wächter braucht eine Selbstprobe — und die findet mehr als ein Review.**
+  Ein Architektur-Wächter, der ein MUSTER sucht, kann aus zwei Gründen grün
+  sein: es gibt keinen Verstoß, oder die Erkennung ist kaputt. Von außen sehen
+  beide gleich aus.
+
+  Gemessen am 23.09.2026: ein neuer Wächter sollte sicherstellen, dass jede
+  Verzweigung auf ein Flag den gemeinsamen Default liest. Er prüfte
+  **zeilenweise**. Die eingebaute Verletzung lautete
+
+  ```ts
+  const resetAnchor = opts?.resetDisplacesAllSources
+    ? await readResetAnchor(...)
+    : null;
+  ```
+
+  Flag auf Zeile 1, Fragezeichen auf Zeile 2 — **der Wächter blieb grün, aus
+  einem Formatierungsgrund.** Er hätte jeden so formatierten Verstoß
+  durchgelassen und dabei ausgesehen, als hielte er die Zusage.
+
+  **Aufgefallen ist es der Selbstprobe, nicht dem Review.** Der Reviewer hatte
+  den Wächter gar nicht mehr gesehen — er entstand erst als Antwort auf seinen
+  Befund. Gefunden hat es der Mutations-Gegencheck: Verstoß wieder einbauen,
+  Wächter laufen lassen, Rot erwarten, Grün bekommen.
+
+  **Praktisch heißt das zweierlei:**
+  - Jeder Muster-Wächter bekommt einen Test, der eine Verletzung KONSTRUIERT
+    und prüft, dass die Erkennung anschlägt (`AW-2`, `RD-2` sind die Beispiele
+    im Repo).
+  - Die Selbstprobe muss die Formen abdecken, in denen der Verstoß real
+    auftritt — also auch über Zeilen umgebrochen. Ein regulärer Ausdruck auf
+    Zeilen ist für TypeScript fast immer zu eng; über Anweisungen (`;`) oder
+    mit normalisierten Zwischenräumen zu prüfen ist die haltbarere Form.
 - **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
   kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
   Der `tests`-CI-Job hat **keinen roten Altbestand mehr** (Stand 08.08.2026,
