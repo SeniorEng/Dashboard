@@ -266,6 +266,30 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   überhaupt" prüft, braucht das nicht. Ein Test, dessen Name eine Invariante
   behauptet („… darf nie …", „… bleibt unverändert", „… wird nicht …"),
   braucht es immer.
+- **Ein Testhaken ist kein Zeuge.** Entsteht etwas **FÜR** den Test — eine
+  `data-testid`-Verzweigung, ein Flag, ein Extra-Feld in der Antwort —, dann
+  ist es ab diesem Moment **Teil des Prüflings, nicht des Maßstabs**. Ein Test,
+  der darauf prüft, bestätigt sich selbst.
+
+  Gemessen am 23.09.2026: ein Anzeige-Test hieß „ohne projizierte Zahl kein
+  irreführender Kopf" und prüfte ausschließlich die `data-testid`. Die
+  Verzweigung war eingeführt worden, damit er unterscheiden kann. Ausgeführt
+  blieb er **grün**, während der Kopf „im Termin-Monat verfügbar: 47,00 €"
+  zeigte — genau das Irreführende, das er abfangen sollte.
+
+  **Die allgemeine Antwort: die Zusage auf das stellen, was der Nutzer
+  bekommt.** Gerenderter Text, HTTP-Antwort, geschriebene Zeile — nicht die
+  Hilfskonstruktion, die man für die Prüfung gebaut hat.
+
+  Und der saubere Nebeneffekt, wenn man es so herum macht: fällt ein Feld auf,
+  dessen einziger Verbraucher ein Testhaken war, gehört es nach der
+  Ersetzungs-Regel ohnehin nicht dorthin. In genau diesem Fall fiel damit ein
+  Feld aus dem öffentlichen Response-Schema.
+
+  Diese Form ist **tückischer als die drei oben**, weil sie beim Schreiben wie
+  Sorgfalt aussieht: man baut eine Unterscheidung ein, um genau prüfen zu
+  können. Der Mutations-Gegencheck fängt sie trotzdem — er fragt nicht, worauf
+  der Test schaut, sondern ob er rot wird.
 - **Test-Fallen**: `getFutureDate` rollt Sa/So auf Montag → mehrere Offsets
   kollabieren auf denselben Tag (Do–So-Flake) → eigene Uhrzeit je Seed-Termin.
   Der `tests`-CI-Job hat **keinen roten Altbestand mehr** (Stand 08.08.2026,
