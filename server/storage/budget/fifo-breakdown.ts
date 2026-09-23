@@ -20,7 +20,11 @@
  *  existiert — die bekannte manual_adjustment-Schatten-Drift ist Phase-6-Thema
  *  und wird hier bewusst NICHT übermalt.)
  */
-import { allocationValidAtWhere, notDisplacedByResetWhere } from "./allocation-window";
+import {
+  allocationValidAtWhere,
+  notDisplacedByResetWhere,
+  RESET_DISPLACES_ALL_SOURCES_DEFAULT,
+} from "./allocation-window";
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
 import { and, eq, lte, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
@@ -85,7 +89,12 @@ export async function readBudget45bFifoBreakdown(
   const V = pot.availableCents;
 
   // ---- 2) Übertrags-Allocations (identischer Filter wie FIFO-Engine) ----
-  const resetAnchor = opts?.resetDisplacesAllSources
+  // `?? DEFAULT`, nicht blosse Truthiness: `A` unten kommt ueber
+  // `readUnifiedBudgetAvailability` aus `calculateAllocated45b` und folgt der
+  // Konstante. Haenge diese Zeile nur an `opts`, dann verdraengt der Anspruch
+  // beim Default-Umschwung und die Uebertrags-Summe nicht — gemessen faellt
+  // `allocatedCur` dann auf −1.048,00 EUR (Gate 2 zu #180, B1).
+  const resetAnchor = (opts?.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
     ? await readResetAnchor(customerId, asOfDate)
     : null;
   const carryoverAllocations = await budgetAllocationsRepo

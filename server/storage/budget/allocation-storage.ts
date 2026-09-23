@@ -467,7 +467,11 @@ export async function getCustomerBudgetAmounts(customerId: number, _tx?: DbClien
  * Funktion zweimal aufrufen und die Differenz ausweisen — per Konstruktion
  * deckungsgleich mit dem, was die App anzeigt.
  *
- * Default `false`: ohne ausdrueckliches Setzen aendert sich nichts.
+ * Der Default steht NICHT hier, sondern in
+ * `RESET_DISPLACES_ALL_SOURCES_DEFAULT` (allocation-window.ts) — eine zweite
+ * Aussage darueber waere genau die Doppelung, die dieser Mechanismus
+ * beseitigt. Solange die Konstante `false` ist, aendert sich ohne
+ * ausdrueckliches Setzen nichts.
  */
 export async function calculateAllocatedCents(
   customerId: number,

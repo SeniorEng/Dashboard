@@ -158,6 +158,10 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
       { symbol: "notDisplacedByResetWhere", module: "server/storage/budget/allocation-window.ts" },
       // „Welcher Startwert ist der Reset?" — von TS- und SQL-Pfad gelesen.
       { symbol: "resetAnchorFrom", module: "server/storage/budget/allocation-window.ts" },
+      // Der EINE Schalter fuer den Default-Umschwung. Wer auf die Verdraengung
+      // verzweigt, liest ihn — sonst bewegt sich beim Flip die eine Groesse
+      // und die andere nicht (gemessen: allocatedCur faellt auf −1.048,00 EUR).
+      { symbol: "RESET_DISPLACES_ALL_SOURCES_DEFAULT", module: "server/storage/budget/allocation-window.ts" },
     ],
     ownedLiterals: [],
     guards: [
@@ -166,6 +170,10 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
         // die bekannten Fundstellen: sechs Fassungen derselben Regel waren der
         // Anlass, und die naechste entsteht dort, wo heute niemand hinsieht.
         test: "tests/architecture/allocation-window-single-source.test.ts",
+      },
+      {
+        // Haelt die Zusage „Umschalten heisst: diese Zeile. Nicht neun."
+        test: "tests/architecture/reset-displaces-default-single-source.test.ts",
       },
     ],
     eslintRules: [],

@@ -48,7 +48,10 @@ export async function getTotalCarryoverCents(
   opts?: { resetDisplacesAllSources?: boolean },
 ): Promise<number> {
   const d = _tx ?? db;
-  const resetAnchor = opts?.resetDisplacesAllSources
+  // `?? DEFAULT` — siehe `fifo-breakdown`. Diese Summe wird von
+  // `computeCapSlot` gelesen; folgte sie dem Schalter nicht, meldete sie beim
+  // Flip einen Uebertrag, den der Anspruch nicht mehr fuehrt.
+  const resetAnchor = (opts?.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
     ? await readResetAnchor(customerId, asOfDate, d)
     : null;
   const carryoverAllocations = await budgetAllocationsRepo.selectColumnsFrom({
@@ -71,19 +74,27 @@ export async function getBudgetSummary(
   _preferences?: CustomerBudgetPreferences | undefined,
   _typeSettings?: CustomerBudgetTypeSetting[],
   asOfDate: string = todayISO(),
-  /**
-   * NUR fuer Tests und Messungen. Produktiv entscheidet
-   * `RESET_DISPLACES_ALL_SOURCES_DEFAULT` — damit der Flip EINE Zeile ist und
-   * nicht neun Aufrufstellen.
-   *
-   * Wirkt ausdruecklich NICHT auf `netUsedCents`: die Exklusions-Mathematik
-   * lebt in `netAvailable45bAt`, und `summary-queries` darf sie nicht selbst
-   * fuehren (Waechter `budget-single-reader`, Task #1366). `availableCents`
-   * wird nach aussen ohnehin von `mergeServed45b` aus dem Reader gesetzt.
-   */
-  opts?: { resetDisplacesAllSources?: boolean },
 ): Promise<BudgetSummary> {
-  const verdraengt = opts?.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT;
+  /**
+   * KEIN `opts`-Parameter. Die Verdraengung entscheidet allein
+   * `RESET_DISPLACES_ALL_SOURCES_DEFAULT`.
+   *
+   * Eine Zwischenfassung hatte hier einen Parameter „nur fuer Tests und
+   * Messungen". Er war in zweierlei Hinsicht schaedlich:
+   *
+   *  1. Er wirkte auf die Uebertrags-Abfrage, aber NICHT auf
+   *     `calculateAllocatedCents` — `getBudgetSummary(…, { flag: true })`
+   *     lieferte „Uebertrag verdraengt, Anspruch nicht", also genau die
+   *     Divergenz, gegen die dieser PR antritt, nur spiegelverkehrt.
+   *  2. Er existierte ausschliesslich fuer den Test. Der musste
+   *     `totalAllocatedCents` von Hand nachziehen und prueft damit einen Pfad,
+   *     den kein produktiver Aufrufer nimmt — „Ein Testhaken ist kein Zeuge".
+   *
+   * Der Test legt jetzt die Konstante um. Dann folgen ALLE Leser, und ein
+   * halb verdrahteter Schalter faellt auf (Gate 2 zu #180, S1 — genau so waere
+   * B1 schon beim Schreiben aufgefallen).
+   */
+  const verdraengt = RESET_DISPLACES_ALL_SOURCES_DEFAULT;
   const [preferences, typeSettings, customerRows] = await Promise.all([
     _preferences !== undefined ? _preferences : getBudgetPreferences(customerId),
     _typeSettings ?? readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }),

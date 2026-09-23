@@ -478,11 +478,25 @@ function BudgetPot45b({
                 <AlertTriangle className={`${iconSize.sm} text-amber-600`} />
               )}
             </div>
-            {data.carryoverVerdraengtCents > 0 ? (
+            {/*
+              Beide Betraege, nicht entweder-oder.
+              Eine Zwischenfassung zeigte bei `carryoverVerdraengtCents > 0`
+              NUR den durchgestrichenen Betrag — ein daneben noch lebender
+              Uebertrag waere vom Schirm verschwunden, waehrend darunter
+              weiter „Verfaellt am ..." steht, das sich auf ihn bezieht
+              (Gate 2 zu #180, S3). Mit den heutigen Schreibpfaden tritt die
+              Teil-Verdraengung nicht auf; eine Zeile mit
+              `year != Jahr(validFrom)` bricht diese Annahme aber, und davon
+              gibt es im Bestand 26 (Ticket `6hcCCrWgXCH2XxXp`).
+            */}
+            <p className="text-2xl font-bold text-gray-700 mt-1" data-testid="text-45b-carryover">
+              {formatCurrency(data.carryoverCents)}
+            </p>
+            {data.carryoverVerdraengtCents > 0 && (
               <>
                 <p
-                  className="text-2xl font-bold text-gray-400 mt-1 line-through"
-                  data-testid="text-45b-carryover"
+                  className="text-lg font-semibold text-gray-400 mt-1 line-through"
+                  data-testid="text-45b-carryover-verdraengt"
                 >
                   {formatCurrency(data.carryoverVerdraengtCents)}
                 </p>
@@ -490,10 +504,6 @@ function BudgetPot45b({
                   ersetzt durch Startwert {data.carryoverErsetztDurchStartwertMonat}
                 </p>
               </>
-            ) : (
-              <p className="text-2xl font-bold text-gray-700 mt-1" data-testid="text-45b-carryover">
-                {formatCurrency(data.carryoverCents)}
-              </p>
             )}
             {data.carryoverExpiresAt && (
               <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
