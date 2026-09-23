@@ -115,5 +115,11 @@ describe("Budget-Gültigkeitsfenster — eine SSoT, kein Nachbau", () => {
     expect(ssot).toContain("export function allocationValidAt(");
     expect(ssot).toContain("export function allocationValidAtWhere(");
     expect(ssot).toContain("export function displacedByReset(");
+    // Nachgezogen (Gate 2 zu #174, S2): `ssot-registry.test.ts` prueft nur
+    // Registry→Code, nicht Code→Registry. Zwei neue kanonische Funktionen in
+    // derselben Datei blieben deshalb unbemerkt aussen vor — ein Katalog, der
+    // nicht vollstaendig ist, laesst genau die Luecken zu, gegen die es ihn gibt.
+    expect(ssot).toContain("export function notDisplacedByResetWhere(");
+    expect(ssot).toContain("export function resetAnchorFrom(");
   });
 });

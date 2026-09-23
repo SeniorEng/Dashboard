@@ -153,6 +153,11 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
       { symbol: "allocationValidAt", module: "server/storage/budget/allocation-window.ts" },
       { symbol: "allocationValidAtWhere", module: "server/storage/budget/allocation-window.ts" },
       { symbol: "displacedByReset", module: "server/storage/budget/allocation-window.ts" },
+      // Die Drizzle-Entsprechung zu `displacedByReset` — exakte Spiegelung,
+      // ohne Quellen-Pruefung (die steht beim Aufrufer, wie im TS-Pfad auch).
+      { symbol: "notDisplacedByResetWhere", module: "server/storage/budget/allocation-window.ts" },
+      // „Welcher Startwert ist der Reset?" — von TS- und SQL-Pfad gelesen.
+      { symbol: "resetAnchorFrom", module: "server/storage/budget/allocation-window.ts" },
     ],
     ownedLiterals: [],
     guards: [

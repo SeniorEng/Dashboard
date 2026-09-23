@@ -179,7 +179,7 @@ async function main() {
           + `  | Verbrauch-Korrektur ${euro(exNeu.excludedConsumedNetCents - exHeute.excludedConsumedNetCents)}`
           + `  | accrualFloor ${diagHeute.accrualFloorDate ?? "—"}`
           + (floorVerschoben ? ` ⚠→ ${diagNeu.accrualFloorDate ?? "—"}` : "")
-          + `  | resetCutoff ${diagNeu.resetCutoffDate ?? "—"}`,
+          + `  | resetCutoff ${diagNeu.resetAnchor?.cutoffDate ?? "—"}`,
         );
       }
       if (diff !== 0) summeDifferenz += diff;

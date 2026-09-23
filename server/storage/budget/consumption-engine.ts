@@ -13,7 +13,7 @@ import type { DbClient, CascadeResult } from "./types";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
-import { syncCarryoverAndExpiry, calculateAllocatedCents, getExcluded45bConsumption, readResetAnchor } from "./allocation-storage";
+import { syncCarryoverAndExpiry, calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { resolveEffectivePotConfig, resolvePotEligibilityAt } from "@shared/domain/budgets";
 import { planCascade } from "@shared/domain/budget/plan-cascade";
@@ -21,7 +21,7 @@ import { isPrivatePaymentAllowed, isSelbstzahlerBillingType } from "@shared/doma
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
-import { allocationValidAtWhere, notDisplacedByResetWhere } from "./allocation-window";
+import { allocationValidAtWhere } from "./allocation-window";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
 import { auditService } from "../../services/audit";
 
@@ -160,23 +160,29 @@ export async function computeFifoAvailability(
   /**
    * `resetDisplacesAllSources` — der BUCHUNGS-Pfad.
    *
-   * Die vier uebrigen Stellen sind Lesepfade; diese hier entscheidet, gegen
-   * welchen Topf tatsaechlich gebucht wird. Bliebe sie aussen vor, koennte die
-   * Kaskade weiterhin einen Uebertrag belasten, den der Anspruch nicht mehr
-   * fuehrt — genau die Wirkungskette aus dem Stammticket (#1915), nur mit
-   * umgekehrtem Vorzeichen.
+   * ── Hier gibt es KEINE eigene SQL-Bedingung, und das ist Absicht ───────
+   * Eine erste Fassung haengte `notDisplacedByResetWhere` an die
+   * `specialAllocations`-Abfrage. Das war ein ZWEITER Mechanismus neben dem,
+   * der unten ohnehin laeuft: `excludedSpecialAllocationIds` entfernt den
+   * verdraengten Uebertrag bereits, und zwar aus derselben SSoT wie
+   * `totalAllocated`.
    *
-   * Der Anker wird nur fuer §45b geholt: `readResetAnchor` ist eine
-   * §45b-Frage, und die Inventur-Lesart gibt es fuer die anderen Toepfe nicht.
+   * Schlimmer als redundant war es **falsch**: das Flag ging nur an die
+   * SQL-Bedingung, nicht an die beiden SSoT-Aufrufe darunter. Gemessen gab
+   * `totalAvailable` dann **1.310,00 EUR** frei, waehrend `netAvailable45bAt`
+   * fuer denselben Kunden und Stichtag **131,00 EUR** meldete — der
+   * verdraengte Uebertrag war aus `specialAllocations` gefiltert, floss aber
+   * ueber `totalAllocated` weiter in die Kapazitaet und landete beim Buchen im
+   * `allocation_id = NULL`-Leg, das keine Exklusion mehr greift (Gate 2 zu
+   * #174, B1).
+   *
+   * Das Flag geht deshalb an die Stellen, die die Frage beantworten, und an
+   * keine zweite.
    */
   opts?: { resetDisplacesAllSources?: boolean },
 ): Promise<FifoAvailability> {
   const d = _tx ?? db;
   const today = transactionDate;
-
-  const resetAnchor = opts?.resetDisplacesAllSources && budgetType === "entlastungsbetrag_45b"
-    ? await readResetAnchor(customerId, today, d)
-    : null;
 
   let specialAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
@@ -184,7 +190,6 @@ export async function computeFifoAvailability(
       eq(budgetAllocations.budgetType, budgetType),
       isNull(budgetAllocations.deletedAt),
       allocationValidAtWhere(today),
-      notDisplacedByResetWhere(resetAnchor),
       sql`${budgetAllocations.source} IN ('carryover', 'initial_balance', 'manual_adjustment')`
     ))
     .orderBy(
@@ -200,7 +205,11 @@ export async function computeFifoAvailability(
   // (append-only Historisierung), damit Buchungen NIE die heutige Konfiguration
   // für ein historisches Datum verwenden.
   const historicalTypeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today }, _tx);
-  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx, undefined, historicalTypeSettings);
+  const totalAllocated = await calculateAllocatedCents(
+    customerId, budgetType,
+    { asOfDate: today, resetDisplacesAllSources: opts?.resetDisplacesAllSources },
+    _tx, undefined, historicalTypeSettings,
+  );
 
   // Task #1306 — §45b-Symmetrie (gleicher Fix wie im unified-reader): Verbrauch,
   // der gegen einen aus `Allocated` herausgefallenen Topf (abgelaufener Übertrag
@@ -212,7 +221,10 @@ export async function computeFifoAvailability(
   // totalNetConsumed ab. Exklusions-IDs aus derselben SSoT wie `totalAllocated`.
   let excludedConsumedNetCents = 0;
   if (budgetType === "entlastungsbetrag_45b") {
-    const excluded = await getExcluded45bConsumption(customerId, today, d, historicalTypeSettings);
+    const excluded = await getExcluded45bConsumption(
+      customerId, today, d, historicalTypeSettings,
+      { resetDisplacesAllSources: opts?.resetDisplacesAllSources },
+    );
     excludedConsumedNetCents = excluded.excludedConsumedNetCents;
     if (excluded.excludedSpecialAllocationIds.length > 0) {
       const excludedSet = new Set(excluded.excludedSpecialAllocationIds);

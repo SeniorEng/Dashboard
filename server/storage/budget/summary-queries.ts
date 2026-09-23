@@ -67,14 +67,6 @@ export async function getBudgetSummary(
   _preferences?: CustomerBudgetPreferences | undefined,
   _typeSettings?: CustomerBudgetTypeSetting[],
   asOfDate: string = todayISO(),
-  /**
-   * `resetDisplacesAllSources` — muss an BEIDE Seiten gehen.
-   *
-   * `totalAllocatedCents` kommt aus `calculateAllocatedCents`, `carryoverCents`
-   * aus der Abfrage darunter. Bekaeme nur eine von beiden das Flag, meldete das
-   * Summary einen Uebertrag, den der Anspruch nicht mehr enthaelt.
-   */
-  opts?: { resetDisplacesAllSources?: boolean },
 ): Promise<BudgetSummary> {
   const [preferences, typeSettings, customerRows] = await Promise.all([
     _preferences !== undefined ? _preferences : getBudgetPreferences(customerId),
@@ -92,27 +84,15 @@ export async function getBudgetSummary(
   const currentMonth = todayDate.getMonth() + 1;
   const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
 
-  // Der Anker einmal fuer alle Abfragen dieses Aufrufs — `notDisplacedByResetWhere`
-  // traegt die Quellen-Grenze selbst, `allocValidWhere` darf deshalb weiterhin
-  // ueber ALLE Quellen laufen.
-  const resetAnchor = opts?.resetDisplacesAllSources
-    ? await readResetAnchor(customerId, today)
-    : null;
-
   const allocValidWhere = and(
     eq(budgetAllocations.customerId, customerId),
     eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
     isNull(budgetAllocations.deletedAt),
     allocationValidAtWhere(today),
-    notDisplacedByResetWhere(resetAnchor),
   );
 
   const [totalAllocatedCents, currentYearAllocatedCents, txResult, carryoverResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([
-    calculateAllocatedCents(
-      customerId, "entlastungsbetrag_45b",
-      { asOfDate: today, resetDisplacesAllSources: opts?.resetDisplacesAllSources },
-      undefined, preferences, typeSettings,
-    ),
+    calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { asOfDate: today }, undefined, preferences, typeSettings),
 
     calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: currentYear, asOfDate: today }, undefined, preferences, typeSettings),
 

@@ -583,26 +583,29 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
     res.json(allocations.map(a => ({ ...a, zaehltNicht: false, ersetztDurchStartwertMonat: null })));
     return;
   }
-  const { read45bAllocationDiagnostics, readResetAnchor } = await import("../storage/budget/allocation-storage");
+  const { read45bAllocationDiagnostics } = await import("../storage/budget/allocation-storage");
   const { allocationValidAt, displacedByReset } = await import("../storage/budget/allocation-window");
   const heute = todayISO();
   const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: heute });
   const ausgeschlossen = new Set(diagnose.excludedSpecialAllocationIds);
   /**
-   * Der Anker kommt aus `readResetAnchor` — derselben Funktion, die auch die
-   * SQL-Pfade fragen.
+   * Der Anker kommt aus der Diagnose, die eine Zeile darueber ohnehin gelesen
+   * wird — nicht aus einem zweiten Aufruf.
    *
-   * Vorher wurde er hier aus `diagnose.resetCutoffDate` + `diagnose.resetYear`
-   * zusammengesetzt und der Monat per `slice(5, 7)` herausgeschnitten. Das
-   * war rechnerisch richtig und trotzdem eine eigene Ableitung: sie haelt nur,
-   * solange das Datumsformat bleibt, und sie konnte von den SQL-Pfaden
-   * abweichen, ohne dass es jemand merkt.
+   * Zwei Zwischenfassungen standen hier. Die erste setzte ihn aus
+   * `resetCutoffDate` + `resetYear` zusammen und schnitt den Monat per
+   * `slice(5, 7)` heraus — eine eigene Ableitung, die nur haelt, solange das
+   * Datumsformat bleibt. Die zweite rief `readResetAnchor` und behauptete
+   * „per Konstruktion derselbe Anker". **Das stimmte nicht:**
+   * `calculateAllocated45b` steigt bei `anchor.kind === "ineligible"` VOR der
+   * Anker-Berechnung aus und liefert `null`; `readResetAnchor` kennt diesen
+   * Zweig nicht und haette fuer denselben Kunden einen Anker geliefert
+   * (Gate 2 zu #174, S3). Dazu kostete sie einen zusaetzlichen Roundtrip.
    *
-   * Gleiche Eingaben wie die Diagnose oben (`asOfDate: heute`, kein
-   * `{year}`-Modus) — also per Konstruktion derselbe Anker, nicht nur
-   * zufaellig derselbe Wert.
+   * Jetzt ist es dieselbe Groesse aus derselben Rechnung — keine Behauptung
+   * mehr, sondern dasselbe Objekt.
    */
-  const resetAnker = await readResetAnchor(customerId, heute);
+  const resetAnker = diagnose.resetAnchor;
   const resetMonat = resetAnker
     ? `${String(resetAnker.month).padStart(2, "0")}/${resetAnker.year}`
     : null;

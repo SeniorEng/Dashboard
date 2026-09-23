@@ -37,7 +37,7 @@
  * beantworten andere Fragen (Reset-Baseline bzw. Doppelzaehlung) und haben je
  * genau einen Aufrufer.
  */
-import { and, gt, gte, isNull, lte, ne, or, type SQL } from "drizzle-orm";
+import { and, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
 import { budgetAllocations } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
@@ -157,33 +157,27 @@ export function displacedByReset(
  * `undefined` bei `reset === null`: keine Bedingung, nicht „nichts zaehlt".
  * Das entspricht `displacedByReset(row, null) === false`.
  *
- * ── Die Quellen-Grenze steckt MIT DRIN, und das ist der Punkt ───────────
- * Im TS-Pfad wirkt `displacedByReset` ausschliesslich INNERHALB von
- * `carryoverCounted` — also erst, nachdem `source === "carryover"` geprueft
- * ist. Wer die nackte Negation in eine Abfrage haengt, die NICHT nach Quelle
- * filtert, verdraengt damit **den Startwert selbst**: fuer ihn gilt
- * `validFrom == cutoffDate` und `year == reset.year`, die Bedingung trifft
- * also genau zu. Die Inventur wuerde sich selbst loeschen — die Umkehrung
- * ihres Zwecks.
+ * ── NUR neben einem `source = 'carryover'`-Filter verwenden ────────────
+ * Diese Bedingung ist die exakte Spiegelung von `displacedByReset`, und die
+ * hat KEINE Quellen-Pruefung: im TS-Pfad steht sie innerhalb von
+ * `carryoverCounted`, also hinter `source === "carryover"`. Die Quellen-Grenze
+ * gehoert deshalb genauso auch hier zum Aufrufer.
  *
- * **Heute betrifft das genau EINE der fuenf Stellen:** die
- * Spezial-Allocations in `consumption-engine.ts`, die `carryover`,
- * `initial_balance` und `manual_adjustment` zusammen laden. Die anderen vier
- * filtern ohnehin auf `source = 'carryover'`; dort ist die Grenze wirkungslos.
- * `SQ-4` haelt den einen wirksamen Fall fest — ohne ihn bleibt das Entfernen
- * der Grenze unbemerkt (im Mutations-Gegencheck gemessen: alle drei uebrigen
- * Tests blieben gruen).
+ * **Warum das wichtig ist:** der Startwert erfuellt die Bedingung woertlich —
+ * fuer ihn gilt `validFrom == cutoffDate` und `year == reset.year`. In einer
+ * Abfrage ohne Quellen-Filter wuerde die Inventur sich selbst loeschen.
  *
- * Sie steht trotzdem hier und nicht beim Aufrufer, damit die Bedingung in
- * JEDER Abfrage sicher ist — auch in der naechsten, die niemand mehr mit
- * dieser Frage im Kopf schreibt.
+ * Eine Zwischenfassung trug die Grenze (`source <> 'carryover'`) in dieser
+ * Funktion. Das war gut gemeint und in zweierlei Hinsicht falsch: es machte
+ * zwei als Spiegel benannte Funktionen ungleich, und es war nach dem
+ * B1-Fix von keinem Aufrufer mehr erreichbar — alle drei filtern auf
+ * `carryover`. Eine Bedingung, die kein Aufruf je ausloest, ist keine
+ * Absicherung, sondern eine Zusage ohne Beleg (Gate 2 zu #174).
  */
 export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undefined {
   if (!reset) return undefined;
+  // Negation von `validFrom <= cutoff AND year <= resetYear`.
   return or(
-    // Alles, was kein Uebertrag ist, bleibt unberuehrt — wie im TS-Pfad.
-    ne(budgetAllocations.source, "carryover"),
-    // Negation von `validFrom <= cutoff AND year <= resetYear`.
     gt(budgetAllocations.validFrom, reset.cutoffDate),
     gt(budgetAllocations.year, reset.year),
   );

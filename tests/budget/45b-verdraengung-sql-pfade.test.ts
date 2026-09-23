@@ -98,11 +98,26 @@ describe("§45b-Verdrängung — Anspruch und Übertrags-Summe aus derselben Reg
         + "still weg, der Fehler zeigt sich dann als FEHLENDE Zeile",
       ).toEqual([]);
 
-      // Und die Gegenrichtung: die Summe der Töpfe ist der Anspruch. Ohne sie
-      // wäre „kein Topf negativ" auch dadurch zu erfüllen, dass beide 0 sind.
-      const summe = breakdown.pots.reduce((s, p) => s + p.allocatedCents, 0);
-      expect(summe, "Topf-Summe und Gesamtanspruch laufen auseinander")
-        .toBe(breakdown.totalAllocatedCents);
+      /**
+       * Und die Gegenrichtung mit einer ECHTEN Zahl.
+       *
+       * Hier stand zuerst `pots.reduce(…) === totalAllocatedCents`, begründet
+       * mit „sonst wäre ‚kein Topf negativ' auch durch zwei Nullen zu
+       * erfüllen". Die Assertion konnte durch keine Eingabe rot werden:
+       * `fifo-breakdown` definiert `allocatedCur := A − allocatedCarry` und
+       * `totalAllocatedCents := A`, die Summe ist also per Konstruktion `A`.
+       * Bei `A = 0` wäre sie ebenfalls grün — sie fing genau den Fall nicht,
+       * für den sie dastand (Gate 2 zu #174, S1: „unerreichbare
+       * Konstellation" aus CLAUDE.md).
+       *
+       * Jetzt gegen den Startwert: er ist der Bestand, den die Inventur
+       * festgestellt hat, und der Übertrag daneben zählt nicht mehr.
+       */
+      const uebertragsTopf = breakdown.pots.find(p => p.potType === "carryover")!;
+      expect(uebertragsTopf.allocatedCents, "der verdrängte Übertrag steht noch im Topf")
+        .toBe(0);
+      expect(breakdown.totalAllocatedCents, "der Anspruch ist nicht der Startwert")
+        .toBe(STARTWERT_CENTS);
     } finally {
       await cleanupCustomer(id);
     }
@@ -131,21 +146,23 @@ describe("§45b-Verdrängung — Anspruch und Übertrags-Summe aus derselben Reg
 
   it("SQ-4 – die Verdrängung trifft den Übertrag, nicht den Startwert selbst", async () => {
     /**
-     * Die Quellen-Grenze in `notDisplacedByResetWhere`.
+     * Im BUCHUNGS-Pfad trifft die Verdrängung den Übertrag, nicht den
+     * Startwert — und zwar über `excludedSpecialAllocationIds`, nicht über
+     * eine eigene SQL-Bedingung.
      *
-     * Der Startwert erfüllt die Verdrängungs-Bedingung wörtlich: sein
-     * `validFrom` IST `cutoffDate`, sein `year` IST `reset.year`. Ohne die
-     * Grenze `source <> 'carryover'` löscht die Inventur sich selbst.
+     * ── Was dieser Test früher prüfte, und warum das weg ist ──────────────
+     * Er hielt die Quellen-Grenze `source <> 'carryover'` in
+     * `notDisplacedByResetWhere` fest. Die gibt es nicht mehr: nach dem
+     * B1-Fix hat die consumption-engine keine eigene SQL-Bedingung, und alle
+     * verbliebenen Aufrufer filtern ohnehin auf `carryover`. Die Grenze war
+     * damit von keinem Aufruf mehr erreichbar — also keine Absicherung,
+     * sondern eine Zusage ohne Beleg.
      *
-     * ── Warum dieser Test hier steht und nicht weggelassen werden kann ────
-     * Vier der fünf SQL-Stellen filtern ohnehin auf `source = 'carryover'`;
-     * dort ist die Grenze wirkungslos. Sie wirkt genau in der
-     * consumption-engine, die `carryover`, `initial_balance` und
-     * `manual_adjustment` zusammen lädt — also im BUCHUNGS-Pfad.
-     *
-     * Im Mutations-Gegencheck blieben SQ-1 bis SQ-3 **grün**, als die Grenze
-     * entfernt wurde. Die Zusage „nur der Übertrag wird verdrängt" war also
-     * durch nichts belegt.
+     * Was bleibt, ist die fachliche Aussage: der Startwert erfüllt die
+     * Verdrängungs-Bedingung wörtlich (`validFrom == cutoffDate`,
+     * `year == reset.year`). Geriete er in die Verdrängung, löschte die
+     * Inventur sich selbst. Dass das nicht passiert, muss auf dem Pfad
+     * stehen, der tatsächlich bucht.
      */
     const id = await kundeMitStartwertUndUebertrag();
     try {
@@ -166,6 +183,46 @@ describe("§45b-Verdrängung — Anspruch und Übertrags-Summe aus derselben Reg
         betraege,
         "der vom Startwert ersetzte Übertrag steht der Buchung weiter zur Verfügung",
       ).not.toContain(UEBERTRAG_CENTS);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  });
+
+  it("SQ-5 – der Buchungs-Pfad gibt nicht mehr Kapazität frei als der Reader", async () => {
+    /**
+     * Gate 2 zu #174, B1 — und `SQ-4` sah es nicht.
+     *
+     * `SQ-4` prüft `specialAllocations`, also WELCHE Töpfe zur Buchung
+     * anstehen. Es prüft nicht `totalAvailable`, also WIE VIEL gebucht werden
+     * darf. Gemessen gab der Buchungs-Pfad **1.310,00 €** frei, während
+     * `netAvailable45bAt` für denselben Kunden und Stichtag **131,00 €**
+     * meldete: der verdrängte Übertrag war aus `specialAllocations` gefiltert,
+     * floss aber über `totalAllocated` weiter in die Kapazität.
+     *
+     * Der Betrag über dem Startwert landet beim Buchen im
+     * `allocation_id = NULL`-Leg — und dort greift keine Exklusion mehr. Die
+     * Wirkungskette aus dem Stammticket, nur an der anderen Stelle.
+     *
+     * Eine Zusage über den Buchungs-Pfad muss die gebuchte KAPAZITÄT messen.
+     */
+    const id = await kundeMitStartwertUndUebertrag();
+    try {
+      const { computeFifoAvailability } = await import(
+        "../../server/storage/budget/consumption-engine"
+      );
+      const { netAvailable45bAt } = await import(
+        "../../server/storage/budget/net-available-45b"
+      );
+      const buchung = await computeFifoAvailability(
+        id, "entlastungsbetrag_45b", STICHTAG, undefined,
+        { resetDisplacesAllSources: true },
+      );
+      const reader = await netAvailable45bAt(id, STICHTAG, { resetDisplacesAllSources: true });
+
+      expect(
+        buchung.totalAvailable,
+        "der Buchungs-Pfad gibt mehr frei als der Reader führt",
+      ).toBe(reader.availableCents);
     } finally {
       await cleanupCustomer(id);
     }
