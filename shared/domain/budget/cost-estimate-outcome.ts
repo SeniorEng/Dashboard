@@ -186,6 +186,11 @@ export function classifyCostEstimate(input: CostEstimateInput): CostEstimateOutc
         `Im Termin-Monat reicht das Budget (${formatEuroDE(projiziert)} verfügbar, `
         + `Termin kostet ${formatEuroDE(totalCostCents)}). `
         + `Heute fehlen davon noch ${fehltHeute} — sie kommen mit der `
+        // NICHT „der Termin kann angelegt werden" — siehe Docblock oben.
+        // Die Vorschau kennt die Fahrt-Kilometer nicht und weiss nichts vom
+        // Zwei-Kraefte-Einsatz, bei dem `planHold` ZWEIMAL reserviert. Sie
+        // kann das Gelingen des Speicherns also nicht zusagen. Wer den Satz
+        // „hilfreicher" macht, macht ihn falsch.
         + `Monatsaufstockung. Die Budget-Sperre entfällt damit; die Beträge `
         + `beziehen sich auf den Monat des Termins.`
         + (input.pflegegrad1OhnePrivatzahlung ? " Kein Ausweichbudget verfügbar." : ""),
