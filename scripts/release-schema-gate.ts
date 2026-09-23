@@ -91,10 +91,64 @@ async function schemaSchnappschuss(): Promise<Record<string, string[]>> {
   return schnappschuss;
 }
 
+/**
+ * Wie viele Katalog-Abfragen des Trockenlaufs gleichzeitig unterwegs sein
+ * duerfen.
+ *
+ * ── ABHILFE OHNE VERSTANDENE URSACHE ────────────────────────────────────
+ * Das ist ausdruecklich KEIN Fix. Warum Schritt 0d gegen Prod abbricht, ist
+ * weiterhin offen (`6hc8RMmfr93WF5wG`, Schritt 1).
+ *
+ * Meine Erklaerung — der Pool oeffnet 20 Verbindungen gleichzeitig, der
+ * Endpunkt gewaehrt weniger — ist **widerlegt**: Prod hat
+ * `max_connections = 450` bei 15 offenen Verbindungen (gemessen 23.09.2026).
+ * Es gibt dort keine Obergrenze, an die 20 stossen koennten.
+ *
+ * Was der Deckel trotzdem tut: er senkt die Spitzen-Nebenlaeufigkeit von 69
+ * auf 4 und die geoeffneten Verbindungen von 20 auf 4, ohne den Lauf messbar
+ * zu verlangsamen (lokal 3,3 s gegen 3,3 s). Solange die Ursache offen ist,
+ * ist das eine Verkleinerung der Angriffsflaeche, kein Beweis.
+ *
+ * Offener Kandidat: Neons **Autosuspend** — der Compute muss beim ersten
+ * Zugriff aufwachen. Das passt zur hoeheren Prod-Dauer (31–35 s gegen 17 s
+ * lokal) und dazu, dass der Abbruch reproduzierbar, aber nicht immer
+ * auftritt. Nicht gemessen.
+ */
+const GLEICHZEITIG_MAX = 4;
+
+/** Deckelt, wie viele Abfragen gleichzeitig laufen. */
+function semaphor(max: number) {
+  let offen = 0;
+  const warteschlange: (() => void)[] = [];
+  return async function <T>(fn: () => Promise<T>): Promise<T> {
+    if (offen >= max) await new Promise<void>((r) => warteschlange.push(r));
+    offen += 1;
+    try {
+      return await fn();
+    } finally {
+      offen -= 1;
+      warteschlange.shift()?.();
+    }
+  };
+}
+
 async function anstehendeAnweisungen(): Promise<string[]> {
+  const drossel = semaphor(GLEICHZEITIG_MAX);
+  // Derselbe Weg wie im Messgeraet `scripts/messe-0d.ts`: ein Proxy um
+  // `execute`, damit `pushSchema` unveraendert bleibt. Nur die Abfragen
+  // werden gedrosselt, nichts an der Semantik.
+  const gedrosselt = new Proxy(db, {
+    get(ziel, prop, recv) {
+      const orig = Reflect.get(ziel, prop, recv);
+      if (prop !== "execute" || typeof orig !== "function") return orig;
+      return (...args: unknown[]) =>
+        drossel(() => (orig as (...a: unknown[]) => Promise<unknown>).apply(ziel, args));
+    },
+  });
+
   const trocken = await pushSchema(
     schema as Parameters<typeof pushSchema>[0],
-    db as unknown as Parameters<typeof pushSchema>[1],
+    gedrosselt as unknown as Parameters<typeof pushSchema>[1],
   );
   return trocken.statementsToExecute;
 }
