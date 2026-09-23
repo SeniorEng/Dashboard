@@ -309,22 +309,28 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   // zurückliegenden/zukünftigen Monat.
   const { getAvailableForDate } = await import("../storage/budget/import-availability");
   /**
-   * KEINE Monatsend-Projektion hier — und das ist ein Befund, keine
-   * Unterlassung (Replit #1916).
+   * BEIDE Zahlen holen — die projizierte und die ungeprojizierte.
    *
-   * Der naheliegende Fix waere gewesen, hier wie `planHold` bis zum
-   * Monatsende zu projizieren. **Ausgefuehrt bricht das `#424`:** der
-   * Verbrauchspfad `createConsumptionTransaction` projiziert NICHT, und die
-   * dort gesicherte Invariante lautet „Vorschau == was die Buchung
-   * durchlaesst" (gemessen 127.200 statt 114.100).
+   * ── Zwei Tore mit verschiedenen Stichtagen (Replit #1916) ────────────
+   * `planHold` entscheidet beim ANLEGEN und projiziert bis zum Monatsende.
+   * `createConsumptionTransaction` entscheidet beim DOKUMENTIEREN und ist auf
+   * heute gedeckelt. **Beide sind fuer sich richtig**: wer im Oktober
+   * dokumentiert, hat den Oktober-Anspruch real.
    *
-   * Es gibt also ZWEI Tore mit verschiedenen Stichtagen — `planHold`
-   * (projiziert) und `createConsumptionTransaction` (projiziert nicht). Die
-   * Vorschau kann nicht zu beiden gleich sein. Welches maßgeblich ist, ist
-   * eine fachliche Frage und keine, die man in der Kostenschaetzung
-   * entscheidet.
+   * Falsch war, die Vorschau der ANLAGE gegen den Dokumentations-Stichtag zu
+   * pruefen. Sie war damit strenger als der Server und sperrte Termine, die
+   * `planHold` angenommen haette — eine Mitarbeiterin konnte fuer Oktober
+   * nichts anlegen.
+   *
+   * Ein frueherer Anlauf hat nur die projizierte Zahl eingesetzt und damit
+   * `#424` gebrochen (gemessen 127.200 statt 114.100): dessen Invariante
+   * lautet „Vorschau == was die BUCHUNG durchlaesst". Mit beiden Zahlen
+   * bleibt sie erhalten — `availableCents` ist weiterhin die des
+   * Verbrauchspfads, die Projektion kommt als zweite Groesse daneben.
    */
-  const dateAware = await getAvailableForDate(customerId, date);
+  const dateAware = await getAvailableForDate(customerId, date, undefined, {
+    project45bToMonthEnd: true,
+  });
 
   // Task #876 — Serving-Pfad auf den unified Reader vereinheitlicht. Gelesen
   // werden hier nur Nicht-Verfügbarkeits-Felder (`currentMonthUsedCents`,
@@ -338,6 +344,11 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   const outcome = classifyCostEstimate({
     totalCostCents,
     availableCents: totalAvailable,
+    projectedAvailableCents: dateAware.projectedTotalCents,
+    // Alriks Kriterium, woertlich: Pflegegrad 1 und keine Privatzahlung. Bei
+    // PG 1 gibt es weder Umwandlung (§45a) noch Verhinderungspflege
+    // (§39/§42a) — es bleibt allein der Entlastungsbetrag.
+    pflegegrad1OhnePrivatzahlung: customer?.pflegegrad === 1 && !acceptsPrivatePayment,
     weightedVatRate,
     acceptsPrivatePayment,
     isSelbstzahler: false,
@@ -362,6 +373,28 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     monthlyLimitCents: summary45b.monthlyLimitCents,
     warning: outcome.warning,
     isHardBlock: outcome.isHardBlock,
+    /**
+     * Die PROJIZIERTE Zahl geht mit ueber die Leitung — `kind` nicht.
+     *
+     * Der Kopf des Kastens muss dieselbe Zahl nennen wie der Warntext; ohne
+     * sie zeigte er „verfuegbar: 47,00" ueber einem Text, der 178,00 nennt.
+     * Das ist der Grund, aus dem dieses Feld existiert.
+     *
+     * ── Warum `kind` NICHT (Gate 2 zu #167, S-B) ────────────────────────
+     * Eine fruehere Fassung schickte es mit der Begruendung, der Client
+     * koenne sonst die zwei nicht-blockierenden Faelle nicht unterscheiden.
+     * **Seit die Kopfzahl an `projectedAvailableCents` haengt, stimmt das
+     * nicht mehr**: beide rendern denselben Kasten mit demselben Kopf und
+     * unterscheiden sich nur durch den `warning`-Text, der ohnehin von hier
+     * kommt.
+     *
+     * Uebrig blieb ein Feld im oeffentlichen Response-Schema, dessen einziger
+     * Verbraucher eine `data-testid`-Verzweigung war — **und der Test pruefte
+     * dann sie.** Der Pruefgegenstand existierte nur fuer den Test. Nach der
+     * Ersetzungs-Regel ist ein Feld, das nichts ersetzt und nichts bewirkt,
+     * nicht zu bauen.
+     */
+    projectedAvailableCents: dateAware.projectedTotalCents,
     privateCents: outcome.privateCents,
     vatCents: outcome.vatCents,
     vatRate: Math.round(weightedVatRate),
