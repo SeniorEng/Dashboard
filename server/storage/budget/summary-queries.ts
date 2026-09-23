@@ -19,7 +19,11 @@ import { netAvailable45bAt } from "./net-available-45b";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { computeCapSlot } from "./cap-calculator";
 import { readUnifiedBudgetAvailability, type PotAvailability, type UnifiedBudgetAvailability } from "./unified-reader";
-import { allocationValidAtWhere, notDisplacedByResetWhere } from "./allocation-window";
+import {
+  allocationValidAtWhere,
+  notDisplacedByResetWhere,
+  RESET_DISPLACES_ALL_SOURCES_DEFAULT,
+} from "./allocation-window";
 import { budgetAllocationsRepo } from "../../repos";
 
 // Hinweis (Task #603): §45b bleibt ein Jahrestopf — KEIN harter Monats-Cap.
@@ -67,7 +71,19 @@ export async function getBudgetSummary(
   _preferences?: CustomerBudgetPreferences | undefined,
   _typeSettings?: CustomerBudgetTypeSetting[],
   asOfDate: string = todayISO(),
+  /**
+   * NUR fuer Tests und Messungen. Produktiv entscheidet
+   * `RESET_DISPLACES_ALL_SOURCES_DEFAULT` — damit der Flip EINE Zeile ist und
+   * nicht neun Aufrufstellen.
+   *
+   * Wirkt ausdruecklich NICHT auf `netUsedCents`: die Exklusions-Mathematik
+   * lebt in `netAvailable45bAt`, und `summary-queries` darf sie nicht selbst
+   * fuehren (Waechter `budget-single-reader`, Task #1366). `availableCents`
+   * wird nach aussen ohnehin von `mergeServed45b` aus dem Reader gesetzt.
+   */
+  opts?: { resetDisplacesAllSources?: boolean },
 ): Promise<BudgetSummary> {
+  const verdraengt = opts?.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT;
   const [preferences, typeSettings, customerRows] = await Promise.all([
     _preferences !== undefined ? _preferences : getBudgetPreferences(customerId),
     _typeSettings ?? readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }),
@@ -84,6 +100,8 @@ export async function getBudgetSummary(
   const currentMonth = todayDate.getMonth() + 1;
   const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
 
+  const resetAnchor = verdraengt ? await readResetAnchor(customerId, today) : null;
+
   const allocValidWhere = and(
     eq(budgetAllocations.customerId, customerId),
     eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
@@ -91,7 +109,7 @@ export async function getBudgetSummary(
     allocationValidAtWhere(today),
   );
 
-  const [totalAllocatedCents, currentYearAllocatedCents, txResult, carryoverResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([
+  const [totalAllocatedCents, currentYearAllocatedCents, txResult, carryoverResult, carryoverRohResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([
     calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { asOfDate: today }, undefined, preferences, typeSettings),
 
     calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: currentYear, asOfDate: today }, undefined, preferences, typeSettings),
@@ -109,9 +127,24 @@ export async function getBudgetSummary(
       lte(budgetTransactions.transactionDate, today)
     )).groupBy(budgetTransactions.transactionType),
 
+    // ZAEHLENDE Uebertraege — mit der Verdraengung, wie `totalAllocatedCents`.
     budgetAllocationsRepo.selectColumnsFrom({
       total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       expiresAt: sql<string | null>`MIN(${budgetAllocations.expiresAt})`,
+    }, db).where(and(
+      allocValidWhere,
+      eq(budgetAllocations.source, "carryover"),
+      sql`${budgetAllocations.expiresAt} IS NOT NULL`,
+      notDisplacedByResetWhere(resetAnchor),
+    )),
+
+    // ROHE Uebertraege — ohne die Verdraengung. Die Differenz ist der Betrag,
+    // den die Inventur ersetzt hat: er faellt aus dem Anspruch, soll aber
+    // SICHTBAR bleiben (E4: verdraengen, nicht loeschen). Ohne ihn faellt die
+    // Uebertrags-Karte beim Flip kommentarlos auf 0 — und genau die Frage
+    // „wo ist mein Uebertrag hin?" sollte E4 beantworten.
+    budgetAllocationsRepo.selectColumnsFrom({
+      total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
     }, db).where(and(
       allocValidWhere,
       eq(budgetAllocations.source, "carryover"),
@@ -151,6 +184,19 @@ export async function getBudgetSummary(
 
   const carryoverCents = Number(carryoverResult[0]?.total ?? 0);
   const carryoverExpiresAt = carryoverCents > 0 ? (carryoverResult[0]?.expiresAt ?? null) : null;
+  /**
+   * Was die Inventur ersetzt hat — roh minus zaehlend.
+   *
+   * `0`, solange nichts verdraengt wird. Der Monat kommt aus dem Anker, nicht
+   * aus dem Datum zurueckgeschnitten (`ResetAnchor` traegt ihn selbst).
+   */
+  const carryoverVerdraengtCents = Math.max(
+    0,
+    Number(carryoverRohResult[0]?.total ?? 0) - carryoverCents,
+  );
+  const carryoverErsetztDurchStartwertMonat = carryoverVerdraengtCents > 0 && resetAnchor
+    ? `${String(resetAnchor.month).padStart(2, "0")}/${resetAnchor.year}`
+    : null;
   const currentMonthConsumption = Number(currentMonthResult[0]?.total ?? 0);
   const currentMonthReversals = Number(currentMonthReversalResult[0]?.total ?? 0);
   const currentMonthUsedCents = Math.max(0, currentMonthConsumption - currentMonthReversals);
@@ -299,6 +345,8 @@ export async function getBudgetSummary(
     plannedCents: isCurrentlyActive ? plannedCents : 0,
     availableAfterPlannedCents: isCurrentlyActive ? availableAfterPlannedCents : 0,
     carryoverCents,
+    carryoverVerdraengtCents,
+    carryoverErsetztDurchStartwertMonat,
     carryoverExpiresAt,
     currentYearAllocatedCents,
     monthlyLimitCents,

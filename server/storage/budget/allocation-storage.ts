@@ -26,6 +26,7 @@ import {
   allocationValidAt,
   displacedByReset,
   resetAnchorFrom,
+  RESET_DISPLACES_ALL_SOURCES_DEFAULT,
   type ResetAnchor,
 } from "./allocation-window";
 import { getEarliestCareLevelStart } from "../customer-mgmt/care-level";
@@ -903,7 +904,7 @@ async function calculateAllocated45b(
   const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null; year: number }) =>
     a.source === "carryover" &&
     allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, fensterBis, verfallAb) &&
-    (!opts.resetDisplacesAllSources
+    (!(opts.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
       || !displacedByReset(a, resetAnchor));
   const validCarryoverTargetYears = existingAllocations
     .filter(carryoverCounted)
