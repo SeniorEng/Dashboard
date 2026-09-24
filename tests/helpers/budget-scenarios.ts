@@ -385,7 +385,10 @@ export async function setupBudgetScenario(
       `/api/budget/${customerId}/initial-budget`,
       {
         budgetType: carry.type,
-        currentMonthAmountCents: 0,
+        // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+        // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+        // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+        // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
         carryoverAmountCents: carry.amountCents,
         budgetStartDate: `${carry.year + 1}-01-01`,
       },

@@ -163,7 +163,10 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
     const year = now.getFullYear();
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
+      // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+      // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+      // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+      // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
       carryoverAmountCents: 50000,
       budgetStartDate: `${year}-12-01`, // bewusst nach dem Importmonat
     });
@@ -236,7 +239,10 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
     const year = new Date().getFullYear();
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
+      // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+      // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+      // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+      // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
       carryoverAmountCents: 50000,
       budgetStartDate: `${year}-01-01`,
     });

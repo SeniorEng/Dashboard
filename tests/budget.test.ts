@@ -588,7 +588,10 @@ describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover",
     // im laufenden Jahr.
     const coRes = await apiPost<any>(`/api/budget/${coCustomerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
+      // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+      // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+      // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+      // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
       carryoverAmountCents: 13100,
       budgetStartDate: `${previousYear}-01-01`,
     });
@@ -642,7 +645,10 @@ describe("BB-18: Carryover Response-Shape", () => {
     // budget_start_date-Spalte KEINEN automatischen Carryover mehr.
     const coRes = await apiPost(`/api/budget/${carryoverCustomerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
+      // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+      // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+      // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+      // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
       carryoverAmountCents: 13100,
       budgetStartDate: `${previousYear}-01-01`,
     });
