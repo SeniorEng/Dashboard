@@ -219,7 +219,19 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
 
                   {budgetType === "entlastungsbetrag_45b" && (
                     <div className="mt-4 space-y-3">
-                      {showCarryover && (
+                      {/*
+                        ENTWEDER Startwert ODER Übertrag (Alrik, 24.09.2026).
+
+                        Seit dem Scharfschalten der Inventur-Lesart verdrängt ein
+                        Startwert jede früher beginnende Zuweisung. Beide zusammen
+                        anzunehmen hieße: der Übertrag wird eingegeben, gegen seinen
+                        Cap validiert, quittiert — und ist wirkungslos. Gemessen:
+                        100 € Startwert + 500 € Übertrag ergaben 755 € statt 1.255 €.
+
+                        Der Server lehnt die Kombination ab (`applyInitialBudget`);
+                        hier wird sie gar nicht erst anbietbar.
+                      */}
+                      {showCarryover && !formData.restguthaben45bOverrideEnabled && (
                         <div className="p-3 rounded-md bg-green-100/50 border border-green-200 space-y-3">
                           <h4 className="text-sm font-medium text-green-800">Übertrag aus Vorjahr</h4>
                           <div className="space-y-2">
@@ -250,25 +262,31 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                       )}
 
                       <div className="p-3 rounded-md bg-green-100/50 border border-green-200 space-y-3">
-                        <h4 className="text-sm font-medium text-green-800">Aktuelles Restguthaben (laufendes Jahr)</h4>
+                        <h4 className="text-sm font-medium text-green-800">Ist der aktuelle Restbestand bekannt?</h4>
                         <p className="text-xs text-gray-500">
-                          Normalerweise wird das Guthaben des laufenden Jahres automatisch aus dem
-                          Pflegegrad-Beginn berechnet (131 €/Monat). Aktivieren Sie diese Option nur,
-                          wenn das tatsächliche Restguthaben davon abweicht – etwa weil schon etwas
-                          verbraucht wurde.
+                          Wenn Sie den tatsächlichen Restbestand kennen – etwa aus einer
+                          Kassenauskunft oder weil ein anderer Dienst abgerechnet hat –, tragen Sie
+                          ihn hier ein. <strong>Diese Angabe ersetzt den Übertrag aus dem Vorjahr</strong>:
+                          eine Bestandsaufnahme enthält ihn bereits. Ohne die Angabe wird das Guthaben
+                          des laufenden Jahres aus dem Pflegegrad-Beginn berechnet (131 €/Monat).
                         </p>
                         <div className="flex items-center gap-3">
                           <Checkbox
                             id="restguthaben45bOverrideEnabled"
                             checked={formData.restguthaben45bOverrideEnabled}
-                            onCheckedChange={(checked) => onChange("restguthaben45bOverrideEnabled", !!checked)}
+                            onCheckedChange={(checked) => {
+                              onChange("restguthaben45bOverrideEnabled", !!checked);
+                              // Ausblenden reicht nicht: ein bereits getippter Übertrag
+                              // bliebe im Formular und liefe in die Server-Ablehnung.
+                              if (checked) onChange("uebertrag45b", "");
+                            }}
                             data-testid="checkbox-restguthaben-override"
                           />
                           <Label
                             htmlFor="restguthaben45bOverrideEnabled"
                             className="text-xs font-medium text-green-800"
                           >
-                            Restguthaben abweichend erfassen
+                            Ja, Restbestand ist bekannt
                           </Label>
                         </div>
 

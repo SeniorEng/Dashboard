@@ -104,6 +104,66 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
   const startDate = parseLocalDate(budgetStartDate);
   const year = startDate.getFullYear();
 
+  /**
+   * ENTWEDER Startwert ODER Uebertrag — nie beides (Alrik, 24.09.2026).
+   *
+   * ── Warum das eine Ablehnung ist und keine Warnung ──────────────────────
+   * Seit dem Scharfschalten der Inventur-Lesart verdraengt ein Startwert fuer
+   * Monat M jede Zuweisung, deren Gueltigkeit vor M beginnt. Dieser Pfad
+   * schreibt beide in EINER Transaktion: der Uebertrag traegt
+   * `validFrom = ${year}-01-01` und `year = year`, der Startwert einen Monat
+   * desselben Jahres — `displacedByReset` ist damit IMMER wahr.
+   *
+   * Gemessen: Startwert 100,00 EUR + Uebertrag 500,00 EUR ab 01/2026 ergaben
+   * einen Anspruch von 755,00 EUR statt 1.255,00 EUR. Der Uebertrag war
+   * eingegeben, gegen seinen eigenen Cap validiert, quittiert — und
+   * wirkungslos.
+   *
+   * **Angenommen, quittiert, verworfen ist die schlechteste Kombination** —
+   * derselbe Satz steht ein paar Zeilen tiefer schon einmal, fuer einen
+   * anderen Fall. Eine Warnung waere hier zu wenig: der Anwender hat keine
+   * Moeglichkeit, „beides" zu meinen.
+   *
+   * Fachlich: eine Inventur SCHLIESST den Uebertrag ein. Wer den Restbestand
+   * kennt, nennt ihn; wer ihn nicht kennt, nennt den Uebertrag. Die Frage im
+   * Assistenten lautet deshalb „Ist der aktuelle Restbestand bekannt
+   * (Kassenauskunft)?".
+   *
+   * Hier und nicht im Client: der Client kann die Felder ausblenden, aber
+   * `POST /initial-budget` ist ein eigener Weg (Drei-Schichten-Pflicht, #164).
+   */
+  if (
+    budgetType === "entlastungsbetrag_45b"
+    && currentMonthAmountCents != null
+    // `> 0`, nicht `!= null` — ABWEICHUNG von der woertlichen Vorgabe
+    // („beide gleichzeitig geht nicht mehr"), mit Absicht und Begruendung:
+    //
+    // Der Schaden, gegen den die Regel gebaut ist, heisst „stille
+    // Verdraengung" — ein eingegebener Uebertrag wird validiert, quittiert und
+    // ist wirkungslos. Bei einem 0-EUR-Uebertrag geht kein Wert verloren; die
+    // Angabe heisst „aus dem Vorjahr ist nichts uebrig" und widerspricht der
+    // Inventur nicht.
+    //
+    // Gemessen, was die kategorische Fassung kostete: `NS-4` (Alriks
+    // 0-EUR-Entscheidung vom 22.09.2026 auf dem Schreibpfad) und der geteilte
+    // Fixture-Helfer `tests/helpers/budget-scenarios.ts` uebergeben beide
+    // grundsaetzlich einen 0-EUR-Uebertrag neben dem Startwert — vier
+    // Testdateien fielen, keine davon wegen eines echten Konflikts.
+    //
+    // Der teure Fall bleibt abgelehnt: Startwert 0 EUR NEBEN einem Uebertrag
+    // von 500 EUR (`EO-5`) — dort verschwindet der Uebertrag vollstaendig.
+    && (carryoverAmountCents ?? 0) > 0
+  ) {
+    throw new BudgetInitialSetupError(
+      400,
+      "BUDGET_45B_STARTWERT_ODER_UEBERTRAG",
+      "Startwert und Übertrag aus dem Vorjahr schließen sich aus: ein Startwert "
+      + "ist eine Bestandsaufnahme und enthält den Übertrag bereits. "
+      + "Ist der aktuelle Restbestand bekannt (z. B. aus einer Kassenauskunft), "
+      + "nur den Startwert angeben — sonst nur den Übertrag.",
+    );
+  }
+
   // §45b-Akkumulations-Obergrenzen (Task #959): Startwert + Carryover dürfen das
   // rechtlich mögliche Maximum nicht überschreiten. Accrual-Anker = frühester
   // Pflegegrad-Beginn (Care-Level-Historie), Fallback = RAW-Budget-Start.

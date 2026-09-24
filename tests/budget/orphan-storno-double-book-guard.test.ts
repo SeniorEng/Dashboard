@@ -75,8 +75,12 @@ describe("Task #989 — Storno-Doppel-Buchung verhindert (verwaiste Note-Storno)
     const today = todayISO();
     const r1 = await apiPost<any>(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 13100,
-      carryoverAmountCents: 100000,
+      // Startwert ALLEIN: Startwert und echter Uebertrag schliessen sich seit
+      // dem 24.09.2026 aus (`applyInitialBudget`, Alriks Entweder-oder). Die
+      // Kombination war hier ohnehin nur Topf-Fuellung — der Uebertrag waere
+      // zum Buchungszeitpunkt (nach dem 30.06.) verfallen und haette nichts
+      // beigetragen.
+      currentMonthAmountCents: 113100,
       budgetStartDate: today,
     });
     expect(r1.status).toBe(201);
