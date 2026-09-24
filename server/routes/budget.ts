@@ -1157,9 +1157,42 @@ const initialBudgetSchema = z.object({
    * Uebertrag ist.
    */
   currentMonthAmountCents: z.number().min(0).optional(),
-  carryoverAmountCents: z.number().min(0).optional().default(0),
+  /**
+   * KEIN `.default(0)` mehr (24.09.2026).
+   *
+   * Mit dem Default wurde ein WEGGELASSENES Feld zu `0` — und sobald `0` nicht
+   * mehr auf `null` gemappt wird (unten), waere daraus bei jedem Aufrufer eine
+   * „festgestellte Null" und damit eine Uebertragszeile geworden, die niemand
+   * angegeben hat.
+   *
+   * `undefined` = keine Angabe, `0` = festgestellte Null. Dieselbe
+   * Unterscheidung, die `ApplyInitialBudgetParams` schon traegt.
+   */
+  carryoverAmountCents: z.number().min(0).optional(),
   budgetStartDate: z.string(),
-});
+}).refine(
+  /**
+   * MINDESTENS eine der beiden Angaben — die andere Haelfte des
+   * Entweder-oder.
+   *
+   * `currentMonthAmountCents` ist seit dem 24.09.2026 optional, damit „nur
+   * Uebertrag" ausdrueckbar ist. Ohne diese Schranke waere damit aber auch
+   * „weder noch" erlaubt: der Endpunkt antwortete `201` samt Audit-Eintrag,
+   * und in der DB stuende nichts — „angenommen, quittiert, verworfen", der
+   * Fall, den `budget-initial-setup` ein paar Ebenen tiefer ausdruecklich
+   * abgeschafft hat.
+   *
+   * Zwei Tests hielten das vorher ueber die Pflichtfeld-Eigenschaft fest
+   * (`Task #731`-Alias und „ohne currentMonthAmountCents → 400"). Ihre
+   * ZUSAGE bleibt damit erhalten, ihr Mechanismus wechselt: nicht mehr „das
+   * Feld fehlt", sondern „es fehlt jede Angabe".
+   */
+  (d) => d.currentMonthAmountCents != null || d.carryoverAmountCents != null,
+  {
+    message: "Mindestens eine Angabe nötig: Startwert oder Übertrag aus dem Vorjahr.",
+    path: ["currentMonthAmountCents"],
+  },
+);
 
 router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nicht erfasst werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
@@ -1213,8 +1246,25 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     const allocations = await applyInitialBudget({
       customerId,
       budgetType,
-      currentMonthAmountCents: (currentMonthAmountCents ?? 0) > 0 ? currentMonthAmountCents! : null,
-      carryoverAmountCents: carryoverAmountCents > 0 ? carryoverAmountCents : null,
+      /**
+       * `0` wird NICHT mehr auf `null` gemappt (24.09.2026).
+       *
+       * Alriks Entscheidung vom 22.09.2026: „0 EUR ist eine festgestellte
+       * Null." Eine Zuordnung auf „kein Wert" macht daraus eine fehlende
+       * Angabe — und dann meldet der Endpunkt `201` samt Audit-Eintrag ueber
+       * einen Betrag, den er verworfen hat.
+       *
+       * Derselbe Punkt wurde bei #163 fuer `budget-initial-setup` gemeldet und
+       * DORT behoben (`!= null` statt `> 0`, gesichert von `NS-4`). Die
+       * Uebersetzung in dieser Route blieb stehen — die Funktion unterschied
+       * also, und der Weg dorthin warf die Unterscheidung vorher weg.
+       *
+       * Gemessen, was das aendert: eine 0-EUR-Uebertragszeile neben einem
+       * Startwert laesst den Anspruch unveraendert (39.300 mit und ohne). Sie
+       * ist eine Zeile mit Aussage, nicht mit Betrag.
+       */
+      currentMonthAmountCents: currentMonthAmountCents ?? null,
+      carryoverAmountCents: carryoverAmountCents ?? null,
       budgetStartDate,
       customer: { billingType: customer.billingType, pflegegrad: customer.pflegegrad },
       userId,

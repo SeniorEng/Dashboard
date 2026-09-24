@@ -119,11 +119,27 @@ describe("Task #725 — initial-budget Endpoint-Semantik (Monatswert)", () => {
   });
 
   it("Task #731: alter Alias `currentYearAmountCents` wird vom Schema mit 400 abgelehnt", async () => {
+    /**
+     * Der Füllwert `carryoverAmountCents: 0` ist am 24.09.2026 RAUS — er hat
+     * diesen Test um seine Aussage gebracht.
+     *
+     * Gemessen: `initialBudgetSchema` ist NICHT `.strict()`; der unbekannte
+     * Alias-Schlüssel wird still verworfen. Die `400` kam also nie vom Alias,
+     * sondern davon, dass kein bekannter Betrag übrigblieb. Mit dem Füllwert
+     * daneben — sobald `0` als festgestellte Null zählt (S5) — nennt der Body
+     * einen bekannten Betrag, und derselbe Test meldet `201`.
+     *
+     * Die Zusage, die er trägt, ist damit genau: **ein Aufrufer, der nur den
+     * alten Alias schickt, kommt nicht still durch.** Dafür darf im Body kein
+     * zweiter Betrag stehen.
+     *
+     * FINDING dazu (still ignorierte Unbekannte) steht im PR-Body; ein
+     * `.strict()` hat eigenen Blast-Radius und gehört nicht in diesen Diff.
+     */
     const customerId = await freshCustomer("T731-alias-removed");
     const res = await apiPost(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
       currentYearAmountCents: 13_100,
-      carryoverAmountCents: 0,
       budgetStartDate: "2026-05-15",
     });
     expect(res.status).toBe(400);
@@ -133,11 +149,26 @@ describe("Task #725 — initial-budget Endpoint-Semantik (Monatswert)", () => {
     expect(rows.length).toBe(0);
   });
 
-  it("Validation: ohne `currentMonthAmountCents` → 400", async () => {
+  it("Validation: ohne JEDE Angabe (weder Startwert noch Übertrag) → 400", async () => {
+    /**
+     * Der Name hat sich am 24.09.2026 geändert, die Zusage nicht.
+     *
+     * Vorher hielt dieser Test die Pflichtfeld-Eigenschaft von
+     * `currentMonthAmountCents` fest. Das Feld ist jetzt optional, damit „nur
+     * Übertrag" überhaupt ausdrückbar ist (Alriks Entweder-oder) — die Zusage
+     * dahinter war aber nie „dieses Feld muss da sein", sondern **„der
+     * Endpunkt darf nicht 201 melden und nichts schreiben"**.
+     *
+     * Die prüft er weiter, nur über die `refine`-Regel statt über das
+     * Pflichtfeld.
+     *
+     * Der Füllwert `carryoverAmountCents: 0` ist dabei RAUS: seit `0` eine
+     * festgestellte Null ist, wäre er eine Angabe — der Test hätte „ohne jede
+     * Angabe" behauptet und eine gemacht.
+     */
     const customerId = await freshCustomer("T725-validation");
     const res = await apiPost(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      carryoverAmountCents: 0,
       budgetStartDate: "2026-01-01",
     });
     expect(res.status).toBe(400);

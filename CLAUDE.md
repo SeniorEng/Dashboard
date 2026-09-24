@@ -314,6 +314,26 @@ sie gelten auch dann, wenn die aktuelle Aufgabe sie nicht erwähnt.
   Der Mutations-Gegencheck fängt diese Form **nicht** — er fragt, ob eine
   Prüfung rot werden kann, nicht ob ihr Rot etwas bedeutet. Deshalb steht sie
   hier als eigener Punkt und nicht als Unterfall.
+- **Eine Teilmenge im PR-Body liest sich wie das Ganze.** „Tests grün" über
+  einem Lauf, der vier Verzeichnisse umfasste, ist keine falsche Zahl — es ist
+  eine richtige Zahl über einen anderen Gegenstand als den, den der Leser
+  annimmt. Der Leser prüft nicht nach, denn genau dafür steht die Zahl da.
+
+  Gemessen am 24.09.2026: der Lauf zu #184 deckte `tests/budget`,
+  `tests/billing`, `tests/equality` und `tests/architecture` ab und stand im
+  Body als Testergebnis des PRs. Die Änderung berührte einen Endpunkt, den
+  **55 Dateien außerhalb dieser vier Verzeichnisse** aufrufen. Gefunden hat das
+  nicht der Verfasser, sondern Gate 2 — die einzige Instanz, die den Umfang
+  nachgerechnet hat.
+
+  **Die Regel: im PR-Body steht, WELCHE Verzeichnisse gelaufen sind und welche
+  nicht.** Nicht „grün", sondern „grün in X, Y, Z; nicht gelaufen: der Rest".
+  Das kostet eine Zeile und macht die Lücke sichtbar, statt sie zu schließen.
+
+  Nah an „rot ohne Aussage", aber die Gegenrichtung: dort behauptet ein Signal
+  eine Ursache, die es nicht gemessen hat — hier behauptet ein Signal einen
+  Umfang, den es nicht gemessen hat. Beide Male ist die Zahl korrekt und die
+  Aussage nicht.
 - **Ein Wächter braucht eine Selbstprobe — und die findet mehr als ein Review.**
   Ein Architektur-Wächter, der ein MUSTER sucht, kann aus zwei Gründen grün
   sein: es gibt keinen Verstoß, oder die Erkennung ist kaputt. Von außen sehen
