@@ -393,6 +393,131 @@ steht nicht im Chat.**
 Cowork hat nur Todoist. Was nicht im Ticket steht, existiert dort nicht und ist
 beim nächsten Start weg.
 
+## Standard: Änderungen an fachlichen Regeln im Geldpfad
+
+**Beschlossen von Alrik am 24.09.2026, gilt ab sofort.** Anlass war die
+Aufarbeitung des Startwert-/Übertrags-Vorgangs (P1 `6hXp9qMrXH2WGVVG`,
+#163–#186). Ticket: `6hcQPmcrvfj5ghfp`.
+
+> **Ziel: Verständnis entsteht VOR dem Code, nicht im Review.** Gate 2 prüft
+> gegen eine Vorgabe — es entdeckt nicht erst, wie das System funktioniert.
+
+Der Standard steht bewusst **vor** dem Gate-Abschnitt: er beschreibt, was
+passiert, bevor Gate 2 überhaupt etwas zu prüfen bekommt.
+
+### 1. Wann er gilt
+
+| Stufe | Beispiele | Verfahren |
+|---|---|---|
+| **Voll** | Änderung einer fachlichen Regel in Budget, Abrechnung, Zahlungen, Leistungsnachweisen, GoBD — alles, was bestimmt, *wie viel Geld wem zusteht oder abgerechnet wird* | A–G vollständig |
+| **Leicht** | Bugfix, der nachweislich nur **eine** Stelle betrifft und keine Regel ändert; Anzeige-/Textänderung | A (ein Satz), C (nur betroffene Stelle), F |
+| **Keins** | Doku, Kosmetik, Test-Refactoring ohne Verhaltensänderung | normaler PR |
+
+**Im Zweifel: Voll.** Ein Fix, der sich beim Bauen als Regeländerung entpuppt,
+wechselt sofort auf Voll (→ G).
+
+Die Staffelung ist Absicht: schwere Spezifikation für kleine Änderungen ist
+nachweislich kontraproduktiv (Böckeler/Fowler zu Spec-Driven Development).
+
+### 2. Die Schritte
+
+**A — Fachliche Bedeutung** (Alrik, max. 1 Seite). Begriffe mit Bedeutung,
+Herkunft der Zahl, Beispiel; neue oder mehrdeutige Begriffe ins Glossar (§4).
+Regeln als einzelne Sätze. **Offene Fragen ausdrücklich listen („rote Karten",
+Example Mapping). Solange eine offen ist, wird nicht gebaut.**
+*Anlassfall: „Enthält die Kassenauskunft den Übertrag?" — in einem Satz
+beantwortet, gestellt nach vier Tagen Bauen.*
+
+**B — Ist-Verhalten festschreiben** (CC, vor jeder Änderung).
+Charakterisierungstests nach Feathers: was der Code **heute** tut. Für
+Geldpfade zusätzlich ein Mess-Lauf gegen echte Daten, der die heutigen Werte je
+Kunde festhält. Ruft die echte Funktion auf, baut nichts nach. Nennt,
+**welche Verzeichnisse/Datenmengen** gelaufen sind — eine Teilmenge darf nicht
+wie eine Gesamtzahl klingen (siehe „Eine Teilmenge im PR-Body liest sich wie
+das Ganze").
+
+**C — Wirkungskarte** (CC, gemessen, nicht erinnert). Drei Listen mit
+`datei:zeile`:
+1. **Schreibwege** — UI, Anlage-Assistent, Import, Automatik, Skripte,
+   Jahreswechsel …
+2. **Lesewege/Tore mit ihren Einstellungen** — Stichtag/Horizont, Abzüge, Flags
+3. **Datenbestand** — Verteilungen, Konventionen, Auffälligkeiten in Prod
+
+Je Schicht (Server · Midlayer · Client): **„sitzt hier: `<Stelle>`"** oder
+**„sitzt hier nicht"**. **„Nicht geprüft" ist keine zulässige Antwort** —
+identisch zur Drei-Schichten-Pflicht oben, hier nur auf den ganzen Vorgang
+statt auf eine Änderung angewandt.
+
+**D — Entscheidungstabelle** (Alrik entscheidet einmal). Alle Kombinationen der
+relevanten Eingaben mit erwartetem Ergebnis. Zwei Prüfungen: **Vollständigkeit**
+(jede Kombination genau eine Zeile) und **keine Überschneidung**.
+Einzelentscheidungen im Chat ersetzen die Tabelle nicht — sie werden
+eingetragen.
+*Anlassfall: „0 € gültig" + „`<=`" ergab zusammen „ein 0-€-Startwert zum 01.01.
+löscht den ganzen Übertrag". Zwei einzeln richtige Entscheidungen, eine Folge,
+die niemand ausgesprochen hatte — erst im Test entdeckt.*
+
+**E — Echte Fälle als Abnahme** (vor dem Code). 3–6 Beispiele aus echten Daten
+mit erwartetem Ergebnis in Euro, von Alrik bestätigt. Dazu **Invarianten** als
+Eigenschaften über ein erzeugtes Raster (z. B. Vorschau = Reservierung =
+Buchung für dasselbe Datum; Σ bleibt erhalten; eine rückwirkende Buchung sieht
+keinen künftigen Anspruch). Jeder zusichernde Test mutations-gegengeprüft und
+auf der Schicht, über die er etwas behauptet.
+
+**F — Bauen und prüfen.** Erst jetzt Code. Gate 2 prüft gegen D, C und E und
+meldet jede Abweichung.
+
+**G — Stopp-Regel.** Findet Bau oder Review einen Schreib-/Leseweg, der nicht in
+C steht, oder eine Kombination, die nicht in D steht: **nicht weiterflicken.**
+Zurück zu C/D, ergänzen, von Alrik bestätigen lassen. **Das Anhalten ist
+erwünscht, kein Versagen.**
+
+### 3. Rollen
+
+| | |
+|---|---|
+| **Alrik** | A, D, E bestätigen, Gate 3 |
+| **CC** | B, C, Entwurf D und E, F |
+| **Cowork** | fordert A–E vor dem ersten Code ein, prüft auf Lücken, schneidet Tickets in dieser Reihenfolge, schlägt bei G Alarm statt Einzelfunde weiterzureichen |
+
+### 4. Glossar (lebend)
+
+Begriffe mit mehr als einer möglichen Bedeutung werden hier festgelegt und in
+Code, Oberfläche und Tickets **gleich** verwendet.
+
+| Begriff | Bedeutung | Quelle der Zahl |
+|---|---|---|
+| **Startwert** | Inventur: festgestellter §45b-Restbestand zum Monatsbeginn. **Ersetzt alles davor**, einschließlich Übertrag. 0 € = festgestellte Null. | Kassenauskunft, gesamter Restbestand |
+| **Übertrag** | Restguthaben des Vorjahres, nutzbar bis 30.06. | Jahreswechsel-Automatik oder Eingabe |
+| **ersetzt** | zählt nicht mehr, weil ein Startwert es einschließt | — |
+| **verfallen** | zählt nicht mehr, weil die Frist abgelaufen ist | — |
+| **verfügbar (Monat M)** | *festzulegen in `6hcFRR3Q8Hg8W7Pp`* | — |
+
+### 5. Was der Anlassfall gezeigt hat
+
+- Erster Schritt war ein **Umbau statt einer Bestandsaufnahme**.
+- Rund zehn „Funde" in fünf Tagen waren Teile der Wirkungskarte, die vor dem
+  Code hätte stehen müssen.
+- Gate 2 fand pro PR zwei bis fünf Blocker — **das Verständnis entstand im
+  Review.**
+- Zahlen wurden weitergegeben, bevor sie gemessen waren (8 → 23 → 28 → 20 → 21
+  Kunden).
+
+Alriks Satz dazu: *„Trial & Error ist keine Arbeitsweise, die annehmbar ist."*
+
+### Quellen
+
+- GitHub Spec Kit: [Spec-driven development with AI](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/)
+- [Claude Code Best Practices](https://code.claude.com/docs/en/best-practices)
+- Böckeler/Fowler zu SDD: [Martin Fowler auf X](https://x.com/martinfowler/status/1978453531565695415) · [Spec-Driven Development Deep Dive](https://hazar-nazari.medium.com/spec-driven-development-deep-dive-c01e597e92bf)
+- Example Mapping: [The one where Oskar explains Example Mapping](https://event-driven.io/en/intro_to_example_mapping/) · Specification by Example: [Specification by Example, remotely](https://gojko.net/2020/03/31/sbe-remotely.html)
+- Charakterisierungstests: [Characterization test (Wikipedia)](https://en.wikipedia.org/wiki/Characterization_test) · [Key points of Working Effectively with Legacy Code](https://understandlegacycode.com/blog/key-points-of-working-effectively-with-legacy-code/)
+- Entscheidungstabellen (DMN): [DMN Hit Policy Explained](https://www.trisotech.com/dmn-hit-policy-explained/) · [Testing DMN Decision Tables](https://camunda.com/blog/2016/01/testing-dmn/)
+- Property-based / metamorphes Testen: [Property-based Testing and Test Oracles](https://swen90006.github.io/Property-based-testing.html) · [Metamorphic testing (Wikipedia)](https://en.wikipedia.org/wiki/Metamorphic_testing)
+- [Design Docs at Google](https://www.industrialempathy.com/posts/design-docs-at-google/)
+- [Ubiquitous Language](https://ddd-practitioners.com/home/glossary/ubiquitous-language/)
+- Andon / Stop the Line: [Andon (manufacturing), Wikipedia](https://en.wikipedia.org/wiki/Andon_(manufacturing))
+
 ## Arbeitsmodus: autonom bis zur PR, Mensch an 4 Gates
 
 Der volle Loop (read → plan → implement → tsc/lint/test → commit → push → PR →
@@ -416,6 +541,12 @@ CI) läuft **autonom**. Ein Mensch klinkt sich nur an diesen vier Punkten ein:
      ist. Er hat kein `Grep` und bricht bei kritischen Funden ab.
 
    Beide ERSETZEN den früheren `reviewer`-Subagenten (Datei entfernt).
+
+   **Bei Änderungen im Geldpfad prüft Gate 2 gegen C, D und E** des Standards
+   oben — nicht gegen sein eigenes, im Review erst entstehendes Bild. Fehlen
+   diese Unterlagen, ist das selbst der Befund: dann prüft der Reviewer eine
+   Vorgabe, die es nicht gibt, und der Blocker heißt „zurück zu A–E", nicht
+   „hier eine Zeile ändern".
 3. **Merge + Deploy** — Admin-Merge nach `main` + Prod-Publish. → Alrik bestätigt.
 4. **Prod-Schreiboperation** — Dry-Run zuerst, dann ausdrückliche Freigabe je
    Schritt. → Alrik bestätigt.
