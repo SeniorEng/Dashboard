@@ -48,6 +48,9 @@ async function main(): Promise<void> {
   const alsCsv = args.includes("--csv");
   const vergleichIdx = args.indexOf("--vergleich");
   const vergleichsDatei = vergleichIdx >= 0 ? args[vergleichIdx + 1] : null;
+  const ursachen = args.includes("--ursachen");
+  const diagIdx = args.indexOf("--diagnose");
+  const diagKunde = diagIdx >= 0 ? Number(args[diagIdx + 1]) : null;
   const stichtag = args.find(a => /^\d{4}-\d{2}-\d{2}$/.test(a)) ?? todayISO();
 
   /**
@@ -112,6 +115,8 @@ async function main(): Promise<void> {
     }
   }
 
+  if (diagKunde != null) { await diagnose(diagKunde, stichtag, namen); return; }
+  if (ursachen) { await ursachenAufteilung(kunden, stichtag); return; }
   if (vergleichsDatei) {
     await vergleiche(vergleichsDatei, kunden, stichtag, namen);
     return;
@@ -162,7 +167,9 @@ async function vergleiche(
   }
 
   const { readBudget45bFifoBreakdown: lies } = await import("../storage/budget/fifo-breakdown");
-  const aenderungen: Array<{ id: number; dRest: number; dVerbrauch: number }> = [];
+  const aenderungen: Array<{
+    id: number; dUeRest: number; dUeVerbr: number; dLfRest: number; dLfVerbr: number;
+  }> = [];
   let negativVorher = 0;
   for (const id of kunden) {
     const a = alt.get(id);
@@ -181,16 +188,18 @@ async function vergleiche(
      * Die erste Fassung meldete „0 von 1 geaendert" fuer einen Fall, der sich
      * nachweislich aendert.
      */
-    const dLaufendRest = l.remainingCents - a.laufendRest;
-    const dUebertragRest = c.remainingCents - a.uebertragRest;
-    const dUebertragVerbrauch = c.consumedCents - a.uebertragVerbraucht;
-    if (dLaufendRest !== 0 || dUebertragRest !== 0 || dUebertragVerbrauch !== 0) {
-      aenderungen.push({ id, dRest: dLaufendRest, dVerbrauch: dUebertragVerbrauch });
-    }
+    const d = {
+      id,
+      dUeRest: c.remainingCents - a.uebertragRest,
+      dUeVerbr: c.consumedCents - a.uebertragVerbraucht,
+      dLfRest: l.remainingCents - a.laufendRest,
+      dLfVerbr: l.consumedCents - a.laufendVerbraucht,
+    };
+    if (d.dUeRest || d.dUeVerbr || d.dLfRest || d.dLfVerbr) aenderungen.push(d);
   }
 
-  const summeRest = aenderungen.reduce((n, a) => n + a.dRest, 0);
-  const groesste = [...aenderungen].sort((a, b) => Math.abs(b.dRest) - Math.abs(a.dRest)).slice(0, 5);
+  const summeRest = aenderungen.reduce((n, a) => n + a.dLfRest, 0);
+  const groesste = [...aenderungen].sort((a, b) => Math.abs(b.dLfRest) - Math.abs(a.dLfRest)).slice(0, 5);
 
   console.log("");
   console.log(`VORHER/NACHHER — §45b-Topfaufteilung zum ${stichtag}`);
@@ -203,20 +212,155 @@ async function vergleiche(
     console.log("  Keine Aenderung — auf diesem Bestand tritt der Fall nicht auf.");
   } else {
     console.log("  Die fuenf groessten Faelle:");
-    console.log("  " + "Kunde".padEnd(7) + "Name".padEnd(28) + "Δ Rest".padStart(14) + "Δ Verbrauch".padStart(16));
-    console.log("  " + "-".repeat(64));
+    console.log("  " + "Kunde".padEnd(7) + "Name".padEnd(22)
+      + "Δ Übertr.Rest".padStart(15) + "Δ Übertr.Verbr".padStart(16)
+      + "Δ Lauf.Rest".padStart(14) + "Δ Lauf.Verbr".padStart(15));
+    console.log("  " + "-".repeat(84));
     for (const g of groesste) {
       console.log(
         "  " + String(g.id).padEnd(7)
-        + (namen.get(g.id) ?? "?").slice(0, 26).padEnd(28)
-        + formatEuroDE(g.dRest).padStart(16)
-        + formatEuroDE(g.dVerbrauch).padStart(18),
+        + (namen.get(g.id) ?? "?").slice(0, 20).padEnd(22)
+        + formatEuroDE(g.dUeRest).padStart(15)
+        + formatEuroDE(g.dUeVerbr).padStart(16)
+        + formatEuroDE(g.dLfRest).padStart(14)
+        + formatEuroDE(g.dLfVerbr).padStart(15),
       );
     }
   }
   console.log("");
-  console.log("  Lesart: Δ Rest laufend NEGATIV = der Topf meldet nach dem Fix WENIGER frei.");
-  console.log("  Das ist die Korrekturrichtung — vorher war zu viel frei ausgewiesen.");
+  console.log("  Lesart — JE TOPF lesen, nicht über Kreuz:");
+  console.log("    · Übertrag:  Verbrauch fällt, Rest steigt   (der Schnitt nimmt Buchungen heraus)");
+  console.log("    · Laufend:   Verbrauch steigt, Rest fällt   (die Gegenbewegung)");
+  console.log("");
+  console.log("  A / C / V ändern sich NICHT — nur ihre Aufteilung auf die zwei Töpfe.");
+  console.log("");
+  console.log("  |Δ Lauf.Rest| kann KLEINER sein als |Δ Übertr.Verbr.|: `freeCarry` ist bei V");
+  console.log("  gedeckelt — der Übertrags-Topf kann nie mehr frei zeigen als der Kunde");
+  console.log("  insgesamt hat. An einem konstruierten Fall gemessen: 16.500 gegen 157.200.");
+  console.log("  Kein Fehler, sondern die Deckelung.");
+  console.log("");
+}
+
+/**
+ * Woher kommt die Verschiebung — as-of-Schnitt oder Reset-Schnitt?
+ *
+ * Klassifiziert die Buchungen, die der Schnitt herausnimmt. **Kein Nachbau der
+ * Formel** — gezaehlt wird nur, welche Transaktion in welche der beiden
+ * Kategorien faellt:
+ *
+ *   as-of   : `transactionDate > asOfDate`   (FS-5, spaetere Buchungen)
+ *   Reset   : `transactionDate < cutoffDate` (Startwert-Stichtag)
+ *
+ * Fuer Modell v2 zaehlt vor allem der zweite: der as-of-Schnitt betrifft
+ * Stichtagssichten in die Vergangenheit, der Reset-Schnitt die Inventur selbst.
+ */
+async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<void> {
+  const { and: und, eq: ist, isNull: istNull, inArray, sql: roh, gt, lt } = await import("drizzle-orm");
+  const { budgetTransactions } = await import("@shared/schema");
+  const { readResetAnchor } = await import("../storage/budget/allocation-storage");
+
+  let summeAsOf = 0, summeReset = 0, kundenAsOf = 0, kundenReset = 0;
+  for (const id of kunden) {
+    const ueIds = (await db.select({ id: budgetAllocations.id })
+      .from(budgetAllocations)
+      .where(und(
+        ist(budgetAllocations.customerId, id),
+        ist(budgetAllocations.budgetType, BUDGET_TYPE),
+        ist(budgetAllocations.source, "carryover"),
+        istNull(budgetAllocations.deletedAt),
+      ))).map(z => z.id);
+    if (ueIds.length === 0) continue;
+
+    const anker = await readResetAnchor(id, stichtag);
+
+    const [nachher] = await db.select({
+      total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    }).from(budgetTransactions).where(und(
+      inArray(budgetTransactions.allocationId, ueIds),
+      roh`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+      gt(budgetTransactions.transactionDate, stichtag),
+    ));
+    const vorReset = anker ? (await db.select({
+      total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    }).from(budgetTransactions).where(und(
+      inArray(budgetTransactions.allocationId, ueIds),
+      roh`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+      lt(budgetTransactions.transactionDate, anker.cutoffDate),
+    )))[0] : { total: 0 };
+
+    const a = Number(nachher?.total ?? 0);
+    const r = Number(vorReset?.total ?? 0);
+    if (a > 0) { summeAsOf += a; kundenAsOf++; }
+    if (r > 0) { summeReset += r; kundenReset++; }
+  }
+
+  console.log("");
+  console.log(`URSACHEN der Verschiebung zum ${stichtag}`);
+  console.log("=".repeat(72));
+  console.log(`  as-of-Schnitt (Buchung NACH dem Stichtag):  ${formatEuroDE(summeAsOf)}  bei ${kundenAsOf} Kunden`);
+  console.log(`  Reset-Schnitt (Buchung VOR dem Startwert):  ${formatEuroDE(summeReset)}  bei ${kundenReset} Kunden`);
+  console.log("");
+  console.log("  Beide Mengen koennen sich ueberschneiden, wenn ein Kunde beides hat.");
+  console.log("  Fuer Modell v2 zaehlt der Reset-Schnitt — der as-of-Schnitt betrifft nur");
+  console.log("  Sichten in die Vergangenheit.");
+  console.log("");
+}
+
+/**
+ * Ein Einzelfall von Hand nachvollziehbar: Zeilen, Buchungen, Werte.
+ */
+async function diagnose(id: number, stichtag: string, namen: Map<number, string>): Promise<void> {
+  const { and: und, eq: ist, isNull: istNull } = await import("drizzle-orm");
+  const { budgetTransactions } = await import("@shared/schema");
+  const { readResetAnchor } = await import("../storage/budget/allocation-storage");
+
+  const zeilen = await db.select({
+    id: budgetAllocations.id, source: budgetAllocations.source,
+    year: budgetAllocations.year, month: budgetAllocations.month,
+    amountCents: budgetAllocations.amountCents,
+    validFrom: budgetAllocations.validFrom, expiresAt: budgetAllocations.expiresAt,
+  }).from(budgetAllocations).where(und(
+    ist(budgetAllocations.customerId, id),
+    ist(budgetAllocations.budgetType, BUDGET_TYPE),
+    istNull(budgetAllocations.deletedAt),
+  ));
+
+  const tx = await db.select({
+    date: budgetTransactions.transactionDate, typ: budgetTransactions.transactionType,
+    amountCents: budgetTransactions.amountCents, alloc: budgetTransactions.allocationId,
+  }).from(budgetTransactions).where(und(
+    ist(budgetTransactions.customerId, id),
+    ist(budgetTransactions.budgetType, BUDGET_TYPE),
+  ));
+
+  const anker = await readResetAnchor(id, stichtag);
+  const b = await readBudget45bFifoBreakdown(id, stichtag);
+
+  console.log("");
+  console.log(`DIAGNOSE Kunde ${id} (${namen.get(id) ?? "?"}) zum ${stichtag}`);
+  console.log("=".repeat(84));
+  console.log(`Reset-Anker: ${anker ? anker.cutoffDate : "— keiner —"}`);
+  console.log("");
+  console.log("Zuweisungen:");
+  for (const z of zeilen.sort((a, b2) => a.validFrom.localeCompare(b2.validFrom))) {
+    console.log(`  #${String(z.id).padEnd(6)} ${z.source.padEnd(16)} ${formatEuroDE(z.amountCents).padStart(13)}`
+      + `  ab ${z.validFrom}  bis ${z.expiresAt ?? "—"}  (year ${z.year}, month ${z.month ?? "—"})`);
+  }
+  console.log("");
+  console.log("Buchungen:");
+  for (const t of tx.sort((a, b2) => a.date.localeCompare(b2.date))) {
+    const lage = t.date > stichtag ? "NACH Stichtag (as-of-Schnitt)"
+      : (anker && t.date < anker.cutoffDate) ? "vor dem Reset (Reset-Schnitt)" : "zaehlt";
+    console.log(`  ${t.date}  ${t.typ.padEnd(12)} ${formatEuroDE(t.amountCents).padStart(13)}`
+      + `  alloc=${String(t.alloc ?? "NULL").padEnd(7)} ${lage}`);
+  }
+  console.log("");
+  console.log("Ergebnis (dieser Code-Stand):");
+  for (const t of b.pots) {
+    console.log(`  ${t.potType.padEnd(13)} alloc ${formatEuroDE(t.allocatedCents).padStart(13)}`
+      + `  verbr ${formatEuroDE(t.consumedCents).padStart(13)}  rest ${formatEuroDE(t.remainingCents).padStart(13)}`);
+  }
+  console.log(`  GESAMT        A ${formatEuroDE(b.totalAllocatedCents)}  C ${formatEuroDE(b.totalConsumedCents)}  V ${formatEuroDE(b.totalAvailableCents)}`);
   console.log("");
 }
 
