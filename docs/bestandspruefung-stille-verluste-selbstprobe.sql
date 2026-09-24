@@ -79,3 +79,67 @@ ROLLBACK;
 
 -- Für Fall 2 gibt es keine Selbstprobe, weil es keinen Beleg gibt, den man
 -- konstruieren könnte. Genau das ist der Befund.
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SELBSTPROBE 2 — trennt die Fall-2-Abfrage richtig?
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- Nach dem Gate-4-Lauf vom 24.09.2026 schliesst die Kandidatenliste
+-- zusammengefuehrte Dubletten aus (`merged_into_customer_id IS NOT NULL`) —
+-- alle vier geprueften Kandidaten waren solche.
+--
+-- Eine Einengung ist ein Filter, und ein falscher Filter faellt nicht auf: er
+-- liefert einfach weniger. Diese Probe baut BEIDE Seiten und prueft, dass genau
+-- eine uebrig bleibt.
+--
+-- Erwartet: GENAU eine Zeile, der NICHT zusammengefuehrte Kunde.
+
+BEGIN;
+
+-- Zwei Kunden ohne §45b-Topf: einer zusammengefuehrt, einer nicht.
+INSERT INTO customers (name, address, pflegegrad, billing_type, accepts_private_payment, status)
+VALUES ('Probe NICHT zusammengefuehrt', 'Teststr. 1', 3, 'pflegekasse_gesetzlich', false, 'aktiv');
+
+INSERT INTO customers (name, address, pflegegrad, billing_type, accepts_private_payment, status,
+                       merged_into_customer_id, inaktiv_ab)
+VALUES ('Probe ZUSAMMENGEFUEHRT', 'Teststr. 2', 3, 'pflegekasse_gesetzlich', false, 'inaktiv',
+        (SELECT id FROM customers WHERE name = 'Probe NICHT zusammengefuehrt'), '2026-03-01');
+
+\echo '=== Muss GENAU die nicht zusammengefuehrte Zeile melden ==='
+SELECT
+  c.name                                               AS kundenname,
+  c.status                                             AS status,
+  c.inaktiv_ab                                         AS inaktiv_ab
+FROM customers c
+WHERE c.deleted_at IS NULL
+  AND c.merged_into_customer_id IS NULL
+  AND c.pflegegrad IS NOT NULL
+  AND c.billing_type IN ('pflegekasse_gesetzlich', 'pflegekasse_privat')
+  AND c.name LIKE 'Probe %'
+  AND NOT EXISTS (
+    SELECT 1 FROM customer_budget_type_settings s
+    WHERE s.customer_id = c.id AND s.budget_type = 'entlastungsbetrag_45b'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM budget_allocations b
+    WHERE b.customer_id = c.id AND b.budget_type = 'entlastungsbetrag_45b' AND b.deleted_at IS NULL
+  );
+
+\echo '=== Gegenprobe: OHNE die Einengung waeren es zwei ==='
+SELECT count(*) AS ohne_einengung
+FROM customers c
+WHERE c.deleted_at IS NULL
+  AND c.pflegegrad IS NOT NULL
+  AND c.billing_type IN ('pflegekasse_gesetzlich', 'pflegekasse_privat')
+  AND c.name LIKE 'Probe %'
+  AND NOT EXISTS (
+    SELECT 1 FROM customer_budget_type_settings s
+    WHERE s.customer_id = c.id AND s.budget_type = 'entlastungsbetrag_45b'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM budget_allocations b
+    WHERE b.customer_id = c.id AND b.budget_type = 'entlastungsbetrag_45b' AND b.deleted_at IS NULL
+  );
+
+ROLLBACK;

@@ -133,16 +133,42 @@ ORDER BY a.created_at DESC;
 -- Die Unterscheidung ist wichtig: „X tritt auf" ist keine Aussage über die
 -- Ursache. Wer diese Liste als Verlustliste liest, behauptet mehr, als gemessen
 -- ist.
+--
+-- ── Eingeengt am 24.09.2026, nach dem Gate-4-Lauf ──────────────────────────
+-- Die erste Fassung war zu breit. Alle vier geprüften Kandidaten (132, 124,
+-- 113, 112) waren **zusammengeführte Dubletten** aus Feb/Mär — inaktiv, per
+-- `merged_into_customer_id` auf einen Zielkunden gezeigt. Kein fehlendes
+-- Budget, sondern ein Kunde, der aus gutem Grund keines mehr hat.
+--
+-- **Das Signal ist `merged_into_customer_id`, nicht der Pflegegrad** — dieselbe
+-- Lehre wie bei 139/148 im September. Eine Dublette behält ihren Pflegegrad,
+-- verliert aber alles, was am aktiven Datensatz hängt; „Pflegegrad ohne
+-- §45b-Topf" trifft deshalb jede zusammengeführte Zeile.
+--
+-- Zusammengeführte sind jetzt ausgeschlossen, und `status`/`inaktiv_ab` stehen
+-- in der Ausgabe: ein inaktiver Kunde ohne Topf ist ein anderer Sachverhalt als
+-- ein aktiver, und diese Unterscheidung soll man sehen, ohne nachfragen zu
+-- müssen.
+--
+-- (`customers` hat KEINE `is_active`-Spalte — nachgesehen, nicht angenommen;
+-- das `isActive` im Schema sitzt auf `customer_contacts`. Der Aktivitäts-Stand
+-- steht in `status` mit den Werten `aktiv`/`inaktiv`/`gekuendigt`, das Datum
+-- der Deaktivierung in `inaktiv_ab`.)
 
 SELECT
   c.id                                                 AS kunde,
   c.name                                               AS kundenname,
   c.created_at::date                                   AS angelegt_am,
+  c.status                                             AS status,
+  c.inaktiv_ab                                         AS inaktiv_ab,
   c.pflegegrad,
   c.billing_type                                       AS abrechnungsart,
   'KANDIDAT — kein §45b-Topf trotz Pflegegrad'         AS lesart
 FROM customers c
 WHERE c.deleted_at IS NULL
+  -- Zusammengeführte Dubletten raus: sie haben ihren Pflegegrad behalten und
+  -- ihr Budget an den Zielkunden abgegeben. Das ist kein Verlust.
+  AND c.merged_into_customer_id IS NULL
   AND c.pflegegrad IS NOT NULL
   AND c.billing_type IN ('pflegekasse_gesetzlich', 'pflegekasse_privat')
   -- Kein §45b-Typ-Setting: der Block ist nie angekommen.
@@ -158,4 +184,4 @@ WHERE c.deleted_at IS NULL
       AND b.budget_type = 'entlastungsbetrag_45b'
       AND b.deleted_at IS NULL
   )
-ORDER BY c.created_at DESC;
+ORDER BY (c.status = 'aktiv') DESC, c.created_at DESC;
