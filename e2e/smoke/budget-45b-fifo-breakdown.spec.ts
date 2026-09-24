@@ -77,7 +77,14 @@ test.describe("@smoke §45b FIFO-Aufschlüsselung — Balken auf der Detailseite
       `/api/budget/${customer.id}/initial-budget`,
       {
         budgetType: "entlastungsbetrag_45b",
-        currentMonthAmountCents: 13_100,
+        // NUR der Uebertrag. Startwert und echter Uebertrag schliessen sich
+        // seit dem 24.09.2026 im Anlage-Pfad aus (`applyInitialBudget`) — die
+        // Zwei-Topf-Lage entsteht hier aus Uebertrag + laufender
+        // Monatsaufstockung, nicht aus Uebertrag + Startwert.
+        //
+        // Ein Startwert wuerde den Uebertrag unter der Inventur-Lesart
+        // ohnehin verdraengen; die Fixture haette den FIFO-Balken dann gar
+        // nicht mehr erzeugt.
         carryoverAmountCents: 10_000,
         budgetStartDate: `${curYear}-01-01`,
       },

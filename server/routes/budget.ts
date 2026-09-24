@@ -1143,7 +1143,20 @@ router.post("/:customerId/allocations", asyncHandler("Budget-Zuweisung konnte ni
 // `docs/architecture/budget.md → initial-budget-Endpoint`.
 const initialBudgetSchema = z.object({
   budgetType: z.enum(BUDGET_TYPES).default("entlastungsbetrag_45b"),
-  currentMonthAmountCents: z.number().min(0),
+  /**
+   * OPTIONAL seit dem 24.09.2026 — vorher Pflichtfeld.
+   *
+   * Mit dem Entweder-oder (Startwert ODER Uebertrag, Alriks Entscheidung) war
+   * „nur Uebertrag" ueber diesen Endpunkt sonst NICHT AUSDRUECKBAR: das
+   * Pflichtfeld erzwang einen Startwert, und der Startwert neben einem echten
+   * Uebertrag wird abgelehnt. Ein Uebertrag waere hier also gar nicht mehr
+   * anlegbar gewesen.
+   *
+   * Aufgefallen ist es an `INT-116.1` („initial-budget mit Carryover setzt
+   * validFrom auf Jahresanfang") — dem Test, dessen Gegenstand genau dieser
+   * Uebertrag ist.
+   */
+  currentMonthAmountCents: z.number().min(0).optional(),
   carryoverAmountCents: z.number().min(0).optional().default(0),
   budgetStartDate: z.string(),
 });
@@ -1200,7 +1213,7 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     const allocations = await applyInitialBudget({
       customerId,
       budgetType,
-      currentMonthAmountCents: currentMonthAmountCents > 0 ? currentMonthAmountCents : null,
+      currentMonthAmountCents: (currentMonthAmountCents ?? 0) > 0 ? currentMonthAmountCents! : null,
       carryoverAmountCents: carryoverAmountCents > 0 ? carryoverAmountCents : null,
       budgetStartDate,
       customer: { billingType: customer.billingType, pflegegrad: customer.pflegegrad },

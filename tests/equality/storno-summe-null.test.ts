@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
-import { appointments, budgetTransactions } from "@shared/schema";
+import { appointments, budgetAllocations, budgetTransactions } from "@shared/schema";
 import { todayISO } from "@shared/utils/datetime";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 import { reverseBudgetTransaction } from "../../server/storage/budget/transaction-storage";
@@ -105,12 +105,47 @@ describe("Equality — Σ Service-Feld nach Storno = 0", () => {
       { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null },
       { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, yearlyLimitCents: null },
     ], undefined, userId);
-    await apiPost<any>(`/api/budget/${customerId}/initial-budget`, {
+    const initRes = await apiPost<any>(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
+      // Startwert ALLEIN und cap-sicher (EIN Monatsbetrag passiert den
+      // Startwert-Cap in jedem Monat) — die restliche Topf-Füllung steht
+      // darunter als `manual_adjustment`.
       currentMonthAmountCents: 13100,
-      carryoverAmountCents: 100000,
       budgetStartDate: todayISO(),
     });
+    /**
+     * Status PRÜFEN, nicht verschlucken.
+     *
+     * Die frühere Fassung warf die Antwort weg. Als die Kombination abgelehnt
+     * wurde, blieb der Topf LEER — der Test blieb grün, weil er Summen gegen 0
+     * prüft, und das Coverage-Gate `consumption-engine` fiel (62,50 % → 61,90 %),
+     * weil die Cascade-Zweige nie liefen. Ein Aufruf ohne Status-Prüfung ist
+     * eine Annahme, die niemand sieht.
+     */
+    expect([200, 201], `initial-budget: ${initRes.status} ${JSON.stringify(initRes.data)}`)
+      .toContain(initRes.status);
+    /**
+     * Restliche Topf-Fuellung als `manual_adjustment` — NICHT als hoeherer
+     * Startwert.
+     *
+     * `max45bStartValueCents` deckelt den Startwert auf
+     * (berechtigte Monate bis zum Startmonat) x 131 EUR. Bei
+     * `budgetStartDate = heute` ist das im Januar 131 EUR und im September
+     * 1.179 EUR — ein fester Betrag wie 1.131 EUR passiert den Cap also nur
+     * wegen der Kalenderlage und kippt am 01.01. (Gate 2 zu #186, B5: genau
+     * die datums-fragile Fixture, vor der CLAUDE.md warnt).
+     *
+     * `manual_adjustment` hat keinen Cap, zaehlt im Anspruch mit und wird von
+     * der Inventur-Lesart nicht verdraengt (die trifft nur `carryover`).
+     */
+    await db.insert(budgetAllocations).values({
+      customerId, budgetType: "entlastungsbetrag_45b",
+      year: new Date().getFullYear(), month: null,
+      amountCents: 100000, source: "manual_adjustment",
+      validFrom: `${new Date().getFullYear()}-01-01`, expiresAt: null,
+      notes: "Fixture-Topffuellung (cap-frei)",
+    });
+
 
     const apptId = await bookAndStorno(customerId, userId);
     const s = await sumPerField(customerId, apptId);

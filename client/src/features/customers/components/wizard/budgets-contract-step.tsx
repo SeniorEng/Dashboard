@@ -276,9 +276,23 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                             checked={formData.restguthaben45bOverrideEnabled}
                             onCheckedChange={(checked) => {
                               onChange("restguthaben45bOverrideEnabled", !!checked);
-                              // Ausblenden reicht nicht: ein bereits getippter Übertrag
-                              // bliebe im Formular und liefe in die Server-Ablehnung.
-                              if (checked) onChange("uebertrag45b", "");
+                              /**
+                               * `"0"`, NICHT `""`.
+                               *
+                               * Ausblenden reicht nicht: ein bereits getippter Übertrag
+                               * bliebe im Formular und liefe in die Server-Ablehnung.
+                               *
+                               * Aber leeren auch nicht: `budgetsStepErrors` rechnet
+                               * `parseFloat(formData.uebertrag45b)` und blockiert bei
+                               * `NaN` mit „Übertrag darf nicht negativ sein" — für ein
+                               * Feld, das gar nicht mehr gerendert wird. Der Anwender
+                               * käme nicht weiter und sähe nicht, warum
+                               * (Gate 2 zu #186, B4).
+                               *
+                               * `"0"` heißt fachlich „aus dem Vorjahr ist nichts übrig"
+                               * und ist genau das, was eine Inventur aussagt.
+                               */
+                              if (checked) onChange("uebertrag45b", "0");
                             }}
                             data-testid="checkbox-restguthaben-override"
                           />
