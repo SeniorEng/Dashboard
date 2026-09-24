@@ -146,14 +146,46 @@ describe("budgetsStepErrors — 'Weiter' blockiert (Task #982)", () => {
     expect(errors).toHaveLength(0);
   });
 
-  it("blockiert mit Negativ-Fehler (separat vom Cap-Fehler) bei negativem Startwert", () => {
+  it("blockiert mit eigenem Betrags-Fehler (separat vom Cap-Fehler) bei negativem Startwert", () => {
+    /**
+     * Der TEXT hat sich am 24.09.2026 geändert, die Zusage nicht.
+     *
+     * Er lautete „Restguthaben darf nicht negativ sein" — und erschien auch
+     * bei einem LEEREN Feld, wo nichts Negatives vorlag. Die Meldung ist
+     * jetzt nach Fall getrennt (Gate 2 zum B1-Delta):
+     *   leer     → „Restguthaben angeben oder den Schalter ausschalten"
+     *   ungültig → „Restguthaben muss eine Zahl ≥ 0 sein"
+     *
+     * Die Zusage dieses Tests war nie der Wortlaut, sondern: ein negativer
+     * Betrag wird mit einem EIGENEN Fehler blockiert, nicht mit dem
+     * Cap-Fehler. Das prüft er unverändert — die zweite Zeile trägt sie.
+     */
     const errors = budgetsStepErrors(
       makeFormData({ restguthaben45b: "-5" }),
       CURRENT_YEAR,
       TODAY,
     );
-    expect(errors).toContain("Restguthaben darf nicht negativ sein");
+    expect(errors).toContain("Restguthaben muss eine Zahl ≥ 0 sein");
     expect(errors).not.toContain(max45bStartValueExceededMessage(13100));
+  });
+
+  it("blockiert ein LEERES Feld mit einem Fehler, der den Ausweg nennt", () => {
+    /**
+     * Die Ergänzung zum Fall oben: bei aktivem Schalter ist ein leeres Feld
+     * ein Fehler — der Schalter IST das Existenz-Signal. Vorher stand dort
+     * derselbe „negativ"-Text, der nichts über ein leeres Feld aussagt.
+     *
+     * Ohne diesen Test wäre die Trennung der beiden Meldungen nicht gesichert:
+     * der Test oben bliebe auch grün, wenn beide Fälle wieder denselben Text
+     * bekämen.
+     */
+    const errors = budgetsStepErrors(
+      makeFormData({ restguthaben45b: "" }),
+      CURRENT_YEAR,
+      TODAY,
+    );
+    expect(errors).toContain("Restguthaben angeben oder den Schalter ausschalten");
+    expect(errors).not.toContain("Restguthaben muss eine Zahl ≥ 0 sein");
   });
 
   it("validiert den §45b-Startwert nicht für Selbstzahler (kein Pflegekasse-Schritt)", () => {
