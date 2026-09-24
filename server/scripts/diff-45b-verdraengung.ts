@@ -147,6 +147,127 @@ async function main() {
   } else {
     console.log("  Konsistent — die VD-5-Verengung ist auf diesem Bestand wirkungslos.");
   }
+  /**
+   * ── Drei Bestandsfragen VOR dem Scharfschalten ──────────────────────────
+   * Alle drei waren bisher abgeleitet. Hier werden sie gemessen.
+   */
+
+  // (1) 0-EUR-Startwerte. Nach Alriks Entscheidung vom 22.09.2026 ist 0 eine
+  // festgestellte Null, und mit `<=` verdraengt eine Inventur zum 01.01. einen
+  // Uebertrag, der am selben Tag beginnt. Zusammen: der Uebertrag ist ganz weg.
+  const nullStartwerte = await db
+    .select({ customerId: budgetAllocations.customerId, validFrom: budgetAllocations.validFrom })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      eq(budgetAllocations.source, "initial_balance"),
+      eq(budgetAllocations.amountCents, 0),
+      isNull(budgetAllocations.deletedAt),
+    ));
+  console.log("");
+  if (nullStartwerte.length === 0) {
+    console.log("0-EUR-Startwerte: keine.");
+  } else {
+    console.log(`\u26a0 0-EUR-Startwerte: ${nullStartwerte.length} Zeile(n) bei `
+      + `${new Set(nullStartwerte.map(z => z.customerId)).size} Kunde(n):`);
+    for (const z of nullStartwerte.slice(0, 20)) {
+      console.log(`    Kunde ${z.customerId}, ab ${z.validFrom}`);
+    }
+    console.log("  Dort heisst die Verdraengung nicht „Startwert statt Uebertrag\",");
+    console.log("  sondern „nichts statt Uebertrag\" — vor einer Umbuchung einzeln ansehen.");
+  }
+
+  /**
+   * (2) Startwert UND Uebertrag aus DEMSELBEN Anlage-Vorgang.
+   *
+   * `budget-initial-setup.ts` schreibt beide in EINER Transaktion (Wizard und
+   * `POST /initial-budget`). Dort war „beides zusammen" vermutlich gemeint, und
+   * der Flip aendert das Budget, ohne dass jemand eine Verdraengung eingegeben
+   * haette.
+   *
+   * Erkennungsmerkmal ist der Zeitstempel auf Sekundengenauigkeit — eine
+   * HEURISTIK, keine Transaktions-ID. Zwei unabhaengige Eingaben in derselben
+   * Sekunde saehen gleich aus.
+   *
+   * **Deshalb die Gegenprobe daneben:** wie viele Startwert-Uebertrags-Paare
+   * gibt es ueberhaupt, und wie viele davon treffen dieselbe Sekunde? Treffen
+   * fast alle, ist die Heuristik belastbar. Treffen wenige, sagt sie wenig —
+   * und dann darf die Liste nicht als „das sind die Faelle" gelesen werden.
+   */
+  const paare = await db
+    .select({ customerId: budgetAllocations.customerId })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      isNull(budgetAllocations.deletedAt),
+      sql`${budgetAllocations.source} IN ('initial_balance', 'carryover')`,
+    ))
+    .groupBy(budgetAllocations.customerId)
+    .having(sql`count(DISTINCT ${budgetAllocations.source}) > 1`);
+
+  const gleichzeitig = await db
+    .select({
+      customerId: budgetAllocations.customerId,
+      zeitpunkt: sql<string>`date_trunc('second', ${budgetAllocations.createdAt})::text`,
+      quellen: sql<string>`string_agg(DISTINCT ${budgetAllocations.source}, ',' ORDER BY ${budgetAllocations.source})`,
+      betraege: sql<string>`string_agg(${budgetAllocations.amountCents}::text, ' + ')`,
+    })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      isNull(budgetAllocations.deletedAt),
+      sql`${budgetAllocations.source} IN ('initial_balance', 'carryover')`,
+    ))
+    .groupBy(budgetAllocations.customerId, sql`date_trunc('second', ${budgetAllocations.createdAt})`)
+    .having(sql`count(DISTINCT ${budgetAllocations.source}) > 1`);
+
+  const kundenMitPaar = paare.length;
+  const kundenGleichzeitig = new Set(gleichzeitig.map(z => z.customerId)).size;
+  console.log("");
+  console.log(`Kunden mit Startwert UND Uebertrag: ${kundenMitPaar}`);
+  console.log(`  davon aus derselben Sekunde (= ein Anlage-Vorgang): ${kundenGleichzeitig}`);
+  if (kundenMitPaar > 0) {
+    const quote = Math.round((kundenGleichzeitig / kundenMitPaar) * 100);
+    console.log(`  Trefferquote der Heuristik: ${quote}%`);
+    if (quote >= 80) {
+      console.log("  → belastbar: fast alle Paare stammen aus einem Vorgang.");
+    } else if (kundenGleichzeitig === 0) {
+      console.log("  → die Heuristik findet NICHTS. Die Paare sind getrennt entstanden,");
+      console.log("    oder der Zeitstempel taugt nicht als Merkmal. Nicht als „keine");
+      console.log("    Faelle\" lesen.");
+    } else {
+      console.log("  → SCHWACH: die Liste unten ist eine Teilmenge, kein Befund.");
+      console.log("    Die uebrigen Paare einzeln ansehen.");
+    }
+  }
+  for (const z of gleichzeitig.slice(0, 25)) {
+    console.log(`    Kunde ${z.customerId}  ${z.zeitpunkt}  [${z.quellen}]  ${z.betraege} ct`);
+  }
+
+  /**
+   * (3) Umfang des Mischbestands nach dem Deploy.
+   *
+   * `ensureYearlyCarryover45b` schreibt mit `onConflictDoNothing`. Zeilen von
+   * VOR dem Flip tragen den alten (hoeheren) Betrag und werden nicht
+   * korrigiert; danach entstehende tragen den neuen.
+   */
+  const jetzt = new Date().getFullYear();
+  const [{ folgejahr }] = await db
+    .select({ folgejahr: sql<number>`count(*)::int` })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      eq(budgetAllocations.source, "carryover"),
+      isNull(budgetAllocations.deletedAt),
+      sql`${budgetAllocations.year} > ${jetzt}`,
+    ));
+  console.log("");
+  console.log(`Bereits materialisierte Folgejahres-Uebertraege (year > ${jetzt}): ${folgejahr}`);
+  if (folgejahr > 0) {
+    console.log("  Diese Betraege korrigiert `ensureYearlyCarryover45b` NICHT nach");
+    console.log("  (`onConflictDoNothing`) — nach dem Flip Mischbestand.");
+  }
+
   console.log("");
   console.log(`Kunden mit aktiver initial_balance-Zeile: ${kunden.length}`);
   console.log(`Stichtage: ${stichtage.join(", ")}`);
