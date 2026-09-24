@@ -206,3 +206,164 @@ auch über Pfade, die niemand als „Übertrag schreiben" liest — unter andere
 beim **Server-Start** (`sync-budget-allocations.ts:19`). Wer die Wirkung
 abschätzt und nur die Editoren ansieht, sieht einen Bruchteil.
 `FINDING: … [P2]`
+
+---
+
+# Anhang: Schritt C zur Prämissen-Frage (Alrik, 24.09.2026)
+
+> **Anlass:** Alrik hat die Prämisse in Frage gestellt, auf der #184 und #186
+> stehen. Die Oberfläche hat **getrennte Felder** für „Übertrag aus Vorjahr"
+> (Frist 30.06.) und „Startwert laufendes Jahr". Unsere Arbeit nimmt an, dass
+> der Startwert den Übertrag EINSCHLIESST. Ist der Prozess stattdessen „beide
+> Felder nebeneinander", löschen beide PRs genau den Vorjahresanteil, der am
+> 30.06. verfallen soll.
+>
+> **Nur gemessen, keine Bewertung, kein Lösungsvorschlag.** Schritt A (der
+> tatsächliche Prozess) liegt bei Alrik.
+
+**Welcher Code-Stand welche Zeilennummer trägt** — beim Nachschlagen wichtig,
+weil zwei Dateien in diesem Vorgang geändert wurden:
+
+| Referenzen aus | Stand |
+|---|---|
+| `server/services/budget-initial-setup.ts`, `client/.../budgets-contract-step.tsx` | Branch `fix/startwert-oder-uebertrag` (#186) |
+| `server/storage/budget/consumption-engine.ts`, `client/src/components/budget/BudgetTypeSettings.tsx` | `main` — dort unverändert |
+
+Alle sieben Referenzen sind gegen den jeweils genannten Stand nachgeschlagen,
+nicht gegen den gerade ausgecheckten.
+
+## Aufbau der Messung
+
+Ein Kunde, Pflegegrad 3 seit 2024 (Monatsrate 131,00 €), **beide Zeilen für
+dasselbe Jahr**:
+
+| Zeile | Betrag | `validFrom` | `expiresAt` | `month` |
+|---|---|---|---|---|
+| `carryover` | 500,00 € | 01.01.2026 | **30.06.2026** | `NULL` |
+| `initial_balance` | 300,00 € | 01.03.2026 | **`NULL`** | 3 |
+
+Gemessen über `calculateAllocatedCents` und `readBudget45bFifoBreakdown`, je
+einmal mit `resetDisplacesAllSources: false` und `: true`.
+
+## 1. + 2. Was das System tut — ohne und mit Flip
+
+| Stichtag | | Anspruch | Topf `carryover` | Topf `current_year` | `carryoverExpiresAt` |
+|---|---|---|---|---|---|
+| **15.05.** (vor Frist) | ohne Flip | **1.062,00 €** | 500,00 € | 562,00 € | 30.06.2026 |
+| **15.05.** (vor Frist) | **mit Flip** | **562,00 €** | **0,00 €** | 562,00 € | **null** |
+| **15.07.** (nach Frist) | ohne Flip | **824,00 €** | 0,00 € | 824,00 € | null |
+| **15.07.** (nach Frist) | mit Flip | **824,00 €** | 0,00 € | 824,00 € | null |
+
+Rechenweg der Teilbeträge:
+- `562,00 € = 300,00 € (Startwert ab März) + 2 × 131,00 € (April, Mai)`
+- `824,00 € = 300,00 € + 4 × 131,00 € (April–Juli)`
+
+**Drei Feststellungen daraus:**
+
+1. **Vor der Frist unterscheiden sich die beiden Zustände um genau den
+   Übertrag** — 1.062,00 € gegen 562,00 €, Differenz 500,00 €. Mit Flip zählt
+   der Übertrag ab dem Tag des Startwerts nicht mehr mit.
+2. **Nach der Frist sind beide Zustände identisch** (824,00 €). Der Übertrag
+   ist dann ohnehin verfallen; der Flip ändert an diesem Stichtag nichts.
+3. **Der Startwert überlebt die Frist vollständig.** Die 300,00 € stehen am
+   15.07. unverändert im laufenden Topf.
+
+### Reihenfolge beim Verbrauch
+
+**FIFO, Übertrag zuerst.** Nicht aus dem Docblock übernommen, sondern an der
+Abfrage abgelesen (`server/storage/budget/consumption-engine.ts:195-199`):
+
+```sql
+ORDER BY CASE WHEN source = 'carryover' THEN 0 ELSE 1 END,
+         valid_from ASC,
+         id ASC
+```
+
+Der Übertrag wird also vor dem Startwert aufgebraucht — **ohne Flip.** Mit Flip
+ist er zum selben Zeitpunkt gar nicht mehr im Topf (Zeile 2 der Tabelle), es
+gibt für ihn nichts zu verbrauchen.
+
+## 3. Hat ein Startwert je ein `expiresAt`?
+
+**Für §45b: nein, nie.** An beiden Schreibstellen identisch:
+
+| Stelle | Ausdruck |
+|---|---|
+| `server/services/budget-initial-setup.ts:314` | `budgetType === "ersatzpflege_39_42a" ? \`${year}-12-31\` : null` |
+| `server/routes/budget.ts` (Startwert-Editor) | derselbe Ausdruck |
+
+Nur §39/§42a bekommt ein Datum. Ein §45b-Startwert trägt `expiresAt = null` und
+verfällt nicht.
+
+**Was daraus folgt, als Messung formuliert:** steckt der Vorjahresrest im
+Startwert, dann trägt er dessen Verfallsverhalten — also keines. In Zeile 3 der
+Tabelle oben ist das der Fall: am 15.07. stehen die 300,00 € noch da. Es gibt
+im System **keine Stelle, an der ein Anteil eines Startwerts zum 30.06.
+verfällt**; die Frist hängt ausschließlich am `expiresAt` der
+`carryover`-Zeile.
+
+## 4. Woher kam die Annahme „Startwert schließt Übertrag ein"?
+
+Gesucht in Docblocks, UI-Beschriftungen, Tests und der git-Historie.
+
+### Im Code steht sie erst seit dem 24.09.2026
+
+| Fundstelle | Commit | Datum |
+|---|---|---|
+| `budget-initial-setup.ts:166` („ist eine Bestandsaufnahme und enthält den Übertrag bereits") | `4548a0ec` | 24.09.2026 |
+| `budgets-contract-step.tsx:270` („eine Bestandsaufnahme enthält ihn bereits") | `4548a0ec` | 24.09.2026 |
+| `docs/architecture/budget.md:227` | dieser Vorgang | 24.09.2026 |
+
+Suche nach der Formulierung vor dem 21.09.2026: **keine Treffer.**
+
+Auch der Verdrängungs-Mechanismus selbst ist neu: `displacedByReset` /
+`resetAnchor` erscheinen zuerst in `d7ba1dc1` (22.09.2026), scharf geschaltet in
+`379cac79` (23.09.2026) — beides dieser Vorgang.
+
+### Was es VORHER gab, ist etwas anderes
+
+`initialBalanceMonths` stammt aus `2ab844ff` vom **06.03.2026**:
+
+> *„Update budget logic to correctly calculate monthly allocations after initial
+> balance"*
+
+Der Commit betrifft ausschließlich die **monatliche Aufstockung** — sie beginnt
+nach dem Startwert-Monat. Der Übertrag kommt darin nicht vor. Das ist der
+Ansammlungs-Boden, nicht eine Verdrängung des Übertrags.
+
+### Die UI-Historie sagt das Gegenteil
+
+| Commit | Datum | Titel |
+|---|---|---|
+| `539b7e02` | 27.05.2026 | **„Task #670: §45b Carryover-UI vom Startwert trennen"** |
+| `b105d022` | 04.06.2026 | „Task #960: Split §45b block in new-customer wizard into carryover + optional current-year override" |
+
+Aus der Beschreibung von `b105d022` wörtlich:
+
+> *„Restructured the ‚Budgets' step §45b block so the operator enters **two
+> distinct amounts** with clear German labels: 1. ‚Übertrag aus Vorjahr'
+> (carryover, expires 30.06.) … 2. New optional override ‚Aktuelles Restguthaben
+> (laufendes Jahr)'"*
+
+### Die heutigen Beschriftungen
+
+| Feld | Beschriftung | Datei |
+|---|---|---|
+| Übertrag (Bestand) | **„Restguthaben aus Vorjahr (verfällt 30.06.)"** | `BudgetTypeSettings.tsx:1296` |
+| Startwert (Bestand) | **„Restguthaben (€)"** + **„Ab Monat"** | `BudgetTypeSettings.tsx:982`, `:1005` |
+| Übertrag (Wizard) | **„Übertrag (€)"** | `budgets-contract-step.tsx:238` |
+| Startwert (Wizard) | **„Restguthaben (<Stichmonat>) in €"**, hinter dem Schalter **„Ja, Restbestand ist bekannt"** | `budgets-contract-step.tsx:333`, `:300` |
+
+Der Schaltertext „Ja, Restbestand ist bekannt" stammt aus diesem Vorgang
+(Alriks B3-Entscheidung). Die übrigen drei Beschriftungen sind älter und sagen
+**an keiner Stelle**, dass der Startwert den Übertrag enthält. Der Startwert
+heißt schlicht „Restguthaben" mit einem Stichmonat daneben.
+
+## Zusammenfassung der Messung
+
+| Frage | Befund |
+|---|---|
+| Beide Zeilen nebeneinander, ohne Flip | zählen **beide**, Summe 1.062,00 €; Übertrag wird zuerst verbraucht und verfällt am 30.06. |
+| Beide Zeilen nebeneinander, mit Flip | nur der Startwert zählt, 562,00 €; der Übertrag ist ab dem Startwert-Monat aus dem Topf |
+| Startwert und Frist | ein §45b-Startwert hat **nie** ein `expiresAt`; nichts an ihm verfällt zum 30.06. |
+| Herkunft der Annahme | **erst 24.09.2026, aus diesem Vorgang.** Die ältere UI-Historie beschreibt die Felder ausdrücklich als „two distinct amounts" und trennt sie bewusst (#670, #960). |
