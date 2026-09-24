@@ -88,11 +88,33 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
 
     const initRes = await apiPost<any>(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 50000,
+      /**
+       * NUR der Übertrag — er ist der Prüfgegenstand.
+       *
+       * Ein erster Versuch faltete ihn in den Startwert (62.500) und ließ den
+       * Übertrag weg. Falsch: der Test heißt „initial-budget mit Carryover
+       * setzt validFrom auf Jahresanfang", der Übertrag IST der Gegenstand.
+       * Ohne ihn prüfte der Test nichts mehr und war nur noch grün.
+       *
+       * Startwert und echter Übertrag schließen sich seit dem 24.09.2026 aus
+       * (`applyInitialBudget`); der Startwert war hier Topf-Füllung und wird
+       * darunter cap-frei als `manual_adjustment` nachgezogen.
+       */
       carryoverAmountCents: 12500,
       budgetStartDate,
     });
-    expect([200, 201]).toContain(initRes.status);
+    expect([200, 201], `initial-budget: ${initRes.status} ${JSON.stringify(initRes.data)}`).toContain(initRes.status);
+
+    // Topf-Fuellung ohne Startwert-Cap und ohne Verdraengungs-Wirkung
+    // (`manual_adjustment` ist keine `carryover`-Zeile).
+    const { budgetAllocations } = await import("@shared/schema");
+    const { db } = await import("../server/lib/db");
+    await db.insert(budgetAllocations).values({
+      customerId, budgetType: "entlastungsbetrag_45b",
+      year, month: null, amountCents: 50000, source: "manual_adjustment",
+      validFrom: `${year}-01-01`, expiresAt: null,
+      notes: "Fixture-Topffuellung (cap-frei)",
+    });
 
     // Task #601: Carryover-Konvention vereinheitlicht — `year` ist jetzt
     // immer das Zieljahr (in dem der Übertrag verbraucht werden darf), nicht
@@ -141,7 +163,10 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
     const year = now.getFullYear();
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
+      // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+      // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+      // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+      // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
       carryoverAmountCents: 50000,
       budgetStartDate: `${year}-12-01`, // bewusst nach dem Importmonat
     });
@@ -214,7 +239,10 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
     const year = new Date().getFullYear();
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
+      // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+      // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+      // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+      // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
       carryoverAmountCents: 50000,
       budgetStartDate: `${year}-01-01`,
     });

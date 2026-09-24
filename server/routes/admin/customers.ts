@@ -750,8 +750,22 @@ const setupPendingBodySchema = z.object({
     items: z.array(z.object({
       budgetType: z.string(),
       // Task #731 — Alias `currentYearAmountCents` nach Release-Zyklus entfernt.
-      currentMonthAmountCents: z.number(),
-      carryoverAmountCents: z.number(),
+      /**
+       * BEIDE optional (24.09.2026) — sonst kann der Wiederhol-Payload „keine
+       * Angabe" nicht ausdruecken.
+       *
+       * Als Pflicht-`number` trug er fuer einen nicht eingegebenen Betrag eine
+       * `0`. Seit `0` eine festgestellte Null ist, erzeugt ein Klick auf
+       * „Startbudgets erneut versuchen" daraus eine Zeile — und ueberschriebe
+       * ohne die Konflikt-Schranke in `applyInitialBudget` sogar einen
+       * inzwischen erfassten Startwert.
+       *
+       * Der Payload ist ein GESPEICHERTER Abzug einer Eingabe. Was die Eingabe
+       * unterscheiden kann, muss er auch unterscheiden koennen — sonst geht die
+       * Unterscheidung beim Speichern verloren statt beim Verarbeiten.
+       */
+      currentMonthAmountCents: z.number().min(0).optional(),
+      carryoverAmountCents: z.number().min(0).optional(),
       budgetStartDate: z.string(),
     })),
   }).optional(),
