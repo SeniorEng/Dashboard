@@ -493,3 +493,109 @@ Zuordnung möglich ist.
    negativen Verbrauch, sobald ein Stichtag schneidet — Ticket
    `6hcVM394XgmP37GG`. Sie wirkt **nach oben** (662,00 € statt 562,00 €), also
    in der Richtung, in der gebucht wird.
+
+---
+
+# Anhang 3: Die FIFO-Aufschlüsselung — Lesewege und ein blinder Wächter
+
+> **Nachtrag vom 24.09.2026**, ausgelöst durch Regel G: Schritt B zu PR #190
+> hat zwei Lesewege gezeigt, die in Abschnitt 2 dieser Karte fehlten.
+
+## 1. Die zwei fehlenden Lesewege
+
+| # | Leseweg | Stelle | Art |
+|---|---|---|---|
+| **L9** | `GET /budget/:customerId/fifo-breakdown` | `server/routes/budget.ts:136`, Aufruf `:142` | Anzeige |
+| **L10** | `checkFifoUnifiedEquality` | `server/lib/invariants.ts:194`, Aufruf `:209` | **Invarianten-Prüfung**, erreichbar über `GET /api/admin/invariants-report` |
+
+Abschnitt 2 führte `fifo-breakdown.ts` als **Rechenstelle** (L4), aber keinen
+ihrer Verbraucher. Das ist genau die Lücke, die eine Wirkungskarte schließen
+soll: wer die Rechnung ändert, sieht nicht, wer davon abhängt.
+
+**Nicht betroffen — geprüft, nicht angenommen:** Reservierung
+(`reservation-storage.ts`), Buchung (`consumption-engine.ts`), Verfall
+(`processExpiredCarryover`), Rebook. Keiner liest diese Aufschlüsselung.
+
+## 2. ⚠ Die Feldnamen-Falle: `consumedCents` gibt es zweimal
+
+`server/storage/budget/rebook-storage.ts:243` prüft `fifoResult.consumedCents`
+— **das ist NICHT diese Aufschlüsselung.** `fifoResult` kommt aus `consumeFifo`
+(`rebook-storage.ts:222`), also aus der Buchungs-Engine.
+
+```
+Budget45bFifoPot.consumedCents      ← Anzeige-Aufteilung (fifo-breakdown.ts)
+consumeFifo(...).consumedCents      ← tatsächlich gebuchter Betrag (consumption-engine.ts)
+```
+
+Gleicher Name, verschiedene Quelle, verschiedene Bedeutung. Wer beim Suchen
+nach `consumedCents` die Buchungsstelle findet und sie für einen Verbraucher
+der Aufschlüsselung hält, schätzt den Blast-Radius falsch ein — in die
+gefährliche Richtung, weil Rebook ein Schreibpfad ist.
+
+**Genau diese Verwechslung soll diese Karte verhindern.**
+
+## 3. ⚠ Der Wächter, der nicht fehlschlagen kann
+
+`checkFifoUnifiedEquality` vergleicht für vier Felder die Summe über beide Töpfe
+gegen den jeweiligen Gesamtwert. Gemessen an der Arithmetik in
+`fifo-breakdown.ts:195-204` gegen die Rückgabe `:243-246`:
+
+| Feld | Aufteilung | Summe | verglichen mit |
+|---|---|---|---|
+| `allocated` | `allocatedCarry` + (`A` − `allocatedCarry`) | `A` | `totalAllocatedCents: A` |
+| `consumed` | `consumedCarry` + (`C` − `consumedCarry`) | `C` | `totalConsumedCents: C` |
+| `planned` | `holdsCarry` + (`H` − `holdsCarry`) | `H` | `totalPlannedCents: H` |
+| `available` | `freeCarry` + (`V` − `freeCarry`) | `V` | `totalAvailableCents: V` |
+
+**Alle vier Summen sind Identitäten.** Der zweite Topf ist jeweils als
+Differenz zum Gesamtwert definiert; die Summe ergibt den Gesamtwert per
+Konstruktion zurück. Die Prüfung kann keinen Verstoß melden — auch den
+negativen Verbrauch nicht, gegen den sie dem Namen nach schützt.
+
+Das gilt **unabhängig von PR #190**, also auch auf dem heutigen `main`. Es
+erklärt, warum der Fehler unbemerkt blieb: die Stelle, die ihn hätte finden
+sollen, ist strukturell blind.
+
+Dieselbe Klasse wie die tautologische Assertion aus #174
+(`pots.reduce(...) === totalAllocatedCents`) — dort im Test, hier im
+Produktivcode und im Admin-Bericht sichtbar.
+
+**Eigenes Ticket `6hcVfPxVrCWVC8wp`**, bewusst nicht in #190: anderer
+Gegenstand, und ein Fix dort müsste die Aufteilung an einer echten zweiten
+Größe messen statt an sich selbst.
+
+## 4. Die zwei Anker — eine Unterscheidung, die es vorher nicht gab
+
+`fifo-breakdown.ts` führt seit PR #190 **zwei** Reset-Anker:
+
+| Anker | Frage | Flag-abhängig? |
+|---|---|---|
+| `resetAnchor` | Welche Übertragszeilen sind **verdrängt**? | **ja** (`RESET_DISPLACES_ALL_SOURCES_DEFAULT`) |
+| `verbrauchsAnker` | Welche **Buchungen** zählen zum Stichtag? | **nein** |
+
+Der Reader schneidet den Verbrauch flag-unabhängig — `resetAnchorFrom(…)` in
+`allocation-storage.ts` hängt nur an `opts.year == null`, nicht am Flag. Wer
+beide Fragen mit demselben Anker beantwortet, bekommt bei ausgeschaltetem Flag
+`null` und damit **keinen** Schnitt.
+
+**Das war der erste Fehlversuch des Fixes**, und er ist nur aufgefallen, weil
+der Test vor dem Fix existierte und rot blieb.
+
+Das gemeinsame Prädikat heißt `countedConsumptionWhere` und liegt in
+`allocation-window.ts` neben den übrigen Reset-Prädikaten. Sein Docblock
+begründet, warum nur **zwei** der drei Reader-Glieder gelten — sonst hält die
+nächste Person die fehlenden für ein Versehen.
+
+## 5. `FS-5` — eine Buchung in der Zukunft belastete den Übertrag rückwirkend
+
+Die Pro-Allocation-Rechnung hatte **kein** `transactionDate <= asOfDate`. Eine
+Buchung nach dem Stichtag zählte damit in **jeder** Stichtagssicht gegen den
+Übertrag.
+
+Aufgefallen ist das **nicht beim Schreiben des Fixes**, sondern im
+Mutations-Gegencheck: das Entfernen des `as-of`-Glieds ließ `FS-1`…`FS-4` grün.
+`FS-5` schließt die Lücke.
+
+Das ist der Punkt aus CLAUDE.md („ein Wächter braucht eine Selbstprobe") auf
+einen gewöhnlichen Fix angewandt: der Gegencheck fragt nicht, ob die Zusage
+plausibel ist, sondern ob ihr Test rot werden kann.
