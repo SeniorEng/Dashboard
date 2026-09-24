@@ -27,9 +27,9 @@
  * unabhängig von der realen Uhr.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
-import { appointments, appointmentServices } from "@shared/schema";
+import { appointments, appointmentServices, budgetAllocations, budgetTransactions } from "@shared/schema";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 import { getBudgetSummary, getAllBudgetSummariesServed } from "../../server/storage/budget/summary-queries";
 import { netAvailable45bAt } from "../../server/storage/budget/net-available-45b";
@@ -178,9 +178,67 @@ describe("Task #1395 — §45b Forecast Prod-Inzident (Übertrag + Startwert, Ju
       "die Allokation trägt nicht Startwert + Aufstockung",
     ).toBe(INITIAL_BALANCE_CENTS + MONTHLY_45B_CENTS);
 
+    /**
+     * ── DIE Zusage des Inzidents: Buchung und Anzeige folgen DERSELBEN Grenze ──
+     *
+     * Gate 2 zu #184, B2 hat gemessen, dass die Reader-Zahlen diesen Fall NICHT
+     * unterscheiden koennen: baut man die Asymmetrie wieder ein
+     * (`getExcluded45bConsumption` liefert leer), sind `allocatedCents`,
+     * `excludedConsumedNetCents`, `consumedNetCents`, `availableCents` und
+     * `availableAfterPlannedCents` **bit-identisch**. Der Unterschied steckt
+     * allein darin, WORAUF die Buchung verlinkt ist.
+     *
+     * Deshalb prueft der Test das: die Buchung darf nicht auf dem verdraengten
+     * Uebertrag liegen. Genau diese Diskrepanz war der Inzident — der Reader
+     * liess den Uebertrag fallen, die Buchung hing daran, und der Verbrauch
+     * blieb stehen.
+     */
+    const zeilen = await db.select({ id: budgetAllocations.id, source: budgetAllocations.source })
+      .from(budgetAllocations)
+      .where(eq(budgetAllocations.customerId, h.customerId));
+    const uebertragId = zeilen.find(z => z.source === "carryover")?.id;
+    const startwertId = zeilen.find(z => z.source === "initial_balance")?.id;
+    expect(uebertragId, "die Fixture hat keinen Übertrag — der Fall prüft nichts").toBeTruthy();
+
+    /**
+     * `transactionType = 'consumption'`, NICHT `amountCents < 0`.
+     *
+     * Eine erste Fassung filterte auf das Vorzeichen und fing damit auch den
+     * `write_off` mit, den der Verfalls-Lauf auf den verdraengten Uebertrag
+     * schreibt (gemessen: −1.572,00 EUR auf der Uebertrags-Zeile). Der Test war
+     * dadurch rot, obwohl die Buchung korrekt auf dem Startwert lag.
+     */
+    const verbrauch = await db.select({
+      allocationId: budgetTransactions.allocationId,
+      amountCents: budgetTransactions.amountCents,
+    }).from(budgetTransactions)
+      .where(and(
+        eq(budgetTransactions.customerId, h.customerId),
+        eq(budgetTransactions.transactionType, "consumption"),
+      ));
+    expect(verbrauch.length, "keine Verbrauchsbuchung gefunden").toBeGreaterThan(0);
+
+    for (const b of verbrauch) {
+      expect(
+        b.allocationId,
+        "der Verbrauch hängt am verdrängten Übertrag, während der Reader ihn "
+        + "nicht mehr führt — das IST die #1395-Signatur",
+      ).not.toBe(uebertragId);
+    }
+    // Und positiv: er hängt am Topf, den der Anspruch führt.
+    expect(
+      verbrauch.map(b => b.allocationId),
+      "der Verbrauch liegt nicht auf dem Startwert",
+    ).toContain(startwertId);
+
     // Der Kern des Inzidents, unverändert: keine Doppelbelastung.
     expect(net.excludedConsumedNetCents).toBe(0);
     expect(net.consumedNetCents, "der Verbrauch wird nicht genau einmal abgezogen").toBe(consumed);
+    // Exakte Zahl statt Schwelle — `> 0` liesse jede Verschiebung durch.
+    expect(
+      net.allocatedCents - net.consumedNetCents,
+      "die vorzeichenbehaftete Verfügbarkeit weicht ab",
+    ).toBe(INITIAL_BALANCE_CENTS + MONTHLY_45B_CENTS - consumed);
 
     // Und die Gegenprobe in der ALTEN Lesart — ohne sie wäre nicht zu sehen,
     // dass sich die Zahl durch die Verdrängung geändert hat und nicht durch
@@ -227,7 +285,7 @@ describe("Task #1395 — §45b Forecast Prod-Inzident (Übertrag + Startwert, Ju
   // #1395-Test trieb diesen Pfad NICHT.
   it("Served-Pfad: §45b ist ungekappt (kein Monats-Cap) und die Jahres-Projektion bleibt byte-identisch zur Legacy", async () => {
     const h = await makeIncidentCustomer();
-    await bookH1Consumption(h.customerId, h.employeeId, 30);
+    const verbrauchtCents = await bookH1Consumption(h.customerId, h.employeeId, 30);
     for (const p of JUNE_PLAN) {
       await addPlannedAppt(h.customerId, h.employeeId, p.date, p.minutes);
     }
@@ -255,20 +313,18 @@ describe("Task #1395 — §45b Forecast Prod-Inzident (Übertrag + Startwert, Ju
      * Hier stand `> 150000`. Diese Schwelle kodierte die additive Lesart
      * (Übertrag 1.572 € im Topf) und nicht die Zusage des Tests.
      *
-     * Die Zusage ist: „bleibt stark positiv und meldet KEINEN Fehlbetrag (nie
-     * -184,02 €)". Seit dem Scharfschalten trägt der Topf den Übertrag nicht
-     * mehr — geprüft wird deshalb, was der Titel behauptet, nicht die alte
-     * Größenordnung.
+     * Eine erste Ersetzung setzte `> 0`, `>= 0` und `not.toBe(-18402)`
+     * daneben. Gate 2 zu #184 hat gezeigt, dass alle drei von den Zeilen
+     * DARÜBER geschluckt werden (`> MONTHLY_45B_CENTS` bzw. Zeile 241) — keine
+     * konnte je die erste sein, die rot wird. Netto ein Verlust ohne Gewinn.
+     *
+     * Jetzt die exakte Zahl: Startwert + Juni-Aufstockung − Verbrauch. Sie
+     * fängt jede Verschiebung, nicht nur den Vorzeichenwechsel.
      */
-    expect(s45b.availableCents, "der Topf ist leer oder negativ").toBeGreaterThan(0);
     expect(
-      s45b.availableAfterPlannedCents,
-      "„Verfügbar (nach Planung)“ ist negativ — genau die Inzident-Signatur",
-    ).toBeGreaterThanOrEqual(0);
-    expect(
-      s45b.availableAfterPlannedCents,
-      "der -184,02-€-Regressionswert ist zurück",
-    ).not.toBe(-18402);
+      s45b.availableCents,
+      "„Verfügbar“ weicht von Startwert + Aufstockung − Verbrauch ab",
+    ).toBe(INITIAL_BALANCE_CENTS + MONTHLY_45B_CENTS - verbrauchtCents);
     // „Verfügbar (diesen Monat)" spiegelt denselben ungekappten Topf-Rest 1:1.
     expect(s45b.currentMonthAvailableCents).toBe(Math.max(0, s45b.availableCents));
   });

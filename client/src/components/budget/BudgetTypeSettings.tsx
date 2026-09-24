@@ -914,8 +914,6 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
   const eingegebeneCents = amount ? euroStringToCents(amount) : null;
   const hasValidInput = eingegebeneCents != null && eingegebeneCents >= 0;
 
-
-
   const selectedYear = parseInt(month.split("-")[0]);
   const selectedMonthNum = parseInt(month.split("-")[1]);
   const currentYear = new Date().getFullYear();

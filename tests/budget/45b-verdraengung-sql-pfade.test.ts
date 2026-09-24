@@ -138,7 +138,7 @@ describe("§45b-Verdrängung — Anspruch und Übertrags-Summe aus derselben Reg
         resetDisplacesAllSources: true,
       });
 
-      expect(ohne, "mit `false` zählt der Übertrag nicht mehr unverändert mit").toBe(UEBERTRAG_CENTS);
+      expect(ohne, "`false` stellt die alte Lesart nicht wieder her").toBe(UEBERTRAG_CENTS);
       expect(
         mit,
         "mit Flag zählt der vom Startwert ersetzte Übertrag weiterhin mit",

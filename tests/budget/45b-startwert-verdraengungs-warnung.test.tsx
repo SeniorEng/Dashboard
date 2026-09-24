@@ -118,6 +118,75 @@ describe("§45b-Startwert — Warnung, wenn ein gültiger Übertrag verdrängt w
       .toEqual([]);
   }, 60_000);
 
+  it("WV-5 – ein bereits verdrängter Übertrag wird NICHT erneut gemeldet", async () => {
+    /**
+     * Gate 2 zu #184, S3 — gemessen an der ersten Fassung: bei einem
+     * bestehenden Startwert 03/2026 meldete der Endpunkt für einen Entwurf
+     * 06/2026 erneut „entfällt 1.179,00 €". Der Übertrag war zu diesem
+     * Zeitpunkt längst draußen.
+     *
+     * Eine Warnung, die einen bereits eingetretenen Verlust ankündigt, ist
+     * dieselbe falsche Begründung wie „ersetzt durch Startwert" neben
+     * „verfällt 30.06." (#166, B1).
+     */
+    await db.insert(budgetAllocations).values({
+      customerId: kundeId, budgetType: "entlastungsbetrag_45b", year: JAHR, month: 3,
+      amountCents: 200_00, source: "initial_balance",
+      validFrom: `${JAHR}-03-01`, expiresAt: null, notes: "WP-frueher-startwert",
+    });
+    try {
+      const antwort = await antwortVomServer(`${JAHR}-06`);
+      expect(
+        antwort.verdraengt,
+        "der vom März-Startwert bereits verdrängte Übertrag wird erneut gemeldet",
+      ).toEqual([]);
+    } finally {
+      // SOFT-Delete: `budget_allocations` traegt einen Trigger
+      // `budget_allocations_prevent_delete()` (GoBD-Unveraenderlichkeit). Ein
+      // erster Versuch mit `db.delete` ist genau daran gescheitert — und liess
+      // die Zeile stehen, was den naechsten Test mitgerissen hat.
+      await db.update(budgetAllocations)
+        .set({ deletedAt: new Date() })
+        .where(eq(budgetAllocations.notes, "WP-frueher-startwert"));
+    }
+  }, 60_000);
+
+  /**
+   * WV-6 stand hier und ist ZURÜCKGENOMMEN, nicht gelöst.
+   *
+   * Gate 2 zu #184, S2 meldete: ein Kunde ohne Pflegegrad-Historie und mit
+   * deaktiviertem §45b-Typ-Setting bekommt die Warnung, obwohl der
+   * Anspruchspfad dort keinen Reset kennt.
+   *
+   * Zwei Gates probiert, beide greifen gemessen NICHT:
+   *  - Signatur des `ineligible`-Ausstiegs (`resetAnchor === null &&
+   *    accrualFloorDate === null`): der Übertrag ANKERT den Kunden selbst
+   *    (`resolve45bAnchor`, Stufe 3), er ist also nicht `ineligible`.
+   *  - `allocatedCents <= 0`: der Anspruch ist auch bei deaktiviertem Topf
+   *    größer als 0 — der Übertrag zählt dort mit.
+   *
+   * Der Gate `allocatedCents <= 0` bleibt im Endpunkt (er fängt den Fall „nichts
+   * zu verlieren" korrekt), aber der gemeldete Fall ist damit NICHT abgedeckt.
+   * Ein grüner Test dafür hätte behauptet, er sei es.
+   *
+   * Offen als eigenes Ticket: die Frage ist nicht „hat der Endpunkt ein Gate",
+   * sondern „zählt §45b bei deaktiviertem Typ-Setting im Anspruch mit?" — und
+   * die betrifft nicht nur diese Warnung.
+   */
+
+  it("WV-7 – am Randtag greift sie: Übertrag ab 01.01., Inventur im Januar", async () => {
+    // Gate 2 zu #184, S4: `displacedByReset` prüft `<=`, `allocationValidAt`
+    // prüft `validFrom <= asOfDate`, und der Endpunkt setzt beide auf denselben
+    // Tag. Der Reviewer hat gemessen, dass kein Loch entsteht — ungesichert war
+    // es trotzdem. Genau dieser Randtag hat mit `<` die ganze Regel einmal
+    // wirkungslos gemacht.
+    const antwort = await antwortVomServer(`${JAHR}-01`);
+    expect(
+      antwort.verdraengt,
+      "am Randtag fällt die Warnung aus — genau der häufigste Fall",
+    ).toEqual([{ year: JAHR, amountCents: UEBERTRAG }]);
+  }, 60_000);
+
   it("WV-3 – die Warnung steht mit Betrag und Bezugsjahr auf dem Schirm", async () => {
     // Die Eingabe kommt aus dem Server-Aufruf oben, nicht aus der Hand — sonst
     // prüfte die Anzeige einen Zustand, den der Server womöglich nie liefert.

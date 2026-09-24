@@ -806,8 +806,23 @@ router.get("/:customerId/initial-balance-verdraengung/:budgetType", checkCustome
     return;
   }
 
-  const { resetAnchorFrom, displacedByReset, allocationValidAt } =
+  const { resetAnchorFrom, displacedByReset, allocationValidAt, RESET_DISPLACES_ALL_SOURCES_DEFAULT } =
     await import("../storage/budget/allocation-window");
+  const { read45bAllocationDiagnostics } = await import("../storage/budget/allocation-storage");
+
+  /**
+   * Ohne scharfe Verdraengung gibt es nichts zu warnen (Gate 2 zu #184, S1).
+   *
+   * Die erste Fassung rechnete unbedingt. Beim Ruecknahme-Szenario
+   * (`RESET_DISPLACES_ALL_SOURCES_DEFAULT = false`, dessen Pruefbarkeit `VD-4`
+   * ausdruecklich zusichert) waere die Verdraengung aus gewesen und die Warnung
+   * haette weiter behauptet, ein Uebertrag entfalle. Die Zusage „Umschalten
+   * heisst: diese Zeile" gilt auch fuer diese Stelle.
+   */
+  if (!RESET_DISPLACES_ALL_SOURCES_DEFAULT) {
+    res.json({ verdraengt: [], summeCents: 0 });
+    return;
+  }
   const { db: database } = await import("../lib/db");
   const { budgetAllocations: allocTable } = await import("@shared/schema");
   const { and: und, eq: ist, isNull: istNull } = await import("drizzle-orm");
@@ -835,7 +850,43 @@ router.get("/:customerId/initial-balance-verdraengung/:budgetType", checkCustome
       istNull(allocTable.deletedAt),
     ));
 
+  /**
+   * Nur Uebertraege melden, die HEUTE noch zaehlen (Gate 2 zu #184, S2/S3).
+   *
+   * Zwei gemessene Fehlmeldungen der ersten Fassung:
+   *  - ein Uebertrag, den ein FRUEHERER Startwert schon verdraengt hat, wurde
+   *    erneut als „entfaellt" gemeldet — ein Verlust, der bereits eingetreten
+   *    ist;
+   *  - ein Kunde ohne §45b-Anspruch (`ineligible`: kein Pflegegrad, kein
+   *    aktives Typ-Setting) bekam die Warnung, obwohl der Anspruchspfad dort
+   *    gar keinen Reset kennt.
+   *
+   * Beides faellt weg, wenn die Frage lautet „was verliert der Kunde", statt
+   * „was erfuellt das Praedikat". Die Antwort steht in der Diagnose desselben
+   * Anspruchspfads — kein zweites Praedikat.
+   */
+  const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: stichtag });
+  const ausgeschlossen = new Set(diagnose.excludedSpecialAllocationIds);
+
+  /**
+   * Hat der Kunde ueberhaupt etwas zu verlieren?
+   *
+   * Eine erste Fassung fragte nach der Signatur des `ineligible`-Ausstiegs
+   * (`resetAnchor === null && accrualFloorDate === null`). Das griff nicht:
+   * ein Uebertrag ANKERT den Kunden selbst (`resolve45bAnchor`, Stufe 3), also
+   * ist er nicht `ineligible`, auch wenn das Typ-Setting aus ist.
+   *
+   * Die direktere Frage ist besser und braucht keine zweite Definition von
+   * „ineligible": ist der Anspruch zum Stichtag 0, zaehlt der Uebertrag nicht
+   * mit — dann kuendigt eine Warnung einen Verlust an, den es nicht gibt.
+   */
+  if (diagnose.allocatedCents <= 0) {
+    res.json({ verdraengt: [], summeCents: 0 });
+    return;
+  }
+
   const verdraengt = uebertraege
+    .filter(z => !ausgeschlossen.has(z.id))
     .filter(z => allocationValidAt({ validFrom: z.validFrom, expiresAt: z.expiresAt }, stichtag))
     .filter(z => displacedByReset(
       { validFrom: z.validFrom, expiresAt: z.expiresAt, year: z.year }, anker,

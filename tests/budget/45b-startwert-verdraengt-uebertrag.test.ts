@@ -240,10 +240,37 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       });
 
       const stichtag = `${ANKER_JAHR}-12-15`;
-      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+      /**
+       * `false` AUSDRUECKLICH — und das ist der Grund, warum dieser Test einmal
+       * wertlos war.
+       *
+       * Beim Scharfschalten (23.09.2026) wurden `VD-1/2/3/4/6` auf `false`
+       * umgestellt, `VD-5` nicht. Ohne Optionen galt dann der neue Default
+       * `true`, beide Seiten rechneten dasselbe, und die Assertion lautete
+       * `x <= x`: der Test, dessen Titel eine Invariante behauptet, konnte
+       * nicht mehr rot werden.
+       *
+       * Gefunden hat es Gate 2 zu #184, B1 — nicht der Mutations-Gegencheck,
+       * denn der lief auf den anderen fuenf und blieb dort korrekt rot.
+       */
+      const heute = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: false },
+      );
       const neu = await calculateAllocatedCents(
         id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
       );
+      /**
+       * Hier stand kurzzeitig `expect(heute).not.toBe(neu)` als Absicherung
+       * gegen „beide Seiten identisch". Das war falsch: in DIESER Fixture
+       * VERHINDERT die VD-5-Verengung die Verdraengung, beide Seiten gleich
+       * ist also das gewollte Ergebnis.
+       *
+       * Was den Test scharf macht, ist nicht Ungleichheit, sondern die
+       * Mutation: nimmt man `year <= reset.year` aus `displacedByReset`
+       * heraus, wird der Uebertrag verdraengt, die freigelegte
+       * Monatsaufstockung schlaegt durch und `neu` steigt UEBER `heute`.
+       * Gegengeprueft.
+       */
 
       // Die Zusage, die vor dem Scharfschalten tragen muss: die Verdrängung
       // nimmt weg, sie gibt nie dazu.
