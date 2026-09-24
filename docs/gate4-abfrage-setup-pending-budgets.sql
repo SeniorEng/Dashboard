@@ -18,8 +18,14 @@
 --   ein bestehender Startwert desselben Monats würde per UPDATE auf 0 gesetzt.
 --
 -- AUSFÜHRUNG
---   Nur LESEND. Kein INSERT/UPDATE/DELETE, kein DDL, keine temporären Tabellen.
---   Gegen die Prod-Kopie oder Prod ausführbar — die Abfrage verändert nichts.
+--   NUR LESEND — durchgesetzt, nicht zugesagt: die erste Anweisung setzt
+--   `default_transaction_read_only = on`. Ein Schreibversuch bricht danach mit
+--   `cannot execute INSERT in a read-only transaction` ab.
+--
+--   (Die Selbstprobe zu dieser Datei liegt bewusst NICHT hier — sie schreibt.
+--   Muster wie bei `bestandspruefung-stille-verluste-selbstprobe.sql`.)
+--
+--   Gegen die Prod-Kopie oder Prod ausführbar.
 --   Spaltennamen aus `shared/schema/customers.ts:71-76` übernommen, nicht
 --   geraten.
 --
@@ -31,6 +37,10 @@
 --                           die Payloads tragen und ob ein Retry echte Daten
 --                           überschreiben würde.
 -- ============================================================================
+
+
+-- Die Lesesperre. Erste Anweisung, damit sie für alles Folgende gilt.
+SET default_transaction_read_only = on;
 
 
 -- ── 1. Gibt es überhaupt Kunden mit einem Budget-Block im Pending-Payload? ──

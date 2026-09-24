@@ -1,0 +1,81 @@
+-- ============================================================================
+-- SELBSTPROBE zu `bestandspruefung-stille-verluste.sql`
+--
+-- ⚠ NUR TEST-DB — DIESE DATEI SCHREIBT.
+--
+--   Sie legt einen Audit-Eintrag an (`INSERT INTO audit_log`) und rollt ihn
+--   zurück. Zurückgerollt ist nicht ungeschrieben: die Sequenz springt weiter,
+--   und `audit_log` ist GoBD-relevant. Gegen Prod gehört sie nicht, auch nicht
+--   „kurz zum Ausprobieren".
+--
+--   Die Prod-Datei daneben setzt `default_transaction_read_only = on` und
+--   würde diese Anweisungen ablehnen. Das ist Absicht.
+--
+-- WOZU
+--   Eine Abfrage, die „0 Zeilen" meldet, kann zweierlei heißen: es gibt keinen
+--   Fall, oder sie findet keinen. Von außen sehen beide gleich aus. Diese
+--   Probe konstruiert einen Fall und prüft, dass beide Abfragen ihn melden.
+--
+--   Erwartet: Selbstprobe 1 meldet GENAU eine Zeile mit 500,00 €,
+--   Selbstprobe 1b denselben Eintrag über leeres `allocationIds`.
+--
+-- AUSFÜHRUNG
+--   set -a; . ./.env.test.local; set +a
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f docs/bestandspruefung-stille-verluste-selbstprobe.sql
+-- ============================================================================
+
+BEGIN;
+
+INSERT INTO audit_log (user_id, action, entity_type, entity_id, metadata, created_at)
+SELECT
+  (SELECT id FROM users ORDER BY id LIMIT 1),
+  'budget_initial_setup',
+  'budget',
+  (SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1),
+  jsonb_build_object(
+    'customerId', (SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1),
+    'budgetType', 'umwandlung_45a',
+    'currentMonthAmountCents', NULL,
+    'carryoverAmountCents', 50000,
+    'budgetStartDate', '2026-05-15',
+    'allocationIds', '[]'::jsonb
+  ),
+  now();
+
+\echo '=== Selbstprobe 1: muss GENAU 1 Zeile mit 500,00 EUR melden ==='
+SELECT
+  a.entity_id AS kunde,
+  a.metadata ->> 'budgetType' AS topf,
+  round((a.metadata ->> 'carryoverAmountCents')::bigint / 100.0, 2) AS verlorener_uebertrag_eur
+FROM audit_log a
+WHERE a.action = 'budget_initial_setup'
+  AND a.metadata ->> 'budgetType' <> 'entlastungsbetrag_45b'
+  AND a.metadata -> 'carryoverAmountCents' IS NOT NULL
+  AND a.metadata ->> 'carryoverAmountCents' <> 'null'
+  AND (a.metadata ->> 'carryoverAmountCents')::bigint > 0
+  AND NOT EXISTS (
+    SELECT 1 FROM budget_allocations b
+    WHERE b.customer_id = a.entity_id
+      AND b.budget_type = a.metadata ->> 'budgetType'
+      AND b.source      = 'carryover'
+  );
+
+\echo '=== Selbstprobe 1b: muss denselben Eintrag ueber leeres allocationIds finden ==='
+SELECT
+  a.entity_id AS kunde,
+  a.metadata ->> 'budgetType' AS topf,
+  (a.metadata ->> 'carryoverAmountCents')::bigint AS uebertrag_cents
+FROM audit_log a
+WHERE a.action = 'budget_initial_setup'
+  AND jsonb_array_length(coalesce(a.metadata -> 'allocationIds', '[]'::jsonb)) = 0
+  AND (
+       (a.metadata ->> 'currentMonthAmountCents') IS NOT NULL
+         AND a.metadata ->> 'currentMonthAmountCents' <> 'null'
+    OR (a.metadata ->> 'carryoverAmountCents') IS NOT NULL
+         AND a.metadata ->> 'carryoverAmountCents' <> 'null'
+  );
+
+ROLLBACK;
+
+-- Für Fall 2 gibt es keine Selbstprobe, weil es keinen Beleg gibt, den man
+-- konstruieren könnte. Genau das ist der Befund.

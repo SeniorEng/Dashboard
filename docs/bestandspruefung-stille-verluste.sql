@@ -9,20 +9,35 @@
 --   nachzuarbeiten ist.
 --
 -- AUSFÜHRUNG
---   Nur LESEND. Kein INSERT/UPDATE/DELETE, kein DDL. Gegen Prod oder die
---   Prod-Kopie ausführbar.
+--   NUR LESEND — und das ist hier keine Zusage, sondern durchgesetzt: die
+--   erste Anweisung setzt `default_transaction_read_only = on`. Ein
+--   INSERT/UPDATE/DELETE bricht danach mit einem Fehler ab, statt zu laufen.
+--
+--   Gegen Prod oder die Prod-Kopie ausführbar.
+--
 --   Spalten- und Aktionsnamen aus dem Code übernommen, nicht geraten:
 --     · `audit_log`            → `shared/schema/audit.ts:185-199`
 --     · Aktion `budget_initial_setup` und die Metadaten-Felder
 --                             → `server/services/budget-initial-setup.ts:308-315`
 --     · `budget_allocations`   → `shared/schema`
 --
--- SELBSTPROBE
---   Am Ende steht ein Block, der einen Fall KONSTRUIERT und prüft, dass beide
---   Abfragen ihn finden — in einer Transaktion mit `ROLLBACK`. Eine Abfrage,
---   die „0" meldet, muss vorher gezeigt haben, dass sie überhaupt etwas findet.
---   Sonst ist ihre Null keine Aussage.
+-- SELBSTPROBE — in `bestandspruefung-stille-verluste-selbstprobe.sql`
+--   Sie SCHREIBT (ein konstruierter Audit-Eintrag, danach `ROLLBACK`) und
+--   gehört deshalb NICHT in diese Datei. Sie stand hier bis zum 24.09.2026
+--   unten drin, während der Kopf „kein INSERT" behauptete — wer dem Kopf
+--   glaubte und die Datei gegen Prod fuhr, schrieb in `audit_log`.
+--   Zurückgerollt, aber geschrieben, und `audit_log` ist GoBD-relevant.
+--
+--   Genau die Klasse „Beschreibung, die etwas Falsches behauptet": sie wird
+--   als Beleg gelesen, und niemand prüft nach, denn dafür steht sie da.
+--
+--   Vor dem Prod-Lauf die Selbstprobe einmal gegen die TEST-DB fahren — eine
+--   Abfrage, die hier „0 Zeilen" meldet, ist sonst ununterscheidbar von einer,
+--   die nichts finden kann.
 -- ============================================================================
+
+-- Die Lesesperre. Erste Anweisung, damit sie für alles Folgende gilt.
+SET default_transaction_read_only = on;
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -144,71 +159,3 @@ WHERE c.deleted_at IS NULL
       AND b.deleted_at IS NULL
   )
 ORDER BY c.created_at DESC;
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- SELBSTPROBE — findet Fall 1 überhaupt etwas?
--- ════════════════════════════════════════════════════════════════════════════
---
--- In einer Transaktion, die am Ende zurückgerollt wird. Konstruiert wird der
--- §45a-Fall: ein Audit-Eintrag mit 500,00 € Übertrag und leerem
--- `allocationIds`, ohne zugehörige Zeile. Beide Abfragen müssen ihn melden.
---
--- Wer sie überspringt und unten „0 Zeilen" liest, weiß nicht, ob es keinen
--- Fall gibt oder ob die Abfrage blind ist.
-
-BEGIN;
-
-INSERT INTO audit_log (user_id, action, entity_type, entity_id, metadata, created_at)
-SELECT
-  (SELECT id FROM users ORDER BY id LIMIT 1),
-  'budget_initial_setup',
-  'budget',
-  (SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1),
-  jsonb_build_object(
-    'customerId', (SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1),
-    'budgetType', 'umwandlung_45a',
-    'currentMonthAmountCents', NULL,
-    'carryoverAmountCents', 50000,
-    'budgetStartDate', '2026-05-15',
-    'allocationIds', '[]'::jsonb
-  ),
-  now();
-
-\echo '=== Selbstprobe 1: muss GENAU 1 Zeile mit 500,00 EUR melden ==='
-SELECT
-  a.entity_id AS kunde,
-  a.metadata ->> 'budgetType' AS topf,
-  round((a.metadata ->> 'carryoverAmountCents')::bigint / 100.0, 2) AS verlorener_uebertrag_eur
-FROM audit_log a
-WHERE a.action = 'budget_initial_setup'
-  AND a.metadata ->> 'budgetType' <> 'entlastungsbetrag_45b'
-  AND a.metadata -> 'carryoverAmountCents' IS NOT NULL
-  AND a.metadata ->> 'carryoverAmountCents' <> 'null'
-  AND (a.metadata ->> 'carryoverAmountCents')::bigint > 0
-  AND NOT EXISTS (
-    SELECT 1 FROM budget_allocations b
-    WHERE b.customer_id = a.entity_id
-      AND b.budget_type = a.metadata ->> 'budgetType'
-      AND b.source      = 'carryover'
-  );
-
-\echo '=== Selbstprobe 1b: muss denselben Eintrag ueber leeres allocationIds finden ==='
-SELECT
-  a.entity_id AS kunde,
-  a.metadata ->> 'budgetType' AS topf,
-  (a.metadata ->> 'carryoverAmountCents')::bigint AS uebertrag_cents
-FROM audit_log a
-WHERE a.action = 'budget_initial_setup'
-  AND jsonb_array_length(coalesce(a.metadata -> 'allocationIds', '[]'::jsonb)) = 0
-  AND (
-       (a.metadata ->> 'currentMonthAmountCents') IS NOT NULL
-         AND a.metadata ->> 'currentMonthAmountCents' <> 'null'
-    OR (a.metadata ->> 'carryoverAmountCents') IS NOT NULL
-         AND a.metadata ->> 'carryoverAmountCents' <> 'null'
-  );
-
-ROLLBACK;
-
--- Für Fall 2 gibt es keine Selbstprobe, weil es keinen Beleg gibt, den man
--- konstruieren könnte. Genau das ist der Befund.
