@@ -23,6 +23,7 @@
 import {
   allocationValidAtWhere,
   notDisplacedByResetWhere,
+  countedConsumptionWhere,
   RESET_DISPLACES_ALL_SOURCES_DEFAULT,
 } from "./allocation-window";
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
@@ -97,6 +98,24 @@ export async function readBudget45bFifoBreakdown(
   const resetAnchor = (opts?.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
     ? await readResetAnchor(customerId, asOfDate)
     : null;
+
+  /**
+   * Der Anker fuer den VERBRAUCHS-Schnitt haengt NICHT am Flag.
+   *
+   * Zwei verschiedene Fragen, zwei Anker:
+   *  · `resetAnchor` oben entscheidet ueber die VERDRAENGUNG von
+   *    Uebertragszeilen — die ist schaltbar, und das bleibt so.
+   *  · `verbrauchsAnker` hier entscheidet, welche BUCHUNGEN zum Stichtag noch
+   *    zaehlen. Der Reader tut das unabhaengig vom Flag
+   *    (`allocation-storage.ts`: `resetAnchorFrom(initialBalanceMonths, …)`,
+   *    nur an `opts.year == null` gebunden).
+   *
+   * Genau daran ist die erste Fassung dieses Fixes gescheitert: sie benutzte
+   * den flag-gegateten Anker, und mit ausgeschaltetem Flag war er `null` —
+   * der Schnitt blieb aus, der Verbrauch weiter negativ. Gemessen, nicht
+   * hergeleitet (Ticket `6hcVM394XgmP37GG`).
+   */
+  const verbrauchsAnker = await readResetAnchor(customerId, asOfDate);
   const carryoverAllocations = await budgetAllocationsRepo
     .selectColumnsFrom({ id: budgetAllocations.id, amountCents: budgetAllocations.amountCents, expiresAt: budgetAllocations.expiresAt })
     .where(and(
@@ -137,6 +156,9 @@ export async function readBudget45bFifoBreakdown(
       }).from(budgetTransactions).where(and(
         inArray(budgetTransactions.allocationId, carryoverIds),
         sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+        // Derselbe Schnitt wie im Reader — sonst subtrahieren sich zwei Zahlen,
+        // die verschiedene Mengen sehen (Ticket `6hcVM394XgmP37GG`).
+        countedConsumptionWhere(verbrauchsAnker, asOfDate),
       )).groupBy(budgetTransactions.allocationId),
       db.select({
         allocationId: budgetTransactions.allocationId,
@@ -144,6 +166,7 @@ export async function readBudget45bFifoBreakdown(
       }).from(budgetTransactions).where(and(
         inArray(budgetTransactions.allocationId, carryoverIds),
         eq(budgetTransactions.transactionType, "reversal"),
+        countedConsumptionWhere(verbrauchsAnker, asOfDate),
       )).groupBy(budgetTransactions.allocationId),
     ]);
     const consumedMap = new Map(consumed.map(c => [c.allocationId, Number(c.total)]));
@@ -156,6 +179,19 @@ export async function readBudget45bFifoBreakdown(
   }
 
   // ---- 4) FIFO-Verteilung von Konsum / Holds / Frei auf beide Töpfe ----
+  /**
+   * `consumedCarry` und `C` muessen dieselbe Menge sehen.
+   *
+   * Die Pro-Allocation-Rechnung oben zaehlte bis zum 24.09.2026 JEDE Buchung
+   * gegen eine Uebertrags-Zeile — ohne Stichtag, ohne Reset-Schnitt. `C` kommt
+   * aus dem Reader und ist um beides bereinigt. Die Differenz konnte damit
+   * negativ werden (gemessen: −100,00 EUR), und der ausgewiesene Rest des
+   * laufenden Jahres stieg entsprechend.
+   *
+   * `countedConsumptionWhere` traegt den Schnitt jetzt an beiden Stellen aus
+   * derselben Funktion. Das `Math.max(0, …)` bleibt als zweite Lage stehen —
+   * es fing den Fehler nicht, weil er eine Ebene darunter sass.
+   */
   const consumedCarry = Math.max(0, allocatedCarry - availableCarry);
   const consumedCur = C - consumedCarry;
 

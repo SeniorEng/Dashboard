@@ -38,7 +38,7 @@
  * genau einen Aufrufer.
  */
 import { and, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
-import { budgetAllocations } from "@shared/schema";
+import { budgetAllocations, budgetTransactions } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
 export interface AllocationWindowRow {
@@ -224,6 +224,47 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
     gt(budgetAllocations.validFrom, reset.cutoffDate),
     gt(budgetAllocations.year, reset.year),
   );
+}
+
+/**
+ * Zaehlt diese Verbrauchs-Buchung zum Stichtag mit?
+ *
+ * Gilt fuer Buchungen, die an eine NICHT ausgeschlossene Allocation verlinkt
+ * sind — also genau den Fall, den die FIFO-Aufschluesselung pro Uebertrags-
+ * Zeile rechnet.
+ *
+ * ── Warum es diese Funktion gibt ────────────────────────────────────────
+ * `getExcluded45bConsumption` schneidet den Gesamt-Verbrauch mit drei Gliedern:
+ *   (a) `allocationId IN excludedSpecialAllocationIds`
+ *   (b) `transactionDate < resetAnchor.cutoffDate`
+ *   (c) `allocationId IS NULL AND transactionDate < accrualFloorDate`
+ *
+ * Die Pro-Allocation-Rechnung in `fifo-breakdown.ts` hatte **keines** davon —
+ * nicht einmal `transactionDate <= asOfDate`. Gemessen (24.09.2026): ein
+ * Verbrauch von 100,00 EUR vor dem Stichtag fiel aus dem Gesamt-Verbrauch
+ * heraus, blieb aber in der Uebertrags-Restrechnung stehen. Die Differenz
+ * `consumedCur = C − consumedCarry` wurde dadurch **−100,00 EUR**, und der
+ * ausgewiesene Rest des laufenden Jahres stieg auf 662,00 statt 562,00 EUR —
+ * also in die Richtung, in der gebucht wird.
+ *
+ * ── Warum nur zwei der drei Glieder ─────────────────────────────────────
+ * (a) trifft nicht zu: die Zeilen, fuer die diese Bedingung gilt, sind gerade
+ *     die NICHT ausgeschlossenen — `notDisplacedByResetWhere` hat sie
+ *     durchgelassen.
+ * (c) trifft nicht zu: es gilt ausdruecklich nur fuer `allocationId IS NULL`,
+ *     und hier ist die ID gesetzt.
+ *
+ * Das steht hier und nicht als Kommentar an der Aufrufstelle, weil sonst die
+ * naechste Person die fehlenden Glieder fuer ein Versehen haelt und sie
+ * „ergaenzt".
+ */
+export function countedConsumptionWhere(
+  reset: ResetAnchor | null,
+  asOfDate: string,
+): SQL | undefined {
+  const bis = lte(budgetTransactions.transactionDate, asOfDate);
+  if (!reset) return bis;
+  return and(bis, gte(budgetTransactions.transactionDate, reset.cutoffDate));
 }
 
 /**
