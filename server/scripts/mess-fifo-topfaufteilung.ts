@@ -259,7 +259,10 @@ async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<v
   const { budgetTransactions } = await import("@shared/schema");
   const { readResetAnchor } = await import("../storage/budget/allocation-storage");
 
-  let summeAsOf = 0, summeReset = 0, kundenAsOf = 0, kundenReset = 0;
+  let summeAsOf = 0, kundenAsOf = 0;
+  let summeResetDamals = 0, kundenResetDamals = 0;
+  let summeResetNachtraeglich = 0, kundenResetNachtraeglich = 0;
+
   for (const id of kunden) {
     const ueIds = (await db.select({ id: budgetAllocations.id })
       .from(budgetAllocations)
@@ -273,6 +276,7 @@ async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<v
 
     const anker = await readResetAnchor(id, stichtag);
 
+    // (a) as-of-Anteil: Buchungen NACH dem Stichtag.
     const [nachher] = await db.select({
       total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
     }).from(budgetTransactions).where(und(
@@ -280,29 +284,79 @@ async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<v
       roh`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
       gt(budgetTransactions.transactionDate, stichtag),
     ));
-    const vorReset = anker ? (await db.select({
+    const a = Number(nachher?.total ?? 0);
+    if (a > 0) { summeAsOf += a; kundenAsOf++; }
+
+    if (!anker) continue;
+
+    /**
+     * (b) / (c) — WANN wurde der Startwert eingetragen?
+     *
+     * Nur ein Startwert, der zum Stichtag schon EXISTIERTE, kann damals real
+     * auf dem Schirm gestanden haben. Ein nachtraeglich eingetragener
+     * veraendert die Vergangenheits-SICHT, nicht das, was jemand damals sah.
+     *
+     * `created_at` ist `NOT NULL DEFAULT now()` — gemessen, immer gefuellt.
+     * (Die frueheren „0 Treffer" betrafen die Sekunden-Heuristik als
+     * VORGANGS-Merkmal, nicht die Spalte als Eintragsdatum.)
+     *
+     * ⚠ Was `created_at` NICHT sagt: ob die Zeile seither geaendert wurde.
+     * `upsertInitialBalanceAllocation` aktualisiert in-place, ohne das Datum
+     * anzufassen. Ein Startwert, der damals mit anderem Betrag existierte,
+     * zaehlt hier als „damals" — richtig fuer die Frage „stand etwas auf dem
+     * Schirm", zu grob fuer „stand DIESE Zahl dort".
+     */
+    const [startwert] = await db.select({
+      createdAt: budgetAllocations.createdAt,
+    }).from(budgetAllocations).where(und(
+      ist(budgetAllocations.customerId, id),
+      ist(budgetAllocations.budgetType, BUDGET_TYPE),
+      ist(budgetAllocations.source, "initial_balance"),
+      ist(budgetAllocations.year, anker.year),
+      ist(budgetAllocations.month, anker.month),
+      istNull(budgetAllocations.deletedAt),
+    ));
+
+    const [vorReset] = await db.select({
       total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
     }).from(budgetTransactions).where(und(
       inArray(budgetTransactions.allocationId, ueIds),
       roh`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
       lt(budgetTransactions.transactionDate, anker.cutoffDate),
-    )))[0] : { total: 0 };
-
-    const a = Number(nachher?.total ?? 0);
+    ));
     const r = Number(vorReset?.total ?? 0);
-    if (a > 0) { summeAsOf += a; kundenAsOf++; }
-    if (r > 0) { summeReset += r; kundenReset++; }
+    if (r <= 0) continue;
+
+    const eingetragen = startwert?.createdAt
+      ? new Date(startwert.createdAt).toISOString().slice(0, 10)
+      : null;
+    if (eingetragen != null && eingetragen <= stichtag) {
+      summeResetDamals += r; kundenResetDamals++;
+    } else {
+      summeResetNachtraeglich += r; kundenResetNachtraeglich++;
+    }
   }
 
   console.log("");
   console.log(`URSACHEN der Verschiebung zum ${stichtag}`);
-  console.log("=".repeat(72));
-  console.log(`  as-of-Schnitt (Buchung NACH dem Stichtag):  ${formatEuroDE(summeAsOf)}  bei ${kundenAsOf} Kunden`);
-  console.log(`  Reset-Schnitt (Buchung VOR dem Startwert):  ${formatEuroDE(summeReset)}  bei ${kundenReset} Kunden`);
+  console.log("=".repeat(78));
+  console.log(`  (a) as-of-Schnitt — Buchung NACH dem Stichtag`);
+  console.log(`      ${formatEuroDE(summeAsOf).padStart(14)}  bei ${kundenAsOf} Kunden`);
   console.log("");
-  console.log("  Beide Mengen koennen sich ueberschneiden, wenn ein Kunde beides hat.");
-  console.log("  Fuer Modell v2 zaehlt der Reset-Schnitt — der as-of-Schnitt betrifft nur");
-  console.log("  Sichten in die Vergangenheit.");
+  console.log(`  (b) Reset-Schnitt, Startwert existierte SCHON zum Stichtag`);
+  console.log(`      ${formatEuroDE(summeResetDamals).padStart(14)}  bei ${kundenResetDamals} Kunden`);
+  console.log("");
+  console.log(`  (c) Reset-Schnitt, Startwert NACHTRAEGLICH eingetragen`);
+  console.log(`      ${formatEuroDE(summeResetNachtraeglich).padStart(14)}  bei ${kundenResetNachtraeglich} Kunden`);
+  console.log("");
+  console.log("  NUR (b) kann damals real auf dem Schirm gestanden haben.");
+  console.log("  (a) und (c) veraendern die Vergangenheits-SICHT, nicht das, was");
+  console.log("  jemand damals gesehen hat. Wer alle drei zusammenzaehlt und das");
+  console.log("  Ergebnis als „so viel stand falsch auf dem Schirm\" liest, macht");
+  console.log("  aus einer Teilmenge eine Gesamtzahl — zeitlich statt raeumlich.");
+  console.log("");
+  console.log("  Einschraenkung zu (b): `created_at` sagt, wann die ZEILE entstand,");
+  console.log("  nicht ob ihr Betrag seither geaendert wurde (In-Place-Upsert).");
   console.log("");
 }
 
