@@ -355,7 +355,22 @@ export function useCustomerWizard() {
     // 30.06. nutzbar (verfällt danach). Bei späterem Beginn wird das Feld
     // ausgeblendet und darf auch nicht gebucht werden.
     const carryover45bUsable = (formData.contractStart || today) < `${new Date().getFullYear()}-07-01`;
-    const carryoverAmount = is45bEnabled && carryover45bUsable ? (Math.round(parseFloat(formData.uebertrag45b) * 100) || 0) : 0;
+    /**
+     * LEER heisst `null`, nicht `0` (Alrik, 24.09.2026).
+     *
+     * Hier stand `Math.round(parseFloat(...) * 100) || 0`. Bei leerem Feld ist
+     * `parseFloat("")` gleich `NaN`, und `NaN || 0` ergibt `0` — aus „nichts
+     * eingetragen" wurde damit eine festgestellte Null und eine Zeile, die
+     * niemand gemeint hat.
+     *
+     * Die Unterscheidung, die ueberall sonst schon gilt:
+     *   `null`/`undefined` = keine Angabe  ->  keine Zeile
+     *   `0`                = festgestellte Null  ->  Zeile mit Betrag 0
+     */
+    const uebertragRoh = formData.uebertrag45b.trim();
+    const carryoverAmount = is45bEnabled && carryover45bUsable && uebertragRoh !== ""
+      ? Math.round(parseFloat(uebertragRoh) * 100)
+      : null;
     // Task #960 — Optionaler §45b-Restguthaben-Override (laufendes Jahr). Nur
     // wenn aktiv, wird ein initial_balance für den Stichmonat gebucht; sonst
     // bleibt das §45b-Guthaben rein auto-renewal-getrieben (kein initial_balance).
@@ -373,7 +388,7 @@ export function useCustomerWizard() {
       // heisst „nicht angegeben", `0` heisst „festgestellte Null". Vorher
       // entschied `> 0` beides zugleich und warf eine bewusst eingetragene 0
       // weg, bevor sie den Server erreichte (Schranke 8, P1 6hXp9qMrXH2WGVVG).
-      carryoverAmountCents: (is45bEnabled && carryover45bUsable) ? carryoverAmount : undefined,
+      carryoverAmountCents: carryoverAmount ?? undefined,
       // Task #1213 — §45b-Restguthaben-Override (laufendes Jahr) + Stichmonat-Start
       // fließen jetzt in DENSELBEN Anlage-Request; der Server bucht das
       // initial_balance innerhalb der Anlage-Transaktion (kein separater
@@ -381,7 +396,23 @@ export function useCustomerWizard() {
       override45bCents: override45bActive ? override45bCents : undefined,
       override45bStichmonatStart: override45bStichmonatStart || undefined,
     };
-    const budgets = budgetValues.entlastungsbetrag45b > 0 || budgetValues.verhinderungspflege39 > 0 || budgetValues.pflegesachleistungen36 > 0
+    /**
+     * Der Block faellt nur weg, wenn WIRKLICH nichts angegeben ist.
+     *
+     * Hier stand nur die Pruefung auf die drei MONATSbetraege. **Gemessen am
+     * 24.09.2026** (Fall 5 der Payload-Messung): mit `entlastungsbetrag45b = 0`
+     * und einem eingetragenen Uebertrag von 500 EUR verschwand der ganze
+     * `budgets`-Block — der Uebertrag war eingegeben, quittiert und weg, ohne
+     * jede Meldung.
+     *
+     * Dieselbe Form wie „angenommen, quittiert, verworfen" aus #186, nur eine
+     * Schicht frueher: der Server hat den Betrag nie zu sehen bekommen.
+     */
+    const budgets = budgetValues.entlastungsbetrag45b > 0
+      || budgetValues.verhinderungspflege39 > 0
+      || budgetValues.pflegesachleistungen36 > 0
+      || budgetValues.carryoverAmountCents != null
+      || budgetValues.override45bCents != null
       ? budgetValues
       : undefined;
 

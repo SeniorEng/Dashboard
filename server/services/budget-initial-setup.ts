@@ -74,6 +74,11 @@ export interface ApplyInitialBudgetParams {
  * §45b-Kappung (Task #856/#860/#959) und die §45a/§39-In-place-Aktivierung
  * (Task #705/#876) sind hier zentralisiert — siehe Inline-Kommentare.
  */
+/** `MM/JJJJ` fuer Fehlermeldungen — eine Stelle, damit die Form nicht driftet. */
+function monatJahr(year: number, month: number): string {
+  return `${String(month).padStart(2, "0")}/${year}`;
+}
+
 export async function applyInitialBudget(params: ApplyInitialBudgetParams): Promise<BudgetAllocation[]> {
   const { customerId, budgetType, customer, userId, tx } = params;
   const currentMonthAmountCents = params.currentMonthAmountCents ?? null;
@@ -219,6 +224,45 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
   if (currentMonthAmountCents != null) {
     const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
     const startMonth = startDate.getMonth() + 1;
+
+    /**
+     * ── Ein Wiederholungs-Versuch darf keinen erfassten Startwert ueberschreiben ──
+     *
+     * `upsertInitialBalanceAllocation` macht bei vorhandener aktiver Zeile
+     * fuer dasselbe `(Kunde, Topf, Jahr, Monat)` ein
+     * `UPDATE ... SET amount_cents = <neuer Wert>`. Auf dem ANLAGE-Pfad ist
+     * das harmlos (es gibt noch nichts). Auf dem WIEDERHOL-Pfad nicht: der
+     * Banner „Startbudgets erneut versuchen"
+     * (`client/src/features/customers/components/admin/customer-detail-sections.tsx`)
+     * spielt einen GESPEICHERTEN Payload ab, und dessen Kontrakt kann „keine
+     * Angabe" nicht ausdruecken — er traegt dann `0`. Ein Klick haette einen
+     * inzwischen erfassten Startwert still auf 0 gesetzt.
+     *
+     * Alriks Vorgabe vom 24.09.2026: **entweder idempotent ueber denselben
+     * Payload, oder Konflikt melden.** Genau das steht hier:
+     *  - gleicher Betrag  -> kein Fehler, der Upsert laeuft und aendert nichts;
+     *  - anderer Betrag   -> `409`, nichts wird geschrieben.
+     *
+     * Die Schranke sitzt bewusst HIER und nicht in
+     * `upsertInitialBalanceAllocation`: der Startwert-EDITOR
+     * (`POST /budget/:id/initial-balance/:budgetType`) geht an
+     * `applyInitialBudget` vorbei und MUSS weiter korrigieren duerfen. Eine
+     * Schranke in der Storage-Funktion haette ihm das genommen.
+     */
+    const bestehend = await budgetStorage.findActiveInitialBalance(
+      { customerId, budgetType, year, month: startMonth }, tx,
+    );
+    if (bestehend != null && bestehend.amountCents !== currentMonthAmountCents) {
+      throw new BudgetInitialSetupError(
+        409,
+        "BUDGET_INITIAL_BALANCE_CONFLICT",
+        `Für ${monatJahr(year, startMonth)} ist bereits ein Startwert von `
+        + `${formatEuroDE(bestehend.amountCents)} erfasst. Dieser Vorgang würde ihn auf `
+        + `${formatEuroDE(currentMonthAmountCents)} ändern. Wenn das gewollt ist, den `
+        + `Startwert im Budget-Editor ändern — die Anlage überschreibt ihn nicht.`,
+      );
+    }
+
     await budgetStorage.upsertInitialBalanceAllocation({
       customerId,
       budgetType,

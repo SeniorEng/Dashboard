@@ -42,6 +42,40 @@ import { SelbstzahlerStatutoryPotError } from "./preferences-storage";
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
 /**
+ * Die AKTIVE Startwert-Zeile fuer `(Kunde, Topf, Jahr, Monat)` — oder `null`.
+ *
+ * Existiert, damit ein Aufrufer VOR dem Upsert wissen kann, ob er etwas
+ * ueberschreiben wuerde (`applyInitialBudget`, Wiederhol-Schutz).
+ *
+ * **Die Auswahl ist absichtlich Zeichen fuer Zeichen dieselbe wie in
+ * `upsertInitialBalanceAllocation`**: gleiche vier Gleichheiten, gleiche
+ * Sortierung (`desc(id)`), gleicher Aktiv-Filter. Eine eigene, „aehnliche"
+ * Abfrage waere der Zweitbegriff — sie koennte eine andere Zeile finden als
+ * die, die gleich ueberschrieben wird, und dann schuetzt der Schutz nichts.
+ */
+export async function findActiveInitialBalance(
+  params: { customerId: number; budgetType: string; year: number; month: number },
+  _tx?: DbClient,
+): Promise<{ id: number; amountCents: number } | null> {
+  const d = _tx ?? db;
+  const zeilen = await budgetAllocationsRepo.selectColumnsFrom({
+    id: budgetAllocations.id,
+    amountCents: budgetAllocations.amountCents,
+    deletedAt: budgetAllocations.deletedAt,
+  }, d)
+    .where(and(
+      eq(budgetAllocations.customerId, params.customerId),
+      eq(budgetAllocations.budgetType, params.budgetType),
+      eq(budgetAllocations.source, "initial_balance"),
+      eq(budgetAllocations.year, params.year),
+      eq(budgetAllocations.month, params.month),
+    ))
+    .orderBy(desc(budgetAllocations.id));
+  const aktiv = zeilen.filter(z => !z.deletedAt);
+  return aktiv.length > 0 ? { id: aktiv[0].id, amountCents: aktiv[0].amountCents } : null;
+}
+
+/**
  * Task #1234 — Defense-in-Depth (Schwester zu Task #1233 auf dem
  * type-settings-Pfad): Selbstzahler (`billingType='selbstzahler'`) dürfen
  * NIE Geld aus einem gesetzlichen Pflegekassen-Topf (§45b/§45a/§39+§42a)

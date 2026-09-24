@@ -40,10 +40,27 @@ export function budgetsStepErrors(
     // ausgeblendet und wird beim Speichern auf 0 gezwungen.
     const carryoverUsable = (formData.contractStart || today) < `${currentYear}-07-01`;
     if (carryoverUsable) {
-      const uebertrag = parseFloat(formData.uebertrag45b);
-      if (isNaN(uebertrag) || uebertrag < 0) {
-        errors.push("Übertrag darf nicht negativ sein");
-      } else {
+      /**
+       * Ein LEERES Feld ist „keine Angabe" — kein Fehler (24.09.2026).
+       *
+       * Hier stand `isNaN(uebertrag) || uebertrag < 0`. `parseFloat("")` ist
+       * `NaN`, also lehnte die Prüfung das leere Feld ab — mit der Meldung
+       * „Übertrag darf nicht negativ sein", die gar nicht zutraf.
+       *
+       * **Gemessen am 24.09.2026** (Hook gefahren, Payload abgefangen): mit
+       * leerem Feld kam der Anlage-Assistent überhaupt nicht durch. Der
+       * Anwender war damit gezwungen, eine `0` zu tippen — und seit `0` eine
+       * festgestellte Null ist, erzeugte das eine Übertragszeile, die niemand
+       * gemeint hat.
+       *
+       * Das ist der Ursprung des Blockers B1: nicht „der Client schickt
+       * heimlich 0", sondern „der Client lässt nichts anderes zu".
+       */
+      const roh = formData.uebertrag45b.trim();
+      const uebertrag = roh === "" ? null : parseFloat(roh);
+      if (uebertrag != null && (isNaN(uebertrag) || uebertrag < 0)) {
+        errors.push("Übertrag muss eine Zahl ≥ 0 sein");
+      } else if (uebertrag != null) {
         const eligibleMonths = eligible45bCarryoverMonths(formData.pflegegradSeit, currentYear);
         const maxCarryoverCents = max45bCarryoverCents(eligibleMonths);
         if (Math.round(uebertrag * 100) > maxCarryoverCents) {

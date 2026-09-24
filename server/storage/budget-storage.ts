@@ -65,6 +65,7 @@ interface BudgetStorage {
   upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>, tx?: DbClient, userId?: number, options?: { allowStatutoryForSelbstzahler?: boolean; overrideBackdateGuard?: boolean; overrideUserId?: number; overrideReason?: string; overrideIpAddress?: string }): Promise<CustomerBudgetTypeSetting[]>;
 
   upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number, tx?: DbClient, options?: { allowStatutoryForSelbstzahler?: boolean }): Promise<void>;
+  findActiveInitialBalance(params: { customerId: number; budgetType: string; year: number; month: number }, _tx?: DbClient): Promise<{ id: number; amountCents: number } | null>;
   upsertCarryoverAllocation(params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string }, userId?: number, options?: { allowStatutoryForSelbstzahler?: boolean }): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string, tx?: DbClient): Promise<BudgetAllocation[]>;
   clearLegacyInitialBalanceFromSettings(customerId: number, budgetType: string, tx: DbClient, userId?: number): Promise<boolean>;
@@ -150,6 +151,7 @@ export const budgetStorage: BudgetStorage = {
   upsertBudgetTypeSettings: preferences.upsertBudgetTypeSettings,
 
   upsertInitialBalanceAllocation: allocation.upsertInitialBalanceAllocation,
+  findActiveInitialBalance: allocation.findActiveInitialBalance,
   upsertCarryoverAllocation: allocation.upsertCarryoverAllocation,
   getInitialBalanceAllocations: allocation.getInitialBalanceAllocations,
   clearLegacyInitialBalanceFromSettings: preferences.clearLegacyInitialBalanceFromSettings,
