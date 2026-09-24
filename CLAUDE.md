@@ -416,6 +416,20 @@ passiert, bevor Gate 2 überhaupt etwas zu prüfen bekommt.
 **Im Zweifel: Voll.** Ein Fix, der sich beim Bauen als Regeländerung entpuppt,
 wechselt sofort auf Voll (→ G).
 
+**Der Standard gilt für jede Regeländerung, unabhängig vom Anlass — auch für
+Fixes aus Gate 2. Gerade dort, weil sie unter Zeitdruck entstehen.** Schritt C
+darf dabei klein sein (nur die betroffene Regel), aber er entfällt nicht.
+
+*Der Anlassfall für diesen Zusatz ist am 24.09.2026 entstanden, während der
+Standard beschlossen wurde:* ein Gate-2-Befund („für §45a/§39 wird ein
+Übertrag angenommen, protokolliert und nicht gespeichert") wurde als Einzeiler
+behoben — `carryoverAmountCents != null` ablehnen. **16 Tests wurden rot.** Der
+geteilte Fixture-Helfer übergibt für §45a/§39 grundsätzlich
+`carryoverAmountCents: 0`, und eine `0` verliert nichts; richtig war `> 0`.
+Eine Wirkungskarte über genau diese eine Regel hätte die Aufrufer gezeigt —
+sie wurde übersprungen, weil der Fund aus einem Review kam und nicht aus einem
+Ticket.
+
 Die Staffelung ist Absicht: schwere Spezifikation für kleine Änderungen ist
 nachweislich kontraproduktiv (Böckeler/Fowler zu Spec-Driven Development).
 
