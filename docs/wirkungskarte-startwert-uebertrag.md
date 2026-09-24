@@ -367,3 +367,129 @@ heißt schlicht „Restguthaben" mit einem Stichmonat daneben.
 | Beide Zeilen nebeneinander, mit Flip | nur der Startwert zählt, 562,00 €; der Übertrag ist ab dem Startwert-Monat aus dem Topf |
 | Startwert und Frist | ein §45b-Startwert hat **nie** ein `expiresAt`; nichts an ihm verfällt zum 30.06. |
 | Herkunft der Annahme | **erst 24.09.2026, aus diesem Vorgang.** Die ältere UI-Historie beschreibt die Felder ausdrücklich als „two distinct amounts" und trennt sie bewusst (#670, #960). |
+
+---
+
+# Anhang 2: Schritt C für die Vorgangs-Klammer (24.09.2026)
+
+> **Entscheidung Cowork (technisch):** eine nullable Spalte an
+> `budget_allocations`, gesetzt auf **beide** Zeilen eines
+> Kassenauskunfts-Vorgangs. Regel: zum wirksamen Stichtag zählen die Zeilen des
+> Vorgangs, zu dem der Reset-Anker gehört; alle anderen §45b-Zeilen mit
+> `validFrom <= cutoff` sind verdrängt.
+>
+> Dieser Anhang misst, was das für die vorhandenen Schreibwege heißt — **vor**
+> dem Bauen.
+
+## 1. Die Schreibwege und die Klammer
+
+Gemessen an den Wegen aus Abschnitt 1 dieser Karte. Entscheidend ist, ob ein
+Weg **beide** Zeilen in einem Aufruf schreibt — nur dann gibt es überhaupt
+einen Vorgang zu klammern.
+
+| Weg | schreibt | Klammer |
+|---|---|---|
+| **`applyInitialBudget`** (`budget-initial-setup.ts:162` + `:179`) | `initial_balance` **und** `carryover` in EINEM Aufruf | **muss sie setzen** — der einzige heutige Weg, der einen Vorgang überhaupt bildet |
+| **Startwert-Editor** (`routes/budget.ts` → `upsertInitialBalanceAllocation`) | nur `initial_balance` | **muss sie setzen**, sobald er Teil des Kassenauskunfts-Formulars wird; solange er einzeln bleibt, bildet er einen Vorgang aus einer Zeile |
+| **Übertrags-Editor** (`routes/budget.ts:936` → `upsertCarryoverAllocation`) | nur `carryover` | dasselbe |
+| **Jahreswechsel-Automatik** (`planCarryoverRolls45b`, `allocation-storage.ts:2055`) | nur `carryover` | **bleibt null** — es gibt keinen Vorgang, niemand hat etwas ausgesagt |
+| **§45b-Re-Basierung** (`invoice-45b-reduction.ts:237`) | nur `initial_balance` | **offen** — fachlich ist eine Kassenkürzung durchaus ein eigener Anlass (v2, Fall 3). Gehört in Schritt D, nicht hierher |
+| **Backfills / Wartungsskripte** (5 Wege, Abschnitt 1.2) | `carryover` | bleiben null |
+
+**Der Befund daraus:** heute bildet **genau ein** Weg einen Vorgang mit zwei
+Zeilen. Die beiden Editoren schreiben je eine — das v2-Formular führt sie
+zusammen, und erst dadurch entsteht die Klammer als etwas, das man setzen kann.
+
+## 2. Was für `null` gilt — und warum E1 es NICHT belegt
+
+Die Regel sagt: *„zum wirksamen Stichtag zählen die Zeilen des Vorgangs, zu dem
+der Reset-Anker gehört."* Trägt der Anker-Startwert **keine** Klammer
+(Altbestand), sind zwei Lesarten möglich:
+
+| Lesart | Folge für Altbestand |
+|---|---|
+| **(i)** `null` = eigener Vorgang aus einer Zeile | alles andere mit `validFrom <= cutoff` ist verdrängt → **das #184-Verhalten** |
+| **(ii)** ein Anker ohne Klammer verdrängt nichts | **das heutige Verhalten** (Flag aus) |
+
+**Die beiden unterscheiden sich genau bei den 21 Kunden aus dem Mess-Lauf** —
+Startwert und Übertrag nebeneinander, beide ohne Klammer. Lesart (i) senkt dort
+die Verfügbarkeit um zusammen −20.395,73 €, Lesart (ii) ändert nichts.
+
+> ### ⚠ E1 kann diese Frage nicht beantworten
+>
+> Die Auflage lautet: *„Altbestand ohne Klammer: Regel muss für die heutigen
+> Zeilen genau das Verhalten von heute liefern — E1 ist der Beleg, er muss
+> unverändert grün bleiben."*
+>
+> **E1 hat keinen Startwert** (Übertrag 500 €, fünf Verbräuche, sonst nichts).
+> Ohne Startwert gibt es keinen Reset-Anker, und ohne Anker verdrängt keine der
+> beiden Lesarten irgendetwas. **E1 bleibt in (i) wie in (ii) grün** — er ist
+> gegen die Frage blind.
+>
+> Gemessen ist E1 im Ist-Zustand übrigens exakt richtig, auf den Cent:
+> `486,00 / 341,40 / 326,60 / 302,60 / 153,60`.
+>
+> **Was die Frage entscheidet, ist ein Fall MIT null-Klammer-Startwert neben
+> einem gültigen Übertrag** — also genau die Lage der 21 Kunden. Das ist keine
+> Testlücke, sondern R3: ob dort Lesart (i) oder (ii) richtig ist, sagt Alriks
+> Antwort je Kunde, nicht der Code.
+
+## 3. Additiv — bestätigt
+
+Eine nullable `ADD COLUMN` löst **keine** der Freigabepflichten des
+Release-Gates aus. Gemessen an `scripts/lib/destructive-schema-statements.ts`:
+
+```
+DROP COLUMN | DROP TABLE            (Zeile 42)
+ALTER COLUMN … SET NOT NULL         (Zeile 145)
+ADD CONSTRAINT … UNIQUE             (Zeile 149)
+ADD CONSTRAINT … CHECK              (Zeile 153)
+ALTER COLUMN … TYPE                 (Zeile 157)
+```
+
+Keine davon trifft zu. Vorhandene Zeilen bekommen `NULL`, **keine
+Daten-Migration**, und der im Deploy-Fenster noch bedienende alte Code
+ignoriert die unbekannte Spalte.
+
+## 4. Die zwei verworfenen Alternativen — mit dem gemessenen Grund
+
+### `expiresAt` der alten Zeile vorziehen → löst den Verfalls-Lauf aus
+
+**Ja, und das ist der Grund.** `processExpiredCarryover`
+(`allocation-storage.ts:2067`) wählt aus:
+
+```sql
+source = 'carryover' AND expires_at IS NOT NULL AND expires_at < today
+```
+
+Ein vorgezogenes `expiresAt` liegt in der Vergangenheit und fällt damit in die
+Auswahl. Geschrieben wird dann (`:2170`):
+
+```
+transactionType: "write_off"
+amountCents:     −remaining          (Betrag minus bisheriger Verbrauch)
+notes:           "Verfallenes Guthaben aus {Jahr}: {Betrag} (Frist {expiresAt})"
+```
+
+Also eine Buchung über den **vollen Restbetrag**, beschriftet als
+**verfallen** — eine GoBD-relevante Aussage, die sachlich falsch wäre: der
+Betrag ist nicht verfallen, er ist durch eine Inventur ersetzt. Genau der Fall,
+den S6 als eigenen Punkt führt.
+
+### `createdAt` als Merkmal → als untauglich gemessen
+
+Die Zeitstempel-Heuristik („Startwert und Übertrag aus demselben Vorgang =
+gleicher `created_at` auf die Sekunde") ist am 24.09.2026 gegen Prod gelaufen:
+**0 Treffer** bei den vorhandenen Paaren. Sie kann einen Vorgang im Bestand
+nicht erkennen — und für neue Vorgänge wäre sie eine Heuristik, wo eine
+Zuordnung möglich ist.
+
+## 5. Was daraus für Schritt D offen bleibt
+
+1. **Lesart für `null`** — (i) oder (ii). Hängt an R3, nicht am Code.
+2. **Die §45b-Re-Basierung** (`invoice-45b-reduction.ts`): eigener Vorgang oder
+   Fortschreibung des letzten? Fachlich, nicht technisch.
+3. **Vorbedingung, unabhängig davon:** die FIFO-Aufschlüsselung meldet
+   negativen Verbrauch, sobald ein Stichtag schneidet — Ticket
+   `6hcVM394XgmP37GG`. Sie wirkt **nach oben** (662,00 € statt 562,00 €), also
+   in der Richtung, in der gebucht wird.
