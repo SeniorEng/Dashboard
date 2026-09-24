@@ -63,7 +63,11 @@ describe("Task #725 — initial-budget Endpoint-Semantik (Monatswert)", () => {
     const res = await apiPost(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
       currentMonthAmountCents: amount,
-      carryoverAmountCents: 0,
+      // Kein `carryoverAmountCents: 0` — hier ist „kein Übertrag“ gemeint.
+      // Beim Aufräumen der neun Füllwerte übersehen (Gate 2 zu #186, S7); der
+      // Test blieb grün, weil `getInitialBalances` auf `source =
+      // 'initial_balance'` filtert und die zusätzlich entstehende
+      // Übertragszeile für die Zusage unsichtbar war.
       budgetStartDate,
     });
     expect([200, 201]).toContain(res.status);

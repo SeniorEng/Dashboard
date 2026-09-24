@@ -25,7 +25,24 @@ import { apiPost, cleanupCustomer, getAuthCookie, uniqueId } from "../test-utils
  * Ein Test pro Weg wäre grün, sobald jeder Weg IN SICH stimmig ist — auch wenn
  * beide etwas anderes speichern. Geprüft wird deshalb die GLEICHHEIT der
  * geschriebenen Zeile: dieselbe Eingabe, dasselbe Ergebnis, egal wo sie
- * hereinkommt. Das ist die Drei-Schichten-Pflicht auf den Midlayer angewandt,
+ * hereinkommt.
+ *
+ * ── Worüber die Gleichheit läuft (Gate 2 zu #186, S8) ──────────────────
+ * Über die sechs Spalten in `zeilen()` — `source`, `year`, `month`,
+ * `amountCents`, `validFrom`, `expiresAt` —, nicht über den gesamten
+ * Kundenzustand.
+ *
+ * Das ist kein Nebensatz: `ueberRoute` legt den Kunden über
+ * `ueberWizard(undefined, undefined)` an, und in `customer-creation-helpers.ts`
+ * ist die Bedingung `entlastungsbetrag45b > 0 || override45bCents != null ||
+ * carryoverAmountCents != null` dann falsch — es entstehen keine
+ * §45b-Typ-Einstellungen und `syncCarryoverAndExpiry` läuft nicht. Der
+ * Wizard-Kunde in `FN-1` hat beides.
+ *
+ * Für die geprüfte Frage („trägt der WEG die Unterscheidung?") ist das
+ * tragfähig — die Zeile entsteht in beiden Fällen aus demselben
+ * `applyInitialBudget`. Für eine Zusage über den Kundenzustand wäre es zu
+ * wenig, und deshalb steht hier, was der Vergleich NICHT abdeckt. Das ist die Drei-Schichten-Pflicht auf den Midlayer angewandt,
  * und der Midlayer ist hier der Täter.
  *
  * Beide Wege laufen über HTTP. Ein Aufruf von `applyInitialBudget` als

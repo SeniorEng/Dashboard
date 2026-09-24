@@ -1588,10 +1588,14 @@ describe("INT-17: Selbstzahler ohne Preis-Konfiguration (noPricing edge case)", 
 
 
 describe("INT-18: §45b Onboarding-Baseline – kein Vorjahres-Carryover bei abgeleitetem Anker (Task #860)", () => {
-  // Frisch onboardeter Kunde, dessen Pflegegrad im VORJAHR begann. Der §45b-
-  // Anker wird wie vom Wizard via /initial-budget gesetzt — Origin
-  // 'derived_pflegegrad', RAW-Datum im Vorjahr, KEIN Startguthaben, KEIN
-  // operator-erfasster Übertrag. Erwartung (Task #860): das Vorjahr gilt als
+  // Frisch onboardeter Kunde, dessen Pflegegrad im VORJAHR begann. KEIN
+  // Startguthaben, KEIN operator-erfasster Übertrag.
+  //
+  // Der Anker kommt aus der Pflegegrad-Historie, die `setupBudgetScenario`
+  // setzt — NICHT aus einem `/initial-budget`-Aufruf. Hier stand „wird wie vom
+  // Wizard via /initial-budget gesetzt"; der Aufruf war ein No-Op und ist am
+  // 24.09.2026 entfallen (siehe `beforeAll`). Der Wizard geht diesen Weg
+  // ohnehin nicht mehr. Erwartung (Task #860): das Vorjahr gilt als
   // aufgebraucht — es entsteht KEINE automatisch materialisierte Carryover-
   // Zeile, carryoverCents = 0, und der laufende Jahresanteil läuft ab dem
   // 1.1. des LAUFENDEN Jahres an (Anker gebodet via
@@ -1602,7 +1606,6 @@ describe("INT-18: §45b Onboarding-Baseline – kein Vorjahres-Carryover bei abg
   const curYear = now.getFullYear();
   const priorYear = curYear - 1;
   // Pflegegrad-Beginn im Vorjahr = der abgeleitete §45b-Anker.
-  const derivedAnchor = `${priorYear}-01-01`;
 
   beforeAll(async () => {
     scenario = await setupBudgetScenario({

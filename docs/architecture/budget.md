@@ -210,17 +210,22 @@ Three-pot Budget-Ledger mit Cascading-Allocation, FIFO für §45b und einem virt
 | Feld | Typ | Pflicht | Bedeutung |
 |---|---|---|---|
 | `budgetType` | `entlastungsbetrag_45b` \| `umwandlung_45a` \| `ersatzpflege_39_42a` | nein (Default `entlastungsbetrag_45b`) | Zieltopf. Für `selbstzahler`-Kunden + §45b → 409 (siehe Selbstzahler-Routing). |
-| `currentMonthAmountCents` | `number ≥ 0` | ja | **Monats-Betrag in Cent.** Wird als `initial_balance`-Allokation mit `year/month` aus `budgetStartDate` angelegt. (Der vormalige Alias `currentYearAmountCents` wurde mit Task #731 entfernt — Requests damit erhalten 400.) |
-| `carryoverAmountCents` | `number ≥ 0` | nein (Default 0) | Nur für §45b ausgewertet — legt zusätzlich eine `source='carryover'`-Zeile mit `validFrom = YYYY-01-01`, `expiresAt = YYYY-06-30` an. |
+| `currentMonthAmountCents` | `number ≥ 0` | nein (siehe Validierung) | **Monats-Betrag in Cent.** `0` ist eine **festgestellte Null** und legt eine Zeile an; weggelassen heißt „keine Angabe“ und legt keine an. Wird als `initial_balance`-Allokation mit `year/month` aus `budgetStartDate` angelegt. (Der vormalige Alias `currentYearAmountCents` wurde mit Task #731 entfernt — Requests damit erhalten 400.) |
+| `carryoverAmountCents` | `number ≥ 0` | nein (**kein Default**) | Nur für §45b ausgewertet — legt bei **jeder Angabe** (`!= null`, also auch `0`) eine `source='carryover'`-Zeile mit `validFrom = YYYY-01-01`, `expiresAt = YYYY-06-30` an. Ein `.default(0)` gab es bis zum 24.09.2026; damit wurde ein *weggelassenes* Feld zur festgestellten Null. |
 | `budgetStartDate` | `YYYY-MM-DD` | ja | Bestimmt `year`/`month` der Monats-Allokation sowie deren `validFrom`. |
 
 Pro Topf legt ein Aufruf maximal eine `initial_balance`-Zeile an:
 
-- **§45b (`entlastungsbetrag_45b`)** — Jahrestopf mit monatlicher Auto-Aufstockung. Der `initial_balance`-Eintrag besetzt den Startmonat (verhindert Doppelzählung mit dem virtuellen Auto-Renewal); spätere Monate stockt `calculateAllocated45b` automatisch auf. `expiresAt = null`. Zusätzlicher `carryoverAmountCents > 0` legt eine `carryover`-Zeile mit Verfall 30.06. an.
+- **§45b (`entlastungsbetrag_45b`)** — Jahrestopf mit monatlicher Auto-Aufstockung. Der `initial_balance`-Eintrag besetzt den Startmonat (verhindert Doppelzählung mit dem virtuellen Auto-Renewal); spätere Monate stockt `calculateAllocated45b` automatisch auf. `expiresAt = null`. Jede Angabe von `carryoverAmountCents` (`!= null`) legt eine `carryover`-Zeile mit Verfall 30.06. an.
 - **§45a (`umwandlung_45a`)** — monatliches Budget. `initial_balance` für den Startmonat; Folgemonate sind Sache der Settings/Booking-Pfade. `expiresAt = null`.
 - **§39/§42a (`ersatzpflege_39_42a`)** — jährlicher Anspruch. `initial_balance` wird auf den Startmonat gebucht, `expiresAt = YYYY-12-31`. Wer den vollen Jahresbetrag abbilden möchte, übergibt den Jahres-Anspruch als `currentMonthAmountCents` zum Jahresanfang (`budgetStartDate=YYYY-01-01`) — die Zeile gilt dann bis 31.12.
 
-Validierung (Zod): mindestens eines der beiden Amount-Felder muss gesetzt sein. Fehlen beide → 400 `VALIDATION_ERROR`.
+Validierung (Zod): **mindestens eines der beiden Amount-Felder muss gesetzt sein** (`!= null`, `0` zählt). Fehlen beide → 400 `VALIDATION_ERROR`.
+
+Zwei weitere Ablehnungen auf diesem Endpunkt:
+
+- **§45b: Startwert UND Übertrag > 0** → 400 `BUDGET_45B_STARTWERT_ODER_UEBERTRAG`. Ein Startwert ist eine Bestandsaufnahme und enthält den Übertrag bereits; beides zusammen hieße, den Übertrag anzunehmen und stillschweigend zu verdrängen.
+- **Bereits erfasster Startwert mit anderem Betrag** → 409 `BUDGET_INITIAL_BALANCE_CONFLICT`. Derselbe Betrag ist idempotent. Schützt den Wiederhol-Banner davor, einen erfassten Startwert per `UPDATE` zu überschreiben. Der Startwert-**Editor** (`POST /initial-balance/:budgetType`) ist davon nicht betroffen und korrigiert weiterhin.
 
 **Beispiel-Requests:**
 
@@ -230,9 +235,11 @@ POST /api/budget/42/initial-budget
 {
   "budgetType": "entlastungsbetrag_45b",
   "currentMonthAmountCents": 13100,
-  "carryoverAmountCents": 50000,
   "budgetStartDate": "2026-05-15"
 }
+// ACHTUNG: `currentMonthAmountCents` UND `carryoverAmountCents > 0` zusammen
+// ergeben seit dem 24.09.2026 ein 400 — sie schließen sich aus. Bis dahin
+// stand hier genau diese Kombination als kanonisches Beispiel.
 
 // §45a — Monatsbudget ab Mai
 POST /api/budget/42/initial-budget
