@@ -184,6 +184,76 @@ async function main() {
     console.log("  als bei Kunde 89. Vor einer Umbuchung einzeln ansehen.");
   }
 
+  /**
+   * Startwert UND Uebertrag aus DEMSELBEN Anlage-Vorgang.
+   *
+   * `budget-initial-setup.ts` schreibt beide in einer Transaktion (Wizard und
+   * `POST /initial-budget`). Bei diesen Kunden war „beides zusammen" vermutlich
+   * gemeint — und genau dort aendert der Flip das Budget, ohne dass jemand
+   * eine Verdraengung eingegeben haette.
+   *
+   * Erkennungsmerkmal ist der Zeitstempel: derselbe `created_at` auf
+   * Sekundengenauigkeit. Das ist eine HEURISTIK, keine Transaktions-ID — zwei
+   * unabhaengige Eingaben in derselben Sekunde saehen gleich aus. Bei
+   * Handeingaben ist das unwahrscheinlich, aber es steht hier, damit niemand
+   * die Liste fuer mehr haelt, als sie ist.
+   */
+  const gleichzeitig = await db
+    .select({
+      customerId: budgetAllocations.customerId,
+      zeitpunkt: sql<string>`date_trunc('second', ${budgetAllocations.createdAt})::text`,
+      quellen: sql<string>`string_agg(DISTINCT ${budgetAllocations.source}, ',' ORDER BY ${budgetAllocations.source})`,
+      betraege: sql<string>`string_agg(${budgetAllocations.amountCents}::text, ' + ')`,
+    })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      isNull(budgetAllocations.deletedAt),
+      sql`${budgetAllocations.source} IN ('initial_balance', 'carryover')`,
+    ))
+    .groupBy(budgetAllocations.customerId, sql`date_trunc('second', ${budgetAllocations.createdAt})`)
+    .having(sql`count(DISTINCT ${budgetAllocations.source}) > 1`);
+
+  console.log("");
+  if (gleichzeitig.length === 0) {
+    console.log("Startwert+Uebertrag aus demselben Anlage-Vorgang: keine.");
+  } else {
+    console.log(`\u26a0 Startwert UND Uebertrag aus demselben Vorgang: `
+      + `${gleichzeitig.length} Faelle bei ${new Set(gleichzeitig.map(z => z.customerId)).size} Kunde(n).`);
+    console.log("  Dort war „beides zusammen\" vermutlich gemeint — der Flip aendert");
+    console.log("  ihr Budget ohne eingegebene Verdraengung. VOR dem Flip ansehen.");
+    for (const z of gleichzeitig.slice(0, 25)) {
+      console.log(`    Kunde ${z.customerId}  ${z.zeitpunkt}  [${z.quellen}]  ${z.betraege} ct`);
+    }
+  }
+
+  /**
+   * Mischbestand-Umfang: bereits materialisierte Folgejahres-Uebertraege.
+   *
+   * `ensureYearlyCarryover45b` schreibt mit `onConflictDoNothing`. Zeilen, die
+   * VOR dem Flip entstanden sind, tragen den alten (hoeheren) Betrag und werden
+   * nicht korrigiert; danach entstehende tragen den neuen. Zwei Kunden in
+   * derselben Lage koennen sich damit unterscheiden, je nachdem wann der Roll
+   * lief.
+   */
+  const jetzt = new Date().getFullYear();
+  const [{ folgejahr }] = await db
+    .select({ folgejahr: sql<number>`count(*)::int` })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      eq(budgetAllocations.source, "carryover"),
+      isNull(budgetAllocations.deletedAt),
+      sql`${budgetAllocations.year} > ${jetzt}`,
+    ));
+  console.log("");
+  console.log(`Bereits materialisierte Folgejahres-Uebertraege (year > ${jetzt}): ${folgejahr}`);
+  if (folgejahr > 0) {
+    console.log("  Diese Betraege korrigiert `ensureYearlyCarryover45b` NICHT nach");
+    console.log("  (`onConflictDoNothing`). Nach dem Flip Mischbestand aus alten und");
+    console.log("  neuen Betraegen.");
+  }
+
   console.log("");
   console.log(`Kunden mit aktiver initial_balance-Zeile: ${kunden.length}`);
   console.log(`Stichtage: ${stichtage.join(", ")}`);
