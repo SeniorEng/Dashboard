@@ -148,18 +148,13 @@ async function main() {
     console.log("  Konsistent — die VD-5-Verengung ist auf diesem Bestand wirkungslos.");
   }
   /**
-   * 0-EUR-Startwerte — die Frage aus dem Flip-Durchgang, als FESTSTELLUNG.
-   *
-   * Ein 0-EUR-Startwert ist nach Alriks Entscheidung vom 22.09.2026 eine
-   * festgestellte Null, und mit `<=` verdraengt eine Inventur zum 01.01. einen
-   * Uebertrag, der am selben Tag beginnt. Beide Regeln sind einzeln
-   * entschieden; zusammen heissen sie: **der Uebertrag ist vollstaendig weg.**
-   *
-   * Beim Prod-Lauf vom 23.09.2026 war „keiner der 21 hat einen 0-EUR-Startwert"
-   * aus den kleinsten `neu`-Werten ABGELEITET. Diese Abfrage macht daraus eine
-   * Messung — die Ableitung traegt, solange kein Kunde einen 0-EUR-Startwert
-   * neben einem gueltigen Uebertrag hat, und genau das steht hier.
+   * ── Drei Bestandsfragen VOR dem Scharfschalten ──────────────────────────
+   * Alle drei waren bisher abgeleitet. Hier werden sie gemessen.
    */
+
+  // (1) 0-EUR-Startwerte. Nach Alriks Entscheidung vom 22.09.2026 ist 0 eine
+  // festgestellte Null, und mit `<=` verdraengt eine Inventur zum 01.01. einen
+  // Uebertrag, der am selben Tag beginnt. Zusammen: der Uebertrag ist ganz weg.
   const nullStartwerte = await db
     .select({ customerId: budgetAllocations.customerId, validFrom: budgetAllocations.validFrom })
     .from(budgetAllocations)
@@ -171,33 +166,45 @@ async function main() {
     ));
   console.log("");
   if (nullStartwerte.length === 0) {
-    console.log("0-EUR-Startwerte: keine. Die Kombination „festgestellte Null + <=\" tritt");
-    console.log("  im Bestand nicht auf.");
+    console.log("0-EUR-Startwerte: keine.");
   } else {
     console.log(`\u26a0 0-EUR-Startwerte: ${nullStartwerte.length} Zeile(n) bei `
       + `${new Set(nullStartwerte.map(z => z.customerId)).size} Kunde(n):`);
     for (const z of nullStartwerte.slice(0, 20)) {
       console.log(`    Kunde ${z.customerId}, ab ${z.validFrom}`);
     }
-    console.log("  Bei diesen Kunden heisst die Verdraengung NICHT „Startwert statt");
-    console.log("  Uebertrag\", sondern „nichts statt Uebertrag\" — ein anderer Sachverhalt");
-    console.log("  als bei Kunde 89. Vor einer Umbuchung einzeln ansehen.");
+    console.log("  Dort heisst die Verdraengung nicht „Startwert statt Uebertrag\",");
+    console.log("  sondern „nichts statt Uebertrag\" — vor einer Umbuchung einzeln ansehen.");
   }
 
   /**
-   * Startwert UND Uebertrag aus DEMSELBEN Anlage-Vorgang.
+   * (2) Startwert UND Uebertrag aus DEMSELBEN Anlage-Vorgang.
    *
-   * `budget-initial-setup.ts` schreibt beide in einer Transaktion (Wizard und
-   * `POST /initial-budget`). Bei diesen Kunden war „beides zusammen" vermutlich
-   * gemeint — und genau dort aendert der Flip das Budget, ohne dass jemand
-   * eine Verdraengung eingegeben haette.
+   * `budget-initial-setup.ts` schreibt beide in EINER Transaktion (Wizard und
+   * `POST /initial-budget`). Dort war „beides zusammen" vermutlich gemeint, und
+   * der Flip aendert das Budget, ohne dass jemand eine Verdraengung eingegeben
+   * haette.
    *
-   * Erkennungsmerkmal ist der Zeitstempel: derselbe `created_at` auf
-   * Sekundengenauigkeit. Das ist eine HEURISTIK, keine Transaktions-ID — zwei
-   * unabhaengige Eingaben in derselben Sekunde saehen gleich aus. Bei
-   * Handeingaben ist das unwahrscheinlich, aber es steht hier, damit niemand
-   * die Liste fuer mehr haelt, als sie ist.
+   * Erkennungsmerkmal ist der Zeitstempel auf Sekundengenauigkeit — eine
+   * HEURISTIK, keine Transaktions-ID. Zwei unabhaengige Eingaben in derselben
+   * Sekunde saehen gleich aus.
+   *
+   * **Deshalb die Gegenprobe daneben:** wie viele Startwert-Uebertrags-Paare
+   * gibt es ueberhaupt, und wie viele davon treffen dieselbe Sekunde? Treffen
+   * fast alle, ist die Heuristik belastbar. Treffen wenige, sagt sie wenig —
+   * und dann darf die Liste nicht als „das sind die Faelle" gelesen werden.
    */
+  const paare = await db
+    .select({ customerId: budgetAllocations.customerId })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      isNull(budgetAllocations.deletedAt),
+      sql`${budgetAllocations.source} IN ('initial_balance', 'carryover')`,
+    ))
+    .groupBy(budgetAllocations.customerId)
+    .having(sql`count(DISTINCT ${budgetAllocations.source}) > 1`);
+
   const gleichzeitig = await db
     .select({
       customerId: budgetAllocations.customerId,
@@ -214,27 +221,35 @@ async function main() {
     .groupBy(budgetAllocations.customerId, sql`date_trunc('second', ${budgetAllocations.createdAt})`)
     .having(sql`count(DISTINCT ${budgetAllocations.source}) > 1`);
 
+  const kundenMitPaar = paare.length;
+  const kundenGleichzeitig = new Set(gleichzeitig.map(z => z.customerId)).size;
   console.log("");
-  if (gleichzeitig.length === 0) {
-    console.log("Startwert+Uebertrag aus demselben Anlage-Vorgang: keine.");
-  } else {
-    console.log(`\u26a0 Startwert UND Uebertrag aus demselben Vorgang: `
-      + `${gleichzeitig.length} Faelle bei ${new Set(gleichzeitig.map(z => z.customerId)).size} Kunde(n).`);
-    console.log("  Dort war „beides zusammen\" vermutlich gemeint — der Flip aendert");
-    console.log("  ihr Budget ohne eingegebene Verdraengung. VOR dem Flip ansehen.");
-    for (const z of gleichzeitig.slice(0, 25)) {
-      console.log(`    Kunde ${z.customerId}  ${z.zeitpunkt}  [${z.quellen}]  ${z.betraege} ct`);
+  console.log(`Kunden mit Startwert UND Uebertrag: ${kundenMitPaar}`);
+  console.log(`  davon aus derselben Sekunde (= ein Anlage-Vorgang): ${kundenGleichzeitig}`);
+  if (kundenMitPaar > 0) {
+    const quote = Math.round((kundenGleichzeitig / kundenMitPaar) * 100);
+    console.log(`  Trefferquote der Heuristik: ${quote}%`);
+    if (quote >= 80) {
+      console.log("  → belastbar: fast alle Paare stammen aus einem Vorgang.");
+    } else if (kundenGleichzeitig === 0) {
+      console.log("  → die Heuristik findet NICHTS. Die Paare sind getrennt entstanden,");
+      console.log("    oder der Zeitstempel taugt nicht als Merkmal. Nicht als „keine");
+      console.log("    Faelle\" lesen.");
+    } else {
+      console.log("  → SCHWACH: die Liste unten ist eine Teilmenge, kein Befund.");
+      console.log("    Die uebrigen Paare einzeln ansehen.");
     }
+  }
+  for (const z of gleichzeitig.slice(0, 25)) {
+    console.log(`    Kunde ${z.customerId}  ${z.zeitpunkt}  [${z.quellen}]  ${z.betraege} ct`);
   }
 
   /**
-   * Mischbestand-Umfang: bereits materialisierte Folgejahres-Uebertraege.
+   * (3) Umfang des Mischbestands nach dem Deploy.
    *
-   * `ensureYearlyCarryover45b` schreibt mit `onConflictDoNothing`. Zeilen, die
-   * VOR dem Flip entstanden sind, tragen den alten (hoeheren) Betrag und werden
-   * nicht korrigiert; danach entstehende tragen den neuen. Zwei Kunden in
-   * derselben Lage koennen sich damit unterscheiden, je nachdem wann der Roll
-   * lief.
+   * `ensureYearlyCarryover45b` schreibt mit `onConflictDoNothing`. Zeilen von
+   * VOR dem Flip tragen den alten (hoeheren) Betrag und werden nicht
+   * korrigiert; danach entstehende tragen den neuen.
    */
   const jetzt = new Date().getFullYear();
   const [{ folgejahr }] = await db
@@ -250,8 +265,7 @@ async function main() {
   console.log(`Bereits materialisierte Folgejahres-Uebertraege (year > ${jetzt}): ${folgejahr}`);
   if (folgejahr > 0) {
     console.log("  Diese Betraege korrigiert `ensureYearlyCarryover45b` NICHT nach");
-    console.log("  (`onConflictDoNothing`). Nach dem Flip Mischbestand aus alten und");
-    console.log("  neuen Betraegen.");
+    console.log("  (`onConflictDoNothing`) — nach dem Flip Mischbestand.");
   }
 
   console.log("");
