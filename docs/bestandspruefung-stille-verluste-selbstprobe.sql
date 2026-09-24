@@ -38,7 +38,8 @@ SELECT
     'currentMonthAmountCents', NULL,
     'carryoverAmountCents', 50000,
     'budgetStartDate', '2026-05-15',
-    'allocationIds', '[]'::jsonb
+    'allocationIds', '[]'::jsonb,
+    'probe', 'selbstprobe-1'
   ),
   now();
 
@@ -49,6 +50,9 @@ SELECT
   round((a.metadata ->> 'carryoverAmountCents')::bigint / 100.0, 2) AS verlorener_uebertrag_eur
 FROM audit_log a
 WHERE a.action = 'budget_initial_setup'
+  -- Auf die konstruierte Zeile eingrenzen: auf einer Test-DB mit Vorbestand
+  -- waere „GENAU 1 Zeile" sonst keine Aussage (Gate 2 zum B1-Delta, Notiz).
+  AND a.metadata ->> 'probe' = 'selbstprobe-1'
   AND a.metadata ->> 'budgetType' <> 'entlastungsbetrag_45b'
   AND a.metadata -> 'carryoverAmountCents' IS NOT NULL
   AND a.metadata ->> 'carryoverAmountCents' <> 'null'
@@ -67,6 +71,7 @@ SELECT
   (a.metadata ->> 'carryoverAmountCents')::bigint AS uebertrag_cents
 FROM audit_log a
 WHERE a.action = 'budget_initial_setup'
+  AND a.metadata ->> 'probe' = 'selbstprobe-1'
   AND jsonb_array_length(coalesce(a.metadata -> 'allocationIds', '[]'::jsonb)) = 0
   AND (
        (a.metadata ->> 'currentMonthAmountCents') IS NOT NULL

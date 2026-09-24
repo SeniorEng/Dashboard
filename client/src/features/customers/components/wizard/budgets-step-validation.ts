@@ -37,7 +37,9 @@ export function budgetsStepErrors(
   {
     // Task #960 — Vorjahres-Übertrag nur validieren, solange er (bis
     // 30.06.) nutzbar ist; bei späterem Vertragsbeginn ist das Feld
-    // ausgeblendet und wird beim Speichern auf 0 gezwungen.
+    // ausgeblendet und wird beim Speichern auf `null` gesetzt (nicht auf 0 —
+    // seit dem 24.09.2026 ist die 0 eine festgestellte Null und würde eine
+    // Zeile anlegen).
     const carryoverUsable = (formData.contractStart || today) < `${currentYear}-07-01`;
     if (carryoverUsable) {
       /**
@@ -82,7 +84,15 @@ export function budgetsStepErrors(
     }
     const rest = parseFloat(formData.restguthaben45b);
     if (isNaN(rest) || rest < 0) {
-      errors.push("Restguthaben darf nicht negativ sein");
+      // Der Schalter IST das Existenz-Signal: ist er an, gehoert ein Betrag
+    // hinein. Ein leeres Feld bleibt deshalb ein Fehler — anders als beim
+    // Uebertrag, der keinen Schalter hat. Nur der TEXT war falsch: er sprach
+    // von „negativ" fuer ein leeres Feld (Gate 2 zum B1-Delta, Notiz).
+    errors.push(
+      formData.restguthaben45b.trim() === ""
+        ? "Restguthaben angeben oder den Schalter ausschalten"
+        : "Restguthaben muss eine Zahl ≥ 0 sein",
+    );
     } else if (stichmonat) {
       const maxStartCents = max45bStartValueCents(formData.pflegegradSeit, `${stichmonat}-01`);
       if (Math.round(rest * 100) > maxStartCents) {

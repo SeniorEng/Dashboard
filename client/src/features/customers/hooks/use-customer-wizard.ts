@@ -375,7 +375,28 @@ export function useCustomerWizard() {
     // wenn aktiv, wird ein initial_balance für den Stichmonat gebucht; sonst
     // bleibt das §45b-Guthaben rein auto-renewal-getrieben (kein initial_balance).
     const override45bActive = is45bEnabled && formData.restguthaben45bOverrideEnabled;
-    const override45bCents = override45bActive ? (Math.round(parseFloat(formData.restguthaben45b) * 100) || 0) : 0;
+    /**
+     * Wie beim Uebertrag: LEER heisst „keine Angabe" (Gate 2 zum B1-Delta, S-6).
+     *
+     * Hier stand `... || 0` — dieselbe `NaN || 0`-Konstruktion, die fuer
+     * `uebertrag45b` gerade als Blocker-Ursache entfernt wurde. Bei aktivem
+     * Schalter und leerem Feld waeren daraus `0` Cent geworden, also ein
+     * 0-EUR-Startwert mit Reset-Anker — und der verdraengt einen Uebertrag
+     * vollstaendig.
+     *
+     * Unerreichbar war das nur, weil die Validierung das leere Feld noch
+     * blockiert. Also ueber genau die Pruefung, die fuer das Schwesterfeld
+     * gelockert wurde: ein Schutz, der von einer Nachbarregel abhaengt, faellt
+     * mit ihr.
+     *
+     * Der SCHALTER bleibt das Existenz-Signal, nicht der Betrag — ist er an
+     * und das Feld leer, meldet die Validierung das (siehe
+     * `budgets-step-validation.ts`), statt hier still eine Null zu erfinden.
+     */
+    const restguthabenRoh = formData.restguthaben45b.trim();
+    const override45bCents = override45bActive && restguthabenRoh !== ""
+      ? Math.round(parseFloat(restguthabenRoh) * 100)
+      : null;
     const override45bStichmonatStart = override45bActive && formData.restguthaben45bStichmonat
       ? `${formData.restguthaben45bStichmonat}-01`
       : null;
@@ -393,7 +414,7 @@ export function useCustomerWizard() {
       // fließen jetzt in DENSELBEN Anlage-Request; der Server bucht das
       // initial_balance innerhalb der Anlage-Transaktion (kein separater
       // `POST /budget/:id/initial-budget` mehr).
-      override45bCents: override45bActive ? override45bCents : undefined,
+      override45bCents: override45bCents ?? undefined,
       override45bStichmonatStart: override45bStichmonatStart || undefined,
     };
     /**

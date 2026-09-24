@@ -75,7 +75,18 @@ SELECT
   (b ->> 'currentMonthAmountCents')::bigint              AS startwert_cents,
   (b ->> 'carryoverAmountCents')::bigint                 AS uebertrag_cents,
   b ->> 'budgetStartDate'                                AS start_datum,
+  -- `NULL` heisst „Feld fehlt" = keine Angabe; `0` heisst festgestellte Null.
+  -- Beide getrennt auszuweisen ist der ganze Punkt des Kontrakts — eine
+  -- Auswertung, die sie zusammenwirft, kann den Bestand nicht lesen.
   CASE
+    WHEN (b ->> 'currentMonthAmountCents') IS NULL
+     AND (b ->> 'carryoverAmountCents') IS NULL          THEN 'keine Angabe → 400'
+    WHEN (b ->> 'currentMonthAmountCents') IS NULL       THEN
+      CASE WHEN (b ->> 'carryoverAmountCents')::bigint > 0
+           THEN 'nur Übertrag > 0' ELSE 'nur Übertrag = 0' END
+    WHEN (b ->> 'carryoverAmountCents') IS NULL          THEN
+      CASE WHEN (b ->> 'currentMonthAmountCents')::bigint > 0
+           THEN 'nur Startwert > 0' ELSE 'nur Startwert = 0' END
     WHEN (b ->> 'currentMonthAmountCents')::bigint = 0
      AND (b ->> 'carryoverAmountCents')::bigint = 0      THEN '{0,0} → 2 Null-Zeilen'
     WHEN (b ->> 'currentMonthAmountCents')::bigint = 0
@@ -99,13 +110,25 @@ ORDER BY c.id;
 -- `UPDATE … SET amount_cents = <payload-Wert>` — bei einem 0-Payload also
 -- eine stille Nullsetzung eines erfassten Startwerts.
 --
--- Jahr/Monat werden aus `budgetStartDate` abgeleitet, weil der Schreibpfad
--- genau das tut.
+-- Jahr/Monat werden aus `budgetStartDate` abgeleitet — ABER MIT DER BODUNG,
+-- die der Schreibpfad fuer §45b vornimmt.
+--
+-- `budget-initial-setup.ts:100-107` ruft `floorAutoAnchor45bToCurrentYear`:
+-- liegt `budgetStartDate` vor dem 01.01. des laufenden Jahres, wird es darauf
+-- gehoben. Ein Payload mit `2025-03-15` schreibt also 2026/01, nicht 2025/03.
+--
+-- Die erste Fassung rechnete ohne die Bodung und begruendete das mit „weil der
+-- Schreibpfad genau das tut" — er tut es fuer §45b nicht (Gate 2 zum
+-- B1-Delta, S-3). Der Fehler waere ein FALSCH-NEGATIV gewesen: die Abfrage
+-- haette 2025/03 gesucht, nichts gefunden und „kein Bestand" gemeldet. Ein
+-- Vorjahres-Anker ist beim Wizard die Regelform, nicht die Ausnahme — dafuer
+-- gibt es die Bodung ueberhaupt.
 
 SELECT
   c.id                                            AS kunde,
   b ->> 'budgetType'                              AS topf,
   (b ->> 'budgetStartDate')::date                 AS payload_start,
+  gebodet.d                                       AS gebodeter_start,
   (b ->> 'currentMonthAmountCents')::bigint       AS payload_startwert_cents,
   a.id                                            AS bestehende_allocation,
   a.amount_cents                                  AS bestehender_betrag_cents,
@@ -113,15 +136,27 @@ SELECT
   a.amount_cents - (b ->> 'currentMonthAmountCents')::bigint AS differenz_cents
 FROM customers c
 CROSS JOIN LATERAL jsonb_array_elements(c.setup_pending_payloads -> 'budgets' -> 'items') AS b
+-- Die Bodung des Schreibpfads, in SQL nachgezogen (§45b only).
+CROSS JOIN LATERAL (
+  SELECT CASE
+    WHEN b ->> 'budgetType' = 'entlastungsbetrag_45b'
+      THEN GREATEST((b ->> 'budgetStartDate')::date, date_trunc('year', now())::date)
+    ELSE (b ->> 'budgetStartDate')::date
+  END AS d
+) AS gebodet
 JOIN budget_allocations a
   ON  a.customer_id = c.id
   AND a.budget_type = b ->> 'budgetType'
   AND a.source      = 'initial_balance'
   AND a.deleted_at  IS NULL
-  AND a.year        = EXTRACT(YEAR  FROM (b ->> 'budgetStartDate')::date)::int
-  AND a.month       = EXTRACT(MONTH FROM (b ->> 'budgetStartDate')::date)::int
+  AND a.year        = EXTRACT(YEAR  FROM gebodet.d)::int
+  AND a.month       = EXTRACT(MONTH FROM gebodet.d)::int
 WHERE c.deleted_at IS NULL
   AND c.setup_pending_payloads ? 'budgets'
+  -- Ohne Startwert im Payload kann nichts ueberschrieben werden. Ohne diese
+  -- Zeile machte `IS DISTINCT FROM NULL` aus jedem Payload ohne Startwert
+  -- einen Falsch-Positiv-Konflikt.
+  AND (b ->> 'currentMonthAmountCents') IS NOT NULL
   AND a.amount_cents IS DISTINCT FROM (b ->> 'currentMonthAmountCents')::bigint
 ORDER BY abs(a.amount_cents - (b ->> 'currentMonthAmountCents')::bigint) DESC;
 

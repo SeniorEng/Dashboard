@@ -42,23 +42,31 @@ import { SelbstzahlerStatutoryPotError } from "./preferences-storage";
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
 /**
- * Die AKTIVE Startwert-Zeile fuer `(Kunde, Topf, Jahr, Monat)` — oder `null`.
+ * ALLE `initial_balance`-Zeilen fuer `(Kunde, Topf, Jahr, Monat)`, neueste
+ * zuerst, aktive und soft-geloeschte.
  *
- * Existiert, damit ein Aufrufer VOR dem Upsert wissen kann, ob er etwas
- * ueberschreiben wuerde (`applyInitialBudget`, Wiederhol-Schutz).
+ * Die EINE Stelle, die beantwortet: welche Zeile ist „die" fuer diesen
+ * Schluessel? Zwei Verbraucher mit verschiedenem Bedarf:
+ *  - `upsertInitialBalanceAllocation` braucht die ganze Liste (es aktualisiert
+ *    `aktiv[0]` und soft-loescht `aktiv[1..n]` als Duplikat-Bereinigung);
+ *  - `findActiveInitialBalance` braucht nur `aktiv[0]`.
  *
- * **Die Auswahl ist absichtlich Zeichen fuer Zeichen dieselbe wie in
- * `upsertInitialBalanceAllocation`**: gleiche vier Gleichheiten, gleiche
- * Sortierung (`desc(id)`), gleicher Aktiv-Filter. Eine eigene, „aehnliche"
- * Abfrage waere der Zweitbegriff — sie koennte eine andere Zeile finden als
- * die, die gleich ueberschrieben wird, und dann schuetzt der Schutz nichts.
+ * ── Warum als Funktion und nicht als Kommentar (Gate 2 zum B1-Delta, S-4) ──
+ * Die Auswahl stand zweimal im Code, zeichengleich, und zusammengehalten hat
+ * sie ein Kommentar („absichtlich Zeichen fuer Zeichen dieselbe"). Genau die
+ * Konstruktion, die in diesem Repo mehrfach auseinandergelaufen ist: solange
+ * beide gleich sind, faellt nichts auf — und wenn sie es nicht mehr sind,
+ * schuetzt die Konflikt-Schranke eine andere Zeile als die, die gleich
+ * ueberschrieben wird.
+ *
+ * Eine Zusage, die eine Kopie gleich haelt, ist keine Zusage, sondern eine
+ * Hoffnung. Jetzt gibt es nur noch eine Auswahl.
  */
-export async function findActiveInitialBalance(
+async function selectInitialBalanceRows(
   params: { customerId: number; budgetType: string; year: number; month: number },
-  _tx?: DbClient,
-): Promise<{ id: number; amountCents: number } | null> {
-  const d = _tx ?? db;
-  const zeilen = await budgetAllocationsRepo.selectColumnsFrom({
+  d: Pick<typeof db, "select">,
+) {
+  return budgetAllocationsRepo.selectColumnsFrom({
     id: budgetAllocations.id,
     amountCents: budgetAllocations.amountCents,
     deletedAt: budgetAllocations.deletedAt,
@@ -71,6 +79,21 @@ export async function findActiveInitialBalance(
       eq(budgetAllocations.month, params.month),
     ))
     .orderBy(desc(budgetAllocations.id));
+}
+
+/**
+ * Die AKTIVE Startwert-Zeile fuer `(Kunde, Topf, Jahr, Monat)` — oder `null`.
+ *
+ * Existiert, damit ein Aufrufer VOR dem Upsert wissen kann, ob er etwas
+ * ueberschreiben wuerde (`applyInitialBudget`, Wiederhol-Schutz). Liest ueber
+ * `selectInitialBalanceRows`, also ueber dieselbe Auswahl, die der Upsert
+ * gleich benutzt — nicht ueber eine zweite, die ihr aehnlich sieht.
+ */
+export async function findActiveInitialBalance(
+  params: { customerId: number; budgetType: string; year: number; month: number },
+  _tx?: DbClient,
+): Promise<{ id: number; amountCents: number } | null> {
+  const zeilen = await selectInitialBalanceRows(params, _tx ?? db);
   const aktiv = zeilen.filter(z => !z.deletedAt);
   return aktiv.length > 0 ? { id: aktiv[0].id, amountCents: aktiv[0].amountCents } : null;
 }
@@ -163,15 +186,9 @@ export async function upsertInitialBalanceAllocation(
     d,
     options?.allowStatutoryForSelbstzahler,
   );
-  const allExisting = await budgetAllocationsRepo.selectColumnsFrom({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt }, d)
-    .where(and(
-      eq(budgetAllocations.customerId, params.customerId),
-      eq(budgetAllocations.budgetType, params.budgetType),
-      eq(budgetAllocations.source, "initial_balance"),
-      eq(budgetAllocations.year, params.year),
-      eq(budgetAllocations.month, params.month),
-    ))
-    .orderBy(desc(budgetAllocations.id));
+  // Dieselbe Auswahl wie `findActiveInitialBalance` — EINE Funktion, nicht
+  // zwei gleich aussehende Abfragen (Gate 2 zum B1-Delta, S-4).
+  const allExisting = await selectInitialBalanceRows(params, d);
 
   const active = allExisting.filter(e => !e.deletedAt);
   const deleted = allExisting.filter(e => !!e.deletedAt);

@@ -83,9 +83,21 @@ ORDER BY (a.metadata ->> 'carryoverAmountCents')::bigint DESC, a.created_at DESC
 -- ── 1b. Die allgemeinere Form: Audit behauptet Beträge, `allocationIds` ist leer ──
 --
 -- `budget_initial_setup` trägt die IDs der tatsächlich geschriebenen Zeilen.
--- Ein Eintrag mit Beträgen und LEEREM `allocationIds` ist per Konstruktion ein
--- „angenommen, quittiert, verworfen" — unabhängig davon, welcher Topf und aus
--- welchem Grund. Findet auch Fälle, an die ich beim Bauen nicht gedacht habe.
+-- Ein Eintrag mit Beträgen und LEEREM `allocationIds` heißt: quittiert, nichts
+-- geschrieben. Findet auch Fälle, an die ich beim Bauen nicht gedacht habe.
+--
+-- ⚠ NICHT jede Zeile hier ist ein Verlust (Gate 2 zum B1-Delta):
+--   · Ein `{0, 0}`-Eintrag war vor S5 der NORMALFALL des Onboarding-Aufrufs —
+--     beide Beträge wurden auf `null` gefaltet, es entstand nichts, und es ging
+--     auch nichts verloren. Solche Zeilen sind harmlos.
+--   · Verloren ist etwas, wo ein Betrag > 0 steht. Danach zuerst sortieren.
+--
+-- Und eine Lücke, die diese Abfrage NICHT schließt: das Audit wird ohne `exec`
+-- geschrieben (`budget-initial-setup.ts:308`), läuft also außerhalb der
+-- Anlage-Transaktion. Rollt der Anlage-Flow zurück, überlebt der Audit-Eintrag
+-- mit NICHT-leerem `allocationIds`, das auf verschwundene Zeilen zeigt — diese
+-- Abfrage findet ihn nicht. Wer dem nachgehen will, braucht einen Join von
+-- `allocationIds` gegen `budget_allocations.id`.
 
 SELECT
   a.created_at::date                                   AS datum,
@@ -163,7 +175,12 @@ SELECT
   c.inaktiv_ab                                         AS inaktiv_ab,
   c.pflegegrad,
   c.billing_type                                       AS abrechnungsart,
-  'KANDIDAT — kein §45b-Topf trotz Pflegegrad'         AS lesart
+  -- Bewusst NICHT „kein §45b-Topf": seit Task #1828 ist §45b fuer
+  -- Pflegekassen-Kunden default-aktiv OHNE persistierte Zeile
+  -- (`hasActiveBudgetPot` ist die SSoT). „Keine Zeile" ist ein brauchbares
+  -- Kandidaten-Signal, aber keine Aussage ueber den Topf — das waere ein
+  -- Zweitbegriff zur SSoT.
+  'KANDIDAT — keine §45b-Einstellungszeile, kein Startwert/Übertrag' AS lesart
 FROM customers c
 WHERE c.deleted_at IS NULL
   -- Zusammengeführte Dubletten raus: sie haben ihren Pflegegrad behalten und

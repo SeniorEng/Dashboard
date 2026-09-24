@@ -220,11 +220,12 @@ Pro Topf legt ein Aufruf maximal eine `initial_balance`-Zeile an:
 - **§45a (`umwandlung_45a`)** — monatliches Budget. `initial_balance` für den Startmonat; Folgemonate sind Sache der Settings/Booking-Pfade. `expiresAt = null`.
 - **§39/§42a (`ersatzpflege_39_42a`)** — jährlicher Anspruch. `initial_balance` wird auf den Startmonat gebucht, `expiresAt = YYYY-12-31`. Wer den vollen Jahresbetrag abbilden möchte, übergibt den Jahres-Anspruch als `currentMonthAmountCents` zum Jahresanfang (`budgetStartDate=YYYY-01-01`) — die Zeile gilt dann bis 31.12.
 
-Validierung (Zod): **mindestens eines der beiden Amount-Felder muss gesetzt sein** (`!= null`, `0` zählt). Fehlen beide → 400 `VALIDATION_ERROR`.
+Validierung (Zod): **mindestens eines der beiden Amount-Felder muss gesetzt sein** (`!= null`, `0` zählt) — wobei `carryoverAmountCents` nur für **§45b** als Angabe zählt, weil nur dort eine `carryover`-Zeile entsteht. Fehlen beide → 400 `VALIDATION_ERROR`.
 
 Zwei weitere Ablehnungen auf diesem Endpunkt:
 
 - **§45b: Startwert UND Übertrag > 0** → 400 `BUDGET_45B_STARTWERT_ODER_UEBERTRAG`. Ein Startwert ist eine Bestandsaufnahme und enthält den Übertrag bereits; beides zusammen hieße, den Übertrag anzunehmen und stillschweigend zu verdrängen.
+- **Übertrag für einen Topf ohne Übertrag** (§45a, §39/§42a) → 400 `BUDGET_CARRYOVER_NUR_45B`. Der Betrag würde sonst angenommen, protokolliert und nicht gespeichert.
 - **Bereits erfasster Startwert mit anderem Betrag** → 409 `BUDGET_INITIAL_BALANCE_CONFLICT`. Derselbe Betrag ist idempotent. Schützt den Wiederhol-Banner davor, einen erfassten Startwert per `UPDATE` zu überschreiben. Der Startwert-**Editor** (`POST /initial-balance/:budgetType`) ist davon nicht betroffen und korrigiert weiterhin.
 
 **Beispiel-Requests:**

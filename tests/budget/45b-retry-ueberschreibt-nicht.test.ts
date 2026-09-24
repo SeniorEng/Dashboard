@@ -154,4 +154,100 @@ describe("§45b — ein Retry überschreibt keinen erfassten Startwert", () => {
       await cleanupCustomer(id);
     }
   }, 120_000);
+  it("RU-5 – bei 409 wird NICHTS geschrieben, auch nicht der Topf-Status", async () => {
+    /**
+     * Die Ablehnung darf nichts hinterlassen (Gate 2 zum B1-Delta, S-2).
+     *
+     * Die Schranke stand zuerst direkt über dem Upsert — also NACH
+     * `ensureBudgetTypeEnabledInPlace`, das für §45a/§39 bereits schreibt. Auf
+     * dem Standalone-Endpunkt gibt es keine Transaktion: ein 409 ließ dort eine
+     * re-aktivierte Topf-Zeile zurück und meldete dazu „die Anlage überschreibt
+     * ihn nicht".
+     *
+     * `EO-1` sichert dieselbe Zusage für das Entweder-oder. Für den 409 gab es
+     * sie nicht — hier ist sie.
+     */
+    const id = await kundeMitStartwert();
+    try {
+      // §45a-Startwert anlegen und den Topf danach deaktivieren, damit
+      // `ensureBudgetTypeEnabledInPlace` beim nächsten Aufruf etwas zu tun hätte.
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "umwandlung_45a", year: JAHR, month: MONAT,
+        amountCents: 300_00, source: "initial_balance",
+        validFrom: `${JAHR}-0${MONAT}-01`, expiresAt: null, notes: "RU5-45a",
+      });
+      const vorher = await db.select({ id: customerBudgetTypeSettings.id })
+        .from(customerBudgetTypeSettings)
+        .where(and(
+          eq(customerBudgetTypeSettings.customerId, id),
+          eq(customerBudgetTypeSettings.budgetType, "umwandlung_45a"),
+        ));
+
+      const res = await apiPost<any>(`/api/budget/${id}/initial-budget`, {
+        budgetType: "umwandlung_45a",
+        currentMonthAmountCents: 500_00,
+        budgetStartDate: `${JAHR}-0${MONAT}-01`,
+      });
+      expect(res.status, `erwartet 409, bekommen ${res.status}`).toBe(409);
+
+      const nachher = await db.select({ id: customerBudgetTypeSettings.id })
+        .from(customerBudgetTypeSettings)
+        .where(and(
+          eq(customerBudgetTypeSettings.customerId, id),
+          eq(customerBudgetTypeSettings.budgetType, "umwandlung_45a"),
+        ));
+      expect(
+        nachher.length,
+        "die Ablehnung hat eine Topf-Einstellung hinterlassen — sie läuft nach "
+        + "dem ersten Schreibvorgang",
+      ).toBe(vorher.length);
+
+      const zeilen45a = await db.select({ amountCents: budgetAllocations.amountCents })
+        .from(budgetAllocations)
+        .where(and(
+          eq(budgetAllocations.customerId, id),
+          eq(budgetAllocations.budgetType, "umwandlung_45a"),
+        ));
+      expect(zeilen45a, "der §45a-Startwert wurde trotz Ablehnung verändert")
+        .toEqual([{ amountCents: 300_00 }]);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
+
+  it("RU-6 – ein Übertrag für einen Topf ohne Übertrag wird abgelehnt", async () => {
+    /**
+     * Gate 2 zum B1-Delta, S-1: die `refine`-Regel schloss nur die halbe
+     * Klasse. Sie fing den Body, der NUR einen Übertrag trägt — nicht den, der
+     * ihn NEBEN einem Startwert trägt.
+     *
+     * Gemessen am Beispiel aus dem Review: §45a mit 300 € Startwert und 500 €
+     * Übertrag ergab `201`, schrieb nur die 300 € und verlor die 500 €
+     * still — während der Audit-Eintrag sie protokollierte.
+     */
+    const id = await kundeMitStartwert();
+    try {
+      const res = await apiPost<any>(`/api/budget/${id}/initial-budget`, {
+        budgetType: "umwandlung_45a",
+        currentMonthAmountCents: 300_00,
+        carryoverAmountCents: 500_00,
+        budgetStartDate: `${JAHR}-0${MONAT}-01`,
+      });
+      expect(res.status, "der Übertrag für §45a wurde angenommen").toBe(400);
+      expect(
+        String(res.data?.message ?? ""),
+        "die Meldung sagt nicht, warum — dann rät der Anwender",
+      ).toContain("§45b");
+
+      const zeilen45a = await db.select({ id: budgetAllocations.id })
+        .from(budgetAllocations)
+        .where(and(
+          eq(budgetAllocations.customerId, id),
+          eq(budgetAllocations.budgetType, "umwandlung_45a"),
+        ));
+      expect(zeilen45a, "trotz Ablehnung wurde für §45a geschrieben").toEqual([]);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
 });

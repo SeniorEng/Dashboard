@@ -172,8 +172,23 @@ describe("§45b-Onboarding — Startwert und Übertrag schließen sich aus", () 
     }
   }, 60_000);
 
-  it("EO-6 – §45a bleibt unberührt", async () => {
-    // Die Regel ist §45b-spezifisch: nur dort gibt es die Inventur-Lesart.
+  it("EO-6 – §45a wird NICHT vom Entweder-oder getroffen (sondern von seiner eigenen Regel)", async () => {
+    /**
+     * Die Zusage ist unverändert: die Inventur-Lesart ist §45b-spezifisch, und
+     * das Entweder-oder gilt für §45a nicht.
+     *
+     * Der erwartete AUSGANG hat sich am 24.09.2026 geändert. §45a mit Startwert
+     * UND Übertrag wird jetzt ebenfalls abgelehnt — aber aus einem anderen
+     * Grund: für §45a entsteht gar keine Übertragszeile, der Betrag wäre
+     * angenommen, protokolliert und nicht gespeichert (Gate 2 zum B1-Delta,
+     * S-1).
+     *
+     * Deshalb prüft der Test jetzt den CODE der Ablehnung. Genau das ist die
+     * Unterscheidung, die er tragen soll: träfe hier
+     * `BUDGET_45B_STARTWERT_ODER_UEBERTRAG`, hätte sich die §45b-Regel auf
+     * §45a ausgedehnt — und das wäre der Fehler, gegen den EO-6 seit jeher
+     * steht.
+     */
     const id = await kunde();
     try {
       await applyInitialBudget({
@@ -184,9 +199,33 @@ describe("§45b-Onboarding — Startwert und Übertrag schließen sich aus", () 
         currentMonthAmountCents: 100_00,
         carryoverAmountCents: 500_00,
       });
-      const geschrieben = await zeilen(id);
-      expect(geschrieben.length, "§45a wurde von der §45b-Regel getroffen")
-        .toBeGreaterThan(0);
+      throw new Error("keine Ablehnung");
+    } catch (e) {
+      const fehler = e as BudgetInitialSetupError;
+      expect(
+        fehler.code,
+        "§45a wurde von der §45b-Regel getroffen — die Inventur-Lesart hat sich ausgedehnt",
+      ).toBe("BUDGET_CARRYOVER_NUR_45B");
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 60_000);
+
+  it("EO-7 – §45a mit Startwert allein wird geschrieben", async () => {
+    // Die Gegenrichtung zu EO-6: ohne Übertrag nimmt §45a den Startwert an.
+    // Ohne diesen Test wäre EO-6 auch erfüllt, wenn §45a gar nichts mehr
+    // annimmt.
+    const id = await kunde();
+    try {
+      await applyInitialBudget({
+        customerId: id,
+        budgetType: "umwandlung_45a",
+        budgetStartDate: START,
+        customer: { billingType: "pflegekasse_gesetzlich", pflegegrad: 3 },
+        currentMonthAmountCents: 100_00,
+      });
+      expect(await zeilen(id), "der §45a-Startwert allein wurde nicht geschrieben")
+        .toEqual([{ source: "initial_balance", amountCents: 100_00 }]);
     } finally {
       await cleanupCustomer(id);
     }

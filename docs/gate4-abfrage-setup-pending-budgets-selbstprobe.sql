@@ -97,3 +97,78 @@ WHERE c.deleted_at IS NULL
   AND a.amount_cents IS DISTINCT FROM (b ->> 'currentMonthAmountCents')::bigint;
 
 ROLLBACK;
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SELBSTPROBE 2 — greift die §45b-Bodung?
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- Die Probe oben benutzt `budgetStartDate = 2026-06-01` — also genau die Form,
+-- in der der Fehler NICHT auftritt. Gate 2 hat das zu Recht bemaengelt: eine
+-- Selbstprobe muss die Formen abdecken, in denen der Verstoss real auftritt.
+--
+-- Hier der Vorjahres-Anker, die Regelform beim Wizard: `2025-03-15`. Der
+-- Schreibpfad bodet ihn auf `2026-01-01` und schreibt 2026/01. Eine Abfrage
+-- ohne Bodung sucht 2025/03 und findet NICHTS — ein Falsch-Negativ, das wie
+-- „kein Bestand" aussieht.
+--
+-- Erwartet: MIT Bodung 1 Zeile, OHNE Bodung 0.
+
+BEGIN;
+
+UPDATE customers SET
+  setup_budgets_pending = true,
+  setup_pending_payloads = jsonb_build_object(
+    'budgets', jsonb_build_object('items', jsonb_build_array(
+      jsonb_build_object(
+        'budgetType', 'entlastungsbetrag_45b',
+        'currentMonthAmountCents', 0,
+        'carryoverAmountCents', 0,
+        'budgetStartDate', '2025-03-15'
+      )
+    ))
+  )
+WHERE id = (SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1);
+
+-- Die Zeile, wie der Schreibpfad sie anlegt: GEBODET auf Januar des laufenden Jahres.
+INSERT INTO budget_allocations
+  (customer_id, budget_type, year, month, amount_cents, source, valid_from, expires_at, notes)
+SELECT id, 'entlastungsbetrag_45b',
+       EXTRACT(YEAR FROM now())::int, 1, 18460, 'initial_balance',
+       date_trunc('year', now())::date, NULL, 'selbstprobe-bodung'
+FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1;
+
+\echo '=== MIT Bodung: muss 1 Zeile melden ==='
+SELECT c.id AS kunde, gebodet.d AS gebodeter_start, a.amount_cents
+FROM customers c
+CROSS JOIN LATERAL jsonb_array_elements(c.setup_pending_payloads -> 'budgets' -> 'items') AS b
+CROSS JOIN LATERAL (
+  SELECT CASE
+    WHEN b ->> 'budgetType' = 'entlastungsbetrag_45b'
+      THEN GREATEST((b ->> 'budgetStartDate')::date, date_trunc('year', now())::date)
+    ELSE (b ->> 'budgetStartDate')::date
+  END AS d
+) AS gebodet
+JOIN budget_allocations a
+  ON  a.customer_id = c.id
+  AND a.budget_type = b ->> 'budgetType'
+  AND a.source      = 'initial_balance'
+  AND a.deleted_at  IS NULL
+  AND a.year        = EXTRACT(YEAR  FROM gebodet.d)::int
+  AND a.month       = EXTRACT(MONTH FROM gebodet.d)::int
+WHERE c.deleted_at IS NULL AND c.setup_pending_payloads ? 'budgets';
+
+\echo '=== OHNE Bodung: muss 0 melden — das war der Fehler ==='
+SELECT count(*) AS ohne_bodung
+FROM customers c
+CROSS JOIN LATERAL jsonb_array_elements(c.setup_pending_payloads -> 'budgets' -> 'items') AS b
+JOIN budget_allocations a
+  ON  a.customer_id = c.id
+  AND a.budget_type = b ->> 'budgetType'
+  AND a.source      = 'initial_balance'
+  AND a.deleted_at  IS NULL
+  AND a.year        = EXTRACT(YEAR  FROM (b ->> 'budgetStartDate')::date)::int
+  AND a.month       = EXTRACT(MONTH FROM (b ->> 'budgetStartDate')::date)::int
+WHERE c.deleted_at IS NULL AND c.setup_pending_payloads ? 'budgets';
+
+ROLLBACK;

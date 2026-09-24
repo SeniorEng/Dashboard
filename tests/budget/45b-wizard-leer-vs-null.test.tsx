@@ -168,4 +168,45 @@ describe("§45b-Anlage-Assistent — leeres Feld ist keine Angabe", () => {
     ).toBeTruthy();
     expect((r as any).budgets?.carryoverAmountCents).toBe(50000);
   }, 60_000);
+  it("WL-5 – Schalter an, Feld leer: blockiert, und die Meldung sagt warum", async () => {
+    /**
+     * Das Schwesterfeld zum Übertrag — mit bewusst ANDERER Regel.
+     *
+     * Beim Übertrag gibt es kein Existenz-Signal außer dem Betrag; ein leeres
+     * Feld heißt dort „keine Angabe". Beim Restguthaben IST der Schalter das
+     * Signal: ist er an, gehört ein Betrag hinein. Ein leeres Feld bleibt
+     * deshalb ein Fehler, und das ist kein Widerspruch, sondern der
+     * Unterschied zwischen den beiden Feldern.
+     *
+     * ── Was dieser Test sichert und was nicht ──────────────────────────────
+     * Gesichert ist die SCHRANKE: der Assistent lässt „Schalter an, Feld leer"
+     * nicht durch, und die Meldung nennt den Ausweg. Vorher stand dort
+     * „Restguthaben darf nicht negativ sein" — ein Text über etwas, das gar
+     * nicht vorlag.
+     *
+     * NICHT gesichert ist die Payload-Seite (`override45bCents` ist jetzt
+     * `null` statt `0`, Gate 2 zum B1-Delta S-6). Sie ist hinter dieser
+     * Schranke unerreichbar, also kann kein Test sie unabhängig prüfen — der
+     * Mutations-Gegencheck hat das bestätigt: die Rücknahme der Payload-Zeile
+     * ließ alles grün. Sie bleibt als zweite Lage, und der Gegencheck greift
+     * an DIESER Schranke.
+     *
+     * Das ist der Punkt, den Gate 2 gemacht hat: ein Schutz, der von einer
+     * Nachbarregel abhängt, fällt mit ihr. Deshalb steht hier ausdrücklich,
+     * welche der beiden Lagen geprüft ist.
+     */
+    const r = await wizardLauf({
+      uebertrag45b: "",
+      restguthaben45bOverrideEnabled: true,
+      restguthaben45b: "",
+      restguthaben45bStichmonat: "2026-06",
+    });
+
+    expect(r.gesendet, "Schalter an mit leerem Feld kam durch").toBe(false);
+    expect(
+      (r as any).meldung,
+      "die Meldung spricht von „negativ\" für ein leeres Feld — sie benennt "
+      + "nicht, was der Anwender tun soll",
+    ).toContain("ausschalten");
+  }, 60_000);
 });
