@@ -957,13 +957,23 @@ router.get("/:customerId/initial-balance-verdraengung/:budgetType", checkCustome
    * entsteht — ein Fehler, den kein Test sieht, der nur eine Seite prueft.
    * `UW-4` haelt die Uebereinstimmung fest.
    */
+  const { carryoverExpiresAtFor } = await import("@shared/domain/budget/expiry-45b");
   const subjekte = istUebertragsRichtung
     ? [{
       id: -1,
       year: uebertragJahr,
       amountCents: uebertragBetragCents,
       validFrom: `${uebertragJahr}-01-01`,
-      expiresAt: `${uebertragJahr}-06-30`,
+      /**
+       * Die Frist aus der SSoT, NICHT als Literal.
+       *
+       * Hier stand `${uebertragJahr}-06-30`. Der Waechter
+       * `tests/architecture/45b-null-leg-exclusion.test.ts` hat es sofort
+       * gefunden — und er hatte recht: eine zweite Fassung der Frist genau in
+       * dem Endpunkt, dessen eigene Begruendung lautet „derselbe Endpunkt,
+       * damit die Regel nicht zweimal steht".
+       */
+      expiresAt: carryoverExpiresAtFor(uebertragJahr),
     }]
     : uebertraege;
 
