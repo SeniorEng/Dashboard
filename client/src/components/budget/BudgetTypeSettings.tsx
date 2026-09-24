@@ -97,15 +97,33 @@ interface InitialBalanceAllocation {
  * `displacedByReset` auf dem Server. Der Client liest nur
  * (Drei-Schichten-Pflicht, #164).
  */
+export interface Verdraengung {
+  verdraengt: Array<{ year: number; amountCents: number }>;
+  summeCents: number;
+  /** `MM/JJJJ` des Startwerts, der ersetzt — vom Server, nicht hier gerechnet. */
+  ersetztDurchStartwertMonat?: string | null;
+}
+
 export function VerdraengungsWarnung({
   verdraengung,
   testId,
+  richtung = "startwert",
 }: {
-  verdraengung?: { verdraengt: Array<{ year: number; amountCents: number }>; summeCents: number };
+  verdraengung?: Verdraengung;
   testId: string;
+  /**
+   * Welche Seite der Nutzer gerade eingibt.
+   *
+   * EINE Komponente, zwei Lesarten — nicht zwei Komponenten. Die Sache ist
+   * dieselbe (ein Startwert und ein Uebertrag koennen nicht beide zaehlen);
+   * verschieden ist nur, welche davon der Nutzer vor sich hat und was er
+   * deshalb verliert.
+   */
+  richtung?: "startwert" | "uebertrag";
 }) {
   if (!verdraengung || verdraengung.verdraengt.length === 0) return null;
   const einer = verdraengung.verdraengt.length === 1 ? verdraengung.verdraengt[0] : null;
+  const startwertMonat = verdraengung.ersetztDurchStartwertMonat;
   return (
     <div
       className="flex items-start gap-2 mt-1 p-2 rounded bg-amber-50 border border-amber-300 text-xs text-amber-900"
@@ -113,11 +131,23 @@ export function VerdraengungsWarnung({
     >
       <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
       <span>
-        {einer
-          ? `Damit entfällt der Übertrag aus ${einer.year} über ${formatCurrency(einer.amountCents)}.`
-          : `Damit entfallen ${verdraengung.verdraengt.length} Überträge über zusammen ${formatCurrency(verdraengung.summeCents)}.`}
-        {" "}Der Startwert ersetzt den Bestand — der Übertrag bleibt in der
-        Historie sichtbar, zählt aber nicht mehr mit.
+        {richtung === "uebertrag"
+          ? (
+            <>
+              {`Dieser Übertrag zählt nicht mit${startwertMonat ? `: der Startwert ${startwertMonat} ersetzt ihn` : ""}.`}
+              {" "}Ein Startwert nennt den gesamten Restbestand — der Übertrag
+              ist darin schon enthalten. Er bleibt in der Historie sichtbar.
+            </>
+          )
+          : (
+            <>
+              {einer
+                ? `Damit entfällt der Übertrag aus ${einer.year} über ${formatCurrency(einer.amountCents)}.`
+                : `Damit entfallen ${verdraengung.verdraengt.length} Überträge über zusammen ${formatCurrency(verdraengung.summeCents)}.`}
+              {" "}Der Startwert ersetzt den Bestand — der Übertrag bleibt in der
+              Historie sichtbar, zählt aber nicht mehr mit.
+            </>
+          )}
       </span>
     </div>
   );
@@ -1355,6 +1385,37 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
   const existsForSelectedYear = carryovers.some(c => (c.year ?? 0) - 1 === sourceYear);
   const targetYear = sourceYear + 1;
 
+  /**
+   * PFLICHT-Warnung (S1, Alrik 24.09.2026): ein Uebertrag > 0, der neben einem
+   * BESTEHENDEN Startwert eingetragen wird und von ihm verdraengt wuerde.
+   *
+   * Gegenstueck zur Warnung im Startwert-Editor — **derselbe Endpunkt, nicht
+   * ein zweiter** (Alriks Vorgabe). Er bekommt hier nur die andere Seite als
+   * Hypothese: `uebertragJahr` + `uebertragBetragCents` statt eines
+   * hypothetischen Startwert-Monats.
+   *
+   * WARNEN, NICHT SPERREN. Anders als im Anlage-Assistenten (#186, dort eine
+   * Ablehnung) ist der Bestands-Editor der Ort, an dem Alrik eine Korrektur
+   * bewusst vornimmt — etwa weil er den Startwert gleich danach loescht. Eine
+   * Sperre naehme ihm den Weg; eine Warnung nimmt ihm nur die Ueberraschung.
+   *
+   * `validFrom` ist der LAUFENDE Monat, nicht der Beginn des Uebertrags: die
+   * Frage lautet „zaehlt er, wenn ich jetzt speichere". Ein Juni-Startwert
+   * faellt sonst aus der Anker-Suche (`resetAnchorFrom` ueberspringt, was nach
+   * dem Stichtag beginnt) und die Warnung bliebe still.
+   */
+  const heuteMonat = getCurrentYearMonth();
+  const { data: verdraengung } = useQuery<Verdraengung>({
+    queryKey: ["initial-balance-verdraengung", customerId, budgetType, heuteMonat, targetYear, eingegebeneCents],
+    queryFn: async () => unwrapResult(await api.get(
+      `/budget/${customerId}/initial-balance-verdraengung/${budgetType}`
+      + `?validFrom=${heuteMonat}&uebertragJahr=${targetYear}&uebertragBetragCents=${eingegebeneCents}`,
+    )),
+    enabled: budgetType === "entlastungsbetrag_45b"
+      && eingegebeneCents != null && eingegebeneCents > 0,
+    staleTime: 30000,
+  });
+
   if (!enabled) return null;
 
   return (
@@ -1525,6 +1586,20 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
               {targetYear} neu an.
             </span>
           </div>
+        )}
+
+        {/**
+          * S1 — der Uebertrag > 0 wird von einem bestehenden Startwert ersetzt.
+          *
+          * Bewusst NACH der 0-EUR-Warnung und exklusiv zu ihr: bei `0` gibt es
+          * nichts zu verlieren, dort sagt die andere Warnung das Richtige.
+          */}
+        {hasValidInput && eingegebeneCents != null && eingegebeneCents > 0 && (
+          <VerdraengungsWarnung
+            verdraengung={verdraengung}
+            richtung="uebertrag"
+            testId={`warning-carryover-verdraengt-${budgetType}`}
+          />
         )}
 
         {hasValidInput && (

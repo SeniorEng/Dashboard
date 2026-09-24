@@ -806,9 +806,60 @@ router.get("/:customerId/initial-balance-verdraengung/:budgetType", checkCustome
     return;
   }
 
+  /**
+   * ZWEITE RICHTUNG (S1, Alrik 24.09.2026): der Uebertrags-Editor fragt
+   * umgekehrt — „verdraengt ein BESTEHENDER Startwert diesen neuen Uebertrag?"
+   *
+   * Bewusst DERSELBE Endpunkt, nicht ein zweiter („dieselbe Form und derselbe
+   * Lese-Endpunkt wie beim Startwert-Editor, nicht ein zweiter"). Die
+   * fachliche Frage ist in beiden Richtungen dieselbe — `displacedByReset`
+   * gegen einen Reset-Anker — und ein zweiter Endpunkt waere der Zweitbegriff,
+   * den die SSoT-Regel verbietet: er wuerde beim naechsten Umbau auseinander-
+   * laufen, ohne dass es jemand merkt.
+   *
+   * Was sich unterscheidet, ist nur, welche Seite hypothetisch ist:
+   *  - ohne `uebertragJahr`: der STARTWERT ist hypothetisch (`validFrom` ist
+   *    sein Monat), der Anker kommt aus ihm, Subjekte sind die bestehenden
+   *    Uebertraege;
+   *  - mit `uebertragJahr`: der UEBERTRAG ist hypothetisch, der Anker kommt
+   *    aus den BESTEHENDEN Startwerten (`readResetAnchor`), Subjekt ist der
+   *    eine hypothetische Uebertrag.
+   *
+   * `validFrom` behaelt in BEIDEN Richtungen eine Bedeutung: **der Monat, zu
+   * dem gerechnet wird.** In der Startwert-Richtung faellt er mit dem Monat
+   * des hypothetischen Startwerts zusammen; in der Uebertrags-Richtung ist es
+   * der laufende Monat — der Moment des Speicherns.
+   *
+   * Das ist kein Detail: `resetAnchorFrom` ueberspringt Startwerte, die NACH
+   * dem Stichtag beginnen. Wuerde der Client hier den Beginn des Uebertrags
+   * (`${jahr}-01`) schicken, fiele ein Juni-Startwert aus der Suche — und die
+   * Warnung bliebe still, obwohl genau er den Uebertrag ersetzt. Der Fehler
+   * waere eine ausbleibende Warnung, also unsichtbar. `UW-3` haelt ihn fest.
+   */
+  const uebertragJahrRoh = req.query.uebertragJahr;
+  const uebertragBetragRoh = req.query.uebertragBetragCents;
+  const istUebertragsRichtung = uebertragJahrRoh != null;
+
   const { resetAnchorFrom, displacedByReset, allocationValidAt, RESET_DISPLACES_ALL_SOURCES_DEFAULT } =
     await import("../storage/budget/allocation-window");
-  const { read45bAllocationDiagnostics } = await import("../storage/budget/allocation-storage");
+  const { read45bAllocationDiagnostics, readResetAnchor } =
+    await import("../storage/budget/allocation-storage");
+
+  let uebertragJahr = 0;
+  let uebertragBetragCents = 0;
+  if (istUebertragsRichtung) {
+    uebertragJahr = Number(uebertragJahrRoh);
+    uebertragBetragCents = Number(uebertragBetragRoh ?? NaN);
+    if (!Number.isInteger(uebertragJahr) || uebertragJahr < 2000 || uebertragJahr > 2100
+      || !Number.isInteger(uebertragBetragCents) || uebertragBetragCents < 0) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        code: "BUDGET_VERDRAENGUNG_UEBERTRAG",
+        message: "`uebertragJahr` (Jahr) und `uebertragBetragCents` (ganze Cent, >= 0) muessen beide gueltig sein.",
+      });
+      return;
+    }
+  }
 
   /**
    * Ohne scharfe Verdraengung gibt es nichts zu warnen (Gate 2 zu #184, S1).
@@ -829,10 +880,21 @@ router.get("/:customerId/initial-balance-verdraengung/:budgetType", checkCustome
 
   const [jahrStr, monatStr] = validFrom.split("-");
   const stichtag = `${validFrom}-01`;
-  const anker = resetAnchorFrom(
-    [{ year: Number(jahrStr), month: Number(monatStr) }],
-    stichtag,
-  );
+  /**
+   * Der Anker: in der Startwert-Richtung aus dem hypothetischen Startwert, in
+   * der Uebertrags-Richtung aus den BESTEHENDEN Startwerten.
+   *
+   * `readResetAnchor` ist dieselbe Funktion, die der Anspruchspfad benutzt —
+   * kein nachgebautes „welcher Startwert gilt". Ohne bestehenden Startwert
+   * liefert sie `null`, und `displacedByReset` ist gegen `null` falsch: keine
+   * Warnung, richtig so.
+   */
+  const anker = istUebertragsRichtung
+    ? await readResetAnchor(customerId, stichtag)
+    : resetAnchorFrom(
+      [{ year: Number(jahrStr), month: Number(monatStr) }],
+      stichtag,
+    );
 
   const uebertraege = await database
     .select({
@@ -885,7 +947,27 @@ router.get("/:customerId/initial-balance-verdraengung/:budgetType", checkCustome
     return;
   }
 
-  const verdraengt = uebertraege
+  /**
+   * Die Subjekte: bestehende Uebertraege, oder der eine hypothetische.
+   *
+   * Der hypothetische traegt genau die Felder, die `applyInitialBudget` beim
+   * Speichern schreiben WUERDE (`validFrom = ${jahr}-01-01`,
+   * `expiresAt = ${jahr}-06-30`, `year = jahr`). Wuerden sie hier anders
+   * lauten als dort, warnte die Vorschau ueber eine andere Zeile als die, die
+   * entsteht — ein Fehler, den kein Test sieht, der nur eine Seite prueft.
+   * `UW-4` haelt die Uebereinstimmung fest.
+   */
+  const subjekte = istUebertragsRichtung
+    ? [{
+      id: -1,
+      year: uebertragJahr,
+      amountCents: uebertragBetragCents,
+      validFrom: `${uebertragJahr}-01-01`,
+      expiresAt: `${uebertragJahr}-06-30`,
+    }]
+    : uebertraege;
+
+  const verdraengt = subjekte
     .filter(z => !ausgeschlossen.has(z.id))
     .filter(z => allocationValidAt({ validFrom: z.validFrom, expiresAt: z.expiresAt }, stichtag))
     .filter(z => displacedByReset(
@@ -896,6 +978,16 @@ router.get("/:customerId/initial-balance-verdraengung/:budgetType", checkCustome
   res.json({
     verdraengt,
     summeCents: verdraengt.reduce((n, z) => n + z.amountCents, 0),
+    /**
+     * Der Startwert-Monat, der ersetzt — damit die Warnung ihn NENNEN kann.
+     *
+     * In der Uebertrags-Richtung ist das die eigentliche Auskunft: „wird vom
+     * Startwert 06/2026 ersetzt". Der Client soll ihn nicht aus dem Anker
+     * zusammensetzen; das waere dieselbe Regel ein viertes Mal.
+     */
+    ersetztDurchStartwertMonat: verdraengt.length > 0 && anker
+      ? `${String(anker.month).padStart(2, "0")}/${anker.year}`
+      : null,
   });
 }));
 
