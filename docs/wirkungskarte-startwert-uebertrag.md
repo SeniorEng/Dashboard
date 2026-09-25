@@ -582,9 +582,11 @@ beide Fragen mit demselben Anker beantwortet, bekommt bei ausgeschaltetem Flag
 der Test vor dem Fix existierte und rot blieb.
 
 Das gemeinsame Prädikat heißt `countedConsumptionWhere` und liegt in
-`allocation-window.ts` neben den übrigen Reset-Prädikaten. Sein Docblock
-begründet, warum nur **zwei** der drei Reader-Glieder gelten — sonst hält die
-nächste Person die fehlenden für ein Versehen.
+`allocation-window.ts` neben den übrigen Reset-Prädikaten. In der ersten
+Fassung trug es nur **zwei** der drei Reader-Glieder und begründete das mit der
+Einschränkung auf Allocation-IDs — eine Begründung, die an einer Eigenschaft
+des Aufrufers hing und am kundenweiten Aufrufer `classifyConsumedByState`
+nicht galt. Seit `6hcfP7xVj5R3Pg6p` (#192) trägt es **alle drei**, immer.
 
 ## 5. `FS-5` — eine Buchung in der Zukunft belastete den Übertrag rückwirkend
 

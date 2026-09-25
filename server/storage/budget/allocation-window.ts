@@ -37,7 +37,7 @@
  * beantworten andere Fragen (Reset-Baseline bzw. Doppelzaehlung) und haben je
  * genau einen Aufrufer.
  */
-import { and, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
+import { and, gt, gte, isNotNull, isNull, lte, notInArray, or, type SQL } from "drizzle-orm";
 import { budgetAllocations, budgetTransactions } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
@@ -227,11 +227,24 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
 }
 
 /**
- * Zaehlt diese Verbrauchs-Buchung zum Stichtag mit?
+ * Der VERBRAUCHS-SCHNITT: welche Glieder am Stichtag gelten.
  *
- * Gilt fuer Buchungen, die an eine NICHT ausgeschlossene Allocation verlinkt
- * sind — also genau den Fall, den die FIFO-Aufschluesselung pro Uebertrags-
- * Zeile rechnet.
+ * ERSETZT die frueheren drei Einzel-Parameter-Kombinationen. Die Groesse wird
+ * an EINER Stelle gelesen (`read45bAllocationDiagnostics`) und als Ganzes
+ * weitergegeben — wer sie in Teilen durchreicht, erzeugt beim Empfaenger die
+ * Ableitung, die sie vermeiden soll.
+ */
+export interface VerbrauchsSchnitt {
+  /** Glied (b): Buchungen vor dem Reset-Cutoff sind im Startwert abgebildet. */
+  resetAnchor: ResetAnchor | null;
+  /** Glied (a): Allocations, die nicht mehr zum Anspruch beitragen. */
+  excludedAllocationIds: readonly number[];
+  /** Glied (c): Boden fuer das Leg ohne Allocation-Zuordnung. */
+  accrualFloorDate: string | null;
+}
+
+/**
+ * Zaehlt diese Verbrauchs-Buchung zum Stichtag mit?
  *
  * ── Warum es diese Funktion gibt ────────────────────────────────────────
  * `getExcluded45bConsumption` schneidet den Gesamt-Verbrauch mit drei Gliedern:
@@ -247,46 +260,71 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
  * ausgewiesene Rest des laufenden Jahres stieg auf 662,00 statt 562,00 EUR —
  * also in die Richtung, in der gebucht wird.
  *
- * ⚠ Ein KUNDENWEITER Aufrufer bekommt nur (b) — siehe den Block unten.
+ * ── ALLE DREI Glieder, immer. Das ERSETZT die Fallunterscheidung ────────
+ * Die vorige Fassung trug nur (b) und begruendete ausfuehrlich, warum (a) und
+ * (c) entfallen duerfen: fuer einen Aufrufer, der bereits auf Allocation-IDs
+ * eingeschraenkt hat, sind sie wirkungslos. Das stimmte — und war trotzdem die
+ * falsche Bauform.
  *
- * ── Warum nur zwei der drei Glieder — und WO diese Begruendung gilt ─────
- * Fuer einen Aufrufer, der bereits auf eine Menge von Allocation-IDs
- * eingeschraenkt hat (`inArray(allocationId, …)`), gilt:
+ * Gemessen (Gate 2 zu #190, S-1): `classifyConsumedByState` ruft kundenweit,
+ * ohne `inArray`, mit `allocationId IS NULL` ausdruecklich eingeschlossen. Dort
+ * fehlten beide Glieder wirklich, und es entstand ein negatives
+ * `consumedOtherCents` — bei einem dokumentierten Termin gegen einen zum
+ * Stichtag abgelaufenen Uebertrag (Glied a) ebenso wie bei einem
+ * Vorjahres-Termin auf dem NULL-Leg (Glied c). Je 100,00 EUR, gemessen.
  *
- * (a) trifft nicht zu: die Zeilen, fuer die diese Bedingung gilt, sind gerade
- *     die NICHT ausgeschlossenen — `notDisplacedByResetWhere` hat sie
- *     durchgelassen.
- * (c) trifft nicht zu: es gilt ausdruecklich nur fuer `allocationId IS NULL`,
- *     und dort ist die ID gesetzt.
+ * **Die Begruendung war richtig und hat nichts genuetzt**, weil sie an einer
+ * Eigenschaft des Aufrufers hing, die die Funktion nicht pruefen kann. Jetzt
+ * gelten alle drei Glieder immer:
  *
- * Das steht hier und nicht als Kommentar an der Aufrufstelle, weil sonst die
- * naechste Person die fehlenden Glieder fuer ein Versehen haelt und sie
- * „ergaenzt".
+ *  · fuer einen Aufrufer MIT `inArray` sind (a) und (c) per Konstruktion
+ *    wirkungslos — (a) trifft nur ausgeschlossene IDs, die dort nicht
+ *    vorkommen, (c) nur `allocationId IS NULL`, was dort nicht vorkommt;
+ *  · fuer einen kundenweiten Aufrufer greifen sie.
  *
- * ⚠ **FUER EINEN KUNDENWEITEN AUFRUFER GILT DIESE BEGRUENDUNG NICHT.**
- * Beide Saetze haengen an der Einschraenkung auf Allocation-IDs. Wer diese
- * Funktion ohne sie ruft, bekommt den as-of- und den Reset-Schnitt, aber
- * WEDER die Ausschlussliste NOCH den `accrualFloorDate`-Boden — und beide
- * fehlen dann wirklich.
+ * Eine Bedingung, die im einen Fall nichts tut und im anderen noetig ist,
+ * gehoert nicht in eine Fallunterscheidung beim Aufrufer.
  *
- * Genau so steht es heute in `classifyConsumedByState`
- * (`fifo-breakdown.ts`): kundenweit, ohne `inArray`, `allocationId IS NULL`
- * ausdruecklich eingeschlossen. Gemessen (Gate 2 zu #190, S-1) entsteht dort
- * weiterhin ein negatives `consumedOtherCents` — bei einem dokumentierten
- * Termin gegen einen zum Stichtag abgelaufenen Uebertrag ebenso wie bei einem
- * Vorjahres-Termin auf dem NULL-Leg.
- *
- * Das ist **kein Regress von #190** (ohne Startwert ist der Anker `null` und
- * die Bedingung zeichengleich mit der frueheren), aber es ist auch keine
- * Deckung. Ticket: `6hcfP7xVj5R3Pg6p`.
+ * ⚠ Was dieser Schnitt NICHT kennt: das AKTIVIERUNGS-Tor des Readers. Ist
+ * §45b deaktiviert oder der Stichtag ausserhalb des Settings-Fensters, liefert
+ * `readUnifiedBudgetAvailability` einen leeren Topf, waehrend die
+ * Aufschluesselung weiter rechnet. Gemessen (25.09.2026): Anspruch +500,00 EUR
+ * im Uebertrags-Topf bei einem Reader, der 0 sagt. Eigener Vorgang,
+ * `6hcfhqhjmgPW8q2G` — hier bewusst nicht mitbehandelt, weil es kein
+ * Schnitt-Problem ist.
  */
 export function countedConsumptionWhere(
-  reset: ResetAnchor | null,
+  schnitt: VerbrauchsSchnitt,
   asOfDate: string,
 ): SQL | undefined {
-  const bis = lte(budgetTransactions.transactionDate, asOfDate);
-  if (!reset) return bis;
-  return and(bis, gte(budgetTransactions.transactionDate, reset.cutoffDate));
+  const teile: (SQL | undefined)[] = [
+    lte(budgetTransactions.transactionDate, asOfDate),
+  ];
+
+  // (b) — Buchungen vor dem Reset sind in der neuen Startwert-Basis enthalten.
+  if (schnitt.resetAnchor) {
+    teile.push(gte(budgetTransactions.transactionDate, schnitt.resetAnchor.cutoffDate));
+  }
+
+  // (a) — NULL-sicher: `notInArray` auf einer NULL-Spalte ergibt NULL und
+  // wuerde die Zeile verwerfen. Das NULL-Leg gehoert aber gezaehlt (es hat
+  // sein eigenes Glied (c)).
+  if (schnitt.excludedAllocationIds.length > 0) {
+    teile.push(or(
+      isNull(budgetTransactions.allocationId),
+      notInArray(budgetTransactions.allocationId, [...schnitt.excludedAllocationIds]),
+    ));
+  }
+
+  // (c) — gilt AUSSCHLIESSLICH fuer das Leg ohne Allocation-Zuordnung.
+  if (schnitt.accrualFloorDate) {
+    teile.push(or(
+      isNotNull(budgetTransactions.allocationId),
+      gte(budgetTransactions.transactionDate, schnitt.accrualFloorDate),
+    ));
+  }
+
+  return and(...teile);
 }
 
 /**

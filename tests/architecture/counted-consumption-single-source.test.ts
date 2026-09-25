@@ -43,10 +43,12 @@ import { collectScanFiles, stripComments } from "./guard-helpers";
  * ── Was dieser Wächter NICHT hält ─────────────────────────────────────
  * `allocation-storage.ts` (der Reader) formuliert dieselbe Frage **invers**:
  * er rechnet nicht „was zählt", sondern `excludedConsumedNetCents` — „was
- * ist auszunehmen" — über drei Ausschluss-Glieder, von denen
- * `countedConsumptionWhere` zwei spiegelt (das dritte, die Sonder-Zuweisungen,
- * ist allocation-spezifisch und gehört zum Aufrufer). Zwei Formulierungen
- * derselben Frage sind ein Zweitbegriff; textlich ist er nicht zu fassen.
+ * ist auszunehmen" — über drei Ausschluss-Glieder. `countedConsumptionWhere`
+ * spiegelt seit `6hcfP7xVj5R3Pg6p` alle drei. Zwei Formulierungen derselben
+ * Frage (die eine „was zählt", die andere „was fällt heraus") bleiben
+ * trotzdem ein Zweitbegriff, und textlich ist er nicht zu fassen: kein
+ * Wächter und keine Invariante hält die beiden Gegenstücke zusammen
+ * (Gate 2 zu #192, S-3 — als FINDING im PR).
  * Er steht als offener Punkt in der Wirkungskarte (`#188`), nicht als stille
  * Lücke hier.
  *

@@ -180,7 +180,7 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
   },
   {
     id: "budget-counted-consumption-45b",
-    question: "Zählt diese §45b-BUCHUNG zum Stichtag? (Stichtags-Schranke + Reset-Schnitt)",
+    question: "Zählt diese §45b-BUCHUNG zum Stichtag? (Stichtags-Schranke + alle drei Ausschluss-Glieder des Readers)",
     // Bewusst ein EIGENER Eintrag neben `budget-allocation-window`: das ist die
     // Schwesterfrage, nicht dieselbe. Die eine entscheidet über Zuweisungen,
     // die andere über Buchungen. Sie in einen Eintrag zu legen hiesse, den

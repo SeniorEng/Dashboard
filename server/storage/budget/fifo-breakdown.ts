@@ -24,7 +24,7 @@ import {
   allocationValidAtWhere,
   notDisplacedByResetWhere,
   countedConsumptionWhere,
-  type ResetAnchor,
+  type VerbrauchsSchnitt,
   RESET_DISPLACES_ALL_SOURCES_DEFAULT,
 } from "./allocation-window";
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
@@ -33,7 +33,7 @@ import { db } from "../../lib/db";
 import { appointmentsRepo, budgetAllocationsRepo } from "../../repos";
 import { todayISO } from "@shared/utils/datetime";
 import { readUnifiedBudgetAvailability } from "./unified-reader";
-import { readResetAnchor } from "./allocation-storage";
+import { read45bAllocationDiagnostics } from "./allocation-storage";
 import { activeInvoiceCondition } from "../../lib/appointment-invoiced";
 
 export type Budget45bFifoPotType = "carryover" | "current_year";
@@ -97,38 +97,52 @@ export async function readBudget45bFifoBreakdown(
   // beim Default-Umschwung und die Uebertrags-Summe nicht — gemessen faellt
   // `allocatedCur` dann auf −1.048,00 EUR (Gate 2 zu #180, B1).
   /**
-   * EIN Lesevorgang, zwei Anker.
+   * EIN Lesevorgang, drei Glieder, zwei Anker.
    *
-   * Der Anker fuer den VERBRAUCHS-Schnitt haengt NICHT am Flag. Zwei
-   * verschiedene Fragen:
+   * ERSETZT `readResetAnchor` an dieser Stelle. Die Diagnose-Groesse kommt aus
+   * DERSELBEN Rechnung, aus der `A` und `C` oben stammen
+   * (`calculateAllocated45b`) — und liefert alle drei Ausschluss-Glieder statt
+   * nur des Ankers.
+   *
+   * ── Warum nicht mehr `readResetAnchor` ──────────────────────────────────
+   * Die beiden beantworten „welcher Startwert ist der Reset?" auf zwei Wegen:
+   * `readResetAnchor` ueber eine eigene Rohabfrage plus `resetAnchorFrom`, der
+   * Reader ueber `calculateAllocated45b`. Der zweite gibt `resetAnchor: null`
+   * zurueck, wenn der §45b-Anker `ineligible` ist — der erste nicht. Damit
+   * schnitt die Aufschluesselung dort, wo der Reader es nicht tat (Gate 2 zu
+   * #190, N-1). Ein Zweitbegriff derselben Frage, und er ist mit dieser
+   * Umstellung weg.
+   *
+   * ── Der VERBRAUCHS-Schnitt haengt NICHT am Flag ─────────────────────────
+   * Zwei verschiedene Fragen:
    *  · `resetAnchor` unten entscheidet ueber die VERDRAENGUNG von
    *    Uebertragszeilen — die ist schaltbar, und das bleibt so.
-   *  · `verbrauchsAnker` entscheidet, welche BUCHUNGEN zum Stichtag noch
-   *    zaehlen. Der Reader tut das unabhaengig vom Flag
-   *    (`allocation-storage.ts`: `resetAnchorFrom(initialBalanceMonths, …)`,
-   *    nur an `opts.year == null` gebunden).
+   *  · der Schnitt entscheidet, welche BUCHUNGEN zum Stichtag zaehlen. Der
+   *    Reader tut das flag-unabhaengig.
    *
-   * Genau daran ist die erste Fassung dieses Fixes gescheitert: sie benutzte
-   * den flag-gegateten Anker, und mit ausgeschaltetem Flag war er `null` —
-   * der Schnitt blieb aus, der Verbrauch weiter negativ. Gemessen, nicht
-   * hergeleitet (Ticket `6hcVM394XgmP37GG`).
+   * Daran ist die erste Fassung des Schnitt-Fixes gescheitert: sie benutzte den
+   * flag-gegateten Anker, und mit ausgeschaltetem Flag war er `null` — der
+   * Schnitt blieb aus, der Verbrauch weiter negativ (`6hcVM394XgmP37GG`).
    *
-   * Die erste Fassung las `readResetAnchor` ZWEIMAL mit identischen Argumenten
-   * (Gate 2 zu #190, N1). Das war nicht nur eine Abfrage zu viel, sondern zwei
-   * Quellen fuer dieselbe Zeile: ein spaeterer Filter an einer der beiden
-   * Aufrufstellen haette die Anker still auseinanderlaufen lassen, und der
-   * Unterschied waere genau da entstanden, wo niemand ihn vermutet. Jetzt ist
-   * der geschaltete Anker eine ABLEITUNG des gelesenen, keine zweite Lesung.
-   *
-   * Der Reviewer schlug vor, die Lesung hinter das `carryoverIds`-Tor zu
-   * ziehen. Das traegt seit dem B1-Fix nicht mehr: `classifyConsumedByState`
-   * braucht den Anker auf einem Pfad, der unabhaengig von Uebertragszeilen
-   * laeuft.
+   * Gemessen und der Grund, warum der Anker hier gefahrlos aus dem
+   * flag-behafteten Aufruf kommt: `initialBalanceMonths` filtert nur auf
+   * `source` und `month` (`allocation-storage.ts`), die Anker-Auswahl haengt
+   * also an keinem Flag. Die Ausschlussliste (Glied a) haengt daran sehr wohl —
+   * und MUSS es, weil `C` oben mit demselben Flag gerechnet wurde. Deshalb EIN
+   * Aufruf mit denselben `opts` wie der Reader, nicht zwei mit verschiedenen.
    */
-  const verbrauchsAnker = await readResetAnchor(customerId, asOfDate);
+  const diagnose = await read45bAllocationDiagnostics(customerId, {
+    asOfDate,
+    resetDisplacesAllSources: opts?.resetDisplacesAllSources,
+  });
+  const schnitt: VerbrauchsSchnitt = {
+    resetAnchor: diagnose.resetAnchor,
+    excludedAllocationIds: diagnose.excludedSpecialAllocationIds,
+    accrualFloorDate: diagnose.accrualFloorDate,
+  };
 
   const resetAnchor = (opts?.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
-    ? verbrauchsAnker
+    ? diagnose.resetAnchor
     : null;
   const carryoverAllocations = await budgetAllocationsRepo
     .selectColumnsFrom({ id: budgetAllocations.id, amountCents: budgetAllocations.amountCents, expiresAt: budgetAllocations.expiresAt })
@@ -172,7 +186,7 @@ export async function readBudget45bFifoBreakdown(
         sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
         // Derselbe Schnitt wie im Reader — sonst subtrahieren sich zwei Zahlen,
         // die verschiedene Mengen sehen (Ticket `6hcVM394XgmP37GG`).
-        countedConsumptionWhere(verbrauchsAnker, asOfDate),
+        countedConsumptionWhere(schnitt, asOfDate),
       )).groupBy(budgetTransactions.allocationId),
       db.select({
         allocationId: budgetTransactions.allocationId,
@@ -180,7 +194,7 @@ export async function readBudget45bFifoBreakdown(
       }).from(budgetTransactions).where(and(
         inArray(budgetTransactions.allocationId, carryoverIds),
         eq(budgetTransactions.transactionType, "reversal"),
-        countedConsumptionWhere(verbrauchsAnker, asOfDate),
+        countedConsumptionWhere(schnitt, asOfDate),
       )).groupBy(budgetTransactions.allocationId),
     ]);
     const consumedMap = new Map(consumed.map(c => [c.allocationId, Number(c.total)]));
@@ -223,7 +237,7 @@ export async function readBudget45bFifoBreakdown(
     loadDocumentedAppointmentIds(customerId),
   ]);
 
-  const stateByPot = await classifyConsumedByState(customerId, asOfDate, verbrauchsAnker, new Set(carryoverIds), billedSet, documentedSet);
+  const stateByPot = await classifyConsumedByState(customerId, asOfDate, schnitt, new Set(carryoverIds), billedSet, documentedSet);
 
   const carryStates = splitConsumed(consumedCarry, stateByPot.carryover);
   const curStates = splitConsumed(consumedCur, stateByPot.current);
@@ -299,7 +313,7 @@ async function loadDocumentedAppointmentIds(customerId: number): Promise<Set<num
 async function classifyConsumedByState(
   customerId: number,
   asOfDate: string,
-  verbrauchsAnker: ResetAnchor | null,
+  schnitt: VerbrauchsSchnitt,
   carryoverIdSet: Set<number>,
   billedSet: Set<number>,
   documentedSet: Set<number>,
@@ -339,24 +353,14 @@ async function classifyConsumedByState(
        * Glied (b) des Readers ist NICHT allocation-spezifisch, gilt also fuer
        * beide Toepfe. Deshalb dieselbe Funktion, nicht eine vierte Fassung.
        *
-       * ⚠ **HIER FEHLEN (a) UND (c) WIRKLICH** (Gate 2 zu #190, S-1).
-       * Die Begruendung im Docblock von `countedConsumptionWhere`, warum die
-       * beiden anderen Glieder entfallen duerfen, haengt an der
-       * Einschraenkung auf Allocation-IDs. Diese Abfrage hat sie NICHT: sie
-       * laeuft kundenweit und nimmt `allocationId IS NULL` ausdruecklich mit.
-       *
-       * Gemessen entsteht deshalb weiterhin ein negatives
-       * `consumedOtherCents` — bei einem dokumentierten Termin gegen einen zum
-       * Stichtag abgelaufenen Uebertrag (Glied a) ebenso wie bei einem
-       * Vorjahres-Termin auf dem NULL-Leg (Glied c).
-       *
-       * Kein Regress von #190: ohne Startwert ist der Anker `null`, und die
-       * Bedingung ist dann zeichengleich mit der frueheren. Aber auch keine
-       * Deckung. Der Fix braucht `excludedSpecialAllocationIds` und
-       * `accrualFloorDate` aus dem Reader — das ist der inverse-Formulierungs-
-       * Fall der Wirkungskarte und ein eigener Schritt: `6hcfP7xVj5R3Pg6p`.
+       * Seit `6hcfP7xVj5R3Pg6p` traegt der Schnitt ALLE DREI Glieder des
+       * Readers. Vorher fehlten hier (a) und (c) wirklich: die Abfrage laeuft
+       * kundenweit, ohne `inArray`, mit `allocationId IS NULL` — und es
+       * entstand ein negatives `consumedOtherCents`, gemessen je −100,00 EUR
+       * (abgelaufener Uebertrag bzw. Vorjahres-Termin auf dem NULL-Leg).
+       * Abnahme: `tests/budget/45b-fifo-zustand-ausschluss.test.ts`.
        */
-      countedConsumptionWhere(verbrauchsAnker, asOfDate),
+      countedConsumptionWhere(schnitt, asOfDate),
     ));
 
   const result = {
