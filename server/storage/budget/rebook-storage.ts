@@ -931,14 +931,17 @@ export async function rebookNetZeroAppointmentCore(
       date: txDate,
     }, tx);
   } catch (err) {
-    // Fehlende Preisvereinbarung ist ein fachlicher Fehler (400), kein 500
-    // (S-4): die Liste „Bereit zum Abrechnen" setzt pro Kunde nur 400/404 auf
-    // „kein Betrag" — ein nacktes `Error` aus dem Probelauf risse den ganzen
-    // Stapel mit. Gleiche Umsetzung wie beim Dokumentieren
-    // (`appointment-documentation.ts`).
-    if (err instanceof AppError) throw err;
-    const msg = err instanceof Error ? err.message : String(err);
-    throw badRequest(`${msg}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
+    // NUR die fehlende Preisvereinbarung ist ein fachlicher Fehler (400)
+    // (Gate 2 zu #193, S-4): die Liste „Bereit zum Abrechnen" setzt pro Kunde
+    // nur 400/404 auf „kein Betrag" — ein nacktes `Error` aus dem Probelauf
+    // risse den ganzen Stapel mit. Alles andere (DB-Stoerung, Timeout,
+    // Programmfehler) bleibt ein 500 und faellt als solcher auf (Runde 3, S-1).
+    // Dieselbe Einschraenkung wie beim Dokumentieren
+    // (`appointment-documentation.ts`, `includes("Preisvereinbarung")`).
+    if (err instanceof Error && !(err instanceof AppError) && err.message.includes("Preisvereinbarung")) {
+      throw badRequest(`${err.message}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
+    }
+    throw err;
   }
   if (costs.totalCents <= 0) return { rebooked: false };
 
@@ -1027,8 +1030,9 @@ export async function rebookNetZeroAppointmentCore(
  * Hintergrund: Wird eine Rechnung storniert, läuft pro Termin ein Budget-
  * Reversal — der Termin wird wieder abrechenbar und seine Konsumption ist
  * netto null (alle `consumption`-Zeilen storniert). Beim Re-Abrechnen
- * deriviert `getBudgetSplitForAppointments` den Pot-Anteil read-only aus der
- * AKTUELLEN Allocation (Task #1011), bucht aber NICHTS. Ohne Re-Buchung weist
+ * ermittelt `getBudgetSplitForAppointments` den Pot-Anteil (seit #193 als
+ * zurueckgerollter Probelauf DIESER Neubuchung), bucht aber nichts, was
+ * stehen bleibt. Ohne Re-Buchung weist
  * die neue Rechnung also einen Pott aus (z.B. §45b), während der Ledger den
  * Topf weiterhin als „verfügbar" führt → ein späterer Termin verbraucht
  * denselben Topf erneut → derselbe Topf ist über ZWEI aktive Rechnungen
