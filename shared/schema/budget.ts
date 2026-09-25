@@ -43,6 +43,34 @@ export const budgetAllocations = pgTable("budget_allocations", {
   validFrom: date("valid_from").notNull(), // When this allocation becomes available
   expiresAt: date("expires_at"), // null = never expires, set for carryover (June 30)
   notes: text("notes"),
+  /**
+   * Die Vorgangs-Klammer: welche Zeilen gehoeren zu EINER Kassenauskunft?
+   *
+   * Gesetzt auf BEIDE Zeilen eines Vorgangs (Rest laufendes Jahr als
+   * `initial_balance`, Rest Uebertrag als `carryover`). Alle Zeilen desselben
+   * Vorgangs zaehlen zum Stichtag; alles frueher Beginnende ist ersetzt.
+   *
+   * ── Warum eine eigene Spalte und nicht ein vorhandenes Merkmal ──────────
+   * Ohne Klammer verdraengt der Stichtag die Uebertragszeile DESSELBEN
+   * Vorgangs mit: `displacedByReset` prueft
+   * `validFrom <= cutoffDate && year <= reset.year`, und beide sind fuer die
+   * neue Zeile erfuellt (ihr `validFrom` IST der Stichtag). Gemessen an der
+   * Funktion, nicht hergeleitet.
+   *
+   * Verworfen, mit gemessenem Grund:
+   *  · `expiresAt` der alten Zeile vorziehen — `processExpiredCarryover`
+   *    waehlt ueber `expires_at < today` und schriebe einen `write_off` ueber
+   *    den vollen Restbetrag mit der Notiz „Verfallenes Guthaben". Eine
+   *    GoBD-relevante Aussage, die sachlich falsch waere.
+   *  · `created_at` als Merkmal — die Sekunden-Heuristik fand in Prod
+   *    0 Treffer. Als Eintragsdatum ist die Spalte brauchbar (`NOT NULL
+   *    DEFAULT now()`), als Vorgangs-Merkmal nicht.
+   *
+   * **`null` heisst: kein Vorgang bekannt** — Altbestand, Jahreswechsel-
+   * Automatik, Backfills. Fuer solche Zeilen gilt unveraendert das heutige
+   * Verhalten: ein Anker ohne Klammer verdraengt nichts.
+   */
+  kassenauskunftId: integer("kassenauskunft_id"),
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),

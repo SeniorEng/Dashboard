@@ -66,6 +66,7 @@ async function kundeFunke(): Promise<number> {
   await db.insert(budgetAllocations).values({
     customerId: id, budgetType: "entlastungsbetrag_45b",
     year: ANKER_JAHR, month: 6, amountCents: 131_00, source: "initial_balance",
+    kassenauskunftId: 90001,
     validFrom: `${ANKER_JAHR}-06-01`, expiresAt: null,
     notes: "Funke-Startwert 06/2026",
   });
@@ -193,6 +194,7 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       await db.insert(budgetAllocations).values({
         customerId: id, budgetType: "entlastungsbetrag_45b",
         year: ANKER_JAHR, month: 6, amountCents: 131_00, source: "initial_balance",
+        kassenauskunftId: 90001,
         validFrom: `${ANKER_JAHR}-06-01`, expiresAt: null, notes: "VD5-Startwert",
       });
       // Der inkonsistente Übertrag: `year` ZWEI Jahre über dem Reset,
@@ -254,6 +256,7 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
         {
           customerId: id, budgetType: "entlastungsbetrag_45b",
           year: ANKER_JAHR, month: 1, amountCents: 131_00, source: "initial_balance",
+          kassenauskunftId: 90001,
           validFrom: `${ANKER_JAHR}-01-01`, expiresAt: null, notes: "VD6-Januar-Inventur",
         },
         {

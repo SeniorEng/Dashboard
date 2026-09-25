@@ -73,6 +73,10 @@ describe("§45b — ersetzter Übertrag ist als ersetzt gekennzeichnet", () => {
           customerId: id, budgetType: "entlastungsbetrag_45b", year: JAHR, month: 6,
           amountCents: 131_00, source: "initial_balance",
           validFrom: `${JAHR}-06-01`, expiresAt: null, notes: "EK1-neu",
+          // Die Kassenauskunft ist der NEUERE Vorgang; der ältere Startwert
+          // (Januar) trägt bewusst keine Klammer — er ist das, was ersetzt wird.
+          // Ohne Klammer am Anker verdrängt seit Modell v2 nichts mehr.
+          kassenauskunftId: 90_001,
         },
       ]);
 

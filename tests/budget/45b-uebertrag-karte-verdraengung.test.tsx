@@ -112,6 +112,7 @@ beforeAll(async () => {
       validFrom: `${JAHR}-01-01`, expiresAt: `${JAHR}-06-30`, notes: "E4K-uebertrag" },
     { customerId: kundeId, budgetType: "entlastungsbetrag_45b", year: JAHR, month: 6,
       amountCents: STARTWERT, source: "initial_balance",
+      kassenauskunftId: 90001,
       validFrom: `${JAHR}-06-01`, expiresAt: null, notes: "E4K-startwert" },
   ]).returning({ id: budgetAllocations.id, notes: budgetAllocations.notes });
   await db.insert(budgetTransactions).values({

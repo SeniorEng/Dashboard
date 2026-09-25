@@ -37,7 +37,7 @@
  * beantworten andere Fragen (Reset-Baseline bzw. Doppelzaehlung) und haben je
  * genau einen Aufrufer.
  */
-import { and, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
+import { and, eq, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
 import { budgetAllocations } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
@@ -58,6 +58,14 @@ export interface AllocationWindowRow {
 export interface ResetAnchor {
   /** Monatsanfang des spaetesten wirksamen Startwert-Monats (`yyyy-mm-01`). */
   cutoffDate: string;
+  /**
+   * Die Vorgangs-Klammer der Anker-Zeile, oder `null`.
+   *
+   * `null` heisst: der Startwert stammt nicht aus einer Kassenauskunft
+   * (Altbestand, Einzel-Editor, Automatik). Dann verdraengt er nichts — das
+   * heutige Verhalten bleibt unveraendert.
+   */
+  kassenauskunftId: number | null;
   /** Jahr desselben Startwerts. */
   year: number;
   /**
@@ -161,7 +169,7 @@ export const RESET_DISPLACES_ALL_SOURCES_DEFAULT = false;
  * die Messung deshalb eine Untergrenze. Sie ist es nicht.
  */
 export function displacedByReset(
-  row: AllocationWindowRow & { year: number },
+  row: AllocationWindowRow & { year: number; kassenauskunftId?: number | null },
   reset: ResetAnchor | null,
 ): boolean {
   if (!reset) return false;
@@ -180,6 +188,33 @@ export function displacedByReset(
    * **`<=` verdraengt MEHR als `<`.** Jede Messung, die mit `<` gefahren
    * wurde, ist damit eine Untergrenze.
    */
+  /**
+   * Ohne Klammer am Anker verdraengt nichts (Alrik/Cowork, 24.09.2026).
+   *
+   * Der Altbestand traegt keine Klammer: Startwerte aus den Einzel-Editoren,
+   * der Jahreswechsel-Automatik und den Backfills. Fuer sie gilt unveraendert
+   * das heutige Verhalten.
+   *
+   * Warum das keine Uebergangsloesung ist, sondern die Regel: eine
+   * Verdraengung ohne ausdrueckliche Uebertrags-Angabe war genau der Fehler,
+   * an dem #184 gescheitert ist. Sie loeschte den Vorjahresanteil, den die
+   * Kasse getrennt gemeldet hatte.
+   */
+  if (reset.kassenauskunftId == null) return false;
+
+  /**
+   * Die Zeilen DESSELBEN Vorgangs zaehlen — auch die Uebertragszeile, deren
+   * `validFrom` der Stichtag selbst ist.
+   *
+   * Ohne diese Zeile verdraengte der Stichtag seine eigene Uebertragszeile:
+   * `validFrom <= cutoffDate` ist fuer sie erfuellt (beides derselbe Tag),
+   * `year <= reset.year` ebenfalls. An der Funktion gemessen, nicht
+   * hergeleitet.
+   */
+  if (row.kassenauskunftId != null && row.kassenauskunftId === reset.kassenauskunftId) {
+    return false;
+  }
+
   return row.validFrom <= reset.cutoffDate && row.year <= reset.year;
 }
 
@@ -219,8 +254,12 @@ export function displacedByReset(
  */
 export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undefined {
   if (!reset) return undefined;
-  // Negation von `validFrom <= cutoff AND year <= resetYear`.
+  // Ohne Klammer am Anker verdraengt nichts — Spiegel zu `displacedByReset`.
+  if (reset.kassenauskunftId == null) return undefined;
+  // Negation von:
+  //   klammer <> ankerKlammer  AND  validFrom <= cutoff  AND  year <= resetYear
   return or(
+    eq(budgetAllocations.kassenauskunftId, reset.kassenauskunftId),
     gt(budgetAllocations.validFrom, reset.cutoffDate),
     gt(budgetAllocations.year, reset.year),
   );
@@ -243,11 +282,12 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
  * ueber die Zuweisungen.
  */
 export function resetAnchorFrom(
-  initialBalanceMonths: readonly { year: number; month: number }[],
+  initialBalanceMonths: readonly { year: number; month: number; kassenauskunftId?: number | null }[],
   resetDateLimit: string,
 ): ResetAnchor | null {
   let jahr = 0;
   let monat = 0;
+  let klammer: number | null = null;
   let gefunden = false;
   for (const ib of initialBalanceMonths) {
     const beginn = `${ib.year}-${String(ib.month).padStart(2, "0")}-01`;
@@ -255,6 +295,7 @@ export function resetAnchorFrom(
     if (!gefunden || ib.year > jahr || (ib.year === jahr && ib.month > monat)) {
       jahr = ib.year;
       monat = ib.month;
+      klammer = ib.kassenauskunftId ?? null;
       gefunden = true;
     }
   }
@@ -263,5 +304,6 @@ export function resetAnchorFrom(
     cutoffDate: `${jahr}-${String(monat).padStart(2, "0")}-01`,
     year: jahr,
     month: monat,
+    kassenauskunftId: klammer,
   };
 }

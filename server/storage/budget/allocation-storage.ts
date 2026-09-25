@@ -688,6 +688,7 @@ export async function readResetAnchor(
   const zeilen = await budgetAllocationsRepo.selectColumnsFrom({
     year: budgetAllocations.year,
     month: budgetAllocations.month,
+    kassenauskunftId: budgetAllocations.kassenauskunftId,
   }, d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
@@ -696,8 +697,8 @@ export async function readResetAnchor(
       isNull(budgetAllocations.deletedAt),
     ));
   const monate = zeilen
-    .filter((z): z is { year: number; month: number } => z.month != null)
-    .map((z) => ({ year: z.year, month: z.month }));
+    .filter((z): z is { year: number; month: number; kassenauskunftId: number | null } => z.month != null)
+    .map((z) => ({ year: z.year, month: z.month, kassenauskunftId: z.kassenauskunftId }));
   return resetAnchorFrom(monate, asOfDate);
 }
 
@@ -784,7 +785,9 @@ async function calculateAllocated45b(
   // aktiv ist.
   const initialBalanceMonths = existingAllocations
     .filter(a => a.source === "initial_balance" && a.month != null)
-    .map(a => ({ year: a.year, month: a.month! }));
+    // Die Vorgangs-Klammer MUSS mit — ohne sie faellt der Anker auf `null`
+    // zurueck und verdraengt nichts (KL-2/KL-3).
+    .map(a => ({ year: a.year, month: a.month!, kassenauskunftId: a.kassenauskunftId }));
 
   // ── Task #1812, hochgezogen (P1 6hXp9qMrXH2WGVVG) ──────────────────────
   // Der SPAETESTE zum Stichtag bereits wirksame Startwert-Monat M ist die neue
