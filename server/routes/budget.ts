@@ -586,10 +586,10 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
     return;
   }
   const { read45bAllocationDiagnostics } = await import("../storage/budget/allocation-storage");
-  const { allocationValidAt, displacedByReset } = await import("../storage/budget/allocation-window");
   const heute = todayISO();
   const diagnose = await read45bAllocationDiagnostics(customerId, { asOfDate: heute });
   const ausgeschlossen = new Set(diagnose.excludedSpecialAllocationIds);
+  const ersetzt = new Set(diagnose.ersetztDurchStartwertIds);
   /**
    * Der Anker kommt aus der Diagnose, die eine Zeile darueber ohnehin gelesen
    * wird — nicht aus einem zweiten Aufruf.
@@ -615,31 +615,29 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
   res.json(allocations.map(a => {
     const zaehltNicht = ausgeschlossen.has(a.id);
     /**
-     * Der GRUND wird gefragt, nicht erschlossen (Gate 2 zu #166, B1).
+     * Der GRUND wird gefragt, nicht erschlossen (Gate 2 zu #166, B1) — und
+     * seit #193 aus DERSELBEN Liste, die der Reader fuer den Verbrauch benutzt.
      *
      * Die erste Fassung las „zaehlt nicht" plus „`validFrom` vor dem Reset"
-     * als „also ersetzt". **Ausgefuehrt war das in JEDEM heute sichtbaren Fall
-     * falsch:** solange das Flag aus ist, kann ein Uebertrag nur aus einem
-     * Grund herausfallen — er ist VERFALLEN. Die Zeile meldete dann
-     * „ersetzt durch Startwert 03/2026" direkt neben „verfaellt 30.06.2026".
-     * Zwei widersprechende Auskuenfte, an genau der Stelle, an der jemand
-     * nachsieht, warum eine Zahl nicht stimmt.
+     * als „also ersetzt" und meldete damit einen VERFALLENEN Uebertrag als
+     * ersetzt. Die zweite leitete es hier selbst ab (Fenster +
+     * `displacedByReset`) — eine zweite Definition neben
+     * `ersetztDurchStartwertIds` des Readers. Die beiden wichen ab (Gate 2 zu
+     * #193, S-1):
+     *  · ein Uebertrag, der verdraengt UND inzwischen abgelaufen ist, galt dem
+     *    Reader als ersetzt, hier als verfallen;
+     *  · der Anker-Startwert selbst erfuellt `displacedByReset`
+     *    (`validFrom == cutoffDate`) — faellt er aus einem ANDEREN Grund aus
+     *    der Zaehlung (Vorjahr), stand hier „ersetzt durch Startwert 05/2025"
+     *    an Startwert 05/2025: ersetzt durch sich selbst.
      *
-     * Jetzt beide Bedingungen aus der SSoT, und die erste schliesst den
-     * Verfall aus: die Zeile muss im Gueltigkeitsfenster LIEGEN und vom Reset
-     * verdraengt SEIN. Ein verfallener Uebertrag faellt an der ersten,
-     * unabhaengig davon, ob ein Startwert existiert.
+     * Jetzt eine Quelle. Der Reader unterscheidet „ersetzt" von „verfallen"
+     * und nimmt den Anker aus („echt frueher", Tabelle D).
      */
-    const imFenster = allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, heute);
-    const vomResetVerdraengt = displacedByReset(
-      { validFrom: a.validFrom, expiresAt: a.expiresAt, year: a.year },
-      resetAnker,
-    );
     return {
       ...a,
       zaehltNicht,
-      ersetztDurchStartwertMonat:
-        zaehltNicht && resetMonat && imFenster && vomResetVerdraengt ? resetMonat : null,
+      ersetztDurchStartwertMonat: ersetzt.has(a.id) && resetMonat ? resetMonat : null,
     };
   }));
 }));

@@ -137,7 +137,8 @@ export async function readBudget45bFifoBreakdown(
   });
   const schnitt: VerbrauchsSchnitt = {
     resetAnchor: diagnose.resetAnchor,
-    excludedAllocationIds: diagnose.excludedSpecialAllocationIds,
+    excludedAllocationIds: diagnose.verbrauchsAusschlussIds,
+    ersetztAllocationIds: diagnose.ersetztDurchStartwertIds,
     accrualFloorDate: diagnose.accrualFloorDate,
   };
 

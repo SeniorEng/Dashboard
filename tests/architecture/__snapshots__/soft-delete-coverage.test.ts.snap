@@ -90,7 +90,6 @@ exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) 
   ],
   "server/services/invoice-data.ts": [
     "appointmentsRepo",
-    "customersRepo",
     "monthlyServiceRecordsRepo",
   ],
   "server/services/invoice-pdf-orchestrator.ts": [
@@ -116,6 +115,9 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
     "appointmentsRepo",
   ],
   "server/storage/appointments-storage.ts": [
+    "appointmentsRepo",
+  ],
+  "server/storage/budget/abrechnungs-lauf.ts": [
     "appointmentsRepo",
   ],
   "server/storage/budget/allocation-storage.ts": [

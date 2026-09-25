@@ -8,12 +8,14 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, or, inArray, isNotNull, gte, lte, ne } from "drizzle-orm";
 import { db } from "../../lib/db";
+import { AppError, badRequest } from "../../lib/errors";
 import type { DbClient, CascadeResult } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
 import { todayISO, lastDayOfMonth } from "@shared/utils/datetime";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "./unified-reader";
+import { chronologischeReihenfolge } from "./abrechnungs-lauf";
 import { formatEuroDE } from "@shared/utils/money";
 import { appointmentsRepo, customersRepo } from "../../repos";
 import {
@@ -825,12 +827,22 @@ export async function rebookNetZeroAppointmentCore(
   params: {
     customerId: number;
     appointmentId: number;
-    userId: number;
+    /**
+     * Wer bucht. `"probelauf"` NUR fuer die Vorschau (`invoice-data.ts`,
+     * `probelaufNeubuchung`): dort wird alles zurueckgerollt, es gibt keinen
+     * Handelnden, und die Engine erfindet auch keinen (kein Audit-Eintrag auf
+     * einen fremden Nutzer, Gate 2 zu #193, S-1). Ausdruecklich statt eines
+     * optionalen `userId` (N-2): ein echter Buchungspfad kann den Handelnden
+     * so nicht unbemerkt weglassen.
+     */
+    handelnder: { userId: number } | "probelauf";
     overflowRestriction?: { allowedPots: string[] };
     privatePotOverride?: RebookPrivatePotOverride | null;
   },
 ): Promise<{ rebooked: boolean; cascade?: CascadeResult }> {
-  const { customerId, appointmentId, userId, overflowRestriction, privatePotOverride } = params;
+  const { customerId, appointmentId, handelnder, overflowRestriction, privatePotOverride } = params;
+  const probelauf = handelnder === "probelauf";
+  const userId = probelauf ? undefined : handelnder.userId;
 
   // Gleicher Advisory-Lock-Namespace wie createConsumptionTransaction /
   // rebookDisabledBudgetTransactions: serialisiert Re-Buchung und parallele
@@ -905,14 +917,32 @@ export async function rebookNetZeroAppointmentCore(
   const customerKm = appt.customerKilometers ?? 0;
   const txDate = typeof appt.date === "string" ? appt.date : String(appt.date);
 
-  const costs = await calculateAppointmentCost({
-    customerId,
-    hauswirtschaftMinutes: hwMinutes,
-    alltagsbegleitungMinutes: abMinutes,
-    travelKilometers: travelKm,
-    customerKilometers: customerKm,
-    date: txDate,
-  });
+  // Preis IM tx lesen (Gate 2 zu #193, S-5): ueber das globale `db` braeuchte
+  // jeder Probelauf eine zweite Verbindung, waehrend er die erste haelt — bei
+  // vielen parallelen Probelaeufen faehrt sich der Pool fest.
+  let costs: Awaited<ReturnType<typeof calculateAppointmentCost>>;
+  try {
+    costs = await calculateAppointmentCost({
+      customerId,
+      hauswirtschaftMinutes: hwMinutes,
+      alltagsbegleitungMinutes: abMinutes,
+      travelKilometers: travelKm,
+      customerKilometers: customerKm,
+      date: txDate,
+    }, tx);
+  } catch (err) {
+    // NUR die fehlende Preisvereinbarung ist ein fachlicher Fehler (400)
+    // (Gate 2 zu #193, S-4): die Liste „Bereit zum Abrechnen" setzt pro Kunde
+    // nur 400/404 auf „kein Betrag" — ein nacktes `Error` aus dem Probelauf
+    // risse den ganzen Stapel mit. Alles andere (DB-Stoerung, Timeout,
+    // Programmfehler) bleibt ein 500 und faellt als solcher auf (Runde 3, S-1).
+    // Dieselbe Einschraenkung wie beim Dokumentieren
+    // (`appointment-documentation.ts`, `includes("Preisvereinbarung")`).
+    if (err instanceof Error && !(err instanceof AppError) && err.message.includes("Preisvereinbarung")) {
+      throw badRequest(`${err.message}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
+    }
+    throw err;
+  }
   if (costs.totalCents <= 0) return { rebooked: false };
 
   // Privattopf: expliziter Override (Kürzungs-Ablauf) ODER Standard-Ableitung.
@@ -964,6 +994,7 @@ export async function rebookNetZeroAppointmentCore(
     customerKilometers: customerKm,
     customerKilometersCents: costs.customerKilometersCents,
     userId,
+    probelauf,
     skipExistingCheck: true,
     privatePot,
     overflowRestriction,
@@ -975,7 +1006,12 @@ export async function rebookNetZeroAppointmentCore(
   // Rechnungserstellung scheitert mit klarer Meldung, der/die Bearbeiter:in
   // muss die Budget-Konfiguration/Buchungen für diesen Termin prüfen.
   if (cascadeResult.outstandingCents > 0) {
-    throw new Error(
+    // Fachlicher Fehler (Budget-Konfiguration), daher 400 — nicht 500. Seit die
+    // Vorschau und die Liste „Bereit zum Abrechnen" diesen Kern im Probelauf
+    // fahren (#193), zaehlt das: die Liste faengt pro Kunde nur 400/404 ab
+    // (`billing-customer-amounts.ts`), ein nacktes `Error` risse den ganzen
+    // Stapel mit.
+    throw badRequest(
       `Re-Abrechnung nicht möglich: Termin #${appointmentId} kann nicht ` +
       `vollständig aus den gesetzlichen Pflegekassen-Töpfen abgerechnet ` +
       `werden (${formatEuroDE(cascadeResult.outstandingCents)} ohne ` +
@@ -994,8 +1030,9 @@ export async function rebookNetZeroAppointmentCore(
  * Hintergrund: Wird eine Rechnung storniert, läuft pro Termin ein Budget-
  * Reversal — der Termin wird wieder abrechenbar und seine Konsumption ist
  * netto null (alle `consumption`-Zeilen storniert). Beim Re-Abrechnen
- * deriviert `getBudgetSplitForAppointments` den Pot-Anteil read-only aus der
- * AKTUELLEN Allocation (Task #1011), bucht aber NICHTS. Ohne Re-Buchung weist
+ * ermittelt `getBudgetSplitForAppointments` den Pot-Anteil (seit #193 als
+ * zurueckgerollter Probelauf DIESER Neubuchung), bucht aber nichts, was
+ * stehen bleibt. Ohne Re-Buchung weist
  * die neue Rechnung also einen Pott aus (z.B. §45b), während der Ledger den
  * Topf weiterhin als „verfügbar" führt → ein späterer Termin verbraucht
  * denselben Topf erneut → derselbe Topf ist über ZWEI aktive Rechnungen
@@ -1023,9 +1060,14 @@ export async function rebookNetZeroAppointmentConsumption(params: {
   const rebookedAppointmentIds: number[] = [];
   if (appointmentIds.length === 0) return { rebookedAppointmentIds };
 
-  for (const appointmentId of appointmentIds) {
+  // CHRONOLOGISCH (Tabelle D). Vorher kam die Reihenfolge aus
+  // `computeNetZeroApptIds`, also aus der Ladereihenfolge der Buchungen. Das
+  // Buchen hier ist kumulativ (jede Buchung ist für die nächste schon im
+  // Ledger) — WELCHER Termin den Rest privat bekommt, hing damit am Zufall.
+  // Dieselbe Reihenfolge wie die Vorschau, damit beide dasselbe zeigen.
+  for (const appointmentId of await chronologischeReihenfolge(appointmentIds)) {
     const { rebooked } = await db.transaction((tx) =>
-      rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, userId }),
+      rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, handelnder: { userId } }),
     );
     if (rebooked) rebookedAppointmentIds.push(appointmentId);
   }

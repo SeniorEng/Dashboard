@@ -202,6 +202,30 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "abrechnungs-lauf",
+    question: "In welcher Reihenfolge rechnet ein Abrechnungs-Lauf über mehrere Termine?",
+    // Gate 2 zu #193, S-7. Zwei Aufrufer lesen dieselbe Reihenfolge: die
+    // Vorschau (Probelauf `probelaufNeubuchung`) und das Erstellen
+    // (`rebookNetZeroAppointmentConsumption`). Laufen sie auseinander, zeigt
+    // die Vorschau etwas anderes, als gebucht wird — der Anlass dieses PRs.
+    canonical: [
+      { symbol: "chronologischeReihenfolge", module: "server/storage/budget/abrechnungs-lauf.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // KEIN Muster-Waechter, sondern der Verhaltenstest der Reihenfolge
+        // (AL-1). Die Topf-Fenster setzt seit dem Vorschau-Probelauf die
+        // Buchungs-Engine selbst um. Einen Waechter, der eine
+        // zweite Lauf-Reihenfolge im Baum findet, gibt es nicht — das steht
+        // hier ausdruecklich, damit der Eintrag keine Absicherung behauptet,
+        // die er nicht hat.
+        test: "tests/budget/abrechnungs-lauf.test.ts",
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "budget-projected-45b",
     question: "Welcher §45b-Stand gilt für das ANLEGE-Tor? (Projektion bis Monatsende)",
     canonical: [
