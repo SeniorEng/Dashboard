@@ -1395,14 +1395,26 @@ async function calculateAllocated45b(
    * die Inventur zum Cutoff abgegolten. Siehe `verbrauchsAusschlussIds`.
    *
    * Fuer einen Startwert gilt das ohne Flag: frueherer Startwert, spaeterer
-   * Reset (#1812, laengst aktiv). Fuer einen Uebertrag nur, wenn die
-   * Verdraengung ihn tatsaechlich aus `Allocated` genommen hat — dieselbe
-   * Bedingung wie in `carryoverCounted`, nicht eine zweite.
+   * Reset (#1812, laengst aktiv) — aber nur, wenn er ECHT FRUEHER ist als der
+   * Anker (Tabelle D, Alrik 25.09.2026). `displacedByReset` prueft
+   * `validFrom <= cutoffDate` und traefe damit auch den Anker-Startwert
+   * selbst; faellt der aus einem ANDEREN Grund aus der Zaehlung (Vorjahr,
+   * Aufstockungs-Boden), erschiene er als „ersetzt durch sich selbst"
+   * (Gate 2 zu #193, B-1 / S-1). Verglichen wird deshalb (Jahr, Monat) — die
+   * Identitaet des Ankers, nicht sein Datum.
+   *
+   * Fuer einen Uebertrag nur, wenn die Verdraengung ihn tatsaechlich aus
+   * `Allocated` genommen hat — dieselbe Bedingung wie in `carryoverCounted`,
+   * nicht eine zweite. Dort gilt weiter `<=` (Alriks Weiche zu #166): ein
+   * Startwert im Januar ersetzt den Uebertrag ab 01.01.
    */
   const verdraengungAn = opts.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT;
-  const vomStartwertErsetzt = (a: { source: string; validFrom: string; expiresAt: string | null; year: number }) =>
+  const echtFrueherAlsAnker = (a: { year: number; month: number | null }) =>
+    resetAnchor != null && a.month != null
+    && (a.year < resetAnchor.year || (a.year === resetAnchor.year && a.month < resetAnchor.month));
+  const vomStartwertErsetzt = (a: { source: string; validFrom: string; expiresAt: string | null; year: number; month: number | null }) =>
     a.source === "initial_balance"
-      ? displacedByReset(a, resetAnchor)
+      ? echtFrueherAlsAnker(a)
       : verdraengungAn && displacedByReset(a, resetAnchor);
   const verbrauchsAusschlussIds = nichtGezaehlt
     .filter(a => !vomStartwertErsetzt(a))
@@ -1505,10 +1517,21 @@ export async function getExcluded45bConsumption(
     // Auf einer vom Startwert ersetzten Zuweisung faellt die ABSCHREIBUNG
     // immer heraus — sie ist der Verfall eines bereits abgegoltenen Bestands,
     // kein Verbrauch (E2, Doppelabschreibung). Buchung und Storno zaehlen.
+    // Und nur im LAUFENDEN Anspruchsfenster (Tabelle D, Alrik 25.09.2026,
+    // Gate 2 zu #193, B-1): eine Buchung auf einer ersetzten Zuweisung aus
+    // einem frueheren Jahr steckt im Uebertrag oder ist verfallen. Gemessen:
+    // ohne diese Grenze zaehlte eine Juni-2025-Buchung auf einem Startwert
+    // 05/2025 gegen 2026 — verfuegbar 100,00 EUR zu NIEDRIG. Der Boden ist
+    // derselbe wie in Glied (c), nur hier fuer verknuepfte Zeilen.
     ersetztDurchStartwertIds.length > 0
       ? and(
           inArray(budgetTransactions.allocationId, ersetztDurchStartwertIds),
-          eq(budgetTransactions.transactionType, "write_off"),
+          accrualFloorDate
+            ? or(
+                eq(budgetTransactions.transactionType, "write_off"),
+                lt(budgetTransactions.transactionDate, accrualFloorDate),
+              )
+            : eq(budgetTransactions.transactionType, "write_off"),
         )
       : undefined,
     resetAnchor

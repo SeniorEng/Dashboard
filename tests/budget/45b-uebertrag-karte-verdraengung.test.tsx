@@ -90,6 +90,8 @@ let kundeId: number;
 let kundeOhneStartwert: number;
 let dtoOhne: Record<string, unknown>;
 let dtoMit: Record<string, unknown>;
+let dtoVorStartwert: Record<string, unknown>;
+let kundeVorStartwert: number;
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -143,6 +145,40 @@ beforeAll(async () => {
     validFrom: `${JAHR}-01-01`, expiresAt: `${JAHR}-06-30`, notes: "E4K-nur-uebertrag",
   });
 
+  /**
+   * Der Verbrauch VOR dem Startwert (10.05.) — für KA-3 (Entscheidung Alrik,
+   * 25.09.2026). Dort ist er wirklich im Startwert abgebildet, unter BEIDEN
+   * Lesarten; die Zeile „verfallen oder ersetzt" zeigt ihn.
+   *
+   * Der 10.06.-Fall bleibt beim Hauptkunden und ist jetzt KA-3b: nach R4
+   * zählt eine Buchung ab dem 1. des Startwert-Monats gegen den Startwert.
+   * KA-3 hielt bis #193 das Gegenteil fest (N-P1).
+   */
+  const [k3] = await db.insert(customers).values({
+    name: "E4-Karte Verbrauch vor Startwert", address: "Teststr. 7", pflegegrad: 3,
+    billingType: "pflegekasse_gesetzlich", acceptsPrivatePayment: false,
+  } as never).returning({ id: customers.id });
+  kundeVorStartwert = k3.id;
+  await db.delete(customerCareLevelHistory).where(eq(customerCareLevelHistory.customerId, kundeVorStartwert));
+  await db.insert(customerBudgetTypeSettings).values({
+    customerId: kundeVorStartwert, budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1,
+    monthlyLimitCents: null, yearlyLimitCents: null, validFrom: `${JAHR}-01-01`, validTo: null,
+  });
+  const zeilen3 = await db.insert(budgetAllocations).values([
+    { customerId: kundeVorStartwert, budgetType: "entlastungsbetrag_45b", year: JAHR, month: null,
+      amountCents: UEBERTRAG, source: "carryover",
+      validFrom: `${JAHR}-01-01`, expiresAt: `${JAHR}-06-30`, notes: "E4K3-uebertrag" },
+    { customerId: kundeVorStartwert, budgetType: "entlastungsbetrag_45b", year: JAHR, month: 6,
+      amountCents: STARTWERT, source: "initial_balance",
+      validFrom: `${JAHR}-06-01`, expiresAt: null, notes: "E4K3-startwert" },
+  ]).returning({ id: budgetAllocations.id, notes: budgetAllocations.notes });
+  await db.insert(budgetTransactions).values({
+    customerId: kundeVorStartwert, budgetType: "entlastungsbetrag_45b",
+    allocationId: zeilen3.find(a => a.notes === "E4K3-uebertrag")!.id,
+    transactionType: "consumption", amountCents: -VERBRAUCH,
+    transactionDate: `${JAHR}-05-10`, description: "E4K3-verbrauch-vor-startwert",
+  });
+
   // KEIN `opts` mehr — beide Seiten laufen ueber denselben produktiven Pfad,
   // die Konstante oben entscheidet.
   const legacyMit = await getBudgetSummary(kundeId, undefined, undefined, STICHTAG);
@@ -151,6 +187,9 @@ beforeAll(async () => {
   const potOhne = (await readUnifiedBudgetAvailability(kundeOhneStartwert, STICHTAG)).pots.entlastungsbetrag_45b;
 
   dtoMit = mergeServed45b(legacyMit, potMit) as unknown as Record<string, unknown>;
+  const legacyVor = await getBudgetSummary(kundeVorStartwert, undefined, undefined, STICHTAG);
+  const potVor = (await readUnifiedBudgetAvailability(kundeVorStartwert, STICHTAG)).pots.entlastungsbetrag_45b;
+  dtoVorStartwert = mergeServed45b(legacyVor, potVor) as unknown as Record<string, unknown>;
   dtoOhne = mergeServed45b(legacyOhne, potOhne) as unknown as Record<string, unknown>;
 }, 180_000);
 
@@ -166,6 +205,7 @@ afterAll(async () => {
    */
   await cleanupCustomer(kundeId);
   await cleanupCustomer(kundeOhneStartwert);
+  await cleanupCustomer(kundeVorStartwert);
 });
 
 afterEach(() => cleanup());
@@ -219,13 +259,39 @@ describe("§45b-Übersichtskarte — der ersetzte Übertrag steht als ersetzt da
   }, 60_000);
 
   it("KA-3 – die Verbrauchs-Zeile nennt BEIDE Fälle, nicht nur den Verfall", async () => {
-    // Der Verbrauch liegt am 10.06., der Reset zum 01.06. — also NICHT in einem
-    // abgeschlossenen Zeitraum. Die frühere Beschriftung „aus abgeschlossenem
-    // Zeitraum" war dafür irreführend.
-    await karteZeigen(dtoMit, kundeId);
+    // Verbrauch am 10.05., VOR dem Startwert vom 01.06. — im Startwert
+    // abgebildet, also wirklich „ersetzt". Die frühere Fixture buchte auf den
+    // 10.06. (nach dem Startwert); unter R4 zählt so eine Buchung gegen den
+    // Startwert, und genau das sichert jetzt KA-3b. (Entscheidung Alrik,
+    // 25.09.2026.) Die Zusage dieses Tests — die Beschriftung nennt
+    // „verfallen ODER ersetzt" — ist unverändert.
+    await karteZeigen(dtoVorStartwert, kundeVorStartwert);
     const zeile = screen.getByTestId("text-45b-used-expired");
     expect(zeile.textContent).toContain("500,00");
     expect(zeile.textContent, "die Beschriftung nennt den Ersetzt-Fall nicht")
       .toContain("verfallenes oder ersetztes Guthaben");
+  }, 60_000);
+
+  it("KA-3b – eine Buchung NACH dem Startwert zählt gegen ihn: 0,00 € frei (R4)", async () => {
+    /**
+     * Der 10.06.-Fall, auf der gerenderten Karte (Entscheidung Alrik,
+     * 25.09.2026: Behauptungen über die Anzeige werden auf der Anzeige
+     * geprüft). Startwert 131,00 € zum 01.06., Buchung 500,00 € am 10.06.,
+     * mit dem ersetzten Übertrag verknüpft.
+     *
+     * Bis #193 verschwand die Buchung mit dem ersetzten Übertrag (N-P1): die
+     * Karte zeigte 131,00 € frei und „+ 500,00 € gegen verfallenes oder
+     * ersetztes Guthaben". Nach R4 zählt sie gegen den Startwert.
+     */
+    await karteZeigen(dtoMit, kundeId);
+    expect(
+      screen.getByTestId("text-45b-available").textContent,
+      "die Karte zeigt Budget frei, obwohl die Buchung vom 10.06. den Startwert aufbraucht",
+    ).toContain("0,00");
+    expect(screen.getByTestId("text-45b-used-attributed").textContent).toContain("131,00");
+    expect(
+      screen.queryByTestId("text-45b-used-expired"),
+      "die Buchung vom 10.06. erscheint als „verfallen oder ersetzt“ statt gegen den Startwert",
+    ).toBeNull();
   }, 60_000);
 });

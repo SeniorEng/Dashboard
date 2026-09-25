@@ -238,14 +238,15 @@ export interface VerbrauchsSchnitt {
   /** Glied (b): Buchungen vor dem Reset-Cutoff sind im Startwert abgebildet. */
   resetAnchor: ResetAnchor | null;
   /**
-   * Glied (a): Allocations, deren Verbrauch herausfaellt
-   * (`verbrauchsAusschlussIds` des Readers).
+   * Glied (a): Allocations, deren Verbrauch ganz herausfaellt
+   * (`verbrauchsAusschlussIds` des Readers — NICHT
+   * `excludedSpecialAllocationIds`, das beantwortet eine andere Frage).
    */
   excludedAllocationIds: readonly number[];
   /**
-   * Glied (a'), nur ABSCHREIBUNGEN: vom Startwert ersetzte Allocations
-   * (`ersetztDurchStartwertIds`). Buchung und Storno darauf zaehlen, die
-   * Abschreibung nicht — siehe dort.
+   * Glied (a'): vom Startwert ersetzte Allocations (`ersetztDurchStartwertIds`).
+   * Buchung und Storno darauf zaehlen im laufenden Anspruchsfenster; die
+   * Abschreibung und alles vor dem Aufstockungs-Boden nicht.
    */
   ersetztAllocationIds: readonly number[];
   /** Glied (c): Boden fuer das Leg ohne Allocation-Zuordnung. */
@@ -325,13 +326,20 @@ export function countedConsumptionWhere(
     ));
   }
 
-  // (a') — die Abschreibung auf einer vom Startwert ersetzten Allocation.
-  // NULL-sicher wie (a); `ne` auf den Typ, weil nur `write_off` herausfaellt.
+  // (a') — auf einer vom Startwert ersetzten Allocation zaehlen Buchung und
+  // Storno, aber NUR im laufenden Anspruchsfenster (ab `accrualFloorDate`) und
+  // NIE die Abschreibung. Spiegel von `getExcluded45bConsumption`.
+  // NULL-sicher wie (a).
   if (schnitt.ersetztAllocationIds.length > 0) {
     teile.push(or(
       isNull(budgetTransactions.allocationId),
       notInArray(budgetTransactions.allocationId, [...schnitt.ersetztAllocationIds]),
-      ne(budgetTransactions.transactionType, "write_off"),
+      schnitt.accrualFloorDate
+        ? and(
+            ne(budgetTransactions.transactionType, "write_off"),
+            gte(budgetTransactions.transactionDate, schnitt.accrualFloorDate),
+          )
+        : ne(budgetTransactions.transactionType, "write_off"),
     ));
   }
 

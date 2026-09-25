@@ -207,6 +207,16 @@ describe("Nachberechnung nach Storno — kumuliert und chronologisch (Tabelle D)
 
     // ── Erstellen ──────────────────────────────────────────────────────
     const neu = await generiere();
+
+    // Vorschau = Erstellen auf dem BETRAG, den der Nutzer in der Vorschau sieht
+    // (Gate 2 zu #193, S-5). Die Vorschau nennt Töpfe und Gesamtbetrag; der
+    // Gesamtbetrag hängt an der Aufteilung, weil auf den Privat-Anteil 19 % USt
+    // kommen. Eine Vorschau, die dieselben Töpfe mit anderer Aufteilung
+    // ankündigte, fiele hier auf.
+    expect(
+      vorschau.data.totalCents,
+      "die Vorschau kündigt einen anderen Gesamtbetrag an, als das Erstellen erzeugt",
+    ).toBe(neu.reduce((n, i) => n + i.grossAmountCents, 0));
     const kasse = neu.filter(i => i.budgetType === "entlastungsbetrag_45b");
     const privat = neu.filter(i => i.billingType === "selbstzahler");
     expect(kasse.reduce((n, i) => n + i.netAmountCents, 0), "Kasse").toBe(KASSE);
