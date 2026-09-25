@@ -12,7 +12,7 @@ import type { BillingExcludedAppointment } from "@shared/api/billing";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
 import { appointments, invoices as invoicesTable, type Invoice } from "@shared/schema";
-import { eq, and, gte, lt, lte, ne, inArray } from "drizzle-orm";
+import { eq, and, gte, lt, lte, ne, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { todayISO, addDays } from "@shared/utils/datetime";
 import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
@@ -26,7 +26,7 @@ import { auditService } from "./audit";
 import { readTestFaults } from "../lib/test-fault-injector";
 import { getCachedCompanySettings } from "./cache";
 import { schedulePdfPersistInBackground } from "./invoice-pdf-orchestrator";
-import { getAlreadyInvoicedAppointmentIds, getServiceRecordsForPeriod, getAppointmentIdsFromServiceRecords, buildLineItemsFromAppointments, getBudgetSplitForAppointments, getInsuranceData, findNetZeroBilledAppointments, lockCustomerForBilling, assertAppointmentsNotYetInvoiced } from "./invoice-data";
+import { getAlreadyInvoicedAppointmentIds, getServiceRecordsForPeriod, getAppointmentIdsFromServiceRecords, buildLineItemsFromAppointments, getBudgetSplitForAppointments, getInsuranceData, neuzubuchendeTermine, lebendeBuchungenStornieren, lockCustomerForBilling, assertAppointmentsNotYetInvoiced } from "./invoice-data";
 import { rebookNetZeroAppointmentConsumption } from "../storage/budget/rebook-storage";
 import type { BuildLineItem } from "./invoice-data";
 
@@ -614,7 +614,18 @@ export async function generateInvoiceCore(
   // Buchung den Draft neu bauen, damit der Split aus den Live-Zeilen kommt
   // (eine Quelle: die gebuchten Zeilen, garantiert deckungsgleich). Idempotent:
   // re-gebuchte Termine sind nicht mehr netto-null.
-  const netZeroApptIds = await findNetZeroBilledAppointments(customerId, draft.apptIds);
+  //
+  // Seit 26.09.2026 (Funke) zusätzlich: lebend gebuchte Termine in einem
+  // überzogenen Topf — erst ihre Buchungen stornieren, dann wie netto-null
+  // neu buchen (`neuzubuchendeTermine`, dieselbe Auswahl wie die Vorschau).
+  const { nettoNull, ueberzogen } = await neuzubuchendeTermine(customerId, draft.apptIds);
+  if (ueberzogen.length > 0) {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`);
+      await lebendeBuchungenStornieren(tx, customerId, ueberzogen, ctx.userId);
+    });
+  }
+  const netZeroApptIds = [...new Set([...nettoNull, ...ueberzogen])];
   if (netZeroApptIds.length > 0) {
     const { rebookedAppointmentIds } = await rebookNetZeroAppointmentConsumption({
       customerId,
