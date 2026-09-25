@@ -17,7 +17,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/lib/db";
-import { budgetTransactions } from "@shared/schema";
+import { appointmentServices, budgetTransactions } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import { getBudgetSplitForAppointments } from "../../server/services/invoice-data";
 import {
   apiGet,
@@ -121,6 +122,24 @@ beforeAll(async () => {
 
   apptA = await createAppt("13:00", "13:30");
   apptB = await createAppt("14:00", "14:30");
+  /**
+   * Termin B DOKUMENTIERT (Ist-Minuten), damit seine Kosten aus den Leistungen
+   * entstehen — wie beim echten Abrechnen.
+   *
+   * Seit #193 rechnet die Vorschau netto-null belegte Termine mit DERSELBEN
+   * Neubuchung wie das Erstellen (`probelaufNeubuchung`) — Kosten aus den
+   * dokumentierten Minuten, nicht mehr aus der Summe der stornierten Buchungen.
+   * Ohne Ist-Minuten waren die Kosten 0, und der Termin fiel aus dem Split.
+   * Abrechnen lassen sich ohnehin nur dokumentierte Termine; der Zustand
+   * „netto null, aber nie dokumentiert" kommt im Rechnungslauf nicht vor.
+   *
+   * 34 min Alltagsbegleitung × 42,00 €/h = 23,80 € — derselbe Betrag wie die
+   * synthetische Buchung unten. Die Zusage (§45b, kein Privat-Fallback, kein
+   * Phantom-§45a) bleibt unverändert.
+   */
+  await db.update(appointmentServices)
+    .set({ actualDurationMinutes: 34 })
+    .where(eq(appointmentServices.appointmentId, apptB));
   apptC = await createAppt("15:00", "15:30");
 
   // --- Synthetische Buchungen (INSERT ist der normale Pfad; Immutabilitäts-

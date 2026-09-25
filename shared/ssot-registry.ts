@@ -202,6 +202,30 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "abrechnungs-lauf",
+    question: "In welcher Reihenfolge rechnet ein Abrechnungs-Lauf über mehrere Termine?",
+    // Gate 2 zu #193, S-7. Zwei Aufrufer lesen dieselbe Reihenfolge: die
+    // Vorschau (Probelauf `probelaufNeubuchung`) und das Erstellen
+    // (`rebookNetZeroAppointmentConsumption`). Laufen sie auseinander, zeigt
+    // die Vorschau etwas anderes, als gebucht wird — der Anlass dieses PRs.
+    canonical: [
+      { symbol: "chronologischeReihenfolge", module: "server/storage/budget/abrechnungs-lauf.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // KEIN Muster-Waechter, sondern der Verhaltenstest der Reihenfolge
+        // (AL-1). Die Topf-Fenster setzt seit dem Vorschau-Probelauf die
+        // Buchungs-Engine selbst um. Einen Waechter, der eine
+        // zweite Lauf-Reihenfolge im Baum findet, gibt es nicht — das steht
+        // hier ausdruecklich, damit der Eintrag keine Absicherung behauptet,
+        // die er nicht hat.
+        test: "tests/budget/abrechnungs-lauf.test.ts",
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "budget-projected-45b",
     question: "Welcher §45b-Stand gilt für das ANLEGE-Tor? (Projektion bis Monatsende)",
     canonical: [
@@ -616,7 +640,7 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     // ssot-imports.test.ts verbietet die hand-gerollte Privatanteil-Formel im
     // gesamten shared/-Baum (inkl. dieser Registry). Die kanonische Definition
     // steht in `isPrivatePaymentAllowed`.
-    question: "Darf ein Kunde einen privaten (19 %-)Anteil erhalten? (Privatzahler-Berechtigung)",
+    question: "Darf ein Kunde einen privaten Anteil erhalten? (Privatzahler-Berechtigung)",
     canonical: [{ symbol: "isPrivatePaymentAllowed", module: "shared/domain/budget-selbstzahler-validator.ts" }],
     ownedLiterals: [],
     guards: [
@@ -628,6 +652,53 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
         allowlist: ["shared/domain/budget-selbstzahler-validator.ts"],
       },
     ],
+    eslintRules: [],
+  },
+  {
+    id: "ust-je-position",
+    // Ticket 6hcgffPJWm57p72p, Tabelle D (Alrik, 25.09.2026). ERSETZT die
+    // Zahlertyp-Regel „19 % genau dann, wenn die Rechnung selbstzahler ist",
+    // die an drei Stellen stand. Rechnung (Mehr- und Einzeltopf), Vorschau,
+    // Liste „Bereit zum Abrechnen", Kostenvoranschlag und Preisanzeige rufen
+    // `ustSatzBP`; Summen je Satz nur über `ustJeSatz`.
+    question: "Welcher USt-Satz gilt für eine Rechnungsposition? (§ 4 Nr. 16 g UStG: Anerkennungsliste × Pflegegrad am Leistungstag)",
+    canonical: [
+      { symbol: "ustSatzBP", module: "shared/domain/invoice-vat.ts" },
+      { symbol: "ustJeSatz", module: "shared/domain/invoice-vat.ts" },
+      { symbol: "ustFuerTopf", module: "shared/domain/invoice-amounts.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      { test: "tests/unit/pot-amounts-summary.test.ts" },
+      { test: "tests/billing/ust-4-16g.test.ts" },
+    ],
+    eslintRules: [],
+  },
+  {
+    id: "pflegegrad-am-stichtag",
+    // Der Pflegegrad zu einem DATUM kommt aus der Historie, nie aus
+    // `customers.pflegegrad` (Stand heute). Ein als Fehleintrag entfernter
+    // Eintrag zählt für kein Datum (`nichtEntfernt`).
+    question: "Welcher Pflegegrad ist an einem Tag nachgewiesen?",
+    canonical: [
+      { symbol: "getCareLevelAt", module: "server/storage/customer-mgmt/care-level.ts" },
+      { symbol: "nichtEntfernt", module: "server/storage/customer-mgmt/care-level.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [{ test: "tests/billing/ust-4-16g.test.ts" }],
+    eslintRules: [],
+  },
+  {
+    id: "ust-rechnungstexte",
+    // PDF und ZUGFeRD-BT-120 lesen dieselben Texte (Alrik, 25.09.2026).
+    question: "Wie lauten Befreiungshinweis und Leistungsempfänger-Zeile auf der Rechnung?",
+    canonical: [
+      { symbol: "ustfreiHinweis", module: "shared/domain/ust-texte.ts" },
+      { symbol: "leistungsempfaengerText", module: "shared/domain/ust-texte.ts" },
+      { symbol: "USTFREI_HINWEIS", module: "shared/domain/ust-texte.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [{ test: "tests/unit/ust-texte.test.ts" }],
     eslintRules: [],
   },
   {

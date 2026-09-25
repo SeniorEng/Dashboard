@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { db } from "../../lib/db";
+import { db, type DbOrTx } from "../../lib/db";
 import type { DbClient } from "./types";
 import { computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
 import { loadCustomerPriceContext } from "../pricing/price-for";
@@ -73,7 +73,7 @@ export async function calculateAppointmentCost(params: {
   travelKilometers: number;
   customerKilometers: number;
   date: string;
-}): Promise<{
+}, tx?: DbOrTx): Promise<{
   hauswirtschaftCents: number;
   alltagsbegleitungCents: number;
   travelCents: number;
@@ -81,7 +81,7 @@ export async function calculateAppointmentCost(params: {
   totalCents: number;
 }> {
   // Task #1291 — Preis-Auflösung ausschließlich über die `priceFor`-SSoT.
-  const priceCtx = await loadCustomerPriceContext(params.customerId);
+  const priceCtx = await loadCustomerPriceContext(params.customerId, tx);
   const hwRes = priceCtx.resolveByCode("hauswirtschaft", params.date);
   const abRes = priceCtx.resolveByCode("alltagsbegleitung", params.date);
   const travelRes = priceCtx.resolveByCode("travel_km", params.date);

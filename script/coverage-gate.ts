@@ -158,6 +158,9 @@ const MODULES: ModuleGate[] = [
       "tests/equality/consumption-leg-sum.test.ts",
       "tests/equality/storno-summe-null.test.ts",
       "tests/equality/selbstzahler-private-booking.test.ts",
+      // #193: der Reconcile-Skip-Zweig (`logReconcileSkip`, Probelauf ohne
+      // Audit) war von keinem Gate-Test erreicht; Branches fielen unter 62 %.
+      "tests/equality/reconcile-skip-probelauf.test.ts",
     ],
     // Ist (Mai 2026): Lines 86.8 % / Branch 67.8 %.
     lines: 82,

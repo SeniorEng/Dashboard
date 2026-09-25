@@ -37,7 +37,7 @@
  * beantworten andere Fragen (Reset-Baseline bzw. Doppelzaehlung) und haben je
  * genau einen Aufrufer.
  */
-import { and, gt, gte, isNotNull, isNull, lte, notInArray, or, type SQL } from "drizzle-orm";
+import { and, eq, gt, gte, isNotNull, isNull, lte, ne, notInArray, or, type SQL } from "drizzle-orm";
 import { budgetAllocations, budgetTransactions } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
@@ -237,8 +237,18 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
 export interface VerbrauchsSchnitt {
   /** Glied (b): Buchungen vor dem Reset-Cutoff sind im Startwert abgebildet. */
   resetAnchor: ResetAnchor | null;
-  /** Glied (a): Allocations, die nicht mehr zum Anspruch beitragen. */
+  /**
+   * Glied (a): Allocations, deren Verbrauch ganz herausfaellt
+   * (`verbrauchsAusschlussIds` des Readers — NICHT
+   * `excludedSpecialAllocationIds`, das beantwortet eine andere Frage).
+   */
   excludedAllocationIds: readonly number[];
+  /**
+   * Glied (a'): vom Startwert ersetzte Allocations (`ersetztDurchStartwertIds`).
+   * Buchung und Storno darauf zaehlen im laufenden Anspruchsfenster; die
+   * Abschreibung und alles vor dem Aufstockungs-Boden nicht.
+   */
+  ersetztAllocationIds: readonly number[];
   /** Glied (c): Boden fuer das Leg ohne Allocation-Zuordnung. */
   accrualFloorDate: string | null;
 }
@@ -313,6 +323,23 @@ export function countedConsumptionWhere(
     teile.push(or(
       isNull(budgetTransactions.allocationId),
       notInArray(budgetTransactions.allocationId, [...schnitt.excludedAllocationIds]),
+    ));
+  }
+
+  // (a') — auf einer vom Startwert ersetzten Allocation zaehlen Buchung und
+  // Storno, aber NUR im laufenden Anspruchsfenster (ab `accrualFloorDate`) und
+  // NIE die Abschreibung. Spiegel von `getExcluded45bConsumption`.
+  // NULL-sicher wie (a).
+  if (schnitt.ersetztAllocationIds.length > 0) {
+    teile.push(or(
+      isNull(budgetTransactions.allocationId),
+      notInArray(budgetTransactions.allocationId, [...schnitt.ersetztAllocationIds]),
+      schnitt.accrualFloorDate
+        ? and(
+            ne(budgetTransactions.transactionType, "write_off"),
+            gte(budgetTransactions.transactionDate, schnitt.accrualFloorDate),
+          )
+        : ne(budgetTransactions.transactionType, "write_off"),
     ));
   }
 

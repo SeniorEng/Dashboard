@@ -233,6 +233,10 @@ export function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], com
       employeeName: item.employeeName ?? null,
       appointmentNotes: item.appointmentNotes || null,
       serviceDetails: item.serviceDetails || null,
+      // Nur übernehmen, wenn gespeichert — Bestands-Positionen bleiben
+      // objektgleich (Fingerprint/Render-Snapshot).
+      ...(item.vatRateBp != null ? { vatRateBp: item.vatRateBp } : {}),
+      ...(item.pflegegradAmLeistungstag != null ? { pflegegradAmLeistungstag: item.pflegegradAmLeistungstag } : {}),
     })),
     netAmountCents: invoice.netAmountCents,
     vatAmountCents: invoice.vatAmountCents,

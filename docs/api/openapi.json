@@ -1319,6 +1319,10 @@
                     },
                     "unitPriceCents": {
                       "type": "integer"
+                    },
+                    "vatRateBp": {
+                      "nullable": true,
+                      "type": "integer"
                     }
                   },
                   "required": [
@@ -1333,7 +1337,8 @@
                     "quantityUnit",
                     "totalCents",
                     "unitPriceCents",
-                    "employeeName"
+                    "employeeName",
+                    "vatRateBp"
                   ],
                   "type": "object"
                 },

@@ -1,10 +1,9 @@
 import { badRequest } from "../lib/errors";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
-import { serviceVatRateBP } from "@shared/domain/invoice-vat";
-import { buildBudgetSplitFromLedger, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment, type SplitReversalRow } from "@shared/domain/budget-invoice-split";
-import { effectiveDefaultPots } from "@shared/domain/budgets";
-import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
+import { istKilometerPosition } from "@shared/domain/invoice-vat";
+import { getCareLevelAt } from "../storage/customer-mgmt/care-level";
+import { buildBudgetSplitFromLedger, type BudgetSplitForAppointment, type SplitReversalRow } from "@shared/domain/budget-invoice-split";
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
 import { FINAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
 import { serviceRecordEmployeeId } from "@shared/domain/service-record-scope";
@@ -12,9 +11,10 @@ import { appointments, appointmentServices as appointmentServicesTable, services
 import { eq, and, isNull, inArray, notInArray, ne, desc, or, gte, lt, lte, sql } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db, type DbOrTx, type Tx } from "../lib/db";
-import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
+import { chronologischeReihenfolge } from "../storage/budget/abrechnungs-lauf";
+import { rebookNetZeroAppointmentCore } from "../storage/budget/rebook-storage";
 import { loadCustomerPriceContext } from "../storage/pricing/price-for";
-import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
+import { monthlyServiceRecordsRepo, appointmentsRepo } from "../repos";
 import { resolveCustomerInsuranceAt } from "../storage/customer-mgmt/insurance";
 import { isServiceRecordSignedForBilling, BILLING_BLOCK_MESSAGES } from "@shared/domain/billing-eligibility";
 import { findActiveInvoicesForAppointments } from "../lib/appointment-invoiced";
@@ -38,6 +38,15 @@ export interface BuildLineItem extends Record<string, unknown> {
   employeeName: string;
   appointmentNotes: string | null;
   serviceDetails: string | null;
+  /**
+   * Pflegegrad, der am Leistungstag in der Historie nachgewiesen ist
+   * (`getCareLevelAt`), sonst `null`. Grundlage der USt (Tabelle D) und des
+   * „Leistungsempfänger … (Pflegegrad N)" auf der Rechnung. NIE aus
+   * `customers.pflegegrad` (Stand heute).
+   */
+  pflegegradAmLeistungstag: number | null;
+  /** Codes der Hauptleistungen desselben Termins — Kilometer folgen ihnen (D6). */
+  hauptleistungenDesTermins: string[];
 }
 
 /**
@@ -474,8 +483,10 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
   // diesen Invariant gekoppelt (kein redundanter appointment_type-Filter). Auf der
   // Mitarbeiterseite (Lohn/Stunden/km) zählt die Erstberatung dagegen voll — siehe
   // CLAUDE.md → Arbeitsregeln.
-  if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0, totalVatCents: 0 };
-  const isVatExempt = billingType && billingType !== "selbstzahler";
+  if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0 };
+  // Keine USt mehr hier: die Entscheidung fällt je Topf in `ustFuerTopf`
+  // (Tabelle D, § 4 Nr. 16 g UStG). Der Zeilen-Bauer liefert dafür je Zeile
+  // den Pflegegrad am Leistungstag und die Hauptleistungen des Termins.
 
   const appts = await appointmentsRepo.selectFrom()
     .where(and(inArray(appointments.id, apptIds), appointmentsRepo.activeOnly()));
@@ -549,13 +560,27 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
   .where(inArray(servicesTable.code, ["travel_km", "customer_km", "hauswirtschaft"]));
   const kmServiceMap = new Map(kmServiceRows.map(s => [s.code, s]));
 
+  // Pflegegrad je Leistungstag — aus der Historie (`getCareLevelAt`), einmal
+  // je Datum gelesen.
+  const pflegegradAm = new Map<string, number | null>();
+  if (resolvedCustomerId != null) {
+    for (const datum of new Set(appts.map(a => a.date))) {
+      pflegegradAm.set(datum, await getCareLevelAt(resolvedCustomerId, datum));
+    }
+  }
+
   const lineItems: BuildLineItem[] = [];
   let totalNetCents = 0;
-  let totalVatCents = 0;
 
   for (const appt of appts) {
     const apptServices = serviceBreakdown.filter(s => s.appointmentId === appt.id);
     const apptDate = appt.date;
+    const ustKontext = {
+      pflegegradAmLeistungstag: pflegegradAm.get(apptDate) ?? null,
+      hauptleistungenDesTermins: apptServices
+        .map(s => s.serviceCode)
+        .filter((c): c is string => c != null && !istKilometerPosition(c)),
+    };
 
     const employeeId = serviceRecordEmployeeId(appt);
     const emp = employeeId ? employeeMap.get(employeeId) : undefined;
@@ -614,6 +639,7 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
             employeeName,
             appointmentNotes: appt.noShowNotes || null,
             serviceDetails: null,
+            ...ustKontext,
           });
           totalNetCents += charge.totalCents;
         }
@@ -628,12 +654,6 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
         throw badRequest(`Kein Preis hinterlegt für Dienstleistung "${svc.serviceName || svc.serviceCode}". Bitte prüfen Sie den Dienstleistungskatalog.`);
       }
       const totalCents = Math.round((durationMinutes / 60) * pricePer60Min);
-      // Task #1659 — USt über die zentrale SSoT (`serviceVatRateBP` liefert
-      // Basispunkte, 19 % → 1900). Der frühere Code las `svc.vatRate` (Prozent)
-      // roh und teilte durch 10000 → 0,19 % statt 19 % (Regression `9d6f9d4`,
-      // RE-2026-0250). Steuerbefreite Töpfe (Pflegekasse) bleiben 0.
-      const vatRateBp = isVatExempt ? 0 : serviceVatRateBP(svc);
-      const vatCents = Math.round(totalCents * vatRateBp / 10000);
 
       lineItems.push({
         appointmentId: appt.id,
@@ -653,10 +673,10 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
         employeeName,
         appointmentNotes: appt.notes || null,
         serviceDetails: svc.details || null,
+        ...ustKontext,
       });
 
       totalNetCents += totalCents;
-      totalVatCents += vatCents;
     }
 
     const kmEntries: { code: string; km: number }[] = [];
@@ -684,10 +704,6 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
       // `Math.round(km)` als Anzeige → Drift (s. RE-2026-0003).
       const quantityKm = quantizeKm(kmEntry.km);
       const kmTotalCents = computeKmLineTotalCents(kmEntry.km, pricePerKm);
-      // Task #1659 — identische Korrektur für den Kilometer-Pfad: USt-Satz über
-      // die SSoT (Basispunkte), damit Selbstzahler-km 19 % statt 0,19 % tragen.
-      const kmVatRateBp = isVatExempt ? 0 : serviceVatRateBP(kmSvc);
-      const kmVatCents = Math.round(kmTotalCents * kmVatRateBp / 10000);
 
       lineItems.push({
         appointmentId: appt.id,
@@ -707,14 +723,14 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
         employeeName,
         appointmentNotes: null,
         serviceDetails: null,
+        ...ustKontext,
       });
 
       totalNetCents += kmTotalCents;
-      totalVatCents += kmVatCents;
     }
   }
 
-  return { lineItems, totalNetCents, totalVatCents };
+  return { lineItems, totalNetCents };
 }
 
 type ApptConsumptionTxn = {
@@ -734,8 +750,9 @@ type ApptConsumptionTxn = {
 async function loadAppointmentConsumptionTxns(
   customerId: number,
   apptIds: number[],
+  d: Pick<typeof db, "select"> = db,
 ): Promise<{ txns: ApptConsumptionTxn[]; reversedIds: Set<number>; reversalRows: SplitReversalRow[] }> {
-  const txns = await db.select({
+  const txns = await d.select({
     id: budgetTransactions.id,
     appointmentId: budgetTransactions.appointmentId,
     budgetType: budgetTransactions.budgetType,
@@ -756,7 +773,7 @@ async function loadAppointmentConsumptionTxns(
   // (vgl. shared/domain/budget/phantom-storno.ts). Eine so referenzierte
   // consumption-Zeile ist netto null belegt und zählt nicht. (Task #1012)
   const consumptionIds = txns.map((t) => t.id);
-  const reversalRows = await db.select({
+  const reversalRows = await d.select({
     reversedTransactionId: budgetTransactions.reversedTransactionId,
     notes: budgetTransactions.notes,
   })
@@ -841,7 +858,7 @@ export async function getBudgetSplitForAppointments(
   // SSoT-Loader liefert die Konsumptionen, die storno-bereinigten Reversal-Zeilen
   // (link- UND note-basiert, Task #1012) und die abgeleitete Menge der netto-null
   // belegten Original-IDs — geteilt mit findNetZeroBilledAppointments.
-  const { txns, reversedIds, reversalRows } = await loadAppointmentConsumptionTxns(customerId, apptIds);
+  const { txns, reversalRows } = await loadAppointmentConsumptionTxns(customerId, apptIds);
 
   if (txns.length === 0) return new Map();
 
@@ -854,9 +871,9 @@ export async function getBudgetSplitForAppointments(
   // Stolperfalle (Task #1011): Termine, die eine Konsumption HATTEN, deren
   // Buchungen aber ALLE storniert wurden (netto null, kein Live-Konsum mehr),
   // dürfen NICHT blind auf den private-Fallback fallen — das erzeugte eine
-  // falsche Selbstzahler-Rechnung. Stattdessen den Pot-Anteil aus der AKTUELLEN
-  // Allocation re-derivieren (read-only Cascade gegen die heute verfügbaren
-  // Töpfe). Termine, die NIE eine Konsumption hatten (echte Selbstzahler /
+  // falsche Selbstzahler-Rechnung. Stattdessen den Pot-Anteil über einen
+  // Probelauf DERSELBEN Neubuchung wie beim Erstellen ermitteln
+  // (`probelaufNeubuchung`, zurückgerollt). Termine, die NIE eine Konsumption hatten (echte Selbstzahler /
   // Alt-Daten), behalten das bestehende Verhalten (kein Eintrag → private).
   const apptsWithAnyConsumption = new Set<number>();
   for (const txn of txns) {
@@ -864,90 +881,69 @@ export async function getBudgetSplitForAppointments(
   }
   const netZeroApptIds = [...apptsWithAnyConsumption].filter((id) => !out.has(id));
   if (netZeroApptIds.length > 0) {
-    await rederiveSplitFromCurrentAllocation(customerId, netZeroApptIds, txns, reversedIds, out);
+    const probe = await probelaufNeubuchung(customerId, netZeroApptIds);
+    for (const [apptId, split] of probe) out.set(apptId, split);
   }
 
   return out;
 }
 
+/** Signal zum Zurueckrollen des Probelaufs — kein Fehler. */
+class ProbelaufZurueckrollen extends Error {}
+
 /**
- * Task #1011 — Re-Derivation für netto-null-belegte Termine (alle Buchungen
- * storniert, keine aktive Konsumption mehr). Verteilt die Termin-Kost (= Σ der
- * stornierten Original-Buchungen dieses Termins) read-only über die aktuelle
- * Topf-Verfügbarkeit (`readUnifiedBudgetAvailability` → `planCascade`), in der
- * Standard-Cascade-Priorität §45b → §45a → §39/§42a, Rest → private. Es wird
- * NICHTS gebucht — Preview und Generate sehen denselben Split, und es entsteht
- * keine Phantom-Rechnung für einen netto-null belegten Topf.
+ * Die Aufteilung netto-null belegter Termine — ermittelt mit DERSELBEN
+ * Neubuchung wie beim Erstellen, in einer Transaktion, die zurueckgerollt wird.
+ *
+ * ── ERSETZT die Nachbildung (Entscheidung Alrik, 25.09.2026) ────────────
+ * Bis #193 leitete die Vorschau die Aufteilung read-only ab
+ * (`rederiveSplitFromCurrentAllocation`): Kosten aus der Summe der stornierten
+ * Buchungen, Kapazitaet aus `readUnifiedBudgetAvailability`, die Aufrechnung
+ * im Lauf ueber eigene Topf-Fenster. Das Erstellen bucht dagegen ueber
+ * `rebookNetZeroAppointmentCore` — Kosten zum Termindatum neu gerechnet,
+ * Kapazitaet aus der Buchungs-Engine. Zwei Rechnungen derselben Frage; sie
+ * liefen auseinander (gemessen: Vorschau 194,20 EUR, Erstellen 196,02 EUR).
+ *
+ * „Vorschau und Erstellen zeigen denselben Bruttobetrag — die Vorschau ist
+ * also falsch, nicht das Erstellen." Deshalb gibt es die Nachbildung nicht
+ * mehr: der Probelauf IST das Erstellen, nur ohne Commit. Damit entfallen
+ * auch die Grenzen, die Gate 2 an der Nachbildung fand (Fristgrenzen
+ * 30.06./01.01., abweichende Kosten bei geaenderten Preisen, die Formel-
+ * Differenz Holds/Cap).
+ *
+ * Reihenfolge wie beim Erstellen: `chronologischeReihenfolge`, dieselbe Funktion.
+ *
+ * Nebenwirkungen: alles, was der Probelauf schreibt (Buchungen, Advisory-
+ * Lock), faellt mit dem Zurueckrollen weg. Der Lock gilt nur fuer die Dauer der
+ * Vorschau und haelt eine gleichzeitige Buchung desselben Kunden so lange an.
+ * Was bleibt: Sequenzwerte von `budget_transactions`/`budget_allocations`
+ * (Luecken in den IDs, keine Rechnungsnummern). Die einzige Stelle der Engine,
+ * die AUSSERHALB der Transaktion schreibt (Audit `budget_reconcile_skipped`),
+ * schreibt im Probelauf nur in die Konsole (`handelnder: "probelauf"`).
+ * Gesichert: NB-1 prueft nach Vorschau und Liste, dass der Ledger unveraendert
+ * ist (mutations-gegengeprueft: ohne das Zurueckrollen rot).
  */
-async function rederiveSplitFromCurrentAllocation(
+async function probelaufNeubuchung(
   customerId: number,
   apptIds: number[],
-  txns: ReadonlyArray<{ id: number; appointmentId: number | null; amountCents: number }>,
-  reversedIds: ReadonlySet<number>,
-  out: Map<number, BudgetSplitForAppointment>,
-): Promise<void> {
-  // Termin-Kost = Σ |Betrag| der stornierten Original-Buchungen des Termins.
-  const costByAppt = new Map<number, number>();
-  for (const txn of txns) {
-    if (!txn.appointmentId || !reversedIds.has(txn.id)) continue;
-    if (!apptIds.includes(txn.appointmentId)) continue;
-    costByAppt.set(
-      txn.appointmentId,
-      (costByAppt.get(txn.appointmentId) ?? 0) + Math.abs(txn.amountCents),
-    );
+): Promise<Map<number, BudgetSplitForAppointment>> {
+  let ergebnis = new Map<number, BudgetSplitForAppointment>();
+  try {
+    await db.transaction(async (tx) => {
+      for (const appointmentId of await chronologischeReihenfolge(apptIds, tx)) {
+        await rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, handelnder: "probelauf" });
+      }
+      const { txns, reversalRows } = await loadAppointmentConsumptionTxns(customerId, apptIds, tx);
+      const live = buildBudgetSplitFromLedger(txns, reversalRows);
+      ergebnis = new Map([...live].filter(([id]) => apptIds.includes(id)));
+      throw new ProbelaufZurueckrollen();
+    });
+  } catch (err) {
+    if (!(err instanceof ProbelaufZurueckrollen)) throw err;
   }
-
-  const apptRows = await appointmentsRepo.selectColumnsFrom({
-    id: appointments.id,
-    date: appointments.date,
-  })
-  .where(and(inArray(appointments.id, apptIds), appointmentsRepo.activeOnly()));
-  const dateByAppt = new Map(apptRows.map((a) => [a.id, a.date]));
-
-  // BUG-19 (Facette A) — Standard-Cascade-Priorität (§45b → §45a → §39/§42a)
-  // über die SSoT `effectiveDefaultPots` (mit Kundenkontext), nicht über die
-  // jetzt modul-private Konstante. Für die reine Reihenfolge ist der `enabled`-
-  // Zustand zwar irrelevant, der Resolver bleibt aber die einzige Default-Quelle.
-  const [splitCustomer] = await customersRepo
-    .selectColumnsFrom({
-      billingType: customersTable.billingType,
-      pflegegrad: customersTable.pflegegrad,
-    })
-    .where(eq(customersTable.id, customerId));
-  const orderedPots = effectiveDefaultPots({
-    billingType: splitCustomer?.billingType,
-    pflegegrad: splitCustomer?.pflegegrad,
-  })
-    .sort((a, b) => a.priority - b.priority)
-    .map((p) => p.budgetType as CappedBudgetPot);
-
-  for (const apptId of apptIds) {
-    const cost = costByAppt.get(apptId) ?? 0;
-    const date = dateByAppt.get(apptId);
-    if (cost <= 0 || !date) continue; // nichts ableitbar → bleibt ohne Eintrag (private)
-
-    const avail = await readUnifiedBudgetAvailability(customerId, date, db);
-    const pots: CascadePot[] = orderedPots.map((bt) => ({
-      budgetType: bt,
-      capacityCents: avail.pots[bt].availableCents,
-    }));
-    // privater Topf absorbiert den Rest, der von keinem Kassen-Topf gedeckt ist.
-    pots.push({ budgetType: "private", capacityCents: 0, uncapped: true });
-
-    const { splits } = planCascade(cost, pots);
-    const cents: BudgetSplitForAppointment["cents"] = {};
-    for (const split of splits) {
-      if (split.amountCents <= 0) continue;
-      const potKey = (POT_ORDER as readonly string[]).includes(split.budgetType)
-        ? (split.budgetType as InvoicePotKey)
-        : "private";
-      cents[potKey] = (cents[potKey] ?? 0) + split.amountCents;
-    }
-    if (Object.keys(cents).length > 0) {
-      out.set(apptId, { cents });
-    }
-  }
+  return ergebnis;
 }
+
 
 /**
  * Kostenträger-Stammdaten für die Rechnungserstellung — am STICHTAG des

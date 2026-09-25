@@ -1205,6 +1205,9 @@ describe("INT-16: Selbstzahler-Kostenvorschau (cost-estimate)", () => {
       customerNamePrefix: "INT-16",
       billingType: "selbstzahler",
       acceptsPrivatePayment: true,
+      // Pflegegrad erst ab 2099 = heute KEIN nachgewiesener Pflegegrad: die
+      // Suite sichert die 19-%-Kostenvorschau (§ 4 Nr. 16 g UStG, Pflichtfall 1).
+      pflegegradSeit: "2099-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -1475,6 +1478,9 @@ describe("INT-17: Selbstzahler ohne Preis-Konfiguration (noPricing edge case)", 
       customerNamePrefix: "INT-17",
       billingType: "selbstzahler",
       acceptsPrivatePayment: true,
+      // Pflegegrad erst ab 2099 = heute KEIN nachgewiesener Pflegegrad: die
+      // Suite sichert die 19-%-Kostenvorschau (§ 4 Nr. 16 g UStG, Pflichtfall 1).
+      pflegegradSeit: "2099-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },

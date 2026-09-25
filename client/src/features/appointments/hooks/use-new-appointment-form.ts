@@ -317,7 +317,7 @@ export function useNewAppointmentForm() {
     isSelbstzahler?: boolean;
     bruttoCents?: number;
     vatCents?: number;
-    vatRate?: number;
+    vatRate?: number | null;
   }>({
     queryKey: ["budget-cost-estimate", ktCustomerId ? parseInt(ktCustomerId) : 0, budgetEstimateParams],
     queryFn: async () => {
@@ -334,7 +334,7 @@ export function useNewAppointmentForm() {
         isSelbstzahler?: boolean;
         bruttoCents?: number;
         vatCents?: number;
-        vatRate?: number;
+        vatRate?: number | null;
       }>(`/budget/${ktCustomerId}/cost-estimate?${budgetEstimateParams}`);
       if (!result.success) return { totalCents: 0, warning: null };
       return result.data;

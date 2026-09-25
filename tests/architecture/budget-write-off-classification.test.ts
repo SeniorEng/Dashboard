@@ -60,6 +60,14 @@ const ALLOWLIST: Record<string, WriteOffView> = {
   // Schreib-Stelle der `processExpiredCarryover`-Verfallsbuchung.
   "server/storage/budget/allocation-storage.ts": "allocation-view",
 
+  // `countedConsumptionWhere` — der Verbrauchs-Schnitt, Spiegel von
+  // `getExcluded45bConsumption`. Nennt `write_off` genau an EINER Stelle,
+  // Glied (a'): auf einer vom STARTWERT ersetzten Allocation zählt die
+  // Abschreibung NICHT (Verfall eines schon abgegoltenen Bestands, Stammticket
+  // E2 „Doppelabschreibung"). Sonst zählt `write_off` wie im Reader als Used —
+  // Topf-/Allocation-Sicht.
+  "server/storage/budget/allocation-window.ts": "allocation-view",
+
   // Task #874 — DER eine Verfügbarkeits-Reader: „Verfügbar zum Buchungsdatum"
   // (`netConsumedUpToDate`). write_off vor dem Buchungsdatum hat den Pot
   // entwertet, zählt also als Used. `import-availability.ts` delegiert seit

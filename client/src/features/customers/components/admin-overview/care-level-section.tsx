@@ -2,17 +2,19 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { PFLEGEGRAD_SELECT_OPTIONS } from "@shared/domain/customers";
+import { vorgaengerZumWiederaufleben } from "@shared/domain/pflegegrad-historie";
 import { SectionCard } from "@/components/patterns/section-card";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
 import { iconSize, componentStyles } from "@/design-system";
 import { EditButton } from "./section-helpers";
-import { Shield, History, Save, X, Loader2 } from "lucide-react";
+import { Shield, History, Save, X, Loader2, Ban, CalendarX } from "lucide-react";
 import type { SectionProps } from "./types";
 
 export function CareLevelSection({ customer, customerId, editingSection, setEditingSection, saving, invalidateCustomer }: SectionProps) {
@@ -21,7 +23,50 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
   const [newPflegegrad, setNewPflegegrad] = useState<string>("");
   const [pflegegradSeit, setPflegegradSeit] = useState<string>(todayISO());
 
-  const currentCareLevel = customer.careLevelHistory?.find((e) => !e.validTo);
+  // Ein als Fehleintrag entfernter Eintrag zählt für kein Datum (Ticket
+  // 6hcgffPJWm57p72p) — er ist nie der laufende.
+  const currentCareLevel = customer.careLevelHistory?.find((e) => !e.validTo && !e.entferntAm);
+  const [beendenAb, setBeendenAb] = useState<string>(todayISO());
+  const [entfernenId, setEntfernenId] = useState<number | null>(null);
+  const [entfernenGrund, setEntfernenGrund] = useState("");
+  // RK-10 (Alrik): lebt ein voriger Eintrag wieder auf, erst nachfragen.
+  const [wiederaufleben, setWiederaufleben] = useState<{ historyId: number; vorgaengerId: number; text: string } | null>(null);
+
+  const beendenMutation = useMutation({
+    mutationFn: async (data: { abDatum: string }) => {
+      const result = await api.post(`/admin/customers/${customerId}/care-level/beenden`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      toast({ title: "Pflegegrad beendet", description: "Ab dem gewählten Datum gilt kein Pflegegrad mehr." });
+      invalidateCustomer();
+      setEditingSection(null);
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
+  const entfernenMutation = useMutation({
+    mutationFn: async (data: { historyId: number; grund: string; vorigenWiederOeffnen: boolean; erwarteterVorgaengerId?: number }) => {
+      const result = await api.post(`/admin/customers/${customerId}/care-level/${data.historyId}/entfernen`, {
+        grund: data.grund,
+        vorigenWiederOeffnen: data.vorigenWiederOeffnen,
+        erwarteterVorgaengerId: data.erwarteterVorgaengerId,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      toast({ title: "Eintrag entfernt", description: "Der Pflegegrad-Eintrag zählt für kein Datum mehr." });
+      invalidateCustomer();
+      setEntfernenId(null);
+      setEntfernenGrund("");
+      setWiederaufleben(null);
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
 
   const changeCareLevelMutation = useMutation({
     mutationFn: async (data: { pflegegrad: number; validFrom: string }) => {
@@ -55,12 +100,12 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
           <div className="space-y-4">
             <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
               <span className="text-sm text-gray-600">Aktueller Pflegegrad:</span>
-              {customer.pflegegrad != null && customer.pflegegrad > 0 ? (
+              {customer.pflegegradHeute != null && customer.pflegegradHeute > 0 ? (
                 <>
-                  <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
-                  {currentCareLevel?.validFrom && (
+                  <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
+                  {customer.pflegegradHeuteSeit && (
                     <span className="text-xs text-gray-500">
-                      seit {formatDateForDisplay(currentCareLevel.validFrom)}
+                      seit {formatDateForDisplay(customer.pflegegradHeuteSeit)}
                     </span>
                   )}
                 </>
@@ -136,17 +181,44 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
                 Abbrechen
               </Button>
             </div>
+
+            {currentCareLevel && (
+              <div className="border-t pt-4 space-y-2">
+                <Label>Pflegegrad beenden ab</Label>
+                <p className="text-xs text-gray-500">
+                  Für ein echtes Ende (z. B. Herabstufung auf „kein Pflegegrad"). Ab diesem Datum gilt kein Pflegegrad mehr;
+                  Leistungen danach tragen Umsatzsteuer. War der Eintrag ein Irrtum, im Verlauf „als Fehleintrag entfernen".
+                </p>
+                <div className="flex items-center gap-2">
+                  <DatePicker
+                    value={beendenAb}
+                    onChange={(val) => setBeendenAb(val || todayISO())}
+                    data-testid="input-pflegegrad-beenden-ab"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => beendenMutation.mutate({ abDatum: beendenAb })}
+                    disabled={beendenMutation.isPending}
+                    data-testid="button-pflegegrad-beenden"
+                  >
+                    <CalendarX className={`${iconSize.sm} mr-2`} />
+                    Beenden
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
-            {customer.pflegegrad != null && customer.pflegegrad > 0 ? (
+            {/* Aus der Historie (Server: `pflegegradHeute`), nicht aus den Stammdaten. */}
+            {customer.pflegegradHeute != null && customer.pflegegradHeute > 0 ? (
               <>
                 <div className="flex items-center gap-3">
-                  <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                  <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
                 </div>
-                {currentCareLevel?.validFrom && (
+                {customer.pflegegradHeuteSeit && (
                   <p className="text-sm text-gray-500">
-                    Seit {formatDateForDisplay(currentCareLevel.validFrom)}
+                    Seit {formatDateForDisplay(customer.pflegegradHeuteSeit)}
                   </p>
                 )}
               </>
@@ -166,17 +238,19 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
             <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
             <div className="space-y-3">
               {customer.careLevelHistory
-                .filter((entry) => !entry.validTo || entry.validTo >= entry.validFrom)
+                .filter((entry) => entry.entferntAm || !entry.validTo || entry.validTo >= entry.validFrom)
                 .map((entry, index) => (
-                <div key={entry.id} className="relative pl-10">
+                <div key={entry.id} className="relative pl-10" data-testid={`care-level-entry-${entry.id}`}>
                   <div
                     className={`absolute left-2.5 w-3 h-3 rounded-full ${
-                      index === 0 ? "bg-teal-500" : "bg-gray-300"
+                      index === 0 && !entry.entferntAm ? "bg-teal-500" : "bg-gray-300"
                     }`}
                   />
-                  <div className="p-3 rounded-lg bg-gray-50">
+                  <div className={`p-3 rounded-lg ${entry.entferntAm ? "bg-gray-100 opacity-70" : "bg-gray-50"}`}>
                     <div className="flex items-center justify-between">
-                      <StatusBadge type="pflegegrad" value={entry.pflegegrad} />
+                      <span className={entry.entferntAm ? "line-through" : ""}>
+                        <StatusBadge type="pflegegrad" value={entry.pflegegrad} />
+                      </span>
                       <span className="text-xs text-gray-500">
                         {entry.validTo
                           ? `${formatDateForDisplay(entry.validFrom)} - ${formatDateForDisplay(entry.validTo)}`
@@ -185,6 +259,84 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
                     </div>
                     {entry.notes && (
                       <p className="text-sm text-gray-600 mt-2">{entry.notes}</p>
+                    )}
+                    {entry.entferntAm ? (
+                      <p className="text-xs text-red-700 mt-2">
+                        Als Fehleintrag entfernt am {formatDateForDisplay(String(entry.entferntAm).slice(0, 10))}
+                        {entry.entferntGrund ? ` — ${entry.entferntGrund}` : ""}
+                      </p>
+                    ) : entfernenId === entry.id ? (
+                      <div className="mt-3 space-y-2">
+                        <Label>Grund (Pflicht)</Label>
+                        <Textarea
+                          value={entfernenGrund}
+                          onChange={(e) => setEntfernenGrund(e.target.value)}
+                          placeholder="z. B. Pflegegrad nie bewilligt, Eintrag irrtümlich angelegt"
+                          data-testid={`input-entfernen-grund-${entry.id}`}
+                        />
+                        {wiederaufleben?.historyId === entry.id ? (
+                          <div className="space-y-2" data-testid={`frage-wiederaufleben-${entry.id}`}>
+                            <p className="text-sm text-gray-700">{wiederaufleben.text}</p>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="destructive"
+                                onClick={() => entfernenMutation.mutate({
+                                  historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: true,
+                                  erwarteterVorgaengerId: wiederaufleben.vorgaengerId,
+                                })}
+                                disabled={entfernenMutation.isPending || entfernenGrund.trim().length < 3}
+                                data-testid={`button-wiederaufleben-ja-${entry.id}`}
+                              >
+                                Ja, übernehmen
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => entfernenMutation.mutate({ historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: false })}
+                                disabled={entfernenMutation.isPending || entfernenGrund.trim().length < 3}
+                                data-testid={`button-wiederaufleben-nein-${entry.id}`}
+                              >
+                                Nein, ohne Pflegegrad
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="destructive"
+                            onClick={() => {
+                              const k = vorgaengerZumWiederaufleben(customer.careLevelHistory ?? [], entry.id);
+                              if (k) {
+                                setWiederaufleben({
+                                  historyId: entry.id,
+                                  vorgaengerId: k.eintrag.id,
+                                  text: `Pflegegrad ${k.eintrag.pflegegrad} gilt dann wieder ab ${formatDateForDisplay(k.giltWiederAb)}${k.neuesEnde ? ` bis ${formatDateForDisplay(k.neuesEnde)}` : ""} – übernehmen?`,
+                                });
+                                return;
+                              }
+                              entfernenMutation.mutate({ historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: false });
+                            }}
+                            disabled={entfernenMutation.isPending || entfernenGrund.trim().length < 3}
+                            data-testid={`button-entfernen-bestaetigen-${entry.id}`}
+                          >
+                            Entfernen
+                          </Button>
+                          <Button variant="outline" onClick={() => { setEntfernenId(null); setEntfernenGrund(""); setWiederaufleben(null); }}>
+                            Abbrechen
+                          </Button>
+                        </div>
+                        )}
+                      </div>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mt-2 text-xs text-gray-600"
+                        onClick={() => { setEntfernenId(entry.id); setEntfernenGrund(""); }}
+                        data-testid={`button-entfernen-${entry.id}`}
+                      >
+                        <Ban className={`${iconSize.sm} mr-1`} />
+                        Als Fehleintrag entfernen
+                      </Button>
                     )}
                   </div>
                 </div>

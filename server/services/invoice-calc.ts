@@ -1,6 +1,6 @@
 import { badRequest, notFound, AppError } from "../lib/errors";
 import { splitLineItemsAcrossPots, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
-import { summarizePotAmounts } from "@shared/domain/invoice-amounts";
+import { summarizePotAmounts, ustFuerTopf } from "@shared/domain/invoice-amounts";
 import { isPrivatePaymentAllowed } from "@shared/domain/budget-selbstzahler-validator";
 import {
   BILLING_BLOCK_MESSAGES,
@@ -16,7 +16,7 @@ import { eq, and, gte, lt, lte, ne, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { todayISO, addDays } from "@shared/utils/datetime";
 import { billingPeriodAsOfISO } from "@shared/domain/insurance-period";
-import { STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
+import { rechnungsSatzBP, pflegegradFuerRechnung } from "@shared/domain/invoice-vat";
 import { storage } from "../storage";
 import { db } from "../lib/db";
 import { appointmentsRepo } from "../repos";
@@ -115,7 +115,7 @@ export async function computeDocumentedGrossCents(args: {
   acceptsPrivatePayment: boolean | null | undefined;
 }): Promise<number> {
   if (args.appointmentIds.length === 0) return 0;
-  const { lineItems, totalNetCents, totalVatCents } =
+  const { lineItems } =
     await buildLineItemsFromAppointments(args.appointmentIds, args.customerId, args.billingType);
   if (lineItems.length === 0) return 0;
   const budgetSplit = await getBudgetSplitForAppointments(args.customerId, args.appointmentIds);
@@ -127,16 +127,17 @@ export async function computeDocumentedGrossCents(args: {
   return summarizePotAmounts({
     potItems,
     billingType: args.billingType,
-    builderNetCents: totalNetCents,
-    builderVatCents: totalVatCents,
     privatePotIsTaxable: privateAllowed,
   }).grossCents;
 }
 
 /**
- * Task #750: Pure read-only Helper, der dieselbe Build-Logik liefert wie
+ * Task #750: Helper, der dieselbe Build-Logik liefert wie
  * `generateInvoiceCore`, aber NICHTS persistiert — keine Rechnungsnummer,
- * keine Inserts, kein Audit-Log, kein PDF. Wird von `POST /billing/generate`
+ * kein Audit-Log, kein PDF. Seit #193 fährt er für netto-null belegte Termine
+ * einen Probelauf der Neubuchung (Inserts in einer Transaktion, die
+ * zurückgerollt wird — `probelaufNeubuchung`, `invoice-data.ts`); es bleibt
+ * nichts davon stehen. Wird von `POST /billing/generate`
  * UND `GET /billing/preview` aufgerufen, damit Vorschau-Werte und finale
  * Rechnungssumme garantiert übereinstimmen.
  *
@@ -453,7 +454,7 @@ export async function buildInvoiceDraft(input: {
   // zurück (Bestandskunden ohne Mehrtopf-Konfiguration sehen 0 Verhaltens-
   // änderung).
   const budgetSplit = await getBudgetSplitForAppointments(customerId, apptIds);
-  const { lineItems: allLineItems, totalNetCents: singleNetCents, totalVatCents: singleVatCents } =
+  const { lineItems: allLineItems, totalNetCents: singleNetCents } =
     await buildLineItemsFromAppointments(apptIds, customerId, billingType);
 
   const potItems = splitLineItemsByPot(allLineItems, budgetSplit, {
@@ -482,8 +483,6 @@ export async function buildInvoiceDraft(input: {
   const amounts = summarizePotAmounts({
     potItems,
     billingType,
-    builderNetCents: singleNetCents,
-    builderVatCents: singleVatCents,
   });
   const { hasPrivateShare, needsBudgetSplit } = amounts;
 
@@ -652,7 +651,6 @@ export async function generateInvoiceCore(
     potItems,
     lineItems,
     totalNetCents,
-    totalVatCents,
     stornoRefsForInsert,
     defaultBuyerReference,
     invoiceDueDateIso,
@@ -724,8 +722,12 @@ export async function generateInvoiceCore(
           buyerReference = defaultBuyerReference;
         }
 
-        const netCents = items.reduce((s, i) => s + i.totalCents, 0);
-        const vatCents = pot === "private" ? Math.round((netCents * STANDARD_VAT_RATE_BP) / 10000) : 0;
+        // USt je Position nach Tabelle D (§ 4 Nr. 16 g UStG) — dieselbe
+        // Funktion wie Vorschau und Anzeige (`summarizePotAmounts`). Die
+        // Positionen tragen ihren Satz danach in die gespeicherte Zeile.
+        const ust = ustFuerTopf(pot, items);
+        const netCents = ust.netCents;
+        const vatCents = ust.vatCents;
         const invoiceBillingType = pot === "private" ? "selbstzahler" : billingType;
 
         const invoiceNumber = await getNextInvoiceNumberTx(tx, billingYear);
@@ -742,11 +744,11 @@ export async function generateInvoiceCore(
           insuranceProviderName: providerName,
           insuranceIkNummer: ikNummer,
           versichertennummer,
-          pflegegrad: customer.pflegegrad || null,
+          pflegegrad: pflegegradFuerRechnung(ust.items),
           netAmountCents: netCents,
           vatAmountCents: vatCents,
           grossAmountCents: netCents + vatCents,
-          vatRate: pot === "private" ? STANDARD_VAT_RATE_BP : 0,
+          vatRate: rechnungsSatzBP(ust.gruppen),
           status: "entwurf",
           notes: getPotInvoiceNote(pot),
           // Pot-Marker + Lauf-Gruppierung für Cascade-Storno und Reporting.
@@ -759,7 +761,7 @@ export async function generateInvoiceCore(
           assignmentDeclarationRef: null,
         };
 
-        const invoice = await createInvoiceTx(tx, invoiceData, items as Record<string, unknown>[], req.user!.id);
+        const invoice = await createInvoiceTx(tx, invoiceData, ust.items as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(invoice);
 
         audit.record({
@@ -887,6 +889,12 @@ export async function generateInvoiceCore(
     );
   }
 
+  // USt je Position nach Tabelle D — der einzige belegte Topf entscheidet
+  // „Kasse oder privat". Dieselbe Funktion wie im Mehrtopf-Weg und in der
+  // Vorschau; sie liefert dieselbe Summe wie `draft.totalVatCents`.
+  const [einzigerTopf] = potItems.keys();
+  const einzelUst = ustFuerTopf(einzigerTopf ?? "private", lineItems);
+
   let invoice: Invoice;
   let invoiceNumber: string;
   try {
@@ -911,11 +919,11 @@ export async function generateInvoiceCore(
         insuranceProviderName: insuranceProviderName || null,
         insuranceIkNummer: insuranceIkNummer || null,
         versichertennummer: versichertennummer || null,
-        pflegegrad: customer.pflegegrad || null,
+        pflegegrad: pflegegradFuerRechnung(einzelUst.items),
         netAmountCents: totalNetCents,
-        vatAmountCents: totalVatCents,
-        grossAmountCents: totalNetCents + totalVatCents,
-        vatRate: invoiceBillingType === "selbstzahler" ? STANDARD_VAT_RATE_BP : 0,
+        vatAmountCents: einzelUst.vatCents,
+        grossAmountCents: totalNetCents + einzelUst.vatCents,
+        vatRate: rechnungsSatzBP(einzelUst.gruppen),
         status: "entwurf",
         // Task #1094 — echter Topf der Single-Pot-Kassenrechnung (null für
         // Selbstzahler/Privat). Damit greift der pot-spezifische Renderer
@@ -927,7 +935,7 @@ export async function generateInvoiceCore(
         assignmentDeclarationDate: null,
         assignmentDeclarationRef: null,
       };
-      const created = await createInvoiceTx(tx, invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
+      const created = await createInvoiceTx(tx, invoiceData, einzelUst.items as Record<string, unknown>[], req.user!.id);
       audit.record({
         userId: req.user!.id,
         action: "invoice_created",
@@ -940,7 +948,7 @@ export async function generateInvoiceCore(
           invoiceType: "rechnung",
           billingMonth,
           billingYear,
-          grossAmountCents: totalNetCents + totalVatCents,
+          grossAmountCents: totalNetCents + einzelUst.vatCents,
           lineItemCount: lineItems.length,
           budgetType: singlePotBudgetType,
         },
