@@ -142,6 +142,8 @@ export interface CustomerDetail extends Customer {
    * Preise bei Selbstzahlern.
    */
   pflegegradHeute: number | null;
+  /** Beginn des heute gültigen Eintrags (derselbe Leser) — für „seit …". */
+  pflegegradHeuteSeit: string | null;
   currentInsurance: {
     id: number;
     providerName: string;

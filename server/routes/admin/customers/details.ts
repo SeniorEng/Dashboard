@@ -304,12 +304,12 @@ router.post("/customers/:id/care-level/:historyId/entfernen", asyncHandler("Pfle
   if (customerId === null) return;
   const historyId = requireIntParam(req.params.historyId, res);
   if (historyId === null) return;
-  const { grund, vorigenWiederOeffnen } = pflegegradEntfernenSchema.parse(req.body);
+  const { grund, vorigenWiederOeffnen, erwarteterVorgaengerId } = pflegegradEntfernenSchema.parse(req.body);
 
   const ergebnis = await withAudit(async (tx, audit) => {
     const [vorher] = await customersRepo.selectColumnsFrom({ pflegegrad: customers.pflegegrad }, tx).where(eq(customers.id, customerId));
     const r = await customerManagementStorage.pflegegradAlsFehleintragEntfernen(
-      { customerId, historyId, grund, userId: req.user!.id, vorigenWiederOeffnen }, tx,
+      { customerId, historyId, grund, userId: req.user!.id, vorigenWiederOeffnen, erwarteterVorgaengerId }, tx,
     );
     audit.record({
       userId: req.user!.id,

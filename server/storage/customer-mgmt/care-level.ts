@@ -10,7 +10,7 @@ import {
 import { eq, and, isNull, desc, asc, lte, gte, or } from "drizzle-orm";
 import { parseLocalDate, formatDateISO, todayISO, addDays } from "@shared/utils/datetime";
 import { db, type DbOrTx } from "../../lib/db";
-import { badRequest, notFound } from "../../lib/errors";
+import { badRequest, conflict, notFound } from "../../lib/errors";
 import { vorgaengerZumWiederaufleben } from "@shared/domain/pflegegrad-historie";
 
 /**
@@ -79,8 +79,20 @@ export async function getCareLevelAt(
   asOfDate: string,
   executor: Pick<typeof db, "select"> = db,
 ): Promise<number | null> {
+  return (await getCareLevelEntryAt(customerId, asOfDate, executor))?.pflegegrad ?? null;
+}
+
+/**
+ * Wie `getCareLevelAt`, liefert aber den gültigen EINTRAG (Grad + Beginn) —
+ * für die Anzeige „Pflegegrad N seit …". Dieselbe Auswahl, keine zweite.
+ */
+export async function getCareLevelEntryAt(
+  customerId: number,
+  asOfDate: string,
+  executor: Pick<typeof db, "select"> = db,
+): Promise<{ pflegegrad: number; validFrom: string } | null> {
   const rows = await executor
-    .select({ pflegegrad: customerCareLevelHistory.pflegegrad })
+    .select({ pflegegrad: customerCareLevelHistory.pflegegrad, validFrom: customerCareLevelHistory.validFrom })
     .from(customerCareLevelHistory)
     .where(and(
       eq(customerCareLevelHistory.customerId, customerId),
@@ -95,7 +107,7 @@ export async function getCareLevelAt(
     // `getCustomerCurrentCareLevel` (dort `desc(validFrom)`).
     .orderBy(desc(customerCareLevelHistory.validFrom))
     .limit(1);
-  return rows[0]?.pflegegrad ?? null;
+  return rows[0] ?? null;
 }
 
 export async function getCustomerCurrentCareLevel(customerId: number): Promise<CustomerCareLevelHistory | undefined> {
@@ -182,7 +194,7 @@ async function stammdatenNachziehen(customerId: number, executor: DbOrTx): Promi
  * weiteren Eintrag also auf „kein Pflegegrad".
  */
 export async function pflegegradAlsFehleintragEntfernen(
-  params: { customerId: number; historyId: number; grund: string; userId: number; vorigenWiederOeffnen?: boolean },
+  params: { customerId: number; historyId: number; grund: string; userId: number; vorigenWiederOeffnen?: boolean; erwarteterVorgaengerId?: number },
   executor: DbOrTx,
 ): Promise<{ eintrag: CustomerCareLevelHistory; pflegegradHeute: number | null; wiederGeoeffnet: CustomerCareLevelHistory | null }> {
   const [eintrag] = await executor
@@ -207,6 +219,9 @@ export async function pflegegradAlsFehleintragEntfernen(
     const kandidat = vorgaengerZumWiederaufleben(historie, eintrag.id);
     if (!kandidat) {
       throw badRequest("Es gibt keinen vorigen Pflegegrad, der direkt vor diesem Eintrag endet — nichts wieder zu öffnen.");
+    }
+    if (params.erwarteterVorgaengerId != null && kandidat.eintrag.id !== params.erwarteterVorgaengerId) {
+      throw conflict("PFLEGEGRAD_HISTORIE_GEAENDERT", "Die Pflegegrad-Historie hat sich inzwischen geändert. Bitte die Seite neu laden und erneut entscheiden.");
     }
     [wiederGeoeffnet] = await executor
       .update(customerCareLevelHistory)

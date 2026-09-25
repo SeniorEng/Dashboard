@@ -423,9 +423,20 @@ describe("§ 4 Nr. 16 g UStG — Abnahme (Tabelle D, Pflichtfälle 1–6, E3–E
     expect((await apiPost(`/api/admin/customers/${ohne.k.id}/care-level/${ohne.falsch.id}/entfernen`, { grund: "Irrtum (Test)" })).status).toBe(200);
     expect(await getCareLevelAt(ohne.k.id, `${J}-08-10`), "ohne Bestätigung: kein PG ab 01.08.").toBeNull();
 
+    // S-12: der Dialog hat einen ANDEREN Eintrag angekündigt → 409, nichts geändert.
+    const veraltet = await setup();
+    const falscheId = await apiPost<any>(`/api/admin/customers/${veraltet.k.id}/care-level/${veraltet.falsch.id}/entfernen`, {
+      grund: "Irrtum (Test)", vorigenWiederOeffnen: true, erwarteterVorgaengerId: veraltet.falsch.id,
+    });
+    expect(falscheId.status, JSON.stringify(falscheId.data)).toBe(409);
+    expect(await getCareLevelAt(veraltet.k.id, `${J}-08-10`), "409: der Fehleintrag gilt weiter (zurückgerollt)").toBe(3);
+
     // Mit Bestätigung: PG 2 gilt wieder ab 01.08., offen wie der entfernte Eintrag.
     const mit = await setup();
-    const r = await apiPost<any>(`/api/admin/customers/${mit.k.id}/care-level/${mit.falsch.id}/entfernen`, { grund: "Irrtum (Test)", vorigenWiederOeffnen: true });
+    const vorgaenger = (await db.select().from(customerCareLevelHistory).where(eq(customerCareLevelHistory.customerId, mit.k.id))).find(h => h.pflegegrad === 2)!;
+    const r = await apiPost<any>(`/api/admin/customers/${mit.k.id}/care-level/${mit.falsch.id}/entfernen`, {
+      grund: "Irrtum (Test)", vorigenWiederOeffnen: true, erwarteterVorgaengerId: vorgaenger.id,
+    });
     expect(r.status, JSON.stringify(r.data)).toBe(200);
     expect(await getCareLevelAt(mit.k.id, `${J}-08-10`), "mit Bestätigung: PG 2 wieder ab 01.08.").toBe(2);
     expect(await getCareLevelAt(mit.k.id, HEUTE)).toBe(2);

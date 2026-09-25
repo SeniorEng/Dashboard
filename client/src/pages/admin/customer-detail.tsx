@@ -277,17 +277,11 @@ export default function AdminCustomerDetail() {
                 {customer.pflegegradHeute != null && customer.pflegegradHeute > 0 && (
                   <>
                     <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
-                    {(() => {
-                      const current = customer.careLevelHistory?.find((h: { validTo: string | null; entferntAm?: unknown }) => !h.validTo && !h.entferntAm);
-                      if (current?.validFrom) {
-                        return (
-                          <span className="text-xs text-gray-500" data-testid="text-pflegegrad-seit">
-                            seit {formatDateForDisplay(current.validFrom, { month: "2-digit", year: "numeric" })}
-                          </span>
-                        );
-                      }
-                      return null;
-                    })()}
+                    {customer.pflegegradHeuteSeit && (
+                      <span className="text-xs text-gray-500" data-testid="text-pflegegrad-seit">
+                        seit {formatDateForDisplay(customer.pflegegradHeuteSeit, { month: "2-digit", year: "numeric" })}
+                      </span>
+                    )}
                   </>
                 )}
                 {isChild(customer.geburtsdatum) && (

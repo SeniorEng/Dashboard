@@ -30,7 +30,7 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
   const [entfernenId, setEntfernenId] = useState<number | null>(null);
   const [entfernenGrund, setEntfernenGrund] = useState("");
   // RK-10 (Alrik): lebt ein voriger Eintrag wieder auf, erst nachfragen.
-  const [wiederaufleben, setWiederaufleben] = useState<{ historyId: number; text: string } | null>(null);
+  const [wiederaufleben, setWiederaufleben] = useState<{ historyId: number; vorgaengerId: number; text: string } | null>(null);
 
   const beendenMutation = useMutation({
     mutationFn: async (data: { abDatum: string }) => {
@@ -48,10 +48,11 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
   });
 
   const entfernenMutation = useMutation({
-    mutationFn: async (data: { historyId: number; grund: string; vorigenWiederOeffnen: boolean }) => {
+    mutationFn: async (data: { historyId: number; grund: string; vorigenWiederOeffnen: boolean; erwarteterVorgaengerId?: number }) => {
       const result = await api.post(`/admin/customers/${customerId}/care-level/${data.historyId}/entfernen`, {
         grund: data.grund,
         vorigenWiederOeffnen: data.vorigenWiederOeffnen,
+        erwarteterVorgaengerId: data.erwarteterVorgaengerId,
       });
       return unwrapResult(result);
     },
@@ -102,9 +103,9 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
               {customer.pflegegradHeute != null && customer.pflegegradHeute > 0 ? (
                 <>
                   <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
-                  {currentCareLevel?.validFrom && (
+                  {customer.pflegegradHeuteSeit && (
                     <span className="text-xs text-gray-500">
-                      seit {formatDateForDisplay(currentCareLevel.validFrom)}
+                      seit {formatDateForDisplay(customer.pflegegradHeuteSeit)}
                     </span>
                   )}
                 </>
@@ -215,9 +216,9 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
                 <div className="flex items-center gap-3">
                   <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
                 </div>
-                {currentCareLevel?.validFrom && (
+                {customer.pflegegradHeuteSeit && (
                   <p className="text-sm text-gray-500">
-                    Seit {formatDateForDisplay(currentCareLevel.validFrom)}
+                    Seit {formatDateForDisplay(customer.pflegegradHeuteSeit)}
                   </p>
                 )}
               </>
@@ -279,8 +280,11 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
                             <div className="flex items-center gap-2">
                               <Button
                                 variant="destructive"
-                                onClick={() => entfernenMutation.mutate({ historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: true })}
-                                disabled={entfernenMutation.isPending}
+                                onClick={() => entfernenMutation.mutate({
+                                  historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: true,
+                                  erwarteterVorgaengerId: wiederaufleben.vorgaengerId,
+                                })}
+                                disabled={entfernenMutation.isPending || entfernenGrund.trim().length < 3}
                                 data-testid={`button-wiederaufleben-ja-${entry.id}`}
                               >
                                 Ja, übernehmen
@@ -288,7 +292,7 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
                               <Button
                                 variant="outline"
                                 onClick={() => entfernenMutation.mutate({ historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: false })}
-                                disabled={entfernenMutation.isPending}
+                                disabled={entfernenMutation.isPending || entfernenGrund.trim().length < 3}
                                 data-testid={`button-wiederaufleben-nein-${entry.id}`}
                               >
                                 Nein, ohne Pflegegrad
@@ -304,6 +308,7 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
                               if (k) {
                                 setWiederaufleben({
                                   historyId: entry.id,
+                                  vorgaengerId: k.eintrag.id,
                                   text: `Pflegegrad ${k.eintrag.pflegegrad} gilt dann wieder ab ${formatDateForDisplay(k.giltWiederAb)}${k.neuesEnde ? ` bis ${formatDateForDisplay(k.neuesEnde)}` : ""} – übernehmen?`,
                                 });
                                 return;

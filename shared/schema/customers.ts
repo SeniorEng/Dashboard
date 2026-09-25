@@ -280,6 +280,12 @@ export const pflegegradEntfernenSchema = z.object({
    * nicht automatisch). Kandidat: `vorgaengerZumWiederaufleben`.
    */
   vorigenWiederOeffnen: z.boolean().optional().default(false),
+  /**
+   * Der Eintrag, den der Dialog angekündigt hat. Weicht der Kandidat auf dem
+   * Server ab (Historie inzwischen geändert), 409 statt still einen anderen zu
+   * öffnen (Gate 2 zu #194, S-12).
+   */
+  erwarteterVorgaengerId: z.number().int().positive().optional(),
 });
 
 export const pflegegradBeendenSchema = z.object({
