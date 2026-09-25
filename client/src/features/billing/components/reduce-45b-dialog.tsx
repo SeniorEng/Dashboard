@@ -35,7 +35,7 @@ interface Reduce45bDialogProps {
 const TARGET_POT_OPTIONS: { value: Reduce45bTargetPot; label: string; hint: string }[] = [
   { value: "umwandlung_45a", label: "§45a (Umwandlung)", hint: "Umwandlungsanspruch — nur bis zum gesetzlichen Deckel." },
   { value: "ersatzpflege_39_42a", label: "§39 / §42a (Ersatz-/Verhinderungspflege)", hint: "Nur bis zum gesetzlichen Deckel des Ziel-Topfs." },
-  { value: "private", label: "Privat (Selbstzahler, inkl. 19% MwSt.)", hint: "Kein Deckel — der Rest wird dem Kunden privat berechnet." },
+  { value: "private", label: "Privat (Rechnung an den Kunden)", hint: "Kein Deckel — der Rest wird dem Kunden privat berechnet. Umsatzsteuer je Leistung nach § 4 Nr. 16 UStG (mit Pflegegrad steuerfrei)." },
 ];
 
 export function Reduce45bDialog({ target, onOpenChange, mutation }: Reduce45bDialogProps) {

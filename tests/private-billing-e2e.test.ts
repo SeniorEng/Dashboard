@@ -322,8 +322,9 @@ function szCustomerPayload(overrides: Record<string, any> = {}) {
     nr: "42",
     plz: "10115",
     stadt: "Berlin",
-    pflegegrad: 2,
-    pflegegradSeit: "2024-01-01",
+    // OHNE Pflegegrad: SZ-5/XV-1 sichern die 19-%-Selbstzahler-Rechnung
+    // (§ 4 Nr. 16 g UStG, Pflichtfall 1). Mit Pflegegrad wäre sie steuerfrei —
+    // der Fall steht in `tests/billing/ust-4-16g.test.ts`.
     billingType: "selbstzahler",
     acceptsPrivatePayment: true,
     contacts: [

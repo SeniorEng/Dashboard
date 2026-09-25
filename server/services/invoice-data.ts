@@ -1,7 +1,8 @@
 import { badRequest } from "../lib/errors";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
-import { serviceVatRateBP } from "@shared/domain/invoice-vat";
+import { istKilometerPosition } from "@shared/domain/invoice-vat";
+import { getCareLevelAt } from "../storage/customer-mgmt/care-level";
 import { buildBudgetSplitFromLedger, type BudgetSplitForAppointment, type SplitReversalRow } from "@shared/domain/budget-invoice-split";
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
 import { FINAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
@@ -37,6 +38,15 @@ export interface BuildLineItem extends Record<string, unknown> {
   employeeName: string;
   appointmentNotes: string | null;
   serviceDetails: string | null;
+  /**
+   * Pflegegrad, der am Leistungstag in der Historie nachgewiesen ist
+   * (`getCareLevelAt`), sonst `null`. Grundlage der USt (Tabelle D) und des
+   * „Leistungsempfänger … (Pflegegrad N)" auf der Rechnung. NIE aus
+   * `customers.pflegegrad` (Stand heute).
+   */
+  pflegegradAmLeistungstag: number | null;
+  /** Codes der Hauptleistungen desselben Termins — Kilometer folgen ihnen (D6). */
+  hauptleistungenDesTermins: string[];
 }
 
 /**
@@ -473,8 +483,10 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
   // diesen Invariant gekoppelt (kein redundanter appointment_type-Filter). Auf der
   // Mitarbeiterseite (Lohn/Stunden/km) zählt die Erstberatung dagegen voll — siehe
   // CLAUDE.md → Arbeitsregeln.
-  if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0, totalVatCents: 0 };
-  const isVatExempt = billingType && billingType !== "selbstzahler";
+  if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0 };
+  // Keine USt mehr hier: die Entscheidung fällt je Topf in `ustFuerTopf`
+  // (Tabelle D, § 4 Nr. 16 g UStG). Der Zeilen-Bauer liefert dafür je Zeile
+  // den Pflegegrad am Leistungstag und die Hauptleistungen des Termins.
 
   const appts = await appointmentsRepo.selectFrom()
     .where(and(inArray(appointments.id, apptIds), appointmentsRepo.activeOnly()));
@@ -548,13 +560,27 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
   .where(inArray(servicesTable.code, ["travel_km", "customer_km", "hauswirtschaft"]));
   const kmServiceMap = new Map(kmServiceRows.map(s => [s.code, s]));
 
+  // Pflegegrad je Leistungstag — aus der Historie (`getCareLevelAt`), einmal
+  // je Datum gelesen.
+  const pflegegradAm = new Map<string, number | null>();
+  if (resolvedCustomerId != null) {
+    for (const datum of new Set(appts.map(a => a.date))) {
+      pflegegradAm.set(datum, await getCareLevelAt(resolvedCustomerId, datum));
+    }
+  }
+
   const lineItems: BuildLineItem[] = [];
   let totalNetCents = 0;
-  let totalVatCents = 0;
 
   for (const appt of appts) {
     const apptServices = serviceBreakdown.filter(s => s.appointmentId === appt.id);
     const apptDate = appt.date;
+    const ustKontext = {
+      pflegegradAmLeistungstag: pflegegradAm.get(apptDate) ?? null,
+      hauptleistungenDesTermins: apptServices
+        .map(s => s.serviceCode)
+        .filter((c): c is string => c != null && !istKilometerPosition(c)),
+    };
 
     const employeeId = serviceRecordEmployeeId(appt);
     const emp = employeeId ? employeeMap.get(employeeId) : undefined;
@@ -613,6 +639,7 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
             employeeName,
             appointmentNotes: appt.noShowNotes || null,
             serviceDetails: null,
+            ...ustKontext,
           });
           totalNetCents += charge.totalCents;
         }
@@ -627,12 +654,6 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
         throw badRequest(`Kein Preis hinterlegt für Dienstleistung "${svc.serviceName || svc.serviceCode}". Bitte prüfen Sie den Dienstleistungskatalog.`);
       }
       const totalCents = Math.round((durationMinutes / 60) * pricePer60Min);
-      // Task #1659 — USt über die zentrale SSoT (`serviceVatRateBP` liefert
-      // Basispunkte, 19 % → 1900). Der frühere Code las `svc.vatRate` (Prozent)
-      // roh und teilte durch 10000 → 0,19 % statt 19 % (Regression `9d6f9d4`,
-      // RE-2026-0250). Steuerbefreite Töpfe (Pflegekasse) bleiben 0.
-      const vatRateBp = isVatExempt ? 0 : serviceVatRateBP(svc);
-      const vatCents = Math.round(totalCents * vatRateBp / 10000);
 
       lineItems.push({
         appointmentId: appt.id,
@@ -652,10 +673,10 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
         employeeName,
         appointmentNotes: appt.notes || null,
         serviceDetails: svc.details || null,
+        ...ustKontext,
       });
 
       totalNetCents += totalCents;
-      totalVatCents += vatCents;
     }
 
     const kmEntries: { code: string; km: number }[] = [];
@@ -683,10 +704,6 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
       // `Math.round(km)` als Anzeige → Drift (s. RE-2026-0003).
       const quantityKm = quantizeKm(kmEntry.km);
       const kmTotalCents = computeKmLineTotalCents(kmEntry.km, pricePerKm);
-      // Task #1659 — identische Korrektur für den Kilometer-Pfad: USt-Satz über
-      // die SSoT (Basispunkte), damit Selbstzahler-km 19 % statt 0,19 % tragen.
-      const kmVatRateBp = isVatExempt ? 0 : serviceVatRateBP(kmSvc);
-      const kmVatCents = Math.round(kmTotalCents * kmVatRateBp / 10000);
 
       lineItems.push({
         appointmentId: appt.id,
@@ -706,14 +723,14 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
         employeeName,
         appointmentNotes: null,
         serviceDetails: null,
+        ...ustKontext,
       });
 
       totalNetCents += kmTotalCents;
-      totalVatCents += kmVatCents;
     }
   }
 
-  return { lineItems, totalNetCents, totalVatCents };
+  return { lineItems, totalNetCents };
 }
 
 type ApptConsumptionTxn = {

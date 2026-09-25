@@ -273,20 +273,15 @@ export default function AdminCustomerDetail() {
                 {customer.billingType && (
                   <StatusBadge type="billingType" value={customer.billingType} data-testid="badge-billingtype" />
                 )}
-                {!isSelbstzahler && customer.pflegegrad !== null && customer.pflegegrad > 0 && (
+                {/* Auch bei Selbstzahlern: der Pflegegrad entscheidet über die USt (Ticket 6hcgffPJWm57p72p). */}
+                {customer.pflegegradHeute != null && customer.pflegegradHeute > 0 && (
                   <>
-                    <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
-                    {(() => {
-                      const current = customer.careLevelHistory?.find((h: { validTo: string | null }) => !h.validTo);
-                      if (current?.validFrom) {
-                        return (
-                          <span className="text-xs text-gray-500" data-testid="text-pflegegrad-seit">
-                            seit {formatDateForDisplay(current.validFrom, { month: "2-digit", year: "numeric" })}
-                          </span>
-                        );
-                      }
-                      return null;
-                    })()}
+                    <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
+                    {customer.pflegegradHeuteSeit && (
+                      <span className="text-xs text-gray-500" data-testid="text-pflegegrad-seit">
+                        seit {formatDateForDisplay(customer.pflegegradHeuteSeit, { month: "2-digit", year: "numeric" })}
+                      </span>
+                    )}
                   </>
                 )}
                 {isChild(customer.geburtsdatum) && (

@@ -37,6 +37,7 @@ import {
   type CappedBudgetPot,
 } from "../storage/budget/unified-reader";
 import type { DbClient } from "../storage/budget/types";
+import { nichtEntfernt } from "../storage/customer-mgmt/care-level";
 
 /** Der Selbstzahler-Overflow-Topf hat per Design KEINE Allocation — er
  *  absorbiert den Cascade-Rest (uncapped). Für die No-Overdraw-Invariante ist
@@ -164,6 +165,8 @@ export async function enumerateConservationPopulation(
     })
     .from(customerCareLevelHistory)
     .innerJoin(customers, eq(customers.id, customerCareLevelHistory.customerId))
+    // Ein als Fehleintrag entfernter Pflegegrad begründet keinen Anspruch.
+    .where(nichtEntfernt())
     .groupBy(customerCareLevelHistory.customerId, customers.billingType);
   for (const r of careLevelCustomers) {
     if (r.billingType !== "selbstzahler") {

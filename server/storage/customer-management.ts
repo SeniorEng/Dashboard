@@ -151,6 +151,8 @@ class CustomerManagementStorage {
   getCustomerCareLevelHistory = careLevelModule.getCustomerCareLevelHistory;
   getCustomerCurrentCareLevel = careLevelModule.getCustomerCurrentCareLevel;
   addCareLevelHistory = careLevelModule.addCareLevelHistory;
+  pflegegradAlsFehleintragEntfernen = careLevelModule.pflegegradAlsFehleintragEntfernen;
+  pflegegradBeenden = careLevelModule.pflegegradBeenden;
   getCustomerNeedsAssessment = careLevelModule.getCustomerNeedsAssessment;
   updateNeedsAssessment = careLevelModule.updateNeedsAssessment;
   createNeedsAssessment = careLevelModule.createNeedsAssessment;

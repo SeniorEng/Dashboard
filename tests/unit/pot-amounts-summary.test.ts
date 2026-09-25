@@ -1,167 +1,146 @@
 /**
- * Task #1905 — `summarizePotAmounts`: DIE EINE Aggregation „Topf-Zeilen →
- * Netto/USt/Brutto".
+ * `summarizePotAmounts` / `ustFuerTopf` / `ustJeSatz` — die USt je Position
+ * nach Tabelle D (§ 4 Nr. 16 g UStG, Ticket 6hcgffPJWm57p72p, bestätigt von
+ * Alrik am 25.09.2026).
  *
- * Anlass ist ein Gate-2-Befund: die IST-Beträge der Karte „Noch zu erstellen"
- * lasen die Summen roh aus dem Zeilen-Bauer und verfehlten damit die
- * USt-Reklassifizierung, die `buildInvoiceDraft` beim Erstellen anwendet. Für
- * einen Pflegekassen-Kunden mit `acceptsPrivatePayment` und ausgeschöpftem Topf
- * lag der angezeigte Betrag dadurch bis zu 19 % unter dem, was tatsächlich
- * abgerechnet wird — in genau der Spalte, die als Erwartungswert gelesen wird.
- *
- * Diese Tests halten die Regel an EINER Stelle fest; Rechnung UND Anzeige rufen
- * dieselbe Funktion.
+ * ERSETZT die Fassung aus Task #1905, die die alte Zahlertyp-Regel festhielt
+ * („Privat-Topf 19 %", Reklassifizierung im Einzeltopf über `builderVatCents`).
+ * Rechnung, Vorschau und Anzeige rufen dieselbe Funktion; diese Tests halten
+ * die Regel an EINER Stelle fest. Die e2e-Abnahme (PDF, XML, gespeicherte
+ * Rechnung) steht in `tests/billing/ust-4-16g.test.ts`.
  */
 import { describe, it, expect } from "vitest";
-import { summarizePotAmounts } from "@shared/domain/invoice-amounts";
+import { summarizePotAmounts, ustFuerTopf, type PotAmountItem } from "@shared/domain/invoice-amounts";
+import { ustJeSatz, ustSatzBP } from "@shared/domain/invoice-vat";
 import type { InvoicePotKey } from "@shared/domain/budget-invoice-split";
 
-function pots(
-  entries: Array<[InvoicePotKey, number[]]>,
-): Map<InvoicePotKey, { totalCents: number }[]> {
-  return new Map(
-    entries.map(([pot, cents]) => [pot, cents.map((c) => ({ totalCents: c }))]),
-  );
+const HW = "hauswirtschaft";
+const AB = "alltagsbegleitung";
+const KM = "travel_km";
+/** Eine Leistung AUSSERHALB der Anerkennungsliste (nicht im Katalog). */
+const GARTEN = "gartenpflege";
+
+function pos(cents: number, code: string, pg: number | null, haupt: string[] = [code]): PotAmountItem {
+  return { totalCents: cents, serviceCode: code, pflegegradAmLeistungstag: pg, hauptleistungenDesTermins: haupt };
 }
 
-describe("summarizePotAmounts — Single-Pot", () => {
-  it("Kassen-Topf: USt bleibt die des Zeilen-Bauers (0 %)", () => {
-    const r = summarizePotAmounts({
-      potItems: pots([["entlastungsbetrag_45b", [10000]]]),
-      billingType: "pflegekasse_gesetzlich",
-      builderNetCents: 10000,
-      builderVatCents: 0,
-    });
-    expect(r).toMatchObject({ netCents: 10000, vatCents: 0, grossCents: 10000 });
-    expect(r.needsBudgetSplit).toBe(false);
-    expect(r.singlePotIsPrivate).toBe(false);
+function pots(entries: Array<[InvoicePotKey, PotAmountItem[]]>): Map<InvoicePotKey, PotAmountItem[]> {
+  return new Map(entries);
+}
+
+describe("Tabelle D — Satz je Position (`ustSatzBP`)", () => {
+  const privat = { kassenTopf: false };
+  const kasse = { kassenTopf: true };
+
+  it("D1: Leistung der Liste + PG nachgewiesen → steuerfrei (Pflichtfall 2/3)", () => {
+    expect(ustSatzBP(pos(1, HW, 2), privat)).toBe(0);
+    expect(ustSatzBP(pos(1, AB, 5), privat)).toBe(0);
   });
 
-  it("Selbstzahler, Privat-Topf: die 19 % des Bauers bleiben (keine Doppelrechnung)", () => {
-    const r = summarizePotAmounts({
-      potItems: pots([["private", [10000]]]),
-      billingType: "selbstzahler",
-      builderNetCents: 10000,
-      builderVatCents: 1900,
-    });
-    expect(r.vatCents).toBe(1900);
-    expect(r.grossCents).toBe(11900);
-    expect(r.singlePotIsPrivate).toBe(true);
+  it("D2: Leistung der Liste OHNE nachgewiesenen PG → 19 % (Pflichtfall 1/6 — darf nie kippen)", () => {
+    expect(ustSatzBP(pos(1, HW, null), privat)).toBe(1900);
+    expect(ustSatzBP(pos(1, AB, null), privat)).toBe(1900);
   });
 
-  it("Pflegekasse + einziger Topf privat: Reklassifizierung auf 19 % (der S1-Fall)", () => {
-    // Ausgeschöpfter §45b-Topf + `acceptsPrivatePayment` ⇒ alles landet privat,
-    // die Rechnung geht als Selbstzahler-Rechnung raus. Der Zeilen-Bauer hat
-    // USt 0 gerechnet (Kunden-billingType ist USt-befreit) — hier korrigiert.
-    const r = summarizePotAmounts({
-      potItems: pots([["private", [10000]]]),
-      billingType: "pflegekasse_gesetzlich",
-      builderNetCents: 10000,
-      builderVatCents: 0,
-    });
-    expect(r.vatCents).toBe(1900);
-    expect(r.grossCents).toBe(11900);
+  it("D3: Leistung AUSSERHALB der Liste → 19 %, auch mit PG (Pflichtfall 4)", () => {
+    expect(ustSatzBP(pos(1, GARTEN, 3), privat)).toBe(1900);
   });
 
-  it("Pflegekasse ohne erlaubte Privatzahlung: KEINE Reklassifizierung", () => {
-    // Anzeige-Pfad über noch nicht gebuchte Termine: der Privat-Topf entsteht
-    // allein aus der fehlenden Buchung (Fallback), nicht aus einem echten
-    // Privatanteil. 19 % aufzuschlagen wäre erfundene Genauigkeit.
-    const r = summarizePotAmounts({
-      potItems: pots([["private", [10000]]]),
-      billingType: "pflegekasse_gesetzlich",
-      builderNetCents: 10000,
-      builderVatCents: 0,
-      privatePotIsTaxable: false,
-    });
-    expect(r.vatCents).toBe(0);
-    expect(r.grossCents).toBe(10000);
+  it("D1/D4 (RK-1): Kassen-Topf → steuerfrei, auch ohne nachgewiesenen PG", () => {
+    expect(ustSatzBP(pos(1, HW, null), kasse)).toBe(0);
+    expect(ustSatzBP(pos(1, HW, 3), kasse)).toBe(0);
   });
 
-  it("leere Topf-Menge ⇒ 0, ohne Sonderfall", () => {
-    const r = summarizePotAmounts({
-      potItems: pots([]),
-      billingType: "pflegekasse_gesetzlich",
-      builderNetCents: 0,
-      builderVatCents: 0,
-    });
-    expect(r).toMatchObject({ netCents: 0, vatCents: 0, grossCents: 0 });
+  it("D6: Kilometer folgen der Hauptleistung — PG + alle Hauptleistungen auf der Liste → steuerfrei", () => {
+    expect(ustSatzBP(pos(1, KM, 3, [HW, AB]), privat)).toBe(0);
+  });
+
+  it("D6/RK-2: Kilometer bei einem Termin mit Leistung AUSSERHALB der Liste → 19 %", () => {
+    expect(ustSatzBP(pos(1, KM, 3, [HW, GARTEN]), privat)).toBe(1900);
+  });
+
+  it("D6: Kilometer ohne Hauptleistung → 19 % (nichts, dem sie folgen könnten)", () => {
+    expect(ustSatzBP(pos(1, KM, 3, []), privat)).toBe(1900);
+  });
+
+  it("D7: Kilometer ohne nachgewiesenen PG → 19 %", () => {
+    expect(ustSatzBP(pos(1, KM, null, [HW]), privat)).toBe(1900);
+  });
+
+  it("D8: Ausfall-/No-Show-Pauschale → 0 %, mit und ohne PG", () => {
+    expect(ustSatzBP(pos(1, "no_show_charge", null, []), privat)).toBe(0);
+    expect(ustSatzBP(pos(1, "no_show_charge", 2, []), privat)).toBe(0);
+  });
+
+  it("ungültiger Grad (0) zählt nicht als Nachweis", () => {
+    expect(ustSatzBP(pos(1, HW, 0), privat)).toBe(1900);
   });
 });
 
-describe("summarizePotAmounts — Multi-Pot", () => {
-  it("Kassen-Töpfe 0 %, Privat-Topf 19 %, je Topf gerundet", () => {
-    const r = summarizePotAmounts({
-      potItems: pots([
-        ["entlastungsbetrag_45b", [12500]],
-        ["private", [3333]],
-      ]),
-      billingType: "pflegekasse_gesetzlich",
-      // Bauer-Summen werden im Multi-Pot-Zweig bewusst NICHT verwendet —
-      // absichtlich abweichend gesetzt, damit ein Rückfall auffiele.
-      builderNetCents: 999999,
-      builderVatCents: 999999,
-    });
-    expect(r.netCents).toBe(15833);
-    // Literal statt nachgerechneter Implementierungsformel: eine Änderung an
-    // `STANDARD_VAT_RATE_BP` oder am Rundungsmodus MUSS hier rot werden.
-    expect(r.vatCents).toBe(633);
-    expect(r.grossCents).toBe(16466);
-    expect(r.needsBudgetSplit).toBe(true);
-    expect(r.singlePotIsPrivate).toBe(false);
+describe("`ustFuerTopf` / `ustJeSatz` — Rundung je Satz auf die Summe", () => {
+  it("E2: RE-2026-0378, 291,01 € ohne PG → 55,29 € (je Satz auf die Summe, nicht je Zeile)", () => {
+    // Drei Positionen, deren Einzelrundung 55,30 ergäbe (0,5-Grenzen) —
+    // gerundet wird EINMAL auf die Summe: round(29101 × 0,19) = round(5529,19).
+    const t = ustFuerTopf("private", [pos(10050, HW, null), pos(10050, HW, null), pos(9001, AB, null)]);
+    expect(t.netCents).toBe(29101);
+    expect(t.vatCents).toBe(5529);
   });
 
-  it("USt wird je TOPF gerundet — nicht je Zeile und nicht auf der Gesamtsumme", () => {
-    // Diskriminierende Beträge: die drei denkbaren Rundungs-Skopen liefern hier
-    // DREI verschiedene Ergebnisse, der Test kann also wirklich rot werden.
-    //   • je Zeile:        round(0,57) + round(0,57) = 1 + 1 = 2
-    //   • je Topf (Soll):  round(6 * 0,19)           = round(1,14) = 1
-    //   • auf Gesamtsumme: round(10006 * 0,19)       = 1901
-    const r = summarizePotAmounts({
-      potItems: pots([
-        ["entlastungsbetrag_45b", [10000]],
-        ["private", [3, 3]],
-      ]),
-      billingType: "pflegekasse_gesetzlich",
-      builderNetCents: 10006,
-      builderVatCents: 0,
-    });
-    expect(r.netCents).toBe(10006);
-    expect(r.vatCents).toBe(1);
-    expect(r.grossCents).toBe(10007);
+  it("E1: RE-2026-0595, 299,85 € ohne PG → 56,97 € unverändert", () => {
+    const t = ustFuerTopf("private", [pos(29985, HW, null)]);
+    expect(t.vatCents).toBe(5697);
   });
 
-  it("Multi-Pot ohne erlaubte Privatzahlung: Privat-Topf wird NICHT besteuert", () => {
-    // Gate-2-Befund (Delta-Runde): das Flag wirkte nur im Single-Pot-Zweig. Ein
-    // reiner Kassen-Kunde mit Kassen-Topf PLUS Fallback-Überhang bekam damit USt
-    // ausgewiesen, die keine Rechnung je ausweisen kann — die Erstellung bricht
-    // für ihn am #1353-Backstop ab.
+  it("gemischte Position im selben Topf: USt nur auf den steuerpflichtigen Teil", () => {
+    const t = ustFuerTopf("private", [pos(10000, HW, 3), pos(5000, GARTEN, 3)]);
+    expect(t.items.map((i) => i.vatRateBp)).toEqual([0, 1900]);
+    expect(t.gruppen).toEqual([
+      { satzBP: 0, basisCents: 10000, ustCents: 0 },
+      { satzBP: 1900, basisCents: 5000, ustCents: 950 },
+    ]);
+    expect(t.vatCents).toBe(950);
+  });
+
+  it("Storno: negative Basis ergibt exakt das Negative, auch an der x,5-Grenze", () => {
+    // 50 ct × 19 % = 9,5 ct → +10; das Storno muss −10 ergeben, nicht −9.
+    expect(ustJeSatz([{ totalCents: 50, vatRateBp: 1900 }]).ustCents).toBe(10);
+    expect(ustJeSatz([{ totalCents: -50, vatRateBp: 1900 }]).ustCents).toBe(-10);
+  });
+});
+
+describe("`summarizePotAmounts` — Rechnung und Anzeige", () => {
+  it("E5 Funke: Kasse 184,60 + Überlauf privat 9,60 mit PG 3 → 194,20 € brutto", () => {
     const r = summarizePotAmounts({
       potItems: pots([
-        ["entlastungsbetrag_45b", [10000]],
-        ["private", [5000]],
+        ["entlastungsbetrag_45b", [pos(18460, HW, 3)]],
+        ["private", [pos(960, HW, 3)]],
       ]),
       billingType: "pflegekasse_gesetzlich",
-      builderNetCents: 15000,
-      builderVatCents: 0,
+    });
+    expect(r).toMatchObject({ netCents: 19420, vatCents: 0, grossCents: 19420 });
+  });
+
+  it("Selbstzahler ohne PG: 19 % (Leitplanke)", () => {
+    const r = summarizePotAmounts({ potItems: pots([["private", [pos(10000, HW, null)]]]), billingType: "selbstzahler" });
+    expect(r).toMatchObject({ netCents: 10000, vatCents: 1900, grossCents: 11900, singlePotIsPrivate: true });
+  });
+
+  it("E6 Selbstzahler MIT PG: steuerfrei, das Netto bleibt", () => {
+    const r = summarizePotAmounts({ potItems: pots([["private", [pos(10000, HW, 2)]]]), billingType: "selbstzahler" });
+    expect(r).toMatchObject({ netCents: 10000, vatCents: 0, grossCents: 10000 });
+  });
+
+  it("Anzeige-Pfad: Privat-Topf nur aus fehlender Buchung (privatePotIsTaxable=false) → keine USt", () => {
+    const r = summarizePotAmounts({
+      potItems: pots([["entlastungsbetrag_45b", [pos(10000, HW, null)]], ["private", [pos(5000, HW, null)]]]),
+      billingType: "pflegekasse_gesetzlich",
       privatePotIsTaxable: false,
     });
-    expect(r.netCents).toBe(15000);
-    expect(r.vatCents).toBe(0);
-    expect(r.grossCents).toBe(15000);
+    expect(r).toMatchObject({ netCents: 15000, vatCents: 0, grossCents: 15000, needsBudgetSplit: true });
   });
 
-  it("Multi-Pot MIT erlaubter Privatzahlung: Privat-Topf trägt 19 %", () => {
-    const r = summarizePotAmounts({
-      potItems: pots([
-        ["entlastungsbetrag_45b", [10000]],
-        ["private", [5000]],
-      ]),
-      billingType: "pflegekasse_gesetzlich",
-      builderNetCents: 15000,
-      builderVatCents: 0,
-    });
-    expect(r.vatCents).toBe(950);
-    expect(r.grossCents).toBe(15950);
+  it("leere Topf-Menge ⇒ 0", () => {
+    const r = summarizePotAmounts({ potItems: pots([]), billingType: "pflegekasse_gesetzlich" });
+    expect(r).toMatchObject({ netCents: 0, vatCents: 0, grossCents: 0 });
   });
 });

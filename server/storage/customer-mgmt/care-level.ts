@@ -8,8 +8,21 @@ import {
   customers,
 } from "@shared/schema";
 import { eq, and, isNull, desc, asc, lte, gte, or } from "drizzle-orm";
-import { parseLocalDate, formatDateISO } from "@shared/utils/datetime";
+import { parseLocalDate, formatDateISO, todayISO, addDays } from "@shared/utils/datetime";
 import { db, type DbOrTx } from "../../lib/db";
+import { badRequest, conflict, notFound } from "../../lib/errors";
+import { vorgaengerZumWiederaufleben } from "@shared/domain/pflegegrad-historie";
+
+/**
+ * Nur Einträge, die NICHT als Fehleintrag entfernt sind (Ticket
+ * 6hcgffPJWm57p72p). Jeder Leser, der eine Aussage über den Pflegegrad trifft
+ * (Stichtag, Anker, aktueller Eintrag), filtert hierüber — ein entfernter
+ * Eintrag zählt für kein Datum. Nur die Verlaufs-Anzeige
+ * (`getCustomerCareLevelHistory`) liefert ihn mit Markierung aus.
+ */
+export function nichtEntfernt() {
+  return isNull(customerCareLevelHistory.entferntAm);
+}
 
 export async function getCustomerCareLevelHistory(customerId: number): Promise<CustomerCareLevelHistory[]> {
   return await db
@@ -35,7 +48,7 @@ export async function getEarliestCareLevelStart(
   const rows = await executor
     .select({ validFrom: customerCareLevelHistory.validFrom })
     .from(customerCareLevelHistory)
-    .where(eq(customerCareLevelHistory.customerId, customerId))
+    .where(and(eq(customerCareLevelHistory.customerId, customerId), nichtEntfernt()))
     .orderBy(asc(customerCareLevelHistory.validFrom))
     .limit(1);
   return rows[0]?.validFrom ?? null;
@@ -66,11 +79,24 @@ export async function getCareLevelAt(
   asOfDate: string,
   executor: Pick<typeof db, "select"> = db,
 ): Promise<number | null> {
+  return (await getCareLevelEntryAt(customerId, asOfDate, executor))?.pflegegrad ?? null;
+}
+
+/**
+ * Wie `getCareLevelAt`, liefert aber den gültigen EINTRAG (Grad + Beginn) —
+ * für die Anzeige „Pflegegrad N seit …". Dieselbe Auswahl, keine zweite.
+ */
+export async function getCareLevelEntryAt(
+  customerId: number,
+  asOfDate: string,
+  executor: Pick<typeof db, "select"> = db,
+): Promise<{ pflegegrad: number; validFrom: string } | null> {
   const rows = await executor
-    .select({ pflegegrad: customerCareLevelHistory.pflegegrad })
+    .select({ pflegegrad: customerCareLevelHistory.pflegegrad, validFrom: customerCareLevelHistory.validFrom })
     .from(customerCareLevelHistory)
     .where(and(
       eq(customerCareLevelHistory.customerId, customerId),
+      nichtEntfernt(),
       lte(customerCareLevelHistory.validFrom, asOfDate),
       or(
         isNull(customerCareLevelHistory.validTo),
@@ -81,7 +107,7 @@ export async function getCareLevelAt(
     // `getCustomerCurrentCareLevel` (dort `desc(validFrom)`).
     .orderBy(desc(customerCareLevelHistory.validFrom))
     .limit(1);
-  return rows[0]?.pflegegrad ?? null;
+  return rows[0] ?? null;
 }
 
 export async function getCustomerCurrentCareLevel(customerId: number): Promise<CustomerCareLevelHistory | undefined> {
@@ -90,6 +116,7 @@ export async function getCustomerCurrentCareLevel(customerId: number): Promise<C
     .from(customerCareLevelHistory)
     .where(and(
       eq(customerCareLevelHistory.customerId, customerId),
+      nichtEntfernt(),
       isNull(customerCareLevelHistory.validTo)
     ))
     .limit(1);
@@ -112,6 +139,7 @@ export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?:
     .from(customerCareLevelHistory)
     .where(and(
       eq(customerCareLevelHistory.customerId, data.customerId),
+      nichtEntfernt(),
       isNull(customerCareLevelHistory.validTo)
     ));
 
@@ -141,6 +169,113 @@ export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?:
     .where(eq(customers.id, data.customerId));
 
   return result[0];
+}
+
+/**
+ * Stammdaten `customers.pflegegrad` aus der Historie nachziehen: der Grad, der
+ * HEUTE gilt, sonst NULL. „Heute" ist hier richtig — die Spalte ist per
+ * Definition der aktuelle Grad; jede Aussage zu einem Datum liest die
+ * Historie (`getCareLevelAt`).
+ */
+async function stammdatenNachziehen(customerId: number, executor: DbOrTx): Promise<number | null> {
+  const heute = await getCareLevelAt(customerId, todayISO(), executor);
+  await executor
+    .update(customers)
+    .set({ pflegegrad: heute, updatedAt: new Date() })
+    .where(eq(customers.id, customerId));
+  return heute;
+}
+
+/**
+ * „Als Fehleintrag entfernen" (Entscheidung Alrik, 25.09.2026): der Eintrag war
+ * NIE richtig. Er wird markiert (nicht gelöscht; Grund Pflicht, Audit beim
+ * Aufrufer) und zählt danach für kein Datum mehr — auch rückwirkend. Die
+ * Stammdaten werden im selben Zug auf den heute geltenden Grad gesetzt, ohne
+ * weiteren Eintrag also auf „kein Pflegegrad".
+ */
+export async function pflegegradAlsFehleintragEntfernen(
+  params: { customerId: number; historyId: number; grund: string; userId: number; vorigenWiederOeffnen?: boolean; erwarteterVorgaengerId?: number },
+  executor: DbOrTx,
+): Promise<{ eintrag: CustomerCareLevelHistory; pflegegradHeute: number | null; wiederGeoeffnet: CustomerCareLevelHistory | null }> {
+  const [eintrag] = await executor
+    .select()
+    .from(customerCareLevelHistory)
+    .where(and(
+      eq(customerCareLevelHistory.id, params.historyId),
+      eq(customerCareLevelHistory.customerId, params.customerId),
+    ))
+    .for("update");
+  if (!eintrag) throw notFound("Pflegegrad-Eintrag nicht gefunden");
+  if (eintrag.entferntAm != null) throw badRequest("Dieser Pflegegrad-Eintrag ist bereits als Fehleintrag entfernt.");
+  // Kandidat VOR dem Markieren bestimmen — auf der gesperrten Historie des
+  // Kunden, mit derselben Funktion, die der Dialog im Client zeigt.
+  let wiederGeoeffnet: CustomerCareLevelHistory | null = null;
+  if (params.vorigenWiederOeffnen) {
+    const historie = await executor
+      .select()
+      .from(customerCareLevelHistory)
+      .where(eq(customerCareLevelHistory.customerId, params.customerId))
+      .for("update");
+    const kandidat = vorgaengerZumWiederaufleben(historie, eintrag.id);
+    if (!kandidat) {
+      throw badRequest("Es gibt keinen vorigen Pflegegrad, der direkt vor diesem Eintrag endet — nichts wieder zu öffnen.");
+    }
+    if (params.erwarteterVorgaengerId != null && kandidat.eintrag.id !== params.erwarteterVorgaengerId) {
+      throw conflict("PFLEGEGRAD_HISTORIE_GEAENDERT", "Die Pflegegrad-Historie hat sich inzwischen geändert. Bitte die Seite neu laden und erneut entscheiden.");
+    }
+    [wiederGeoeffnet] = await executor
+      .update(customerCareLevelHistory)
+      .set({ validTo: kandidat.neuesEnde })
+      .where(eq(customerCareLevelHistory.id, kandidat.eintrag.id))
+      .returning();
+  }
+  const [markiert] = await executor
+    .update(customerCareLevelHistory)
+    .set({ entferntAm: new Date(), entferntGrund: params.grund, entferntVonUserId: params.userId })
+    .where(eq(customerCareLevelHistory.id, eintrag.id))
+    .returning();
+  const pflegegradHeute = await stammdatenNachziehen(params.customerId, executor);
+  return { eintrag: markiert, pflegegradHeute, wiederGeoeffnet };
+}
+
+/**
+ * „Ab Datum beenden" für echte Enden (Entscheidung Alrik, 25.09.2026): ab
+ * `abDatum` gilt kein Pflegegrad mehr; der laufende Eintrag endet am Vortag.
+ * Beginnt der laufende Eintrag erst am oder nach `abDatum`, gäbe es keinen
+ * gültigen Tag — das ist kein Ende, sondern ein Irrtum: dann „als Fehleintrag
+ * entfernen". Stammdaten wie oben.
+ */
+export async function pflegegradBeenden(
+  params: { customerId: number; abDatum: string },
+  executor: DbOrTx,
+): Promise<{ eintrag: CustomerCareLevelHistory; pflegegradHeute: number | null }> {
+  const offene = await executor
+    .select()
+    .from(customerCareLevelHistory)
+    .where(and(
+      eq(customerCareLevelHistory.customerId, params.customerId),
+      nichtEntfernt(),
+      isNull(customerCareLevelHistory.validTo),
+    ))
+    .for("update");
+  if (offene.length === 0) throw badRequest("Es gibt keinen laufenden Pflegegrad, der beendet werden könnte.");
+  if (offene.length > 1) {
+    throw badRequest("Es gibt mehrere laufende Pflegegrad-Einträge. Bitte zuerst den falschen als Fehleintrag entfernen.");
+  }
+  const [offen] = offene;
+  if (offen.validFrom >= params.abDatum) {
+    throw badRequest(
+      "Der laufende Pflegegrad beginnt erst am oder nach diesem Datum — es gäbe keinen gültigen Tag. " +
+      "War der Eintrag ein Irrtum, bitte „als Fehleintrag entfernen“.",
+    );
+  }
+  const [beendet] = await executor
+    .update(customerCareLevelHistory)
+    .set({ validTo: addDays(params.abDatum, -1) })
+    .where(eq(customerCareLevelHistory.id, offen.id))
+    .returning();
+  const pflegegradHeute = await stammdatenNachziehen(params.customerId, executor);
+  return { eintrag: beendet, pflegegradHeute };
 }
 
 export async function getCustomerNeedsAssessment(customerId: number, tx?: DbOrTx): Promise<CustomerNeedsAssessment | undefined> {

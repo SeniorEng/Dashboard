@@ -1,3 +1,4 @@
+import { todayISO } from "@shared/utils/datetime";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,12 +77,17 @@ export function CustomerMedicalSection({
                 </div>
                 <div>
                   <Label>Gültig seit</Label>
+                  {/* Nur ab heute (RK-11, Alrik): der Pflegegrad ist Nachweis für die
+                      Steuerfreiheit; rückwirkend ändert ihn die Verwaltung. Der Server
+                      prüft dasselbe (`routes/customers.ts`). */}
                   <Input
                     type="date"
+                    min={todayISO()}
                     value={pflegegradForm.seitDatum}
                     onChange={(e) => setPflegegradForm(f => ({ ...f, seitDatum: e.target.value }))}
                     data-testid="input-pflegegrad-seit"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Rückwirkende Änderungen nimmt die Verwaltung vor.</p>
                 </div>
               </div>
               <div className="flex gap-2 pt-1">

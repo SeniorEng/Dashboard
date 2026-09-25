@@ -1013,6 +1013,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
             customerId={customerId}
             customerName={`${customer.vorname ?? ""} ${customer.nachname ?? ""}`.trim() || customer.name}
             billingType={customer.billingType ?? undefined}
+            pflegegradHeute={customer.pflegegradHeute}
             onRefresh={() => {
               invalidateRelated(queryClient, "customers");
             }}

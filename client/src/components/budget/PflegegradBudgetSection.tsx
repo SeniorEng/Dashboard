@@ -19,6 +19,8 @@ interface CareLevelHistoryEntry {
   pflegegrad: number;
   validFrom: string;
   validTo: string | null;
+  /** Als Fehleintrag entfernt (Ticket 6hcgffPJWm57p72p) — zählt nicht, hier ausgeblendet. */
+  entferntAm?: string | Date | null;
   notes: string | null;
 }
 
@@ -35,7 +37,7 @@ export function PflegegradBudgetSection({ customerId, pflegegrad, careLevelHisto
   const [newPflegegrad, setNewPflegegrad] = useState<string>("");
   const [pflegegradSeit, setPflegegradSeit] = useState<string>(todayISO());
 
-  const currentCareLevel = careLevelHistory?.find((e) => !e.validTo);
+  const currentCareLevel = careLevelHistory?.find((e) => !e.validTo && !e.entferntAm);
 
   const changeCareLevelMutation = useMutation({
     mutationFn: async (data: { pflegegrad: number; validFrom: string }) => {
@@ -181,7 +183,7 @@ export function PflegegradBudgetSection({ customerId, pflegegrad, careLevelHisto
             <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
             <div className="space-y-3">
               {careLevelHistory
-                .filter((entry) => !entry.validTo || entry.validTo >= entry.validFrom)
+                .filter((entry) => !entry.entferntAm && (!entry.validTo || entry.validTo >= entry.validFrom))
                 .map((entry, index) => (
                 <div key={entry.id} className="relative pl-10">
                   <div

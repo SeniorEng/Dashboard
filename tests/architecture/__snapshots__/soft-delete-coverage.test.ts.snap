@@ -9,6 +9,9 @@ exports[`Architektur — Soft-Delete-Coverage in server/routes/** > Snapshot: pr
   "server/routes/admin/customers/budgets.ts": [
     "appointmentsRepo",
   ],
+  "server/routes/admin/customers/details.ts": [
+    "customersRepo",
+  ],
   "server/routes/admin/customers/workflows.ts": [
     "appointmentsRepo",
     "customersRepo",

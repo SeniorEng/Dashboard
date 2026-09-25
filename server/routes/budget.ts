@@ -17,7 +17,7 @@ import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-v
 import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-validator";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { classifyCostEstimate } from "@shared/domain/budget/cost-estimate-outcome";
-import { serviceVatRateBP } from "@shared/domain/invoice-vat";
+import { ustSatzBP, istKilometerPosition } from "@shared/domain/invoice-vat";
 import {
   max45bStartValueCents,
   resolve45bAccrualAnchor,
@@ -180,10 +180,15 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 
   let totalCostCents = 0;
   let weightedVatRate = 19;
-  // Task #1659 — der USt-Satz eines Service wird ausschließlich über die SSoT
-  // `serviceVatRateBP` gelesen (liefert Basispunkte, 19 % → 1900). Kein roher
-  // `service.vatRate`-Zugriff mehr in der Kostenschätzung.
-  const costDetails: { serviceId: number; costCents: number; vatRateBp: number }[] = [];
+  let einheitlicherSatz: number | null = 19;
+  // § 4 Nr. 16 g UStG (Ticket 6hcgffPJWm57p72p) — der Satz je Leistung kommt
+  // aus DERSELBEN Regel wie die Rechnung (`ustSatzBP`, Tabelle D), mit dem
+  // Pflegegrad AM TERMINDATUM aus der Historie. Der private Anteil ist der
+  // einzige, auf den USt entstehen kann (Kassen-Anteil: 0). ERSETZT den festen
+  // Leistungs-Satz je Service, der für jeden Kunden galt.
+  const { getCareLevelAt: pflegegradAm } = await import("../storage/customer-mgmt/care-level");
+  const pflegegradAmTermin = await pflegegradAm(customerId, date);
+  const costDetails: { serviceCode: string | null; costCents: number }[] = [];
 
   const serviceIdsParam = req.query.serviceIds as string | undefined;
   const serviceDurationsParam = req.query.serviceDurations as string | undefined;
@@ -214,7 +219,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
         }
         if (costCents > 0) {
           totalCostCents += costCents;
-          costDetails.push({ serviceId: service.id, costCents, vatRateBp: serviceVatRateBP(service) });
+          costDetails.push({ serviceCode: service.code, costCents });
         }
       }
     } else {
@@ -239,10 +244,10 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
         serviceCatalogStorage.getServiceByCode("travel_km"),
         serviceCatalogStorage.getServiceByCode("customer_km"),
       ]);
-      if (hwService && hauswirtschaftMinutes > 0) costDetails.push({ serviceId: hwService.id, costCents: costs.hauswirtschaftCents, vatRateBp: serviceVatRateBP(hwService) });
-      if (abService && alltagsbegleitungMinutes > 0) costDetails.push({ serviceId: abService.id, costCents: costs.alltagsbegleitungCents, vatRateBp: serviceVatRateBP(abService) });
-      if (travelKmService && travelKilometers > 0 && costs.travelCents > 0) costDetails.push({ serviceId: travelKmService.id, costCents: costs.travelCents, vatRateBp: serviceVatRateBP(travelKmService) });
-      if (customerKmService && customerKilometers > 0 && costs.customerKilometersCents > 0) costDetails.push({ serviceId: customerKmService.id, costCents: costs.customerKilometersCents, vatRateBp: serviceVatRateBP(customerKmService) });
+      if (hwService && hauswirtschaftMinutes > 0) costDetails.push({ serviceCode: hwService.code, costCents: costs.hauswirtschaftCents });
+      if (abService && alltagsbegleitungMinutes > 0) costDetails.push({ serviceCode: abService.code, costCents: costs.alltagsbegleitungCents });
+      if (travelKmService && travelKilometers > 0 && costs.travelCents > 0) costDetails.push({ serviceCode: travelKmService.code, costCents: costs.travelCents });
+      if (customerKmService && customerKilometers > 0 && costs.customerKilometersCents > 0) costDetails.push({ serviceCode: customerKmService.code, costCents: costs.customerKilometersCents });
     }
   } catch (error: unknown) {
     if (error instanceof Error && error.message.includes("Preisvereinbarung")) {
@@ -269,7 +274,17 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     if (totalCost > 0) {
       // Gewichteter Durchschnitt in Basispunkten → Prozent (classifyCostEstimate
       // erwartet Prozent). Die SSoT liefert BP, deshalb hier einmal /100.
-      weightedVatRate = costDetails.reduce((s, c) => s + (c.vatRateBp * c.costCents / totalCost), 0) / 100;
+      const hauptleistungen = costDetails.map(c => c.serviceCode).filter((c): c is string => c != null && !istKilometerPosition(c));
+      const saetze = costDetails.map(c => ustSatzBP({
+        serviceCode: c.serviceCode,
+        pflegegradAmLeistungstag: pflegegradAmTermin,
+        hauptleistungenDesTermins: hauptleistungen,
+      }, { kassenTopf: false }));
+      weightedVatRate = costDetails.reduce((s, c, i) => s + (saetze[i] * c.costCents / totalCost), 0) / 100;
+      // Gemischte Sätze (z. B. steuerfrei + 19 %): kein Satz in der Antwort —
+      // die Anzeige sagt dann nur „inkl. MwSt." statt eines Mischsatzes wie
+      // „inkl. 11 %" (Entscheidung Alrik, Gate 2 zu #194, Punkt 9).
+      einheitlicherSatz = new Set(saetze).size === 1 ? saetze[0] / 100 : null;
     }
   }
 
@@ -291,7 +306,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       isSelbstzahler: true,
       bruttoCents: outcome.bruttoCents,
       vatCents: outcome.vatCents,
-      vatRate: Math.round(weightedVatRate),
+      vatRate: einheitlicherSatz,
       warning: outcome.warning,
       isHardBlock: outcome.isHardBlock,
       privateCents: outcome.privateCents,
@@ -407,7 +422,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     projectedAvailableCents: dateAware.projectedTotalCents,
     privateCents: outcome.privateCents,
     vatCents: outcome.vatCents,
-    vatRate: Math.round(weightedVatRate),
+    vatRate: einheitlicherSatz,
     acceptsPrivatePayment,
     ...(process.env.NODE_ENV === "test" ? { _testBudgetQueriesExecuted: true } : {}),
   });

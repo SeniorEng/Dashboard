@@ -159,6 +159,11 @@ export async function stornoInvoiceCascade(
       employeeName: item.employeeName,
       appointmentNotes: item.appointmentNotes || null,
       serviceDetails: item.serviceDetails || null,
+      // D9 (Tabelle D, § 4 Nr. 16 g UStG): die Storno-Position übernimmt die
+      // USt-Behandlung der Originalposition und rechnet nicht neu. NULL beim
+      // Bestand bleibt NULL — dort gilt weiter die Rechnungs-Ebene.
+      vatRateBp: item.vatRateBp,
+      pflegegradAmLeistungstag: item.pflegegradAmLeistungstag,
     }));
 
     const created = await createInvoiceTx(tx, stornoData, stornoLineItems, userId);
