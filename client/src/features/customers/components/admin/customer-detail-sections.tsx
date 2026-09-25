@@ -64,7 +64,10 @@ export function SetupPendingBanner({ customer, onRefresh }: { customer: SetupPen
         }
         result = lastResult;
       } else if (step === "budgets") {
-        const items = (stepPayload.items as Array<{ budgetType: string; currentMonthAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }>) || [];
+        // Beide Betraege optional: ein gespeicherter Payload kann „keine Angabe"
+        // tragen, und genau die Unterscheidung darf der Wiederhol-Weg nicht
+        // einebnen (siehe `setupPendingBodySchema`).
+        const items = (stepPayload.items as Array<{ budgetType: string; currentMonthAmountCents?: number; carryoverAmountCents?: number; budgetStartDate: string }>) || [];
         let lastResult;
         for (const b of items) {
           lastResult = await api.post(`/budget/${customer.id}/initial-budget`, b);

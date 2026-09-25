@@ -1588,10 +1588,14 @@ describe("INT-17: Selbstzahler ohne Preis-Konfiguration (noPricing edge case)", 
 
 
 describe("INT-18: §45b Onboarding-Baseline – kein Vorjahres-Carryover bei abgeleitetem Anker (Task #860)", () => {
-  // Frisch onboardeter Kunde, dessen Pflegegrad im VORJAHR begann. Der §45b-
-  // Anker wird wie vom Wizard via /initial-budget gesetzt — Origin
-  // 'derived_pflegegrad', RAW-Datum im Vorjahr, KEIN Startguthaben, KEIN
-  // operator-erfasster Übertrag. Erwartung (Task #860): das Vorjahr gilt als
+  // Frisch onboardeter Kunde, dessen Pflegegrad im VORJAHR begann. KEIN
+  // Startguthaben, KEIN operator-erfasster Übertrag.
+  //
+  // Der Anker kommt aus der Pflegegrad-Historie, die `setupBudgetScenario`
+  // setzt — NICHT aus einem `/initial-budget`-Aufruf. Hier stand „wird wie vom
+  // Wizard via /initial-budget gesetzt"; der Aufruf war ein No-Op und ist am
+  // 24.09.2026 entfallen (siehe `beforeAll`). Der Wizard geht diesen Weg
+  // ohnehin nicht mehr. Erwartung (Task #860): das Vorjahr gilt als
   // aufgebraucht — es entsteht KEINE automatisch materialisierte Carryover-
   // Zeile, carryoverCents = 0, und der laufende Jahresanteil läuft ab dem
   // 1.1. des LAUFENDEN Jahres an (Anker gebodet via
@@ -1602,7 +1606,6 @@ describe("INT-18: §45b Onboarding-Baseline – kein Vorjahres-Carryover bei abg
   const curYear = now.getFullYear();
   const priorYear = curYear - 1;
   // Pflegegrad-Beginn im Vorjahr = der abgeleitete §45b-Anker.
-  const derivedAnchor = `${priorYear}-01-01`;
 
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
@@ -1613,17 +1616,30 @@ describe("INT-18: §45b Onboarding-Baseline – kein Vorjahres-Carryover bei abg
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
     });
-    // Wizard-Onboarding emuliert: /initial-budget mit Vorjahres-Anker, ohne
-    // Startguthaben und ohne Übertrag. Seit Task #1204 gibt es keine gespeicherte
-    // budget_start_date-Spalte mehr — ohne Startguthaben/Übertrag entsteht also
-    // keine §45b-Allokation (Anker wird zur Laufzeit aufs laufende Jahr gebodet).
-    const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-budget`, {
-      budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
-      carryoverAmountCents: 0,
-      budgetStartDate: derivedAnchor,
-    });
-    expect([200, 201]).toContain(res.status);
+    /**
+     * KEIN `/initial-budget`-Aufruf mehr (S5, 24.09.2026).
+     *
+     * Hier stand ein Aufruf mit `currentMonthAmountCents: 0` UND
+     * `carryoverAmountCents: 0`, und der Kommentar daneben sagte, was gemeint
+     * war: „ohne Startguthaben und ohne Übertrag". Zwei Füllwerte für „nichts",
+     * weil `currentMonthAmountCents` damals Pflichtfeld war.
+     *
+     * Seit S5 ist `0` eine festgestellte Null und wird nicht mehr auf `null`
+     * gemappt. Damit hätte derselbe Aufruf eine 0-€-Übertragszeile angelegt —
+     * und `INT-18.2` prüft gerade, dass KEINE Übertragszeile entsteht. Gemessen
+     * war der Test dadurch rot (`expected 1 to be +0`), ohne dass sich am
+     * Prüfgegenstand etwas geändert hätte.
+     *
+     * Der Aufruf war ohnehin ein No-Op: ohne Betrag entsteht keine Allokation
+     * (Task #1204, keine gespeicherte `budget_start_date`-Spalte), und der Anker
+     * kommt aus der Pflegegrad-Historie, die `setupBudgetScenario` setzt. Er
+     * emulierte einen Wizard-Schritt, den der Wizard nicht mehr geht
+     * (`use-customer-wizard.ts`: „kein POST /budget/:id/initial-budget mehr").
+     *
+     * Der Prüfgegenstand von INT-18 braucht ihn nicht: ein Kunde mit Anker im
+     * Vorjahr akkumuliert ab 1.1. des laufenden Jahres und bekommt keine
+     * materialisierte Übertragszeile. Das gilt ohne jeden Aufruf.
+     */
   });
 
   afterAll(async () => {
@@ -1691,7 +1707,10 @@ describe("INT-19: §45b Onboarding – operator-erfasster Übertrag bleibt erhal
     // Wizard-Onboarding mit Vorjahres-Anker UND operator-erfasstem Übertrag.
     const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
+      // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+      // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+      // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+      // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
       carryoverAmountCents: carryoverCents,
       budgetStartDate: derivedAnchor,
     });
@@ -1761,7 +1780,10 @@ describe("INT-20: §45b Carryover-Verfall nach 30.06. (deterministisch, clock-in
     });
     const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentMonthAmountCents: 0,
+      // KEIN `currentMonthAmountCents: 0` — hier ist "kein Startwert" gemeint,
+      // nicht "der Startwert wurde mit 0 EUR festgestellt". Seit S5 (24.09.2026)
+      // mappt die Route die 0 nicht mehr auf `null`, also waere sie eine Angabe
+      // und das Entweder-oder (#186) lehnt sie neben einem Uebertrag ab.
       carryoverAmountCents: carryoverCents,
       budgetStartDate: derivedAnchor,
     });

@@ -42,6 +42,63 @@ import { SelbstzahlerStatutoryPotError } from "./preferences-storage";
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
 /**
+ * ALLE `initial_balance`-Zeilen fuer `(Kunde, Topf, Jahr, Monat)`, neueste
+ * zuerst, aktive und soft-geloeschte.
+ *
+ * Die EINE Stelle, die beantwortet: welche Zeile ist „die" fuer diesen
+ * Schluessel? Zwei Verbraucher mit verschiedenem Bedarf:
+ *  - `upsertInitialBalanceAllocation` braucht die ganze Liste (es aktualisiert
+ *    `aktiv[0]` und soft-loescht `aktiv[1..n]` als Duplikat-Bereinigung);
+ *  - `findActiveInitialBalance` braucht nur `aktiv[0]`.
+ *
+ * ── Warum als Funktion und nicht als Kommentar (Gate 2 zum B1-Delta, S-4) ──
+ * Die Auswahl stand zweimal im Code, zeichengleich, und zusammengehalten hat
+ * sie ein Kommentar („absichtlich Zeichen fuer Zeichen dieselbe"). Genau die
+ * Konstruktion, die in diesem Repo mehrfach auseinandergelaufen ist: solange
+ * beide gleich sind, faellt nichts auf — und wenn sie es nicht mehr sind,
+ * schuetzt die Konflikt-Schranke eine andere Zeile als die, die gleich
+ * ueberschrieben wird.
+ *
+ * Eine Zusage, die eine Kopie gleich haelt, ist keine Zusage, sondern eine
+ * Hoffnung. Jetzt gibt es nur noch eine Auswahl.
+ */
+async function selectInitialBalanceRows(
+  params: { customerId: number; budgetType: string; year: number; month: number },
+  d: Pick<typeof db, "select">,
+) {
+  return budgetAllocationsRepo.selectColumnsFrom({
+    id: budgetAllocations.id,
+    amountCents: budgetAllocations.amountCents,
+    deletedAt: budgetAllocations.deletedAt,
+  }, d)
+    .where(and(
+      eq(budgetAllocations.customerId, params.customerId),
+      eq(budgetAllocations.budgetType, params.budgetType),
+      eq(budgetAllocations.source, "initial_balance"),
+      eq(budgetAllocations.year, params.year),
+      eq(budgetAllocations.month, params.month),
+    ))
+    .orderBy(desc(budgetAllocations.id));
+}
+
+/**
+ * Die AKTIVE Startwert-Zeile fuer `(Kunde, Topf, Jahr, Monat)` — oder `null`.
+ *
+ * Existiert, damit ein Aufrufer VOR dem Upsert wissen kann, ob er etwas
+ * ueberschreiben wuerde (`applyInitialBudget`, Wiederhol-Schutz). Liest ueber
+ * `selectInitialBalanceRows`, also ueber dieselbe Auswahl, die der Upsert
+ * gleich benutzt — nicht ueber eine zweite, die ihr aehnlich sieht.
+ */
+export async function findActiveInitialBalance(
+  params: { customerId: number; budgetType: string; year: number; month: number },
+  _tx?: DbClient,
+): Promise<{ id: number; amountCents: number } | null> {
+  const zeilen = await selectInitialBalanceRows(params, _tx ?? db);
+  const aktiv = zeilen.filter(z => !z.deletedAt);
+  return aktiv.length > 0 ? { id: aktiv[0].id, amountCents: aktiv[0].amountCents } : null;
+}
+
+/**
  * Task #1234 — Defense-in-Depth (Schwester zu Task #1233 auf dem
  * type-settings-Pfad): Selbstzahler (`billingType='selbstzahler'`) dürfen
  * NIE Geld aus einem gesetzlichen Pflegekassen-Topf (§45b/§45a/§39+§42a)
@@ -129,15 +186,9 @@ export async function upsertInitialBalanceAllocation(
     d,
     options?.allowStatutoryForSelbstzahler,
   );
-  const allExisting = await budgetAllocationsRepo.selectColumnsFrom({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt }, d)
-    .where(and(
-      eq(budgetAllocations.customerId, params.customerId),
-      eq(budgetAllocations.budgetType, params.budgetType),
-      eq(budgetAllocations.source, "initial_balance"),
-      eq(budgetAllocations.year, params.year),
-      eq(budgetAllocations.month, params.month),
-    ))
-    .orderBy(desc(budgetAllocations.id));
+  // Dieselbe Auswahl wie `findActiveInitialBalance` — EINE Funktion, nicht
+  // zwei gleich aussehende Abfragen (Gate 2 zum B1-Delta, S-4).
+  const allExisting = await selectInitialBalanceRows(params, d);
 
   const active = allExisting.filter(e => !e.deletedAt);
   const deleted = allExisting.filter(e => !!e.deletedAt);

@@ -1143,10 +1143,73 @@ router.post("/:customerId/allocations", asyncHandler("Budget-Zuweisung konnte ni
 // `docs/architecture/budget.md → initial-budget-Endpoint`.
 const initialBudgetSchema = z.object({
   budgetType: z.enum(BUDGET_TYPES).default("entlastungsbetrag_45b"),
-  currentMonthAmountCents: z.number().min(0),
-  carryoverAmountCents: z.number().min(0).optional().default(0),
+  /**
+   * OPTIONAL seit dem 24.09.2026 — vorher Pflichtfeld.
+   *
+   * Mit dem Entweder-oder (Startwert ODER Uebertrag, Alriks Entscheidung) war
+   * „nur Uebertrag" ueber diesen Endpunkt sonst NICHT AUSDRUECKBAR: das
+   * Pflichtfeld erzwang einen Startwert, und der Startwert neben einem echten
+   * Uebertrag wird abgelehnt. Ein Uebertrag waere hier also gar nicht mehr
+   * anlegbar gewesen.
+   *
+   * Aufgefallen ist es an `INT-116.1` („initial-budget mit Carryover setzt
+   * validFrom auf Jahresanfang") — dem Test, dessen Gegenstand genau dieser
+   * Uebertrag ist.
+   */
+  currentMonthAmountCents: z.number().min(0).optional(),
+  /**
+   * KEIN `.default(0)` mehr (24.09.2026).
+   *
+   * Mit dem Default wurde ein WEGGELASSENES Feld zu `0` — und sobald `0` nicht
+   * mehr auf `null` gemappt wird (unten), waere daraus bei jedem Aufrufer eine
+   * „festgestellte Null" und damit eine Uebertragszeile geworden, die niemand
+   * angegeben hat.
+   *
+   * `undefined` = keine Angabe, `0` = festgestellte Null. Dieselbe
+   * Unterscheidung, die `ApplyInitialBudgetParams` schon traegt.
+   */
+  carryoverAmountCents: z.number().min(0).optional(),
   budgetStartDate: z.string(),
-});
+}).refine(
+  /**
+   * MINDESTENS eine der beiden Angaben — die andere Haelfte des
+   * Entweder-oder.
+   *
+   * `currentMonthAmountCents` ist seit dem 24.09.2026 optional, damit „nur
+   * Uebertrag" ausdrueckbar ist. Ohne diese Schranke waere damit aber auch
+   * „weder noch" erlaubt: der Endpunkt antwortete `201` samt Audit-Eintrag,
+   * und in der DB stuende nichts — „angenommen, quittiert, verworfen", der
+   * Fall, den `budget-initial-setup` ein paar Ebenen tiefer ausdruecklich
+   * abgeschafft hat.
+   *
+   * Zwei Tests hielten das vorher ueber die Pflichtfeld-Eigenschaft fest
+   * (`Task #731`-Alias und „ohne currentMonthAmountCents → 400"). Ihre
+   * ZUSAGE bleibt damit erhalten, ihr Mechanismus wechselt: nicht mehr „das
+   * Feld fehlt", sondern „es fehlt jede Angabe".
+   */
+  /**
+   * Der Übertrag zählt nur dort als Angabe, wo er auch VERARBEITET wird
+   * (Gate 2 zu #186, S4).
+   *
+   * `applyInitialBudget` schreibt eine `carryover`-Zeile ausschließlich für
+   * §45b (`budgetType === "entlastungsbetrag_45b"`). Für §45a und §39/§42a
+   * passierte ein Body mit nur `carryoverAmountCents` die Prüfung, schrieb
+   * nichts und meldete **201 samt Audit-Eintrag über einen Betrag, den niemand
+   * gespeichert hat** — wörtlich der Fall, den diese Regel abschaffen soll.
+   *
+   * Der Fehler ist älter als das Entweder-oder; neu ist, dass die Regel
+   * daneben eine Zusage behauptet, die für zwei von drei Töpfen nicht galt.
+   * Eine Prüfung, die nur für einen Teil ihres Geltungsbereichs stimmt, ist
+   * genau die Form, gegen die die SSoT-Regel steht.
+   */
+  (d) => d.currentMonthAmountCents != null
+    || (d.budgetType === "entlastungsbetrag_45b" && d.carryoverAmountCents != null),
+  {
+    message: "Mindestens eine Angabe nötig: Startwert oder — nur bei §45b — "
+      + "Übertrag aus dem Vorjahr.",
+    path: ["currentMonthAmountCents"],
+  },
+);
 
 router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nicht erfasst werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
@@ -1154,9 +1217,26 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
 
   const result = initialBudgetSchema.safeParse(req.body);
   if (!result.success) {
+    /**
+     * Die erste Zod-Meldung wird DURCHGEREICHT, nicht durch „Ungültige Daten“
+     * ersetzt (Gate 2 zu #186, S3).
+     *
+     * Die `refine`-Regel oben formuliert ausdrücklich, was fehlt
+     * („Mindestens eine Angabe nötig: Startwert oder Übertrag aus dem
+     * Vorjahr.“). Angekommen ist davon nichts: der Client zeigt
+     * `result.error.message` (`customer-detail-sections.tsx`), und das war
+     * dieser Platzhalter — die eigentliche Auskunft lag unerreichbar in
+     * `details`.
+     *
+     * Asymmetrisch war es außerdem: das Entweder-oder kommt über
+     * `BudgetInitialSetupError` und wird 1:1 durchgereicht. Zwei Ablehnungen
+     * auf demselben Endpunkt, eine erklärt sich, die andere nicht.
+     *
+     * `details` bleibt unverändert für Aufrufer, die alle Verstöße brauchen.
+     */
     res.status(400).json({
       error: "VALIDATION_ERROR",
-      message: "Ungültige Daten",
+      message: result.error.issues[0]?.message || "Ungültige Daten",
       details: result.error.issues,
     });
     return;
@@ -1177,31 +1257,47 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   // Die Route übersetzt nur typisierte Fehler ins Wire-Format.
   try {
     /**
-     * Auf DIESEM Endpunkt heisst `0` weiterhin „keine Angabe" — und das ist
-     * bewusst NICHT die Inventur-Lesart.
+     * Auf diesem Endpunkt heisst `0` „festgestellte Null" — wie ueberall sonst.
      *
-     * Alriks Entscheidung vom 22.09.2026 betrifft das Feld *Restguthaben aus
-     * Vorjahr* im Budget-Editor: dort ist „0,00 EUR" eine Aussage. Dieser
-     * Endpunkt ist der ONBOARDING-Pfad, und dort bedeutet `0` seit jeher
-     * „ohne Startguthaben und ohne Uebertrag" — so steht es im Aufrufer und
-     * so pruefen es `INT-18.2`/`INT-18.4`.
+     * Hier stand bis zum 24.09.2026 das GEGENTEIL: „auf DIESEM Endpunkt heisst
+     * `0` weiterhin keine Angabe", samt Verweis auf `INT-18.2`/`INT-18.4` und
+     * der Feststellung, der Zweitbegriff sei „der Preis, nicht die
+     * Rechtfertigung".
      *
-     * Die Unterscheidung „keine Angabe" vs. „festgestellte Null" waere hier
-     * ueber JSON gar nicht ausdrueckbar, solange `0` die eine Bedeutung schon
-     * traegt. Wer eine festgestellte Null setzen will, nimmt
-     * `/initial-balance/:budgetType` bzw. `/carryover/:budgetType` — die
-     * Wege, die die Oberflaeche benutzt.
+     * Alle drei Aussagen sind seit S5 falsch:
+     *  - `0` wird nicht mehr auf `null` gefaltet;
+     *  - `INT-18.2`/`INT-18.4` rufen diesen Endpunkt gar nicht mehr auf (der
+     *    Aufruf war ein No-Op und ist entfallen);
+     *  - der Zweitbegriff IST geschlossen — `/initial-balance/:budgetType` und
+     *    dieser Endpunkt schreiben fuer dieselbe 0 dieselbe Zeile, und genau
+     *    das messen `FN-1`/`FN-2`.
      *
-     * **Das ist der Preis des Zweitbegriffs, nicht seine Rechtfertigung.**
-     * Zwei Endpunkte fuer denselben Vorgang beantworten dieselbe Frage jetzt
-     * nachweislich verschieden; welcher bleibt, ist die offene fachliche
-     * Frage im PR (FINDING).
+     * Stehengeblieben war er, weil der Diff nur die zwei Mapping-Zeilen
+     * darunter beruehrte. Ein ueberholter Kommentar ist schlimmer als keiner:
+     * er wird als Beleg gelesen, und der Naechste faltet die 0 wieder weg.
      */
     const allocations = await applyInitialBudget({
       customerId,
       budgetType,
-      currentMonthAmountCents: currentMonthAmountCents > 0 ? currentMonthAmountCents : null,
-      carryoverAmountCents: carryoverAmountCents > 0 ? carryoverAmountCents : null,
+      /**
+       * `0` wird NICHT mehr auf `null` gemappt (24.09.2026).
+       *
+       * Alriks Entscheidung vom 22.09.2026: „0 EUR ist eine festgestellte
+       * Null." Eine Zuordnung auf „kein Wert" macht daraus eine fehlende
+       * Angabe — und dann meldet der Endpunkt `201` samt Audit-Eintrag ueber
+       * einen Betrag, den er verworfen hat.
+       *
+       * Derselbe Punkt wurde bei #163 fuer `budget-initial-setup` gemeldet und
+       * DORT behoben (`!= null` statt `> 0`, gesichert von `NS-4`). Die
+       * Uebersetzung in dieser Route blieb stehen — die Funktion unterschied
+       * also, und der Weg dorthin warf die Unterscheidung vorher weg.
+       *
+       * Gemessen, was das aendert: eine 0-EUR-Uebertragszeile neben einem
+       * Startwert laesst den Anspruch unveraendert (39.300 mit und ohne). Sie
+       * ist eine Zeile mit Aussage, nicht mit Betrag.
+       */
+      currentMonthAmountCents: currentMonthAmountCents ?? null,
+      carryoverAmountCents: carryoverAmountCents ?? null,
       budgetStartDate,
       customer: { billingType: customer.billingType, pflegegrad: customer.pflegegrad },
       userId,

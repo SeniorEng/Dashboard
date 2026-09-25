@@ -74,6 +74,11 @@ export interface ApplyInitialBudgetParams {
  * §45b-Kappung (Task #856/#860/#959) und die §45a/§39-In-place-Aktivierung
  * (Task #705/#876) sind hier zentralisiert — siehe Inline-Kommentare.
  */
+/** `MM/JJJJ` fuer Fehlermeldungen — eine Stelle, damit die Form nicht driftet. */
+function monatJahr(year: number, month: number): string {
+  return `${String(month).padStart(2, "0")}/${year}`;
+}
+
 export async function applyInitialBudget(params: ApplyInitialBudgetParams): Promise<BudgetAllocation[]> {
   const { customerId, budgetType, customer, userId, tx } = params;
   const currentMonthAmountCents = params.currentMonthAmountCents ?? null;
@@ -103,6 +108,30 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
   }
   const startDate = parseLocalDate(budgetStartDate);
   const year = startDate.getFullYear();
+
+  /**
+   * KEIN Entweder-oder mehr (24.09.2026).
+   *
+   * Hier stand eine Ablehnung: Startwert und Uebertrag zusammen ergaben `400`,
+   * begruendet damit, ein Startwert sei eine Bestandsaufnahme und enthalte den
+   * Uebertrag bereits.
+   *
+   * **Die Praemisse war falsch.** Alriks tatsaechlicher Prozess (Stammticket
+   * `6hXp9qMrXH2WGVVG`, Entscheidungstabelle v2): die Kassen melden Uebertrag
+   * Vorjahr und Budget laufendes Jahr GETRENNT, und im ersten Halbjahr sind
+   * beide Pflicht. „Beides eingeben" ist damit der Normalfall, nicht die
+   * Fehleingabe.
+   *
+   * Gemessen dazu (Schritt C, Anhang der Wirkungskarte): die Annahme
+   * „Startwert schliesst Uebertrag ein" erscheint im Code erstmals am
+   * 24.09.2026 — aus diesem Vorgang. Die aeltere UI-Historie sagt das
+   * Gegenteil: #670 „Carryover-UI vom Startwert TRENNEN", #960 „the operator
+   * enters TWO DISTINCT AMOUNTS".
+   *
+   * Die Ablehnung ist deshalb ersatzlos entfallen. Was an ihre Stelle tritt,
+   * ist das Formular „Kassenauskunft zum Stichtag" mit zwei Feldern — ein
+   * eigener Vorgang, nicht eine Variante dieser Schranke.
+   */
 
   // §45b-Akkumulations-Obergrenzen (Task #959): Startwert + Carryover dürfen das
   // rechtlich mögliche Maximum nicht überschreiten. Accrual-Anker = frühester
@@ -136,6 +165,95 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
     }
   }
 
+  /**
+   * ── Ein Wiederholungs-Versuch darf keinen erfassten Startwert ueberschreiben ──
+   *
+   * `upsertInitialBalanceAllocation` macht bei vorhandener aktiver Zeile fuer
+   * dasselbe `(Kunde, Topf, Jahr, Monat)` ein
+   * `UPDATE ... SET amount_cents = <neuer Wert>`. Auf dem ANLAGE-Pfad ist das
+   * harmlos (es gibt noch nichts). Auf dem WIEDERHOL-Pfad nicht: der Banner
+   * „Startbudgets erneut versuchen" spielt einen GESPEICHERTEN Payload ab,
+   * dessen Kontrakt „keine Angabe" lange nicht ausdruecken konnte — er trug
+   * dann `0`. Ein Klick haette einen inzwischen erfassten Startwert still auf
+   * 0 gesetzt.
+   *
+   * Alriks Vorgabe vom 24.09.2026: **entweder idempotent ueber denselben
+   * Payload, oder Konflikt melden.**
+   *  - gleicher Betrag  -> kein Fehler, der Upsert laeuft und aendert nichts;
+   *  - anderer Betrag   -> `409`, nichts wird geschrieben.
+   *
+   * ── Warum die Pruefung HIER steht und nicht beim Schreiben ──────────────
+   * Sie stand zuerst direkt ueber dem Upsert — also NACH
+   * `ensureBudgetTypeEnabledInPlace`, das fuer §45a/§39 bereits schreibt
+   * (`customer_budget_type_settings`). Auf dem Standalone-Endpunkt gibt es
+   * keine Transaktion; ein 409 haette dort eine bereits re-aktivierte
+   * Topf-Zeile zurueckgelassen und dazu gemeldet „die Anlage ueberschreibt
+   * ihn nicht" (Gate 2, S-2).
+   *
+   * Eine Ablehnung, die etwas hinterlaesst, ist schlimmer als eine, die
+   * blockiert: `EO-1` sichert fuer das Entweder-oder ausdruecklich, dass bei
+   * Ablehnung NICHTS geschrieben wird. Fuer den 409 gilt das jetzt auch —
+   * `RU-5` haelt es fest.
+   *
+   * Die Schranke sitzt bewusst in `applyInitialBudget` und nicht in
+   * `upsertInitialBalanceAllocation`: der Startwert-EDITOR und die
+   * §45b-Kuerzungs-Re-Baseline (`invoice-45b-reduction.ts`) gehen an dieser
+   * Funktion vorbei und MUESSEN weiter ueberschreiben duerfen.
+   */
+  if (currentMonthAmountCents != null) {
+    const konfliktMonat = startDate.getMonth() + 1;
+    const bestehend = await budgetStorage.findActiveInitialBalance(
+      { customerId, budgetType, year, month: konfliktMonat }, tx,
+    );
+    if (bestehend != null && bestehend.amountCents !== currentMonthAmountCents) {
+      throw new BudgetInitialSetupError(
+        409,
+        "BUDGET_INITIAL_BALANCE_CONFLICT",
+        `Für ${monatJahr(year, konfliktMonat)} ist bereits ein Startwert von `
+        + `${formatEuroDE(bestehend.amountCents)} erfasst. Dieser Vorgang würde ihn auf `
+        + `${formatEuroDE(currentMonthAmountCents)} ändern. Wenn das gewollt ist, den `
+        + `Startwert im Budget-Editor ändern — die Anlage überschreibt ihn nicht.`,
+      );
+    }
+  }
+
+  /**
+   * Ein Uebertrag fuer einen Topf, der keinen kennt, wird ABGELEHNT
+   * (Gate 2 zum B1-Delta, S-1).
+   *
+   * `applyInitialBudget` schreibt eine `carryover`-Zeile ausschliesslich fuer
+   * §45b. Fuer §45a und §39/§42a fiel der Betrag unten heraus — und der
+   * Audit-Eintrag protokollierte ihn trotzdem. **Angenommen, quittiert,
+   * verworfen**, derselbe Fall, gegen den dieser ganze Vorgang laeuft.
+   *
+   * Die `refine`-Regel in der Route schloss davon nur die HAELFTE: sie fing
+   * den Body, der NUR einen Uebertrag traegt, nicht den, der ihn NEBEN einem
+   * Startwert traegt. Gemessen am Beispiel aus dem Review: §45a mit
+   * `currentMonthAmountCents: 30000` + `carryoverAmountCents: 50000` ergab
+   * `201`, schrieb nur die 300 EUR und verlor die 500 EUR still.
+   *
+   * Die Schranke steht hier statt in der Route, weil sie damit auch den
+   * Wizard-Pfad deckt — die Route ist nur einer von zwei Zugaengen.
+   *
+   * ── Warum `> 0` und nicht `!= null` ────────────────────────────────────
+   * Eine erste Fassung lehnte JEDE Angabe ab. Gemessen: 16 zusaetzliche rote
+   * Tests, darunter der geteilte Fixture-Helfer `tests/helpers/budget-scenarios.ts`,
+   * der fuer §45a/§39 grundsaetzlich `carryoverAmountCents: 0` uebergibt.
+   *
+   * Eine `0` verliert nichts. Der Schaden heisst „eingegeben, quittiert, nicht
+   * gespeichert" — und den gibt es erst bei einem Betrag. Dieselbe Abwaegung
+   * wie beim Entweder-oder, das aus demselben Grund auf `> 0` steht.
+   */
+  if (budgetType !== "entlastungsbetrag_45b" && (carryoverAmountCents ?? 0) > 0) {
+    throw new BudgetInitialSetupError(
+      400,
+      "BUDGET_CARRYOVER_NUR_45B",
+      `Ein Übertrag aus dem Vorjahr ist nur für den Entlastungsbetrag (§45b) `
+      + `vorgesehen. Für diesen Topf gibt es keinen Übertrag — der Betrag würde `
+      + `angenommen und nicht gespeichert.`,
+    );
+  }
+
   // §45a/§39_42a: Topf idempotent in-place aktivieren, damit der Read-Pfad den
   // Startwert nicht herausfiltert (Task #705/#876).
   if ((budgetType === "umwandlung_45a" || budgetType === "ersatzpflege_39_42a") && currentMonthAmountCents != null && currentMonthAmountCents > 0) {
@@ -159,6 +277,8 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
   if (currentMonthAmountCents != null) {
     const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
     const startMonth = startDate.getMonth() + 1;
+
+
     await budgetStorage.upsertInitialBalanceAllocation({
       customerId,
       budgetType,
@@ -173,6 +293,24 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
     if (allAllocations.length > 0) allocations.push(allAllocations[0]);
   }
 
+  /**
+   * ⚠ Dieser Zweig ist NICHT wiederholungsfest (Gate 2 zum B1-Delta, S-5).
+   *
+   * Der Startwert oben geht ueber `upsertInitialBalanceAllocation` plus die
+   * 409-Schranke — er ist idempotent. Hier steht ein reiner `INSERT`, und der
+   * partielle Unique-Index greift nicht, weil `month` bei einem Uebertrag
+   * `NULL` ist und Postgres NULLs im Index als verschieden behandelt.
+   *
+   * Zweimal derselbe Payload ergaebe also zwei Uebertragszeilen — Geld in die
+   * ERHOEHENDE Richtung. Heute unerreichbar: ein Alt-Payload mit
+   * `carryover > 0` laeuft ins Entweder-oder-400, und `POST /setup-pending`
+   * hat keinen Schreiber. Scharf wird es in dem Moment, in dem der Schreiber
+   * nachgezogen wird.
+   *
+   * Das steht hier, weil die Zusage sonst mehr behauptet, als sie haelt:
+   * geschuetzt ist der STARTWERT, nicht der Uebertrag. Als FINDING im PR-Body
+   * vermerkt.
+   */
   if (carryoverAmountCents != null && budgetType === "entlastungsbetrag_45b") {
     // validFrom auf Jahresanfang (Task #116/#601), Zieljahr-konsistent zu
     // `ensureYearlyCarryover45b` (verhindert Doppel-Carryover via Auto-Dedup).
