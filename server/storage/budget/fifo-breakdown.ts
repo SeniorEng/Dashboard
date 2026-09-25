@@ -353,22 +353,12 @@ async function classifyConsumedByState(
        * Glied (b) des Readers ist NICHT allocation-spezifisch, gilt also fuer
        * beide Toepfe. Deshalb dieselbe Funktion, nicht eine vierte Fassung.
        *
-       * ⚠ **HIER FEHLEN (a) UND (c) WIRKLICH** (Gate 2 zu #190, S-1).
-       * Die Begruendung im Docblock von `countedConsumptionWhere`, warum die
-       * beiden anderen Glieder entfallen duerfen, haengt an der
-       * Einschraenkung auf Allocation-IDs. Diese Abfrage hat sie NICHT: sie
-       * laeuft kundenweit und nimmt `allocationId IS NULL` ausdruecklich mit.
-       *
-       * Gemessen entsteht deshalb weiterhin ein negatives
-       * `consumedOtherCents` — bei einem dokumentierten Termin gegen einen zum
-       * Stichtag abgelaufenen Uebertrag (Glied a) ebenso wie bei einem
-       * Vorjahres-Termin auf dem NULL-Leg (Glied c).
-       *
-       * Kein Regress von #190: ohne Startwert ist der Anker `null`, und die
-       * Bedingung ist dann zeichengleich mit der frueheren. Aber auch keine
-       * Deckung. Der Fix braucht `excludedSpecialAllocationIds` und
-       * `accrualFloorDate` aus dem Reader — das ist der inverse-Formulierungs-
-       * Fall der Wirkungskarte und ein eigener Schritt: `6hcfP7xVj5R3Pg6p`.
+       * Seit `6hcfP7xVj5R3Pg6p` traegt der Schnitt ALLE DREI Glieder des
+       * Readers. Vorher fehlten hier (a) und (c) wirklich: die Abfrage laeuft
+       * kundenweit, ohne `inArray`, mit `allocationId IS NULL` — und es
+       * entstand ein negatives `consumedOtherCents`, gemessen je −100,00 EUR
+       * (abgelaufener Uebertrag bzw. Vorjahres-Termin auf dem NULL-Leg).
+       * Abnahme: `tests/budget/45b-fifo-zustand-ausschluss.test.ts`.
        */
       countedConsumptionWhere(schnitt, asOfDate),
     ));

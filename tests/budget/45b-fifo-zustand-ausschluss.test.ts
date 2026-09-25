@@ -238,4 +238,50 @@ describe("§45b-FIFO — die Zustands-Aufteilung folgt allen drei Ausschluss-Gli
       await cleanupCustomer(id);
     }
   }, 120_000);
+  it("AC-4 – Glied (a) unter Flag an: Verbrauch gegen einen vom Startwert ERSETZTEN Übertrag", async () => {
+    /**
+     * Gate 2 zu #192, S-2. AC-1 prüft Glied (a) nur über einen ABGELAUFENEN
+     * Übertrag — dort ist das Flag egal. Der Fall, den der unmittelbar
+     * folgende Default-Umschwung auslöst, fehlte: ein vom Startwert
+     * VERDRÄNGTER Übertrag, gegen den nach dem Cutoff gebucht wurde (so bucht
+     * die Engine: Übertrag zuerst, und verknüpft die Buchung mit ihm).
+     *
+     * Zugesichert ist hier die ÜBEREINSTIMMUNG mit dem Reader, nicht ein
+     * bestimmter Betrag: ob dieser Verbrauch zählen MUSS, entscheidet R4 und
+     * regelt der Flip-PR. Diese Datei sichert, dass die Aufteilung dem
+     * Reader folgt, egal wie er entscheidet.
+     */
+    const id = await kunde();
+    try {
+      const [ue] = await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", year: J, month: null,
+        amountCents: UEBERTRAG, source: "carryover",
+        validFrom: `${J}-01-01`, expiresAt: `${J}-06-30`, notes: "AC4-uebertrag-verdraengt",
+      }).returning({ id: budgetAllocations.id });
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", year: J, month: 3,
+        amountCents: 300_00, source: "initial_balance",
+        validFrom: `${J}-03-01`, expiresAt: null, notes: "AC4-startwert-maerz",
+      });
+
+      const termin = await dokumentierterTermin(id, `${J}-04-10`);
+      await db.insert(budgetTransactions).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "consumption",
+        amountCents: -BETRAG, transactionDate: `${J}-04-10`,
+        allocationId: ue.id, appointmentId: termin,
+        description: "AC4-nach-cutoff-auf-verdraengtem-uebertrag",
+      } as never);
+
+      const fifo = await readBudget45bFifoBreakdown(id, `${J}-05-15`, { resetDisplacesAllSources: true });
+      const uni = await readUnifiedBudgetAvailability(id, `${J}-05-15`, undefined, { resetDisplacesAllSources: true });
+
+      for (const topf of fifo.pots) pruefeAufteilung(topf);
+      expect(
+        fifo.pots.reduce((n, p) => n + p.consumedCents, 0),
+        "Aufteilung und Reader sehen unter Flag an verschiedene Verbrauchs-Mengen",
+      ).toBe(uni.pots.entlastungsbetrag_45b.consumedNetCents);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
 });
