@@ -37,7 +37,7 @@
  * beantworten andere Fragen (Reset-Baseline bzw. Doppelzaehlung) und haben je
  * genau einen Aufrufer.
  */
-import { and, gt, gte, isNotNull, isNull, lte, notInArray, or, type SQL } from "drizzle-orm";
+import { and, eq, gt, gte, isNotNull, isNull, lte, ne, notInArray, or, type SQL } from "drizzle-orm";
 import { budgetAllocations, budgetTransactions } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
@@ -237,8 +237,17 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
 export interface VerbrauchsSchnitt {
   /** Glied (b): Buchungen vor dem Reset-Cutoff sind im Startwert abgebildet. */
   resetAnchor: ResetAnchor | null;
-  /** Glied (a): Allocations, die nicht mehr zum Anspruch beitragen. */
+  /**
+   * Glied (a): Allocations, deren Verbrauch herausfaellt
+   * (`verbrauchsAusschlussIds` des Readers).
+   */
   excludedAllocationIds: readonly number[];
+  /**
+   * Glied (a'), nur ABSCHREIBUNGEN: vom Startwert ersetzte Allocations
+   * (`ersetztDurchStartwertIds`). Buchung und Storno darauf zaehlen, die
+   * Abschreibung nicht — siehe dort.
+   */
+  ersetztAllocationIds: readonly number[];
   /** Glied (c): Boden fuer das Leg ohne Allocation-Zuordnung. */
   accrualFloorDate: string | null;
 }
@@ -313,6 +322,16 @@ export function countedConsumptionWhere(
     teile.push(or(
       isNull(budgetTransactions.allocationId),
       notInArray(budgetTransactions.allocationId, [...schnitt.excludedAllocationIds]),
+    ));
+  }
+
+  // (a') — die Abschreibung auf einer vom Startwert ersetzten Allocation.
+  // NULL-sicher wie (a); `ne` auf den Typ, weil nur `write_off` herausfaellt.
+  if (schnitt.ersetztAllocationIds.length > 0) {
+    teile.push(or(
+      isNull(budgetTransactions.allocationId),
+      notInArray(budgetTransactions.allocationId, [...schnitt.ersetztAllocationIds]),
+      ne(budgetTransactions.transactionType, "write_off"),
     ));
   }
 

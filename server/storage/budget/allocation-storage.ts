@@ -321,6 +321,31 @@ export async function upsertCarryoverAllocation(
         validFrom,
         expiresAt,
         notes: params.notes ?? null,
+        /**
+         * Der Ersteller wird MIT gesetzt (Entscheidung Alrik, 25.09.2026).
+         *
+         * Vorher blieb er beim Ueberschreiben stehen. Hatte die
+         * Jahreswechsel-Automatik fuer das Jahr schon eine Zeile angelegt
+         * (Ersteller leer) und trug danach jemand in den Budget-Einstellungen
+         * einen Uebertrag ein, wurde DIESE Zeile ueberschrieben: Betrag von
+         * Hand, Ersteller weiter leer. Nach `created_by_user_id` sah ein von
+         * Hand eingetragener Uebertrag damit automatisch aus.
+         *
+         * Das zaehlt, weil der Ersteller das Merkmal ist, an dem der
+         * Startwert-Flip unterscheidet: er verdraengt nur einen AUTOMATISCHEN
+         * Uebertrag, ein von Hand eingetragener zaehlt daneben bis 30.06.
+         * (Tabelle D, „Was ich eingetragen habe, gilt"). Ohne diese Zeile
+         * haette der Flip genau die Werte verdraengt, die geschuetzt sein
+         * sollen.
+         *
+         * Nur wenn ein Benutzer bekannt ist: ein Aufruf ohne `userId` (Test-
+         * Fixtures, Skripte) veraendert die Herkunft nicht.
+         *
+         * Eine eigene Herkunfts-Spalte kommt erst mit der Referenzrechnung
+         * (`6hcfmC4vQjvgwCjp`); bis dahin bleibt `created_by_user_id` das
+         * Merkmal — dieselbe Konvention, die Backfill #601 schon liest.
+         */
+        ...(userId != null ? { createdByUserId: userId } : {}),
       })
       .where(eq(budgetAllocations.id, active[0].id));
 
@@ -650,7 +675,70 @@ export async function calculateAllocatedCents(
  */
 interface Allocated45bResult {
   allocatedCents: number;
+  /**
+   * Spezial-Zuweisungen, die zum Stichtag NICHT zum Budget beitragen — aus
+   * welchem Grund auch immer (verfallen, noch nicht gueltig, per
+   * IB-Supersession abgeloest, vom Startwert ersetzt).
+   *
+   * Beantwortet „zaehlt diese ZUWEISUNG?" und wird dafuer gelesen: als
+   * Buchungsziel-Filter (`consumption-engine.ts`) und fuer die Anzeige
+   * „ersetzt" (`routes/budget.ts`). Fuer die Frage, welcher VERBRAUCH
+   * herausfaellt, ist sie zu weit — dafuer `verbrauchsAusschlussIds`.
+   */
   excludedSpecialAllocationIds: number[];
+  /**
+   * Zuweisungen, deren VERBRAUCH aus dem gezaehlten Verbrauch herausfaellt.
+   *
+   * ERSETZT die Doppelnutzung von `excludedSpecialAllocationIds` fuer diese
+   * Frage (Glied (a) in `getExcluded45bConsumption` und in
+   * `countedConsumptionWhere`). Die eine Liste beantwortete zwei Fragen, und
+   * fuer eine davon falsch.
+   *
+   * ── Der Unterschied: Zuweisungen, die der STARTWERT ersetzt hat ─────────
+   * Sie zaehlen nicht mehr zum Budget — der Startwert stellt den Bestand zum
+   * Monatsbeginn fest. Ihr Verbrauch ist aber zweigeteilt:
+   *  · VOR dem Cutoff ist er im Startwert abgebildet und faellt ohnehin
+   *    ueber Glied (b) heraus (`transactionDate < cutoffDate`, kundenweit);
+   *  · NACH dem Cutoff ist er Verbrauch aus dem NEUEN Bestand und MUSS
+   *    zaehlen. R4 (Tabelle D, von Alrik entschieden): „alle Buchungen ab dem
+   *    1. von M werden abgezogen".
+   *
+   * Die Buchungs-Engine bucht den Uebertrag zuerst und verknuepft die Buchung
+   * mit ihm. Stand die ersetzte Zuweisung auf dieser Liste, fiel damit JEDER
+   * auf sie verknuepfte Verbrauch heraus — auch der nach dem Cutoff.
+   * Gemessen (25.09.2026, Verbrauch 80,00 EUR am 10.04., Startwert Maerz):
+   *
+   *     Flag aus   Anspruch 1.062,00   Verbrauch 80,00   verfuegbar 982,00
+   *     Flag an    Anspruch   562,00   Verbrauch  0,00   verfuegbar 562,00
+   *
+   * Der Anspruch war mit Flag richtig, der Verbrauch verschwunden — die
+   * Verfuegbarkeit stand 80,00 EUR zu hoch, in der Richtung, in der gebucht
+   * wird. Genau Funkes Lage: seine Juni-Buchungen liegen nach dem Startwert
+   * vom 01.06. und sind mit dem Uebertrag verknuepft.
+   *
+   * ── Und der Ersatz geht VOR dem Verfall ─────────────────────────────────
+   * Ein ersetzter Uebertrag, der spaeter auch verfaellt, bleibt auf dieser
+   * Liste draussen. Sonst verschwaende sein Juni-Verbrauch am 01.07. doch
+   * noch, und der Juli stuende um genau diesen Betrag zu hoch — die
+   * Abnahme „Folgemonate korrekt".
+   */
+  verbrauchsAusschlussIds: number[];
+  /**
+   * Die vom Startwert ERSETZTEN Zuweisungen — die Teilmenge von
+   * `excludedSpecialAllocationIds`, die in `verbrauchsAusschlussIds` fehlt.
+   *
+   * Auf ihnen zaehlen Buchungen und Stornos nach dem Cutoff (R4) —
+   * **Abschreibungen aber nie.** Der Verfalls-Lauf schreibt am 30.06. den
+   * Rest des Uebertrags ab; war der Uebertrag da schon vom Startwert ersetzt,
+   * ist diese Abschreibung kein Verbrauch, sondern der Verfall eines Bestands,
+   * den der Startwert bereits abgegolten hat. Zaehlte sie, ginge dasselbe
+   * Guthaben zweimal ab (Stammticket, Ergaenzung E2: „Doppelabschreibung").
+   *
+   * Bei Funke steht diese Zeile in Prod (249,42 EUR am 30.06., Startwert vom
+   * 01.06.). Ohne diese Unterscheidung fiele sein Juni-Topf von 184,60 EUR auf
+   * 0, und die Neuabrechnung ginge komplett privat.
+   */
+  ersetztDurchStartwertIds: number[];
   // Task #1812 — Reset-Stichtag (Monatsanfang des spätesten wirksamen §45b-
   // Startwerts M). Verbrauch mit `transactionDate < resetCutoffDate` ist bereits
   // in der neuen Startwert-Basis abgebildet und darf NICHT erneut abgezogen
@@ -819,7 +907,7 @@ async function calculateAllocated45b(
   if (anchor.kind === "ineligible") {
     // Kein Anspruch, also auch kein Aufstockungs-Boden: es gibt keine Monate,
     // die herausfallen koennten.
-    return { allocatedCents: 0, excludedSpecialAllocationIds: [], resetAnchor: null, accrualFloorDate: null };
+    return { allocatedCents: 0, excludedSpecialAllocationIds: [], verbrauchsAusschlussIds: [], ersetztDurchStartwertIds: [], resetAnchor: null, accrualFloorDate: null };
   }
   const budgetStartDate: string = anchor.anchorIso;
 
@@ -1230,6 +1318,8 @@ async function calculateAllocated45b(
     return {
       allocatedCents: yearMonthlyTotal + sumInitialBalancesForYear(existingAllocations, opts.year),
       excludedSpecialAllocationIds: [],
+      verbrauchsAusschlussIds: [],
+      ersetztDurchStartwertIds: [],
       resetAnchor: null,
       // Pool-Modus (Uebertrags-Berechnung), kein Lesepfad: dort muss das volle
       // Quelljahr sichtbar bleiben, ein Boden waere fachlich falsch.
@@ -1294,16 +1384,38 @@ async function calculateAllocated45b(
   const initialBalanceTotal = existingAllocations
     .filter(ibCounted)
     .reduce((sum, a) => sum + a.amountCents, 0);
-  const excludedSpecialAllocationIds = existingAllocations
-    .filter(a =>
-      (a.source === "initial_balance" && !ibCounted(a)) ||
-      (a.source === "carryover" && !carryoverCounted(a)),
-    )
+  const nichtGezaehlt = existingAllocations.filter(a =>
+    (a.source === "initial_balance" && !ibCounted(a)) ||
+    (a.source === "carryover" && !carryoverCounted(a)),
+  );
+  const excludedSpecialAllocationIds = nichtGezaehlt.map(a => a.id);
+
+  /**
+   * Vom STARTWERT ersetzt — nicht verfallen, nicht abgeloest, sondern durch
+   * die Inventur zum Cutoff abgegolten. Siehe `verbrauchsAusschlussIds`.
+   *
+   * Fuer einen Startwert gilt das ohne Flag: frueherer Startwert, spaeterer
+   * Reset (#1812, laengst aktiv). Fuer einen Uebertrag nur, wenn die
+   * Verdraengung ihn tatsaechlich aus `Allocated` genommen hat — dieselbe
+   * Bedingung wie in `carryoverCounted`, nicht eine zweite.
+   */
+  const verdraengungAn = opts.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT;
+  const vomStartwertErsetzt = (a: { source: string; validFrom: string; expiresAt: string | null; year: number }) =>
+    a.source === "initial_balance"
+      ? displacedByReset(a, resetAnchor)
+      : verdraengungAn && displacedByReset(a, resetAnchor);
+  const verbrauchsAusschlussIds = nichtGezaehlt
+    .filter(a => !vomStartwertErsetzt(a))
+    .map(a => a.id);
+  const ersetztDurchStartwertIds = nichtGezaehlt
+    .filter(a => vomStartwertErsetzt(a))
     .map(a => a.id);
 
   return {
     allocatedCents: totalCalculated + initialBalanceTotal + carryoverTotal,
     excludedSpecialAllocationIds,
+    verbrauchsAusschlussIds,
+    ersetztDurchStartwertIds,
     resetAnchor,
     accrualFloorDate,
   };
@@ -1334,7 +1446,7 @@ export async function getExcluded45bConsumption(
   // (z.B. Forecast-Projektion in `getBudgetSummary` rechnet mit
   // `projectFuture: true`). Default (undefined) = bisheriges Verhalten der
   // Lese-/Buchungs-Pfade (`unified-reader`, `consumption-engine`).
-  const { excludedSpecialAllocationIds, resetAnchor, accrualFloorDate } = await calculateAllocated45b(
+  const { excludedSpecialAllocationIds, verbrauchsAusschlussIds, ersetztDurchStartwertIds, resetAnchor, accrualFloorDate } = await calculateAllocated45b(
     customerId,
     // `resetDisplacesAllSources` MUSS aus demselben Grund mitlaufen wie
     // `projectFuture` (P1 6hXp9qMrXH2WGVVG): verdraengt das Flag einen
@@ -1352,7 +1464,8 @@ export async function getExcluded45bConsumption(
   // `ineligible`-Fall. Das ist gewollt — die Alternative waere eine zusaetzliche
   // Query nach dem fruehesten `transaction_date`, also genau der Roundtrip, den
   // der Kurzschluss sparen soll. Er bleibt als Ineligible-Ausstieg stehen.
-  if (excludedSpecialAllocationIds.length === 0 && !resetAnchor && !accrualFloorDate) {
+  if (verbrauchsAusschlussIds.length === 0 && ersetztDurchStartwertIds.length === 0
+    && !resetAnchor && !accrualFloorDate) {
     return { excludedSpecialAllocationIds, excludedConsumedNetCents: 0 };
   }
 
@@ -1382,9 +1495,21 @@ export async function getExcluded45bConsumption(
   // Spezial-Allocation darf eine reine Datumsregel nicht wegnehmen. Damit
   // bleiben (a) und (c) trennscharf — ID-Weg für verlinkte Zeilen, Datums-Weg
   // ausschließlich für das Leg ohne Verlinkung.
+  // (a) aus `verbrauchsAusschlussIds`, NICHT aus `excludedSpecialAllocationIds`:
+  // vom Startwert ersetzte Zuweisungen gehoeren nicht hierher — ihr Verbrauch
+  // vor dem Cutoff faellt ueber (b) heraus, danach zaehlt er (R4).
   const exclusionParts = [
-    excludedSpecialAllocationIds.length > 0
-      ? inArray(budgetTransactions.allocationId, excludedSpecialAllocationIds)
+    verbrauchsAusschlussIds.length > 0
+      ? inArray(budgetTransactions.allocationId, verbrauchsAusschlussIds)
+      : undefined,
+    // Auf einer vom Startwert ersetzten Zuweisung faellt die ABSCHREIBUNG
+    // immer heraus — sie ist der Verfall eines bereits abgegoltenen Bestands,
+    // kein Verbrauch (E2, Doppelabschreibung). Buchung und Storno zaehlen.
+    ersetztDurchStartwertIds.length > 0
+      ? and(
+          inArray(budgetTransactions.allocationId, ersetztDurchStartwertIds),
+          eq(budgetTransactions.transactionType, "write_off"),
+        )
       : undefined,
     resetAnchor
       ? lt(budgetTransactions.transactionDate, resetAnchor.cutoffDate)

@@ -14,6 +14,7 @@ import { todayISO, lastDayOfMonth } from "@shared/utils/datetime";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "./unified-reader";
+import { chronologischeReihenfolge } from "./abrechnungs-lauf";
 import { formatEuroDE } from "@shared/utils/money";
 import { appointmentsRepo, customersRepo } from "../../repos";
 import {
@@ -1023,7 +1024,12 @@ export async function rebookNetZeroAppointmentConsumption(params: {
   const rebookedAppointmentIds: number[] = [];
   if (appointmentIds.length === 0) return { rebookedAppointmentIds };
 
-  for (const appointmentId of appointmentIds) {
+  // CHRONOLOGISCH (Tabelle D). Vorher kam die Reihenfolge aus
+  // `computeNetZeroApptIds`, also aus der Ladereihenfolge der Buchungen. Das
+  // Buchen hier ist kumulativ (jede Buchung ist für die nächste schon im
+  // Ledger) — WELCHER Termin den Rest privat bekommt, hing damit am Zufall.
+  // Dieselbe Reihenfolge wie die Vorschau, damit beide dasselbe zeigen.
+  for (const appointmentId of await chronologischeReihenfolge(appointmentIds)) {
     const { rebooked } = await db.transaction((tx) =>
       rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, userId }),
     );

@@ -13,6 +13,7 @@ import { eq, and, isNull, inArray, notInArray, ne, desc, or, gte, lt, lte, sql }
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
+import { chronologischeReihenfolge, fensterSchluessel } from "../storage/budget/abrechnungs-lauf";
 import { loadCustomerPriceContext } from "../storage/pricing/price-for";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
 import { resolveCustomerInsuranceAt } from "../storage/customer-mgmt/insurance";
@@ -921,7 +922,23 @@ async function rederiveSplitFromCurrentAllocation(
     .sort((a, b) => a.priority - b.priority)
     .map((p) => p.budgetType as CappedBudgetPot);
 
-  for (const apptId of apptIds) {
+  /**
+   * KUMULIERT und CHRONOLOGISCH (Tabelle D, Entscheidung Alrik 25.09.2026).
+   *
+   * Vorher prüfte jede Iteration gegen die VOLLE Verfügbarkeit. Was ein
+   * früherer Termin desselben Laufs beansprucht hatte, wurde nicht abgezogen
+   * — hier wird ja nichts gebucht, also sah der nächste Termin den Topf
+   * unverändert. Drei Termine, die einzeln passten, passten zusammen auch:
+   * die Vorschau zeigte mehr Kasse, als im Topf ist, und das Erstellen (das
+   * nacheinander BUCHT und damit kumuliert) etwas anderes als die Vorschau.
+   *
+   * Jetzt: Kalender-Reihenfolge aus `chronologischeReihenfolge` — DIESELBE,
+   * nach der das Erstellen bucht —, und je Topf-Fenster die Summe dessen,
+   * was frühere Termine schon beansprucht haben (`fensterSchluessel`).
+   */
+  const beansprucht = new Map<string, number>();
+  const fensterVon = (bt: string, datum: string) => `${bt}|${fensterSchluessel(bt, datum)}`;
+  for (const apptId of await chronologischeReihenfolge(apptIds)) {
     const cost = costByAppt.get(apptId) ?? 0;
     const date = dateByAppt.get(apptId);
     if (cost <= 0 || !date) continue; // nichts ableitbar → bleibt ohne Eintrag (private)
@@ -929,7 +946,10 @@ async function rederiveSplitFromCurrentAllocation(
     const avail = await readUnifiedBudgetAvailability(customerId, date, db);
     const pots: CascadePot[] = orderedPots.map((bt) => ({
       budgetType: bt,
-      capacityCents: avail.pots[bt].availableCents,
+      capacityCents: Math.max(
+        0,
+        avail.pots[bt].availableCents - (beansprucht.get(fensterVon(bt, date)) ?? 0),
+      ),
     }));
     // privater Topf absorbiert den Rest, der von keinem Kassen-Topf gedeckt ist.
     pots.push({ budgetType: "private", capacityCents: 0, uncapped: true });
@@ -942,6 +962,10 @@ async function rederiveSplitFromCurrentAllocation(
         ? (split.budgetType as InvoicePotKey)
         : "private";
       cents[potKey] = (cents[potKey] ?? 0) + split.amountCents;
+      if (split.budgetType !== "private") {
+        const k = fensterVon(split.budgetType, date);
+        beansprucht.set(k, (beansprucht.get(k) ?? 0) + split.amountCents);
+      }
     }
     if (Object.keys(cents).length > 0) {
       out.set(apptId, { cents });

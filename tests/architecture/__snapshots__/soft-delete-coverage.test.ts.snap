@@ -118,6 +118,9 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
   "server/storage/appointments-storage.ts": [
     "appointmentsRepo",
   ],
+  "server/storage/budget/abrechnungs-lauf.ts": [
+    "appointmentsRepo",
+  ],
   "server/storage/budget/allocation-storage.ts": [
     "budgetAllocationsRepo",
     "customersRepo",
