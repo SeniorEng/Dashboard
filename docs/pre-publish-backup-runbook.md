@@ -10,6 +10,23 @@
 
 ---
 
+## 0. Publish OHNE `migrate.sh` — nur nach vorheriger DDL
+
+Hängt Schritt 0d von `migrate.sh` (Ticket `6hWvrJgff5xr9hfp`) und wird deshalb
+ohne `migrate.sh` publiziert, gilt:
+
+1. **Schema-Änderungen dieses Publishes messen**, nicht erinnern:
+   `git diff <letzter-live-commit> origin/main -- shared/schema migrations`.
+2. **DDL vorher in Prod anlegen**: nur `ADD COLUMN IF NOT EXISTS` o. ä.,
+   Typen und FK-Namen exakt aus dem Drizzle-Schema, in EINER Transaktion.
+   Prod-Schreibzugriff = Gate 4 (Alrik).
+3. **Read-only prüfen**, dass alle Spalten/Constraints da sind.
+4. **Erst dann publishen.**
+
+**Nie umgekehrt.** Replits eigene Schema-Phase ist kein Ersatz: am 25.09.2026
+(#195) legte sie fünf additive Spalten nicht an, Prod lief kurz mit
+„column entfernt_am does not exist" (Vorfall in `docs/deployment-log.md`).
+
 ## 1. Wann anwenden?
 
 Vor **jedem** Publish, der mindestens eines der folgenden Risiken trägt:
