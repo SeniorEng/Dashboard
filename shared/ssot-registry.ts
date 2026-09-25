@@ -179,6 +179,29 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     eslintRules: [],
   },
   {
+    id: "budget-counted-consumption-45b",
+    question: "Zählt diese §45b-BUCHUNG zum Stichtag? (Stichtags-Schranke + Reset-Schnitt)",
+    // Bewusst ein EIGENER Eintrag neben `budget-allocation-window`: das ist die
+    // Schwesterfrage, nicht dieselbe. Die eine entscheidet über Zuweisungen,
+    // die andere über Buchungen. Sie in einen Eintrag zu legen hiesse, den
+    // Unterschied im Katalog einzuebnen, den die Fassungen im Code schon
+    // eingeebnet hatten.
+    canonical: [
+      { symbol: "countedConsumptionWhere", module: "server/storage/budget/allocation-window.ts" },
+    ],
+    ownedLiterals: [],
+    guards: [
+      {
+        // Setzt auf der FUNDSTELLE an, nicht auf der Datei: fuenf Dateien
+        // unter `server/storage/budget` tragen eine obere Datumsschranke auf
+        // `budgetTransactions` und beantworten damit verschiedene Fragen. Die
+        // Zusage lautet „wer den Schnitt einmal ruft, ruft ihn ueberall".
+        test: "tests/architecture/counted-consumption-single-source.test.ts",
+      },
+    ],
+    eslintRules: [],
+  },
+  {
     id: "budget-projected-45b",
     question: "Welcher §45b-Stand gilt für das ANLEGE-Tor? (Projektion bis Monatsende)",
     canonical: [

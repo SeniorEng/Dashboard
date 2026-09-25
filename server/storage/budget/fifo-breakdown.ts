@@ -96,17 +96,14 @@ export async function readBudget45bFifoBreakdown(
   // Konstante. Haenge diese Zeile nur an `opts`, dann verdraengt der Anspruch
   // beim Default-Umschwung und die Uebertrags-Summe nicht — gemessen faellt
   // `allocatedCur` dann auf −1.048,00 EUR (Gate 2 zu #180, B1).
-  const resetAnchor = (opts?.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
-    ? await readResetAnchor(customerId, asOfDate)
-    : null;
-
   /**
-   * Der Anker fuer den VERBRAUCHS-Schnitt haengt NICHT am Flag.
+   * EIN Lesevorgang, zwei Anker.
    *
-   * Zwei verschiedene Fragen, zwei Anker:
-   *  · `resetAnchor` oben entscheidet ueber die VERDRAENGUNG von
+   * Der Anker fuer den VERBRAUCHS-Schnitt haengt NICHT am Flag. Zwei
+   * verschiedene Fragen:
+   *  · `resetAnchor` unten entscheidet ueber die VERDRAENGUNG von
    *    Uebertragszeilen — die ist schaltbar, und das bleibt so.
-   *  · `verbrauchsAnker` hier entscheidet, welche BUCHUNGEN zum Stichtag noch
+   *  · `verbrauchsAnker` entscheidet, welche BUCHUNGEN zum Stichtag noch
    *    zaehlen. Der Reader tut das unabhaengig vom Flag
    *    (`allocation-storage.ts`: `resetAnchorFrom(initialBalanceMonths, …)`,
    *    nur an `opts.year == null` gebunden).
@@ -115,8 +112,24 @@ export async function readBudget45bFifoBreakdown(
    * den flag-gegateten Anker, und mit ausgeschaltetem Flag war er `null` —
    * der Schnitt blieb aus, der Verbrauch weiter negativ. Gemessen, nicht
    * hergeleitet (Ticket `6hcVM394XgmP37GG`).
+   *
+   * Die erste Fassung las `readResetAnchor` ZWEIMAL mit identischen Argumenten
+   * (Gate 2 zu #190, N1). Das war nicht nur eine Abfrage zu viel, sondern zwei
+   * Quellen fuer dieselbe Zeile: ein spaeterer Filter an einer der beiden
+   * Aufrufstellen haette die Anker still auseinanderlaufen lassen, und der
+   * Unterschied waere genau da entstanden, wo niemand ihn vermutet. Jetzt ist
+   * der geschaltete Anker eine ABLEITUNG des gelesenen, keine zweite Lesung.
+   *
+   * Der Reviewer schlug vor, die Lesung hinter das `carryoverIds`-Tor zu
+   * ziehen. Das traegt seit dem B1-Fix nicht mehr: `classifyConsumedByState`
+   * braucht den Anker auf einem Pfad, der unabhaengig von Uebertragszeilen
+   * laeuft.
    */
   const verbrauchsAnker = await readResetAnchor(customerId, asOfDate);
+
+  const resetAnchor = (opts?.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
+    ? verbrauchsAnker
+    : null;
   const carryoverAllocations = await budgetAllocationsRepo
     .selectColumnsFrom({ id: budgetAllocations.id, amountCents: budgetAllocations.amountCents, expiresAt: budgetAllocations.expiresAt })
     .where(and(
