@@ -284,4 +284,61 @@ describe("§45b-FIFO — die Zustands-Aufteilung folgt allen drei Ausschluss-Gli
       await cleanupCustomer(id);
     }
   }, 120_000);
+  it("AC-5 – Abschreibung auf einem ersetzten Übertrag: Aufteilung und Reader bleiben deckungsgleich (Flag an)", async () => {
+    /**
+     * Wie AC-4, dazu eine Abschreibung auf dem ersetzten Übertrag am 01.07.
+     * (Datum wie der echte Verfalls-Lauf). Zugesichert ist die
+     * ÜBEREINSTIMMUNG mit dem Reader, und über die Vorbedingung, dass der
+     * READER die Abschreibung nicht zählt (E2, Glied (a') in
+     * `getExcluded45bConsumption` — mutations-gegengeprüft: ohne das Glied rot).
+     *
+     * ⚠ Was dieser Test NICHT bezeugt: das Glied (a') im SPIEGEL
+     * `countedConsumptionWhere`. Gemessen (Mutation): ohne es bleibt der Test
+     * grün. Die Aufteilung nutzt die Abfrage nur, um ABGERECHNETE und
+     * DOKUMENTIERTE Beträge über die Termin-ID zu finden; eine Abschreibung
+     * hat nie einen Termin und landet ohnehin im Rest „sonstiger Verbrauch".
+     * Das Glied steht dort, damit der Spiegel dem Reader gleich bleibt — nicht,
+     * weil ein heutiger Leser es bräuchte. Zusammenhalten müsste die beiden
+     * Gegenstücke eine Eigenschafts-Probe über ein Raster (FINDING aus
+     * Gate 2 zu #192, S-3).
+     */
+    const id = await kunde();
+    try {
+      const [ue] = await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", year: J, month: null,
+        amountCents: UEBERTRAG, source: "carryover",
+        validFrom: `${J}-01-01`, expiresAt: `${J}-06-30`, notes: "AC5-uebertrag-verdraengt",
+      }).returning({ id: budgetAllocations.id });
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", year: J, month: 3,
+        amountCents: 300_00, source: "initial_balance",
+        validFrom: `${J}-03-01`, expiresAt: null, notes: "AC5-startwert-maerz",
+      });
+      const termin = await dokumentierterTermin(id, `${J}-04-10`);
+      await db.insert(budgetTransactions).values([
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "consumption",
+          amountCents: -BETRAG, transactionDate: `${J}-04-10`,
+          allocationId: ue.id, appointmentId: termin, description: "AC5-buchung",
+        },
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "write_off",
+          amountCents: -15_00, transactionDate: `${J}-07-01`,
+          allocationId: ue.id, description: "AC5-abschreibung",
+        },
+      ] as never);
+
+      const fifo = await readBudget45bFifoBreakdown(id, `${J}-07-15`, { resetDisplacesAllSources: true });
+      const uni = await readUnifiedBudgetAvailability(id, `${J}-07-15`, undefined, { resetDisplacesAllSources: true });
+
+      for (const topf of fifo.pots) pruefeAufteilung(topf);
+      expect(
+        fifo.pots.reduce((n, p) => n + p.consumedCents, 0),
+        "Aufteilung und Reader behandeln die Abschreibung des ersetzten Übertrags verschieden",
+      ).toBe(uni.pots.entlastungsbetrag_45b.consumedNetCents);
+      expect(uni.pots.entlastungsbetrag_45b.consumedNetCents, "Vorbedingung: nur die Buchung zählt").toBe(BETRAG);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
 });

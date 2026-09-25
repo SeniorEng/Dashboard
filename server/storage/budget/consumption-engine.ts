@@ -445,6 +445,14 @@ export async function createCascadeConsumption(params: {
   customerKilometers: number;
   customerKilometersCents: number;
   userId?: number;
+  /**
+   * Vorschau-Probelauf (`rebookNetZeroAppointmentCore`, `handelnder:
+   * "probelauf"`): die Transaktion wird zurueckgerollt. Was die Engine sonst
+   * AUSSERHALB der Transaktion schreibt (Audit in `logReconcileSkip`), geht
+   * dann nur in die Konsole — kein Eintrag ueber eine Buchung, die nie
+   * stattfand, und kein erfundener Handelnder.
+   */
+  probelauf?: boolean;
   skipExistingCheck?: boolean;
   /**
    * Task #873 (Budget GF Phase 3) — optionaler privater Selbstzahler-Topf als
@@ -757,6 +765,7 @@ export async function createCascadeConsumption(params: {
           customerId: params.customerId,
           appointmentId: params.appointmentId,
           userId: params.userId,
+          probelauf: params.probelauf,
         },
       );
     }
@@ -804,7 +813,7 @@ async function reconcileAppointmentLegFieldDrift(
     travelCents: number;
     customerKilometersCents: number;
   },
-  ctx: { customerId: number; appointmentId: number; userId?: number },
+  ctx: { customerId: number; appointmentId: number; userId?: number; probelauf?: boolean },
 ): Promise<void> {
   const consumptions = appointmentTxs.filter(
     (t) => t.transactionType === "consumption",
@@ -908,7 +917,7 @@ async function reconcileAppointmentLegFieldDrift(
  */
 async function logReconcileSkip(
   tx: DbClient,
-  ctx: { customerId: number; appointmentId: number; userId?: number },
+  ctx: { customerId: number; appointmentId: number; userId?: number; probelauf?: boolean },
   detail: {
     expected: {
       hauswirtschaftCents: number;
@@ -932,6 +941,13 @@ async function logReconcileSkip(
     consumptionTxIds: number[];
   },
 ): Promise<void> {
+  if (ctx.probelauf) {
+    // Vorschau-Probelauf: die Buchung wird zurueckgerollt. Ein Audit-Eintrag
+    // auf eigener Verbindung ueberlebte das und schriebe eine Anomalie einer
+    // Buchung zu, die es nie gab — einem Nutzer, der nichts getan hat.
+    console.warn("[reconcileAppointmentLegFieldDrift] C-02 im Probelauf (nicht protokolliert)", { ...ctx, ...detail });
+    return;
+  }
   let actorUserId = ctx.userId ?? null;
   if (actorUserId == null) {
     // Kein expliziter Aufrufer (z.B. System-/Backfill-Pfad): ältesten aktiven

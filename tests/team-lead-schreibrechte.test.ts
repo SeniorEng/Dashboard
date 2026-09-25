@@ -1,3 +1,4 @@
+import { todayISO } from "@shared/utils/datetime";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiPost,
@@ -299,10 +300,19 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
       expect(res.data.telefon).toBe("+4917699999999");
     });
 
-    it("Teamleiter darf Pflegegrad eines fremden Kunden setzen", async () => {
-      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/care-level`, {
+    it("Teamleiter darf Pflegegrad eines fremden Kunden setzen (ab heute)", async () => {
+      // Seit § 4 Nr. 16 g UStG (Ticket 6hcgffPJWm57p72p, RK-11, Alrik
+      // 25.09.2026) ist der Pflegegrad Nachweis für die Steuerfreiheit:
+      // rückwirkend setzen ihn nur Admins — Teamleitungen nicht. Das
+      // firmenweite Schreibrecht (Task #252) gilt weiter, ab heute.
+      const rueckwirkend = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/care-level`, {
         pflegegrad: 4,
         seitDatum: "2024-06-01",
+      });
+      expect(rueckwirkend.status, "rückwirkend: nur Admins").toBe(400);
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/care-level`, {
+        pflegegrad: 4,
+        seitDatum: todayISO(),
       });
       expect(res.status).toBe(200);
       expect(res.data.pflegegrad).toBe(4);

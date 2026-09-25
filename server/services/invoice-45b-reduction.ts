@@ -287,7 +287,7 @@ export async function reduceInvoice45bToPaidAmount(
       const { rebooked, cascade } = await rebookNetZeroAppointmentCore(tx, {
         customerId,
         appointmentId,
-        userId: actor.userId,
+        handelnder: { userId: actor.userId },
         overflowRestriction: { allowedPots },
         privatePotOverride,
       });

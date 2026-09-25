@@ -1,7 +1,13 @@
 /**
  * Task #1028 — End-to-End: Re-abgerechnete Termine dürfen auch dann keinen Topf
  * doppelt verbrauchen, wenn die Kaskade aus einem gedeckelten Kassen-Topf in den
- * PRIVATEN Selbstzahler-Topf (uncapped, 19 % USt) überläuft.
+ * PRIVATEN Selbstzahler-Topf (uncapped) überläuft.
+ *
+ * § 4 Nr. 16 g UStG (Ticket 6hcgffPJWm57p72p, Pflichtfall 3): der Kunde hat
+ * Pflegegrad 3 — der private Überlauf ist deshalb STEUERFREI. Bis zur
+ * Umstellung sicherte diese Suite „Privat bleibt 19 % USt"; das war die alte
+ * Zahlertyp-Regel. Die Zusage des Tests (kein Doppel-Spend pro Topf) ist davon
+ * unberührt.
  *
  * Die Schwester-Suite `rebill-no-double-spend-multipot-e2e.test.ts` (Task #1025)
  * deckt die reine Kassen-Kaskade §45b → §45a ab (beide steuerfrei, eine
@@ -12,8 +18,8 @@
  *     gedeckelter §45a-Topf läuft in den privaten uncapped-Terminal-Topf über
  *     (`createCascadeConsumption({ privatePot })`, budgetType `"private"`).
  *   - Der Mehrtopf-Lauf erzeugt einen GEMISCHTEN Split: eine Kasse-Rechnung
- *     (§45a, steuerfrei) UND eine Selbstzahler-Rechnung (privat, 19 % USt,
- *     `billingType="selbstzahler"`, `vatRate=1900`) — siehe
+ *     (§45a, steuerfrei) UND eine Selbstzahler-Rechnung (privat, mit PG
+ *     steuerfrei, `billingType="selbstzahler"`, `vatRate=0`) — siehe
  *     `generateInvoiceCore` (Selbstzahler-Reklassifikation + USt-Verteilung).
  *   - Der Storno→Re-Book-Round-Trip muss BEIDE Anteile wiederherstellen: die
  *     §45a-Consumption UND den privaten Rest (`rebookNetZeroAppointmentConsumption`
@@ -33,7 +39,8 @@
  *
  * Kern-Assertion (fängt den Doppel-Spend-Bug) — PRO TOPF:
  *   Σ(Live-Consumption im Ledger des Topfs) === Σ(Netto der aktiven Rechnungen
- *   dieses Topfs), und die privaten Rechnungen bleiben 19 % USt / Selbstzahler.
+ *   dieses Topfs), und die privaten Rechnungen bleiben Selbstzahler-Rechnungen
+ *   (steuerfrei, PG 3 nachgewiesen).
  *
  * Ohne den Re-Book (Bug-Zustand) bliebe A in beiden Töpfen netto null → Ledger-
  * Live = nur B (komplett privat, weil §45a wieder frei wäre würde B in §45a
@@ -78,8 +85,9 @@ const A_PRIVATE_CENTS = APPT_A_COST_CENTS - A_45A_CENTS; // 1300 (Rest → priva
 const POT_45A = "umwandlung_45a";
 const POT_PRIVATE = "private";
 
-function vat19(netCents: number): number {
-  return Math.round((netCents * 1900) / 10000);
+/** Pflichtfall 3: Überlauf-Privatanteil eines Kunden mit Pflegegrad → steuerfrei. */
+function vatPrivatMitPflegegrad(_netCents: number): number {
+  return 0;
 }
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
@@ -297,7 +305,7 @@ afterAll(async () => {
 });
 
 describe("Re-Rechnung darf bei §45a→PRIVAT-Überlauf keinen Topf doppelt verbrauchen — E2E (Task #1028)", () => {
-  it("bill A (§45a-Kasse + Privat-Split) → cascade-storno → re-bill A (re-book beide Anteile) → bill B (komplett privat): pro Topf Ledger === aktive Rechnungen, Privat bleibt 19 % USt / Selbstzahler", async () => {
+  it("bill A (§45a-Kasse + Privat-Split) → cascade-storno → re-bill A (re-book beide Anteile) → bill B (komplett privat): pro Topf Ledger === aktive Rechnungen, Privat steuerfrei (PG 3) / Selbstzahler", async () => {
     const { year, month } = billingReferenceMonth();
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
 
@@ -326,8 +334,8 @@ describe("Re-Rechnung darf bei §45a→PRIVAT-Überlauf keinen Topf doppelt verb
     expect(inv45aA?.billingType, "§45a-Anteil bleibt Kasse").toBe("pflegekasse_gesetzlich");
     expect(invPrivateA?.netAmountCents, "Privat-Rechnung Netto").toBe(A_PRIVATE_CENTS);
     expect(invPrivateA?.billingType, "Privat-Anteil ist Selbstzahler").toBe("selbstzahler");
-    expect(invPrivateA?.vatRate, "Privat-Rechnung trägt 19 % USt").toBe(1900);
-    expect(invPrivateA?.vatAmountCents, "Privat-Rechnung USt-Betrag = 19 % vom Netto").toBe(vat19(A_PRIVATE_CENTS));
+    expect(invPrivateA?.vatRate, "Privat-Rechnung steuerfrei (PG 3, § 4 Nr. 16 g UStG)").toBe(0);
+    expect(invPrivateA?.vatAmountCents, "Privat-Rechnung ohne USt").toBe(vatPrivatMitPflegegrad(A_PRIVATE_CENTS));
 
     // (2) EINE Split-Rechnung mit Cascade stornieren → alle Geschwister
     //     storniert, A in BEIDEN Töpfen netto null.
@@ -367,8 +375,8 @@ describe("Re-Rechnung darf bei §45a→PRIVAT-Überlauf keinen Topf doppelt verb
     expect(gen3.invoices.length, "B-Abrechnung erzeugt genau 1 Rechnung").toBe(1);
     expect(gen3.invoices[0].billingType, "B ist komplett Selbstzahler").toBe("selbstzahler");
     expect(gen3.invoices[0].netAmountCents, "B-Rechnung Netto = voller B-Betrag").toBe(APPT_B_COST_CENTS);
-    expect(gen3.invoices[0].vatRate, "B-Rechnung trägt 19 % USt").toBe(1900);
-    expect(gen3.invoices[0].vatAmountCents, "B-Rechnung USt-Betrag = 19 % vom Netto").toBe(vat19(APPT_B_COST_CENTS));
+    expect(gen3.invoices[0].vatRate, "B-Rechnung steuerfrei (PG 3)").toBe(0);
+    expect(gen3.invoices[0].vatAmountCents, "B-Rechnung ohne USt").toBe(vatPrivatMitPflegegrad(APPT_B_COST_CENTS));
 
     // === Doppel-Spend-Garantie pro Topf ===
     const ledger45a = await liveConsumptionCents(POT_45A);
@@ -399,8 +407,8 @@ describe("Re-Rechnung darf bei §45a→PRIVAT-Überlauf keinen Topf doppelt verb
 
     // Alle privaten Rechnungen bleiben 19 % USt / Selbstzahler.
     for (const i of invPrivate) {
-      expect(i.vatRate, `Privat-Rechnung ${i.id} trägt 19 % USt`).toBe(1900);
-      expect(i.vatAmountCents, `Privat-Rechnung ${i.id} USt = 19 % vom Netto`).toBe(vat19(i.netAmountCents ?? 0));
+      expect(i.vatRate, `Privat-Rechnung ${i.id} steuerfrei (PG 3)`).toBe(0);
+      expect(i.vatAmountCents, `Privat-Rechnung ${i.id} ohne USt`).toBe(vatPrivatMitPflegegrad(i.netAmountCents ?? 0));
     }
 
     // Gesamt-Deckungsgleichheit als zusätzliche Sicherung.

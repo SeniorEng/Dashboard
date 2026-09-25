@@ -600,9 +600,9 @@ wird für netto-null-belegte Termine frische Cascade-Konsumption gebucht.**
 Wird eine Rechnung storniert, läuft pro Termin ein Budget-Reversal: der
 Termin wird wieder abrechenbar und seine Konsumption ist **netto null**
 (alle `consumption`-Zeilen sind durch `reversal`-Zeilen storniert). Beim
-Re-Abrechnen deriviert `getBudgetSplitForAppointments`
-(`rederiveSplitFromCurrentAllocation`, Task #1011) den Pot-Anteil
-**read-only** aus der aktuellen Allocation — es wird NICHTS gebucht. Folge:
+Re-Abrechnen leitete `getBudgetSplitForAppointments` (bis #193:
+`rederiveSplitFromCurrentAllocation`, Task #1011) den Pot-Anteil **read-only**
+aus der aktuellen Allocation ab — es wurde NICHTS gebucht. Folge:
 Die neue Rechnung weist einen Topf aus (z.B. §45b), während der Ledger den
 Topf weiterhin als „verfügbar" führt. Ein **späterer** Termin verbraucht
 denselben Topf erneut → derselbe Topf ist über **zwei aktive Rechnungen**
@@ -623,9 +623,19 @@ Rest → privater uncapped-Topf. Danach wird der Draft NEU gebaut, sodass der
 Split aus den frisch gebuchten Live-Zeilen kommt. **Eine Quelle: die
 gebuchten Zeilen — Rechnung == Ledger per Konstruktion.**
 
-Die **Preview** bleibt strikt read-only (sie liest weiter über
-`rederiveSplitFromCurrentAllocation`) — eine Vorschau darf den Ledger nie
-verändern.
+Die **Preview** fährt seit #193 (Entscheidung Alrik, 25.09.2026: „Vorschau
+und Erstellen zeigen denselben Bruttobetrag") **dieselbe Neubuchung als
+Probelauf** (`probelaufNeubuchung`, `invoice-data.ts`): chronologisch, in einer
+Transaktion, die zurückgerollt wird. ERSETZT die eigene Nachbildung
+`rederiveSplitFromCurrentAllocation`, die anders rechnete (gemessen: Vorschau
+194,20 €, Erstellen 196,02 €). Der Grundsatz heißt damit nicht mehr „die
+Vorschau schreibt nicht", sondern **„die Vorschau hinterlässt nichts"**: sie
+schreibt in der Transaktion und rollt zurück. Die einzige Schreibstelle
+außerhalb der Transaktion (Audit `budget_reconcile_skipped`) ist im Probelauf
+abgeschaltet (`handelnder: "probelauf"`). Zurückbleiben nur Sequenzwerte
+(Lücken in den IDs von `budget_transactions`/`budget_allocations`).
+Gesichert: NB-1 (`tests/billing/nachberechnung-kumuliert-e2e.test.ts`) prüft
+den Ledger nach Vorschau und Liste.
 
 ### Kein Doppel-Spend, idempotent
 

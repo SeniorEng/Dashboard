@@ -9,7 +9,7 @@ import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { generateAndStorePdf } from "../services/document-pdf";
 import { computeDataHash } from "../services/signature-integrity";
 import { customerManagementStorage } from "../storage/customer-management";
-import { asyncHandler } from "../lib/errors";
+import { asyncHandler, badRequest } from "../lib/errors";
 import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../lib/params";
 import { authService } from "../services/auth";
 import { isTeamLead, actorRole } from "../lib/team-lead";
@@ -156,6 +156,14 @@ router.post("/:id/care-level", asyncHandler("Pflegegrad konnte nicht aktualisier
   if (!customer) { res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" }); return; }
 
   const { pflegegrad, seitDatum } = employeeCareLevelSchema.parse(req.body);
+
+  // Der Pflegegrad ist der Nachweis für die Steuerfreiheit (§ 4 Nr. 16 g UStG,
+  // Ticket 6hcgffPJWm57p72p). Rückwirkend setzen darf ihn nur die Verwaltung
+  // (Entscheidung Alrik, 25.09.2026, RK-11) — sonst könnte ein Mitarbeiter
+  // bereits erbrachte Leistungen nachträglich steuerfrei machen.
+  if (!user.isAdmin && seitDatum < todayISO()) {
+    throw badRequest("Ein Pflegegrad kann hier nur ab heute eingetragen werden. Rückwirkende Änderungen nimmt die Verwaltung vor.");
+  }
 
   const oldPflegegrad = customer.pflegegrad;
 

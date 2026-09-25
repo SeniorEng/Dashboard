@@ -30,7 +30,20 @@ export interface ServiceCatalogEntry {
   unitType: "hours" | "kilometers" | "flat";
   /** Standardpreis als Katalog-Attribut (Integer-Cents). */
   defaultPriceCents: number;
+  /** USt-Satz in Prozent, wenn die Leistung steuerpflichtig ist. */
   vatRate: number;
+  /**
+   * Anerkennungsliste nach § 4 Nr. 16 Buchst. g UStG: die Leistung gehört ihrer
+   * Art nach zu den Angeboten zur Unterstützung im Alltag. An eine Person mit
+   * nachgewiesenem Pflegegrad ist sie steuerfrei, sonst gilt `vatRate`
+   * (Tabelle D, Ticket 6hcgffPJWm57p72p; Liste bestätigt von Alrik 25.09.2026:
+   * nur Hauswirtschaft und Alltagsbegleitung). Kilometer sind keine eigene
+   * Leistung dieser Liste — sie folgen der Hauptleistung (D6).
+   *
+   * ERSETZT den Zahlertyp (`billingType === "selbstzahler"`) als Merkmal der
+   * Steuerpflicht.
+   */
+  ustFreiMitPflegegrad: boolean;
   minDurationMinutes: number | null;
   isBillable: boolean;
   isSystem: boolean;
@@ -49,6 +62,7 @@ export const SERVICE_CATALOG: ServiceCatalogEntry[] = [
     unitType: "hours",
     defaultPriceCents: 3800,
     vatRate: 19,
+    ustFreiMitPflegegrad: true,
     minDurationMinutes: 15,
     isBillable: true,
     isSystem: false,
@@ -65,6 +79,7 @@ export const SERVICE_CATALOG: ServiceCatalogEntry[] = [
     unitType: "hours",
     defaultPriceCents: 4200,
     vatRate: 19,
+    ustFreiMitPflegegrad: true,
     minDurationMinutes: 15,
     isBillable: true,
     isSystem: false,
@@ -81,6 +96,7 @@ export const SERVICE_CATALOG: ServiceCatalogEntry[] = [
     unitType: "kilometers",
     defaultPriceCents: 35,
     vatRate: 19,
+    ustFreiMitPflegegrad: false,
     minDurationMinutes: null,
     isBillable: true,
     isSystem: true,
@@ -97,6 +113,7 @@ export const SERVICE_CATALOG: ServiceCatalogEntry[] = [
     unitType: "kilometers",
     defaultPriceCents: 35,
     vatRate: 19,
+    ustFreiMitPflegegrad: false,
     minDurationMinutes: null,
     isBillable: true,
     isSystem: true,
@@ -113,6 +130,7 @@ export const SERVICE_CATALOG: ServiceCatalogEntry[] = [
     unitType: "hours",
     defaultPriceCents: 0,
     vatRate: 19,
+    ustFreiMitPflegegrad: false,
     minDurationMinutes: null,
     isBillable: false,
     isSystem: true,

@@ -241,6 +241,16 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   appointmentNotes: text("appointment_notes"),
   serviceDetails: text("service_details"),
   sortOrder: integer("sort_order").notNull().default(0),
+  // § 4 Nr. 16 g UStG (Ticket 6hcgffPJWm57p72p) — die USt-Entscheidung je
+  // Position, GoBD-fest mitgespeichert: Satz in Basispunkten (0 = steuerfrei)
+  // und der Pflegegrad, der am Leistungstag nachgewiesen war (Historie).
+  // ERSETZT den einen Satz je Rechnung (`invoices.vat_rate`) als Träger der
+  // Entscheidung — nur so lassen sich gemischte Rechnungen, der Pflegegrad-
+  // Wechsel im Monat und die ZUGFeRD-Kategorie je Position unverändert neu
+  // darstellen. NULL = Bestand vor der Umstellung; dort gilt weiter die
+  // Rechnungs-Ebene (`resolveVatTreatment`).
+  vatRateBp: integer("vat_rate_bp"),
+  pflegegradAmLeistungstag: integer("pflegegrad_am_leistungstag"),
 }, (table) => [
   index("invoice_line_items_invoice_id_idx").on(table.invoiceId),
   // Task #1892 — Gegenrichtung zum `invoice_id`-Index: seit der zeitraum-blinden

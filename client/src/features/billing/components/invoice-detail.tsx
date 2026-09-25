@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { displayPriceCents } from "@shared/domain/customers";
+import { zeilenUstJeSatz } from "@shared/domain/invoice-vat";
 import { renderLineItemQuantity } from "@shared/domain/invoice-line-items";
 import { iconSize } from "@/design-system";
 import { Loader2, AlertTriangle, Clock, Mail, MapPin } from "lucide-react";
@@ -51,14 +52,21 @@ export function InvoiceDetail({ invoice, expandedDetail, detailLoading, delivery
                   <th className="pb-2 pr-3">Leistung</th>
                   <th className="pb-2 pr-3 text-right">Dauer</th>
                   <th className="pb-2 pr-3 text-right">
-                    Betrag{expandedDetail.billingType === "selbstzahler" ? " (brutto)" : ""}
+                    Betrag{expandedDetail.vatAmountCents !== 0 ? " (brutto)" : ""}
                   </th>
                   <th className="pb-2">Mitarbeiter</th>
                 </tr>
               </thead>
               <tbody>
-                {expandedDetail.lineItems.map((item) => {
-                  const displayTotal = displayPriceCents(item.totalCents, expandedDetail.billingType);
+                {(() => {
+                  const zeilenUst = zeilenUstJeSatz(expandedDetail.lineItems.map((l) => ({ totalCents: l.totalCents, vatRateBp: l.vatRateBp ?? 0 })));
+                  return expandedDetail.lineItems.map((item, idx) => {
+                  // Gespeicherter Satz je Position (§ 4 Nr. 16 g UStG), USt je Zeile
+                  // über dieselbe Verteilung wie das PDF; Bestand ohne Satz bleibt
+                  // beim bisherigen Weg über den Zahlertyp.
+                  const displayTotal = item.vatRateBp != null
+                    ? item.totalCents + zeilenUst[idx]
+                    : displayPriceCents(item.totalCents, expandedDetail.billingType);
                   return (
                   <tr key={item.id} className="border-b last:border-0">
                     <td className="py-2 pr-3">{formatDate(item.appointmentDate)}</td>
@@ -77,12 +85,13 @@ export function InvoiceDetail({ invoice, expandedDetail, detailLoading, delivery
                     <td className="py-2">{item.employeeName || "-"}</td>
                   </tr>
                   );
-                })}
+                });
+                })()}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 font-medium">
                   <td colSpan={4} className="pt-2 pr-3 text-right">
-                    Gesamt{expandedDetail.billingType === "selbstzahler" ? " (inkl. MwSt.)" : ""}:
+                    Gesamt{expandedDetail.vatAmountCents !== 0 ? " (inkl. MwSt.)" : ""}:
                   </td>
                   <td className={`pt-2 pr-3 text-right ${expandedDetail.grossAmountCents < 0 ? "text-red-600" : ""}`}>
                     {formatAmount(expandedDetail.grossAmountCents)}

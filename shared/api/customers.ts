@@ -125,9 +125,25 @@ interface CustomerCareLevelHistoryItem {
   validFrom: string;
   validTo: string | null;
   notes: string | null;
+  /**
+   * „Als Fehleintrag entfernt" (Ticket 6hcgffPJWm57p72p): der Eintrag zählt für
+   * kein Datum. Die Verlaufs-Anzeige zeigt ihn markiert; jeder Leser, der eine
+   * Aussage über den Pflegegrad trifft, filtert ihn (Server: `nichtEntfernt()`).
+   */
+  entferntAm: string | null;
+  entferntGrund: string | null;
 }
 
 export interface CustomerDetail extends Customer {
+  /**
+   * Pflegegrad, der HEUTE in der Historie nachgewiesen ist (`getCareLevelAt`),
+   * sonst `null`. Der Admin-Client liest diesen Wert statt der Stammdaten-
+   * Spalte `pflegegrad` (Ticket 6hcgffPJWm57p72p) — für Anzeige und Brutto-
+   * Preise bei Selbstzahlern.
+   */
+  pflegegradHeute: number | null;
+  /** Beginn des heute gültigen Eintrags (derselbe Leser) — für „seit …". */
+  pflegegradHeuteSeit: string | null;
   currentInsurance: {
     id: number;
     providerName: string;

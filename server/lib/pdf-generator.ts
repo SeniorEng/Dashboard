@@ -5,7 +5,8 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatEuroDE } from "@shared/utils/money";
 import { renderLineItemQuantity, isKmLineItem, type LineItemQuantityUnit } from "@shared/domain/invoice-line-items";
 import { aggregateInvoiceLineItems } from "@shared/domain/invoice-line-aggregation";
-import { resolveVatTreatment, distributeVatAcrossLines, grossUpUnitPriceCents, STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
+import { resolveVatTreatment, distributeVatAcrossLines, grossUpUnitPriceCents, STANDARD_VAT_RATE_BP, ustJeSatz, zeilenUstJeSatz, type UstGruppe } from "@shared/domain/invoice-vat";
+import { ustfreiHinweis, leistungsempfaengerText } from "@shared/domain/ust-texte";
 import { buildInvoiceFooterInnerHtml, buildLeistungsnachweisFooterInnerHtml } from "@shared/domain/document-page-geometry";
 import { isSignatureImageMeaningful } from "./signature-validation";
 
@@ -92,6 +93,10 @@ export interface InvoicePdfData {
     employeeName: string | null;
     appointmentNotes: string | null;
     serviceDetails: string | null;
+    // § 4 Nr. 16 g UStG — gespeicherte USt-Entscheidung je Position; `null` =
+    // Bestand (dann gilt die Rechnungs-Ebene, unverändert wie bisher).
+    vatRateBp?: number | null;
+    pflegegradAmLeistungstag?: number | null;
   }[];
   
   // Task #1083 — Positions-Aggregationsmodus. `"cumulative"` fasst Positionen je
@@ -345,6 +350,39 @@ function getConfirmTextForBillingType(billingType: string, rechnungAnKunde?: boo
   }
 }
 
+/** „19 %" / „7 %" aus Basispunkten — die deutschen USt-Sätze sind ganzzahlig. */
+function formatSatz(satzBP: number): string {
+  return `${Math.round(satzBP / 100)} %`;
+}
+
+/**
+ * § 4 Nr. 16 g UStG — Darstellung aus der gespeicherten Entscheidung je
+ * Position. `null` für Bestand (keine Position trägt einen Satz): dann bleibt
+ * der bisherige Weg über die Rechnungs-Ebene.
+ *
+ * Die USt je Zeile wird INNERHALB jedes Satzes drift-frei verteilt
+ * (`distributeVatAcrossLines`), sodass Σ Zeilen = Summe je Satz = gespeicherte
+ * USt der Rechnung.
+ */
+function renderUstJePosition(
+  renderItems: InvoicePdfData["lineItems"],
+  data: InvoicePdfData,
+): { gruppen: UstGruppe[]; zeilenUst: number[]; hinweis: string | null; leistungsempfaenger: string } | null {
+  if (!data.lineItems.some(l => l.vatRateBp != null)) return null;
+  const mitSatz = renderItems.map(i => ({ totalCents: i.totalCents, vatRateBp: i.vatRateBp ?? 0 }));
+  const { gruppen } = ustJeSatz(mitSatz);
+  const zeilenUst = zeilenUstJeSatz(mitSatz);
+  return {
+    gruppen,
+    zeilenUst,
+    hinweis: ustfreiHinweis(mitSatz),
+    leistungsempfaenger: leistungsempfaengerText(
+      data.customerName,
+      data.lineItems.map(l => ({ appointmentDate: l.appointmentDate, pflegegradAmLeistungstag: l.pflegegradAmLeistungstag ?? null })),
+    ),
+  };
+}
+
 export function generateInvoiceHtml(data: InvoicePdfData): string {
   const today = new Date();
   const invoiceDate = data.invoiceDate || `${today.getDate().toString().padStart(2, "0")}.${(today.getMonth() + 1).toString().padStart(2, "0")}.${today.getFullYear()}`;
@@ -362,16 +400,23 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   // Selbstzahler) → persistierte USt-Summe drift-frei auf die Zeilen verteilen,
   // sodass Σ(Brutto-Zeilen) === Gesamtbetrag. Steuerfrei → netto === brutto.
   const treatment = resolveVatTreatment({ billingType: data.billingType, budgetType: data.budgetType });
-  const isStandard = treatment === "standard";
   // Task #1083: kumulierte Positionen (neue Rechnungen) vs. pro-Termin (Bestand,
   // byte-stabil per Render-Snapshot eingefroren). Die persistierten Line-Items
   // bleiben unangetastet — kumuliert wird nur die Anzeige.
   const aggregate = data.lineAggregation === "cumulative";
   const renderItems = aggregate ? aggregateInvoiceLineItems(data.lineItems, data.fahrtkostenLabel) : data.lineItems;
   const lineNetCents = renderItems.map(i => i.totalCents);
-  const lineVatCents = isStandard
-    ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
-    : lineNetCents.map(() => 0);
+  // § 4 Nr. 16 g UStG (Ticket 6hcgffPJWm57p72p): trägt die Rechnung die
+  // USt-Entscheidung je Position, kommt alles Weitere daraus — Satz je Zeile,
+  // Summe je Satz, Hinweistext, Leistungsempfänger (Texte: `ust-texte.ts`).
+  // Bestand (keine Position mit Satz) rendert unverändert über `treatment`.
+  const ust = renderUstJePosition(renderItems, data);
+  const isStandard = ust ? ust.gruppen.some(g => g.satzBP > 0 && g.basisCents !== 0) : treatment === "standard";
+  const lineVatCents = ust
+    ? ust.zeilenUst
+    : isStandard
+      ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
+      : lineNetCents.map(() => 0);
   const displayVatCents = isStandard ? data.vatAmountCents : 0;
   const displayGrossCents = isStandard ? data.grossAmountCents : data.netAmountCents;
 
@@ -381,7 +426,9 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     // wenn vorhanden, sonst Fallback auf `durationMinutes` (historische Zeilen).
     const quantityDisplay = renderLineItemQuantity(item);
     const unitLabel = isKm ? "/km" : "/Std.";
-    const displayUnitPrice = grossUpUnitPriceCents(item.unitPriceCents, treatment);
+    const displayUnitPrice = ust
+      ? Math.round((item.unitPriceCents * (10000 + (item.vatRateBp ?? 0))) / 10000)
+      : grossUpUnitPriceCents(item.unitPriceCents, treatment);
     const displayTotal = item.totalCents + lineVatCents[idx];
     // Task #565: 0,00-€-Zeilen als „kostenlos" kennzeichnen, damit unterscheidbar
     // von versehentlich fehlenden Preisen. Nur für reguläre Rechnungen (nicht Storno,
@@ -397,8 +444,13 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       ? ""
       : `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""}-${item.endTime ? item.endTime.slice(0, 5) : ""}</td>`;
+    // Spalte „Pos." nur bei neuen Rechnungen (Gate 2 zu #194, RK-5, Alrik):
+    // der Hinweis „Pos. 1–3 sind umsatzsteuerfrei …" verweist auf diese
+    // Nummern. Bestand bleibt byte-gleich.
+    const posCell = ust ? `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${idx + 1}</td>` : "";
     return `
     <tr>
+      ${posCell}
       ${dateTimeCells}
       <td class="col-service" style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}${freeHint}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${quantityDisplay}</td>
@@ -435,7 +487,9 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     .meta-table td:last-child { color: #111827; }
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
     table.items th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
-    table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }
+    ${ust && !aggregate
+      ? "table.items th:nth-child(5), table.items th:nth-child(6), table.items th:nth-child(7) { text-align: right; }"
+      : "table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }"}
     /* Task #1072 — Mengen-robuste Seitenumbrüche: Bei vielen Positionen bricht
        die Tabelle geordnet über mehrere Seiten um. table-header-group wiederholt
        den Spaltenkopf auf jeder Folgeseite, break-inside:avoid auf den Zeilen
@@ -536,11 +590,14 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </table>
   </div>
 
+  ${ust ? `<div class="leistungsempfaenger" style="margin-bottom: 10px;">${escapeHtml(ust.leistungsempfaenger)}</div>` : ""}
+
   <p>Für die im Zeitraum <strong>${periodLabel}</strong> erbrachten Leistungen${!data.prominentPotLabel && (data.billingType === "pflegekasse_gesetzlich" || data.billingType === "pflegekasse_privat") ? " gemäß § 45b Abs. 1 Satz 3 Nr. 4 SGB XI (Angebote zur Unterstützung im Alltag gem. § 45a SGB XI)" : ""} berechnen wir:</p>
 
   <table class="items">
     <thead>
       <tr>
+        ${ust ? "<th>Pos.</th>" : ""}
         ${aggregate ? "" : `<th>Datum</th>
         <th>Uhrzeit</th>`}
         <th class="col-service">Leistung</th>
@@ -554,11 +611,16 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </tbody>
   </table>
 
-  ${isStandard ? `<div style="font-size: 9pt; color: #4b5563; margin-bottom: 10px;">Alle Einzelbeträge verstehen sich inkl. ${(STANDARD_VAT_RATE_BP / 100).toFixed(0)}% MwSt.</div>` : ""}
+  ${ust ? (isStandard ? `<div style="font-size: 9pt; color: #4b5563; margin-bottom: 10px;">${ust.hinweis ? "Steuerpflichtige Einzelbeträge" : "Alle Einzelbeträge"} verstehen sich inkl. MwSt.</div>` : "")
+    : isStandard ? `<div style="font-size: 9pt; color: #4b5563; margin-bottom: 10px;">Alle Einzelbeträge verstehen sich inkl. ${(STANDARD_VAT_RATE_BP / 100).toFixed(0)}% MwSt.</div>` : ""}
 
   <table class="totals">
     <tr><td>Nettobetrag:</td><td>${formatCents(data.netAmountCents)}</td></tr>
-    ${isStandard ? `<tr><td>USt. ${(STANDARD_VAT_RATE_BP / 100).toFixed(0)}%:</td><td>${formatCents(displayVatCents)}</td></tr>` : `<tr><td colspan="2" style="font-size: 9pt; color: #1f2937;">Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG</td></tr>`}
+    ${ust
+      ? ust.gruppen.filter(g => g.satzBP > 0 && g.basisCents !== 0).map(g =>
+          `<tr><td>USt. ${formatSatz(g.satzBP)} auf ${formatCents(g.basisCents)}:</td><td>${formatCents(g.ustCents)}</td></tr>`).join("")
+        + (ust.hinweis ? `<tr><td colspan="2" style="font-size: 9pt; color: #1f2937;">${escapeHtml(ust.hinweis)}</td></tr>` : "")
+      : isStandard ? `<tr><td>USt. ${(STANDARD_VAT_RATE_BP / 100).toFixed(0)}%:</td><td>${formatCents(displayVatCents)}</td></tr>` : `<tr><td colspan="2" style="font-size: 9pt; color: #1f2937;">Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG</td></tr>`}
     <tr class="total-row"><td>Gesamtbetrag${isStandard ? " (inkl. MwSt.)" : ""}:</td><td style="color: ${isStorno ? '#dc2626' : 'inherit'};">${formatCents(displayGrossCents)}</td></tr>
   </table>
 
@@ -653,11 +715,24 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   // (Largest-Remainder), Brutto je Zeile via Objekt-Referenz-Map (sortItems/
   // groupByAppointment erhalten die Referenzen). Steuerfrei → netto === brutto.
   const treatment = resolveVatTreatment({ billingType: data.billingType, budgetType: data.budgetType });
-  const isStandard = treatment === "standard";
+  // § 4 Nr. 16 g UStG (Gate 2 zu #194, B-1): trägt die Rechnung die
+  // USt-Entscheidung je Position, rechnet der Nachweis damit — dieselbe
+  // Verteilung wie die Rechnung (`zeilenUstJeSatz`). Bestand (keine Position
+  // mit Satz) bleibt unverändert beim Weg über die Rechnungs-Ebene.
+  const jePosition = data.lineItems.some(l => l.vatRateBp != null);
+  const positionsSaetze = data.lineItems.map(l => ({ totalCents: l.totalCents, vatRateBp: l.vatRateBp ?? 0 }));
+  const isStandard = jePosition
+    ? positionsSaetze.some(p => p.vatRateBp > 0 && p.totalCents !== 0)
+    : treatment === "standard";
   const lineNetCents = data.lineItems.map(i => i.totalCents);
-  const lineVatCents = isStandard
-    ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
-    : lineNetCents.map(() => 0);
+  const lineVatCents = jePosition
+    ? zeilenUstJeSatz(positionsSaetze)
+    : isStandard
+      ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
+      : lineNetCents.map(() => 0);
+  const bruttoSatz = (item: typeof data.lineItems[0]) => jePosition
+    ? Math.round((item.unitPriceCents * (10000 + (item.vatRateBp ?? 0))) / 10000)
+    : grossUpUnitPriceCents(item.unitPriceCents, treatment);
   const lineGrossByRef = new Map<typeof data.lineItems[0], number>();
   data.lineItems.forEach((it, idx) => lineGrossByRef.set(it, it.totalCents + lineVatCents[idx]));
   const grossOf = (item: typeof data.lineItems[0]) => lineGrossByRef.get(item) ?? item.totalCents;
@@ -712,7 +787,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       for (let i = 0; i < group.services.length; i++) {
         const svc = group.services[i];
         const showDateCol = i === 0;
-        const displayUnitPrice = grossUpUnitPriceCents(svc.unitPriceCents, treatment);
+        const displayUnitPrice = bruttoSatz(svc);
         const displayTotal = grossOf(svc);
         rows.push(`
         <tr>
@@ -727,7 +802,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       }
       for (const km of group.kmItems) {
         const kmLabel = km.serviceCode === "customer_km" ? "Fahrten für/mit Kunde" : "Anfahrt";
-        const displayKmUnitPrice = grossUpUnitPriceCents(km.unitPriceCents, treatment);
+        const displayKmUnitPrice = bruttoSatz(km);
         const displayKmTotal = grossOf(km);
         // Task #561: km-Anzeige via Helper — Menge × Satz = Summe konsistent.
         const kmQuantityDisplay = renderLineItemQuantity(km);

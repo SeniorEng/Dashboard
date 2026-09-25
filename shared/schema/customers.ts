@@ -150,6 +150,15 @@ export const customerCareLevelHistory = pgTable("customer_care_level_history", {
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
+  // „Als Fehleintrag entfernen" (Entscheidung Alrik, 25.09.2026; Ticket
+  // 6hcgffPJWm57p72p): markiert, nicht gelöscht. Ein entfernter Eintrag zählt
+  // für KEIN Datum — auch rückwirkend nicht (sonst bliebe z. B. eine
+  // Nachberechnung alter Termine steuerfrei). ERSETZT die Hintertür über die
+  // Admin-API mit frei gesetztem `validTo`, bei der die Stammdaten stehen
+  // blieben. Alle Leser filtern über `nichtEntfernt()` (care-level.ts).
+  entferntAm: timestamp("entfernt_am"),
+  entferntGrund: text("entfernt_grund"),
+  entferntVonUserId: integer("entfernt_von_user_id").references(() => users.id),
 }, (table) => [
   index("customer_care_level_history_customer_id_idx").on(table.customerId),
   index("customer_care_level_history_valid_idx").on(table.customerId, table.validTo),
@@ -257,8 +266,37 @@ export const insertCareLevelHistorySchema = z.object({
   pflegegrad: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen"),
   pflegegradBeantragt: z.number().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen").optional().nullable(),
   validFrom: z.string(), // Date string
-  validTo: z.string().optional().nullable(),
   notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
+});
+// `validTo` ist bewusst NICHT mehr setzbar (Ticket 6hcgffPJWm57p72p): ein Ende
+// entsteht nur über „ab Datum beenden", ein Irrtum über „als Fehleintrag
+// entfernen" — beide führen die Stammdaten mit. Ein unbekanntes Feld wird von
+// `z.object` verworfen.
+
+export const pflegegradEntfernenSchema = z.object({
+  grund: z.string().trim().min(3, "Bitte einen Grund angeben (mindestens 3 Zeichen)").max(500, "Maximal 500 Zeichen"),
+  /**
+   * Im Dialog bestätigt: der vorige Eintrag lebt wieder auf (RK-10, Alrik:
+   * nicht automatisch). Kandidat: `vorgaengerZumWiederaufleben`.
+   */
+  vorigenWiederOeffnen: z.boolean().optional().default(false),
+  /**
+   * Der Eintrag, den der Dialog angekündigt hat. Weicht der Kandidat auf dem
+   * Server ab (Historie inzwischen geändert), 409 statt still einen anderen zu
+   * öffnen (Gate 2 zu #194, S-12).
+   */
+  erwarteterVorgaengerId: z.number().int().positive().optional(),
+});
+
+export const pflegegradBeendenSchema = z.object({
+  abDatum: z.string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Datum im Format JJJJ-MM-TT erwartet")
+    // Kalendergültig: `2026-02-31` darf nicht still auf den 03.03. rollen.
+    .refine((s) => {
+      const [y, m, d] = s.split("-").map(Number);
+      const t = new Date(Date.UTC(y, m - 1, d));
+      return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+    }, "Kein gültiges Kalenderdatum"),
 });
 
 export type CustomerCareLevelHistory = typeof customerCareLevelHistory.$inferSelect;
