@@ -281,13 +281,21 @@ describe("§ 4 Nr. 16 g UStG — Abnahme (Tabelle D, Pflichtfälle 1–6, E3–E
 
     const g = await rendern(a.invoice.id);
     const text = nurText(g.html);
-    expect(text, "Positionsbezug im Hinweis").toContain("Pos. 1 ist umsatzsteuerfrei nach § 4 Nr. 16 UStG.");
-    // RK-5: die Nummern, auf die der Hinweis verweist, stehen in der Tabelle.
+    // Die Reihenfolge der Positionen ist beim Anlegen nicht festgelegt (Termine
+    // ohne ORDER BY geladen, FINDING im PR) — der Test liest die Nummer aus der
+    // gerenderten Tabelle und prüft, dass der Hinweis GENAU auf die steuerfreie
+    // Zeile zeigt (RK-5: die Nummer steht in der Spalte „Pos.“).
     expect(g.html, "Spalte „Pos.“").toContain("<th>Pos.</th>");
     const tbody = g.html.split("<tbody>")[1].split("</tbody>")[0];
-    expect([...tbody.matchAll(/<tr>\s*<td[^>]*>(\d+)<\/td>/g)].map(m => m[1]), "Positionsnummern").toEqual(["1", "2"]);
+    const reihen = [...tbody.matchAll(/<tr>\s*<td[^>]*>(\d+)<\/td>[\s\S]*?<td class="col-service"[^>]*>([^<]+)/g)]
+      .map(m => ({ pos: m[1], leistung: m[2].trim() }));
+    expect(reihen.map(z => z.pos), "Positionsnummern").toEqual(["1", "2"]);
+    const frei = reihen.find(z => z.leistung === "Hauswirtschaft")!;
+    expect(text, "Positionsbezug zeigt auf die steuerfreie Zeile").toContain(`Pos. ${frei.pos} ist umsatzsteuerfrei nach § 4 Nr. 16 UStG.`);
     expect(text, "USt je Satz mit Basis").toMatch(/USt\. 19 % auf 38,00\s*€/);
-    expect(positionsKategorien(g.xml), "XML: Kategorie je Position").toEqual(["E", "S"]);
+    // XML: Kategorie je Position in derselben Reihenfolge wie die PDF-Tabelle.
+    expect(positionsKategorien(g.xml), "XML: Kategorie je Position")
+      .toEqual(reihen.map(z => (z.leistung === "Hauswirtschaft" ? "E" : "S")));
     expect(aufschluesselung(g.xml), "XML: Aufschlüsselung je Satz").toEqual([
       { kategorie: "E", basis: "38.00", steuer: "0.00", grund: USTFREI_HINWEIS },
       { kategorie: "S", basis: "38.00", steuer: "7.22", grund: null },
@@ -306,9 +314,16 @@ describe("§ 4 Nr. 16 g UStG — Abnahme (Tabelle D, Pflichtfälle 1–6, E3–E
     expect(a.invoice.netAmountCents).toBe(2 * HW_60);
     expect(a.invoice.vatAmountCents, "nur der Termin nach dem Ende trägt USt").toBe(UST_19(HW_60));
     const text = nurText(a.html);
-    expect(text).toContain("Pos. 1 ist umsatzsteuerfrei nach § 4 Nr. 16 UStG.");
+    // Reihenfolge der Positionen beim Anlegen nicht festgelegt (FINDING im PR):
+    // die steuerfreie Zeile ist die mit dem Netto-Satz 38,00 €/Std.
+    const tbody = a.html.split("<tbody>")[1].split("</tbody>")[0];
+    const reihen = [...tbody.matchAll(/<tr>\s*<td[^>]*>(\d+)<\/td>[\s\S]*?(\d+,\d{2})\s*€\/Std\./g)]
+      .map(m => ({ pos: m[1], satz: m[2] }));
+    expect(reihen.map(r => r.satz).sort(), "eine steuerfreie, eine 19-%-Zeile").toEqual(["38,00", "45,22"]);
+    const frei = reihen.find(r => r.satz === "38,00")!;
+    expect(text).toContain(`Pos. ${frei.pos} ist umsatzsteuerfrei nach § 4 Nr. 16 UStG.`);
     expect(text, "Leistungsempfänger mit Zeitraum").toContain(`Leistungsempfänger: ${k.name}, Pflegegrad 2 (bis 10.08.)`);
-    expect(positionsKategorien(a.xml)).toEqual(["E", "S"]);
+    expect(positionsKategorien(a.xml)).toEqual(reihen.map(r => (r.satz === "38,00" ? "E" : "S")));
     expect(a.invoice.pflegegrad, "Stempel = Grad am LETZTEN Leistungstag (keiner)").toBeNull();
     // B-1, gemischt: steuerfreie Zeile netto, 19-%-Zeile brutto, Summe = Rechnung.
     const ln = nurText(a.ln);
