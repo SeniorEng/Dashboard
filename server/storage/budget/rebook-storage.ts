@@ -8,6 +8,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, or, inArray, isNotNull, gte, lte, ne } from "drizzle-orm";
 import { db } from "../../lib/db";
+import { badRequest } from "../../lib/errors";
 import type { DbClient, CascadeResult } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
 import { todayISO, lastDayOfMonth } from "@shared/utils/datetime";
@@ -826,7 +827,12 @@ export async function rebookNetZeroAppointmentCore(
   params: {
     customerId: number;
     appointmentId: number;
-    userId: number;
+    /**
+     * `undefined` im PROBELAUF der Vorschau (`invoice-data.ts`) — dort wird
+     * alles zurueckgerollt, es gibt keinen Handelnden. Beim Erstellen immer
+     * gesetzt.
+     */
+    userId?: number;
     overflowRestriction?: { allowedPots: string[] };
     privatePotOverride?: RebookPrivatePotOverride | null;
   },
@@ -976,7 +982,12 @@ export async function rebookNetZeroAppointmentCore(
   // Rechnungserstellung scheitert mit klarer Meldung, der/die Bearbeiter:in
   // muss die Budget-Konfiguration/Buchungen für diesen Termin prüfen.
   if (cascadeResult.outstandingCents > 0) {
-    throw new Error(
+    // Fachlicher Fehler (Budget-Konfiguration), daher 400 — nicht 500. Seit die
+    // Vorschau und die Liste „Bereit zum Abrechnen" diesen Kern im Probelauf
+    // fahren (#193), zaehlt das: die Liste faengt pro Kunde nur 400/404 ab
+    // (`billing-customer-amounts.ts`), ein nacktes `Error` risse den ganzen
+    // Stapel mit.
+    throw badRequest(
       `Re-Abrechnung nicht möglich: Termin #${appointmentId} kann nicht ` +
       `vollständig aus den gesetzlichen Pflegekassen-Töpfen abgerechnet ` +
       `werden (${formatEuroDE(cascadeResult.outstandingCents)} ohne ` +

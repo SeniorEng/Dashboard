@@ -25,25 +25,19 @@
  *   · §45b: Summe über ALLE Termine des Laufs, chronologisch; jeder Termin
  *     sieht, was die früheren schon beansprucht haben.
  *   · §45a: dieselbe Summe, aber je KALENDERMONAT getrennt.
- *   · §39/§42a: je Kalenderjahr. Keine eigene Entscheidung — die Vorschau
- *     FOLGT hier der Buchungs-Engine, die §39 schon heute über das
- *     Kalenderjahr rechnet (`consumption-engine.ts`, `txDateFilters`). Weicht
- *     die Vorschau davon ab, zeigt sie etwas anderes, als das Erstellen bucht
- *     (Gate 2 zu #193, S-6 — die erste Fassung nannte das „nicht entschieden").
+ *   · Gegen alle Töpfe wird NETTO gerechnet; USt entsteht nur auf der
+ *     Privatrechnung und verbraucht nie Budget.
  *
- * ── Grenze dieser Vorschau (Gate 2 zu #193, S-4) ─────────────────────────
- * Die Vorschau bildet die Beanspruchung NACH, statt die Engine zu fahren.
- * Innerhalb eines Monats (der übliche Storno-Lauf) ist das deckungsgleich.
- * Über eine Fristgrenze nicht zwingend: bucht das Erstellen am 25.06. auf
- * einen Übertrag und liest am 05.07., fällt diese Buchung dort über den
- * Verfall heraus — die Vorschau zieht sie über das Lauf-Fenster trotzdem ab
- * und kündigt dann mehr privat an, als gebucht wird (hergeleitet, nicht
- * gemessen). Die saubere Form wäre ein Vorschau-Lauf über die echte Engine in
- * einer zurückgerollten Transaktion. Als FINDING im PR.
+ * Seit der Vorschau-Probelauf (`invoice-data.ts`, `probelaufNeubuchung`) die
+ * echte Neubuchung fährt, setzt die Buchungs-Engine diese Regel für BEIDE Wege
+ * um — Fenster je Topf inklusive (§45a Monat, §39 Kalenderjahr,
+ * `consumption-engine.ts`). Was hier bleibt, ist die EINE Sache, die beide
+ * Wege teilen müssen und die die Engine nicht kennt: die Reihenfolge.
  *
- * ERSETZT: die unkumulierte Einzelprüfung in der Vorschau und die zufällige
- * Reihenfolge im Erstellen. Beide lesen jetzt `chronologischeReihenfolge`,
- * die Vorschau zusätzlich `fensterSchluessel`.
+ * ERSETZT: die zufällige Reihenfolge im Erstellen und — mit dem Probelauf —
+ * die eigene Nachbildung der Vorschau samt ihrer Topf-Fenster
+ * (`fensterSchluessel`, von #193 eingeführt und im selben PR wieder
+ * entfernt, als Alrik entschied, dass die Vorschau dieselbe Rechnung sein muss).
  */
 import { inArray } from "drizzle-orm";
 import { appointments } from "@shared/schema";
@@ -86,29 +80,4 @@ export async function chronologischeReihenfolge(
       || a.start.localeCompare(b.start)
       || a.id - b.id)
     .map(z => z.id);
-}
-
-/**
- * Das Fenster, in dem sich Beanspruchungen eines Topfes im selben Lauf
- * gegenseitig mindern (Tabelle D).
- *
- * Zwei Termine teilen sich den Topf genau dann, wenn ihr Schlüssel gleich ist.
- */
-export function fensterSchluessel(budgetType: string, datum: string): string {
-  switch (budgetType) {
-    // §45b: ein fortlaufender Topf — alle Termine des Laufs teilen ihn.
-    case "entlastungsbetrag_45b":
-      return "lauf";
-    // §45a: Monatsbudget — nur Termine desselben Kalendermonats.
-    case "umwandlung_45a":
-      return datum.slice(0, 7);
-    // §39/§42a: Kalenderjahr — wie die Buchungs-Engine, siehe Dateikopf.
-    case "ersatzpflege_39_42a":
-      return datum.slice(0, 4);
-    default:
-      // Kein stiller Default. Die frühere Fassung bildete hier einen Schlüssel
-      // pro TAG — ein neuer Topf wäre damit als „jeder Tag ein eigenes Budget"
-      // behandelt worden, eine Entscheidung, die niemand getroffen hat.
-      throw new Error(`fensterSchluessel: kein Fenster für Topf „${budgetType}“ festgelegt (Tabelle D)`);
-  }
 }

@@ -56,6 +56,12 @@ const TERMINE = [
 const SUMME = 194_20;
 const KASSE = 184_60;
 const PRIVAT = 9_60;
+/**
+ * Tabelle D (Alrik, 25.09.2026): gegen alle Töpfe wird NETTO gerechnet, USt
+ * entsteht nur auf der Privatrechnung und verbraucht nie Budget.
+ * 184,60 Kasse + 9,60 privat netto + 1,82 USt (19 % auf 9,60) = 196,02 €.
+ */
+const BRUTTO = 196_02;
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let hwId: number;
@@ -202,8 +208,22 @@ describe("Nachberechnung nach Storno — kumuliert und chronologisch (Tabelle D)
     expect(vorschau.status, JSON.stringify(vorschau.data)).toBe(200);
     expect(
       vorschau.data.splitPots,
-      "die Vorschau kündigt keinen Privat-Anteil an — sie prüft jeden Termin gegen den vollen Topf",
+      "die Vorschau kündigt andere Töpfe an, als das Erstellen erzeugt",
     ).toEqual(["entlastungsbetrag_45b", "private"]);
+
+    // Die Vorschau zeigt den Bruttobetrag der Rechnung, die entstehen wird.
+    expect(vorschau.data.totalCents, "Vorschau: Bruttobetrag").toBe(BRUTTO);
+
+    // Die Liste „Bereit zum Abrechnen" zeigt denselben Betrag — der dritte
+    // Ort, an dem der Nutzer ihn sieht (`GET /api/billing/customer-amounts`).
+    const liste = await apiGet<Record<string, { actualAmountCents: number | null }>>(
+      `/api/billing/customer-amounts?year=${J}&month=6&customerIds=${customerId}`,
+    );
+    expect(liste.status, JSON.stringify(liste.data)).toBe(200);
+    expect(
+      liste.data[String(customerId)]?.actualAmountCents,
+      "die Liste „Bereit zum Abrechnen“ zeigt einen anderen Betrag als die Vorschau",
+    ).toBe(BRUTTO);
 
     // ── Erstellen ──────────────────────────────────────────────────────
     const neu = await generiere();
