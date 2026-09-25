@@ -69,6 +69,12 @@ describe("Abrechnungs-Lauf — Fenster je Topf", () => {
      *
      * Mit dem §45b-Fenster („ganzer Lauf") bekäme der Juli-Termin nichts mehr
      * aus §45a — genau die Verwechslung, die dieser Test ausschließt.
+     *
+     * Was dieser Test NICHT sagt (Gate 2 zu #193): nichts über „Vorschau =
+     * Erstellen" für §45a — das Erstellen für §45a prüft kein Test, NB-1 nur
+     * §45b. Und ein Lauf über die Monatsgrenze kommt beim echten Aufrufer kaum
+     * vor (Rechnungen laufen monatlich). Geprüft ist der Vertrag der Funktion,
+     * kein Rechnungspfad.
      */
     const { getBudgetSplitForAppointments } = await import("../../server/services/invoice-data");
     await getAuthCookie();

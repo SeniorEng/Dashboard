@@ -284,11 +284,15 @@ describe("§45b-Übersichtskarte — der ersetzte Übertrag steht als ersetzt da
      * ersetztes Guthaben". Nach R4 zählt sie gegen den Startwert.
      */
     await karteZeigen(dtoMit, kundeId);
+    // Mit Wortgrenze (Gate 2 zu #193, Notiz): `toContain("0,00")` wäre auch
+    // bei „10,00 €" oder „500,00 €" wahr, `toContain("131,00")` bei „1.131,00 €".
     expect(
-      screen.getByTestId("text-45b-available").textContent,
+      screen.getByTestId("text-45b-available").textContent?.trim(),
       "die Karte zeigt Budget frei, obwohl die Buchung vom 10.06. den Startwert aufbraucht",
-    ).toContain("0,00");
-    expect(screen.getByTestId("text-45b-used-attributed").textContent).toContain("131,00");
+    ).toMatch(/^0,00\s€$/);
+    expect(screen.getByTestId("text-45b-used-attributed").textContent).toMatch(/Davon 131,00\s€ verbraucht/);
+    // Folgt schon aus „verfügbar 0" (`hasExpiredUsage` verlangt verfügbar > 0,
+    // `BudgetLedgerSection.tsx:323`) — kein eigener Zeuge, nur die Anzeige-Folge.
     expect(
       screen.queryByTestId("text-45b-used-expired"),
       "die Buchung vom 10.06. erscheint als „verfallen oder ersetzt“ statt gegen den Startwert",

@@ -327,4 +327,46 @@ describe("§45b — was ein Startwert ersetzt, und was nicht", () => {
       await cleanupCustomer(id);
     }
   }, 120_000);
+  it("SE-6 – ein ERSETZTER Übertrag über den Jahreswechsel: seine Buchungen zählen im Folgejahr nicht (Flag an)", async () => {
+    /**
+     * Funkes Lage ein Jahr später — vom Reviewer vorgeschlagen, hier gemessen
+     * statt hergeleitet (Gate 2 zu #193, Runde 2).
+     *
+     * Übertrag 2026 ersetzt durch Startwert 03/2026; Buchung 80,00 € am
+     * 10.04.2026 auf dem Übertrag. Im Jahr darauf legt die Automatik den
+     * Übertrag 2027 an, der den Rest aus 2026 enthält. Gelesen am 15.03.2027:
+     * die Buchung von 2026 steckt im Übertrag 2027 und darf nicht noch einmal
+     * abgehen. Der Aufstockungs-Boden steht auf dem 01.01.2027.
+     */
+    useTestClock(`${J + 1}-09-25`);
+    const id = await kunde();
+    try {
+      const [ue26] = await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", year: J, month: null,
+        amountCents: 500_00, source: "carryover",
+        validFrom: `${J}-01-01`, expiresAt: `${J}-06-30`, notes: "SE6-uebertrag-2026",
+      }).returning({ id: budgetAllocations.id });
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", year: J, month: 3,
+        amountCents: 300_00, source: "initial_balance",
+        validFrom: `${J}-03-01`, expiresAt: null, notes: "SE6-startwert-03-2026",
+      });
+      await verbrauch(id, `${J}-04-10`, 80_00, ue26.id);
+      await db.insert(budgetAllocations).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", year: J + 1, month: null,
+        amountCents: 400_00, source: "carryover",
+        validFrom: `${J + 1}-01-01`, expiresAt: `${J + 1}-06-30`, notes: "SE6-uebertrag-2027",
+      });
+
+      const t = (await readUnifiedBudgetAvailability(
+        id, `${J + 1}-03-15`, undefined, { resetDisplacesAllSources: true },
+      )).pots.entlastungsbetrag_45b;
+      expect(
+        t.consumedNetCents,
+        "die Buchung von 2026 auf dem ersetzten Übertrag zählt gegen 2027, obwohl sie im Übertrag 2027 steckt",
+      ).toBe(0);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
 });
