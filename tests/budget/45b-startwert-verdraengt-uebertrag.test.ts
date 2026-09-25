@@ -66,6 +66,8 @@ async function kundeFunke(): Promise<number> {
   await db.insert(budgetAllocations).values({
     customerId: id, budgetType: "entlastungsbetrag_45b",
     year: ANKER_JAHR, month: 6, amountCents: 131_00, source: "initial_balance",
+    // Vorgangs-Klammer: seit Modell v2 (24.09.2026) verdraengt ein Startwert
+    // ALLEIN nichts mehr. Die Fixture stellt deshalb den Vorgang dar.
     kassenauskunftId: 90001,
     validFrom: `${ANKER_JAHR}-06-01`, expiresAt: null,
     notes: "Funke-Startwert 06/2026",
@@ -194,6 +196,8 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       await db.insert(budgetAllocations).values({
         customerId: id, budgetType: "entlastungsbetrag_45b",
         year: ANKER_JAHR, month: 6, amountCents: 131_00, source: "initial_balance",
+        // Vorgangs-Klammer: seit Modell v2 (24.09.2026) verdraengt ein Startwert
+        // ALLEIN nichts mehr. Die Fixture stellt deshalb den Vorgang dar.
         kassenauskunftId: 90001,
         validFrom: `${ANKER_JAHR}-06-01`, expiresAt: null, notes: "VD5-Startwert",
       });
@@ -227,7 +231,7 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
     }
   });
 
-  it("VD-6 – ein Startwert im JANUAR verdrängt den Übertrag ab 01.01.", async () => {
+  it("VD-6 – eine Kassenauskunft im Januar ersetzt den bisherigen Übertrag durch den gemeldeten", async () => {
     /**
      * Alriks Entscheidung zu S3, und der Grund dafür.
      *
@@ -237,9 +241,28 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
      * Gemessen ergab das `ohne=157200 mit=157200` — das Flag änderte nichts
      * in genau der Konstellation, für die der Mechanismus gemacht ist.
      *
-     * Fachlich: eine Inventur zum 01.01. stellt den Bestand fest, und ein
-     * Übertrag, der am selben Tag beginnt, ist Teil dessen, was festgestellt
-     * wurde.
+     * Fachlich (Modell v2, 24.09.2026): die Kasse meldet zum Stichtag BEIDE
+     * Reste getrennt — Vorjahr und laufendes Jahr. Der gemeldete Übertrag
+     * ERSETZT den bisher angenommenen; er kommt nicht zu ihm hinzu.
+     *
+     * ── Warum die Fixture BEIDE Zeilen des Vorgangs traegt ─────────────────
+     * Im ersten Halbjahr sind im Formular beide Felder Pflicht. Ein Vorgang
+     * mit nur einem Startwert ist damit nicht erzeugbar — ein Test, der ihn
+     * unterstellt, prueft eine Lage, die es nicht geben kann.
+     *
+     * Der gemeldete Übertrag ist hier **0 EUR**: die Kasse sagt „aus dem
+     * Vorjahr ist nichts mehr uebrig". Das ist eine festgestellte Null, keine
+     * fehlende Angabe.
+     *
+     * ── Und es ist der Fall, den nur die Klammer trennen kann ──────────────
+     * Beide Uebertragszeilen beginnen am 01.01. — die alte und die neue. Eine
+     * Datumsregel (`<` statt `<=`) kann sie nicht unterscheiden: mit `<=`
+     * fielen beide, mit `<` keine. Erst `kassenauskunftId` sagt, welche zum
+     * Vorgang gehoert.
+     *
+     * Der frueher Name dieses Tests lautete „ein Startwert im JANUAR
+     * verdraengt den Uebertrag ab 01.01." — die Regel, die v2 abgeschafft hat.
+     * Die Zusage ist dieselbe geblieben, der Ausloeser nicht.
      */
     const c = await createTestCustomer({
       pflegegrad: 3, billingType: "pflegekasse_gesetzlich", acceptsPrivatePayment: false,
@@ -256,14 +279,30 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
         {
           customerId: id, budgetType: "entlastungsbetrag_45b",
           year: ANKER_JAHR, month: 1, amountCents: 131_00, source: "initial_balance",
+          // Vorgangs-Klammer: seit Modell v2 (24.09.2026) verdraengt ein Startwert
+          // ALLEIN nichts mehr. Die Fixture stellt deshalb den Vorgang dar.
           kassenauskunftId: 90001,
           validFrom: `${ANKER_JAHR}-01-01`, expiresAt: null, notes: "VD6-Januar-Inventur",
         },
         {
+          // Der BISHER angenommene Uebertrag — ohne Klammer, also das, was die
+          // Kassenauskunft ersetzt.
           customerId: id, budgetType: "entlastungsbetrag_45b",
           year: ANKER_JAHR, month: null, amountCents: 1_179_00, source: "carryover",
           validFrom: `${ANKER_JAHR}-01-01`, expiresAt: `${ANKER_JAHR}-06-30`,
-          notes: "VD6-Uebertrag-ab-Januar",
+          notes: "VD6-Uebertrag-bisher-angenommen",
+        },
+        {
+          // Der GEMELDETE Uebertrag desselben Vorgangs: 0 EUR, festgestellte
+          // Null. Beginnt am selben Tag wie der alte — nur die Klammer
+          // unterscheidet sie.
+          customerId: id, budgetType: "entlastungsbetrag_45b",
+          year: ANKER_JAHR, month: null, amountCents: 0, source: "carryover",
+          // Dieselbe Klammer wie der Startwert oben — beide Zeilen sind EIN
+          // Vorgang. Ohne sie verdraengte der Stichtag diese Zeile mit.
+          kassenauskunftId: 90001,
+          validFrom: `${ANKER_JAHR}-01-01`, expiresAt: `${ANKER_JAHR}-06-30`,
+          notes: "VD6-Uebertrag-gemeldet",
         },
       ]);
 
@@ -274,8 +313,8 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       );
 
       expect(heute - neu,
-        "der Übertrag ab 01.01. wird vom Januar-Startwert nicht verdrängt — "
-        + "genau der Fall, für den der Mechanismus gemacht ist")
+        "der bisher angenommene Übertrag wird von der Kassenauskunft nicht "
+        + "ersetzt — genau der Fall, für den die Vorgangs-Klammer gemacht ist")
         .toBe(1_179_00);
     } finally {
       await cleanupCustomer(id);

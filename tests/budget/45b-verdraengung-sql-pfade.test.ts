@@ -63,6 +63,8 @@ async function kundeMitStartwertUndUebertrag(): Promise<number> {
       // Die Inventur: „ab Juni gilt dieser Bestand."
       customerId: id, budgetType: "entlastungsbetrag_45b", year: JAHR, month: STARTWERT_MONAT,
       amountCents: STARTWERT_CENTS, source: "initial_balance",
+      // Vorgangs-Klammer: seit Modell v2 (24.09.2026) verdraengt ein Startwert
+      // ALLEIN nichts mehr. Die Fixture stellt deshalb den Vorgang dar.
       kassenauskunftId: 90001,
       validFrom: `${JAHR}-${String(STARTWERT_MONAT).padStart(2, "0")}-01`,
       expiresAt: null, notes: "SQ-Startwert",
