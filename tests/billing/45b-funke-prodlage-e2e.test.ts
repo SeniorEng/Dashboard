@@ -35,6 +35,7 @@ import {
 } from "../test-utils";
 import { assertTestClockActive, clearTestClock, useTestClock } from "../helpers/test-clock";
 import { buildInvoiceDraft } from "../../server/services/invoice-calc";
+import { neubuchenFuerLauf } from "../../server/services/invoice-data";
 import { appendFileSync } from "node:fs";
 import { probeUeberlauf, zaehleUeberlauf } from "../../server/scripts/probe-ueberlauf-45b";
 import { readUnifiedBudgetAvailability } from "../../server/storage/budget/unified-reader";
@@ -277,11 +278,15 @@ describe("Funke (89), Prod-Lage: aktive Buchungen an gelöschter Zuweisung 61", 
     }, 300_000);
 
   it("F-4 – Kunde ohne Privatzahlung, Topf überzogen: Abbruch, Ledger unverändert (fachlich offen)", async () => {
-    const { customerId } = await prodLage(262_00, false);
+    const { customerId, offen } = await prodLage(262_00, false);
     const vorher = await ledgerZeilen(customerId);
     const gen = await apiPost<any>("/api/billing/generate", { customerId, billingMonth: 6, billingYear: J });
     diag("F-4", gen.status, gen.data);
     expect(gen.status, JSON.stringify(gen.data)).toBe(400);
     expect(await ledgerZeilen(customerId), "nichts storniert, nichts gebucht").toBe(vorher);
+    // Die Neubuchung selbst (die Vorschau bricht schon vorher ab): Storno und
+    // Neubuchung sind EINE Transaktion — kein halb stornierter Stand.
+    await expect(neubuchenFuerLauf(customerId, offen, auth.user.id)).rejects.toThrow(/Re-Abrechnung nicht möglich/);
+    expect(await ledgerZeilen(customerId), "Neubuchung rollt vollständig zurück").toBe(vorher);
   }, 300_000);
 });
