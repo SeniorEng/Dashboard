@@ -5,7 +5,7 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatEuroDE } from "@shared/utils/money";
 import { renderLineItemQuantity, isKmLineItem, type LineItemQuantityUnit } from "@shared/domain/invoice-line-items";
 import { aggregateInvoiceLineItems } from "@shared/domain/invoice-line-aggregation";
-import { resolveVatTreatment, distributeVatAcrossLines, grossUpUnitPriceCents, STANDARD_VAT_RATE_BP, ustJeSatz, type UstGruppe } from "@shared/domain/invoice-vat";
+import { resolveVatTreatment, distributeVatAcrossLines, grossUpUnitPriceCents, STANDARD_VAT_RATE_BP, ustJeSatz, zeilenUstJeSatz, type UstGruppe } from "@shared/domain/invoice-vat";
 import { ustfreiHinweis, leistungsempfaengerText } from "@shared/domain/ust-texte";
 import { buildInvoiceFooterInnerHtml, buildLeistungsnachweisFooterInnerHtml } from "@shared/domain/document-page-geometry";
 import { isSignatureImageMeaningful } from "./signature-validation";
@@ -371,12 +371,7 @@ function renderUstJePosition(
   if (!data.lineItems.some(l => l.vatRateBp != null)) return null;
   const mitSatz = renderItems.map(i => ({ totalCents: i.totalCents, vatRateBp: i.vatRateBp ?? 0 }));
   const { gruppen } = ustJeSatz(mitSatz);
-  const zeilenUst = renderItems.map(() => 0);
-  for (const g of gruppen) {
-    const idx = mitSatz.map((m, i) => (m.vatRateBp === g.satzBP ? i : -1)).filter(i => i >= 0);
-    const verteilt = distributeVatAcrossLines(idx.map(i => mitSatz[i].totalCents), g.ustCents);
-    idx.forEach((i, k) => { zeilenUst[i] = verteilt[k]; });
-  }
+  const zeilenUst = zeilenUstJeSatz(mitSatz);
   return {
     gruppen,
     zeilenUst,

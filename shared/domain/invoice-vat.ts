@@ -301,3 +301,20 @@ export function pflegegradFuerRechnung(
   for (const p of positionen) if (letzte == null || p.appointmentDate > letzte.appointmentDate) letzte = p;
   return letzte?.pflegegradAmLeistungstag ?? null;
 }
+
+/**
+ * USt je ZEILE für die Anzeige: innerhalb jedes Satzes drift-frei verteilt
+ * (`distributeVatAcrossLines`), sodass Σ Zeilen = Summe je Satz = gespeicherte
+ * USt. EINE Funktion für PDF (`pdf-generator.ts`) und Detailansicht im Client
+ * (`invoice-detail.tsx`) — ERSETZT dort die eigene Rundung je Zeile, die bei
+ * mehreren 19-%-Zeilen um Cent von der Summe abwich (Gate 2 zu #194, S-9).
+ */
+export function zeilenUstJeSatz(zeilen: ReadonlyArray<{ totalCents: number; vatRateBp: number }>): number[] {
+  const out = zeilen.map(() => 0);
+  for (const g of ustJeSatz(zeilen).gruppen) {
+    const idx = zeilen.map((z, i) => (z.vatRateBp === g.satzBP ? i : -1)).filter((i) => i >= 0);
+    const verteilt = distributeVatAcrossLines(idx.map((i) => zeilen[i].totalCents), g.ustCents);
+    idx.forEach((i, k) => { out[i] = verteilt[k]; });
+  }
+  return out;
+}

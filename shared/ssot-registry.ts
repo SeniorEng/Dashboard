@@ -695,7 +695,7 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     canonical: [
       { symbol: "ustfreiHinweis", module: "shared/domain/ust-texte.ts" },
       { symbol: "leistungsempfaengerText", module: "shared/domain/ust-texte.ts" },
-      { symbol: "ZUGFERD_BEFREIUNGSGRUND", module: "shared/domain/ust-texte.ts" },
+      { symbol: "USTFREI_HINWEIS", module: "shared/domain/ust-texte.ts" },
     ],
     ownedLiterals: [],
     guards: [{ test: "tests/unit/ust-texte.test.ts" }],

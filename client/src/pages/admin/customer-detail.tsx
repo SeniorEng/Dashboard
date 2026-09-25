@@ -274,9 +274,9 @@ export default function AdminCustomerDetail() {
                   <StatusBadge type="billingType" value={customer.billingType} data-testid="badge-billingtype" />
                 )}
                 {/* Auch bei Selbstzahlern: der Pflegegrad entscheidet über die USt (Ticket 6hcgffPJWm57p72p). */}
-                {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
+                {customer.pflegegradHeute != null && customer.pflegegradHeute > 0 && (
                   <>
-                    <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                    <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
                     {(() => {
                       const current = customer.careLevelHistory?.find((h: { validTo: string | null; entferntAm?: unknown }) => !h.validTo && !h.entferntAm);
                       if (current?.validFrom) {

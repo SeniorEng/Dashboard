@@ -92,9 +92,9 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
           <div className="space-y-4">
             <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
               <span className="text-sm text-gray-600">Aktueller Pflegegrad:</span>
-              {customer.pflegegrad != null && customer.pflegegrad > 0 ? (
+              {customer.pflegegradHeute != null && customer.pflegegradHeute > 0 ? (
                 <>
-                  <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                  <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
                   {currentCareLevel?.validFrom && (
                     <span className="text-xs text-gray-500">
                       seit {formatDateForDisplay(currentCareLevel.validFrom)}
@@ -202,10 +202,11 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
           </div>
         ) : (
           <div className="space-y-2">
-            {currentCareLevel && customer.pflegegrad != null && customer.pflegegrad > 0 ? (
+            {/* Aus der Historie (Server: `pflegegradHeute`), nicht aus den Stammdaten. */}
+            {customer.pflegegradHeute != null && customer.pflegegradHeute > 0 ? (
               <>
                 <div className="flex items-center gap-3">
-                  <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                  <StatusBadge type="pflegegrad" value={customer.pflegegradHeute} />
                 </div>
                 {currentCareLevel?.validFrom && (
                   <p className="text-sm text-gray-500">

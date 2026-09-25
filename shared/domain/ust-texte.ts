@@ -11,11 +11,12 @@
  * neu dargestellt werden.
  */
 
-/** Pflichthinweis bei steuerfreien Leistungen (§ 14 Abs. 4 Satz 1 Nr. 8 UStG). */
+/**
+ * Pflichthinweis bei steuerfreien Leistungen (§ 14 Abs. 4 Satz 1 Nr. 8 UStG).
+ * DERSELBE Text steht als BT-120-Befreiungsgrund in der E-Rechnung
+ * (`zugferd.ts` importiert diese Konstante) — bewusst kein Alias, eine Quelle.
+ */
 export const USTFREI_HINWEIS = "Umsatzsteuerfreie Leistungen gemäß § 4 Nr. 16 UStG.";
-
-/** BT-120 — Befreiungsgrund in der E-Rechnung; derselbe Text wie im PDF. */
-export const ZUGFERD_BEFREIUNGSGRUND = USTFREI_HINWEIS;
 
 /** „1–3, 5" aus aufsteigenden Positionsnummern. */
 function bereiche(nummern: number[]): string {

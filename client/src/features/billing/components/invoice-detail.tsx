@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { displayPriceCents } from "@shared/domain/customers";
+import { zeilenUstJeSatz } from "@shared/domain/invoice-vat";
 import { renderLineItemQuantity } from "@shared/domain/invoice-line-items";
 import { iconSize } from "@/design-system";
 import { Loader2, AlertTriangle, Clock, Mail, MapPin } from "lucide-react";
@@ -57,11 +58,14 @@ export function InvoiceDetail({ invoice, expandedDetail, detailLoading, delivery
                 </tr>
               </thead>
               <tbody>
-                {expandedDetail.lineItems.map((item) => {
-                  // Gespeicherter Satz je Position (§ 4 Nr. 16 g UStG); Bestand ohne
-                  // Satz bleibt beim bisherigen Weg über den Zahlertyp.
+                {(() => {
+                  const zeilenUst = zeilenUstJeSatz(expandedDetail.lineItems.map((l) => ({ totalCents: l.totalCents, vatRateBp: l.vatRateBp ?? 0 })));
+                  return expandedDetail.lineItems.map((item, idx) => {
+                  // Gespeicherter Satz je Position (§ 4 Nr. 16 g UStG), USt je Zeile
+                  // über dieselbe Verteilung wie das PDF; Bestand ohne Satz bleibt
+                  // beim bisherigen Weg über den Zahlertyp.
                   const displayTotal = item.vatRateBp != null
-                    ? Math.round((item.totalCents * (10000 + item.vatRateBp)) / 10000)
+                    ? item.totalCents + zeilenUst[idx]
                     : displayPriceCents(item.totalCents, expandedDetail.billingType);
                   return (
                   <tr key={item.id} className="border-b last:border-0">
@@ -81,7 +85,8 @@ export function InvoiceDetail({ invoice, expandedDetail, detailLoading, delivery
                     <td className="py-2">{item.employeeName || "-"}</td>
                   </tr>
                   );
-                })}
+                });
+                })()}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 font-medium">

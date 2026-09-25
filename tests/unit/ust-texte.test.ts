@@ -7,7 +7,6 @@
 import { describe, it, expect } from "vitest";
 import {
   USTFREI_HINWEIS,
-  ZUGFERD_BEFREIUNGSGRUND,
   ustfreiHinweis,
   leistungsempfaengerText,
   pflegegradZeitraeume,
@@ -30,9 +29,8 @@ describe("Befreiungshinweis", () => {
     expect(ustfreiHinweis([pflichtig, frei])).toBe("Pos. 2 ist umsatzsteuerfrei nach § 4 Nr. 16 UStG.");
   });
 
-  it("ZUGFeRD-Befreiungsgrund ist DERSELBE Text wie im PDF", () => {
-    expect(ZUGFERD_BEFREIUNGSGRUND).toBe(USTFREI_HINWEIS);
-  });
+  // „derselbe Text in PDF und ZUGFeRD-BT-120" sichert die e2e-Abnahme
+  // (`ust-4-16g.test.ts`: BT-120 === USTFREI_HINWEIS im erzeugten XML).
 });
 
 describe("Leistungsempfänger mit Pflegegrad", () => {

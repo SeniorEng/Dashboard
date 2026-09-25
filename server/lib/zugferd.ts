@@ -4,7 +4,7 @@ import { parseLocalDate, parseTimestamp } from "@shared/utils/datetime";
 import { centsToEuroNumber } from "@shared/utils/money";
 import { aggregateInvoiceLineItems } from "@shared/domain/invoice-line-aggregation";
 import { ustJeSatz } from "@shared/domain/invoice-vat";
-import { ZUGFERD_BEFREIUNGSGRUND } from "@shared/domain/ust-texte";
+import { USTFREI_HINWEIS } from "@shared/domain/ust-texte";
 
 interface ZugferdInvoice {
   toXML(): Promise<string>;
@@ -403,7 +403,7 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
                     basisAmount: centsToDecimal(g.basisCents),
                     categoryCode: g.satzBP === 0 ? "E" : "S",
                     rateApplicablePercent: g.satzBP / 100,
-                    ...(g.satzBP === 0 ? { exemptionReasonText: ZUGFERD_BEFREIUNGSGRUND } : {}),
+                    ...(g.satzBP === 0 ? { exemptionReasonText: USTFREI_HINWEIS } : {}),
                   }))
                 : [{
                     calculatedAmount: centsToDecimal(data.vatAmountCents),
