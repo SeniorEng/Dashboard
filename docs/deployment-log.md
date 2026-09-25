@@ -37,6 +37,64 @@ in `replit.md` (Guards in die Eltern-Aufgabe einfalten, Publishes bündeln).
 
 ---
 
+### 2026-09-25 ~20:00 UTC — USt-Regel § 4 Nr. 16 g + Nachzug #193/#194 (#195) — VORFALL: neue Spalten fehlten in Prod
+
+**Anlass:** `main` @ `d57aaef1` (#195 = #193 + #194: Verbrauch nach Startwert,
+Vorschau = Rechnung, USt je Position). Frist: vor dem Oktober-Abrechnungslauf.
+
+| | |
+|---|---|
+| Schema-Änderung | **nur additiv**, 5 nullable Spalten + 1 FK (#194, `migrations/0002_*`): `customer_care_level_history.entfernt_am` (timestamptz), `.entfernt_grund` (text), `.entfernt_von_user_id` (int, FK `customer_care_level_history_entfernt_von_user_id_users_id_fk` → `users`), `invoice_line_items.vat_rate_bp` (int), `.pflegegrad_am_leistungstag` (int). #192/#193: kein Schema. |
+| DROPs | 0 — Backup nach §3 nicht erforderlich |
+| Soll-`version` (`GET /health`) | **`2a4cdee5699d8113`** (nachgerechnet über `d57aaef1`, Verfahren §5) — Ist-Wert: *von Alrik nachzutragen* |
+
+#### Ablauf
+
+1. **Erster Publish brach in Schritt 0d ab** („Pulling schema from
+   database…") — derselbe Hänger wie am 22.09. (`6hWvrJgff5xr9hfp`).
+2. **Zweiter Publish ohne `migrate.sh`** (Build-Zeile nur lokal gekürzt, danach
+   per `git reset --hard origin/main` wiederhergestellt). Grundlage war die
+   Aussage im Runbook (`docs/ust-4-16g-golive-runbook.md`, 1c), Replits
+   Schema-Phase wende additive Änderungen an.
+3. **Publish grün, aber die 5 Spalten fehlten in Prod**:
+   `column entfernt_am does not exist`. **Replits Schema-Phase hat sie NICHT
+   angelegt** — die Runbook-Aussage war falsch.
+4. **Fix (Alrik, Gate 4):** eine Transaktion
+   `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` für alle 5 Spalten, FK-Name wie
+   von Drizzle erwartet (DDL von CC aus dem Schema-Diff `3124015a..d57aaef1`
+   gemessen, auf einer Wegwerf-DB im Prod-Zustand geprüft: vorher 0/5, nachher
+   5/5, zweiter Lauf idempotent). Prüfbefehl read-only: **5/5 Spalten, nullable,
+   FK gesetzt.**
+
+**Daten:** nicht betroffen. Jeder Rechnungs-Insert schreibt `vat_rate_bp` —
+ohne die Spalte brach er ab; es gibt keine halben Datensätze. Kein Backfill
+nötig (NULL = Bestand).
+
+#### Live-Gang danach (Ticket `6hcgffPJWm57p72p`)
+
+- Freigabe-Check: A/B nur Kunde 177 — **von Alrik als echt bestätigt (PG 3 seit
+  01.08.2024)**, nichts ausgetragen. C (Stammdaten ≠ Historie, 7 Kunden) und E
+  (umgedrehte Zeiträume, 5 Kunden) bekannt und nicht blockierend → Datenhygiene
+  vor dem Cutover. F/G/H leer.
+- **Oktober-Abrechnungslauf freigegeben.**
+- Folge aus der Korrektur zu 177: RE-2026-0337 und RE-2026-0433 (bezahlt,
+  20,98 € USt) per Storno + Neuausstellung ohne USt berichtigen.
+
+#### Lehren
+
+- **Publish ohne `migrate.sh` nur nach vorheriger DDL in Prod** — DDL →
+  Prüfung → Publish, nie umgekehrt. Jetzt als §0 in
+  `docs/pre-publish-backup-runbook.md` und in CLAUDE.md (Release-Step).
+- **Replits Schema-Phase ist kein verlässlicher Weg.** Ursache offen,
+  vermutlich gleicht sie gegen die Dev-DB ab, in der die Spalten fehlten
+  (Hinweis im Replit-UI „Your development database has been upgraded").
+  Klärung in `6hc8RMmfr93WF5wG`.
+- **Schritt 0d bleibt der Engpass** — vor dem nächsten Publish mit
+  Schema-Änderung lösen, sonst ist der DDL-vorher-Weg Pflicht.
+- Nebenbefund des Tages: #193/#194 waren gestapelt und landeten zunächst nicht
+  in `main` (Nachzug #195). Regel: kein PR zum Merge ohne Basis `main`
+  (CLAUDE.md, #196).
+
 ### 2026-09-21 — Trockenlauf + Messwerkzeug (#155, #156) — ZWEI Publishes, der erste baute den falschen Stand
 
 **Anlass:** zwei gemergte PRs, gebündelt:

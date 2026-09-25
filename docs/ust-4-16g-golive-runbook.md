@@ -45,8 +45,16 @@ build = ["sh", "-c", "npm run build && bash scripts/migrate.sh --force"]
 CLAUDE.md (Ticket `6hWvrJgff5xr9hfp`) sagt, die Build-Zeile läuft derzeit
 **ohne** `migrate.sh`, weil Schritt 0d gegen Prod nicht durchkommt.
 **Vor dem Publish in Replit → Deployments nachsehen, welche Zeile aktiv ist.**
-Für DIESEN Publish reicht beides: die Änderung ist additiv, Replits eigene
-Schema-Phase wendet sie vor dem Build an.
+~~Für DIESEN Publish reicht beides: die Änderung ist additiv, Replits eigene
+Schema-Phase wendet sie vor dem Build an.~~
+
+> **FALSCH — widerlegt beim Live-Gang am 25.09.2026.** Replits Schema-Phase hat
+> die fünf Spalten **nicht** angelegt; Prod lief kurz mit `column entfernt_am
+> does not exist`. Behoben per DDL vor Ort. Vorfall: `docs/deployment-log.md`
+> (Eintrag 25.09.2026), Ticket `6hc8RMmfr93WF5wG`.
+> **Regel seitdem:** Publish ohne `migrate.sh` nur, wenn die Schema-Änderung
+> VORHER in Prod angelegt und geprüft ist — DDL → Prüfung → Publish, nie
+> umgekehrt (`docs/pre-publish-backup-runbook.md`, §0).
 
 ## 2. Publish (Alrik)
 
