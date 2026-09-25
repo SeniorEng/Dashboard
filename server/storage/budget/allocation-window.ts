@@ -247,6 +247,8 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
  * ausgewiesene Rest des laufenden Jahres stieg auf 662,00 statt 562,00 EUR —
  * also in die Richtung, in der gebucht wird.
  *
+ * ⚠ Ein KUNDENWEITER Aufrufer bekommt nur (b) — siehe den Block unten.
+ *
  * ── Warum nur zwei der drei Glieder — und WO diese Begruendung gilt ─────
  * Fuer einen Aufrufer, der bereits auf eine Menge von Allocation-IDs
  * eingeschraenkt hat (`inArray(allocationId, …)`), gilt:

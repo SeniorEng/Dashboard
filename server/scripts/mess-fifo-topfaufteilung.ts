@@ -131,6 +131,7 @@ async function main(): Promise<void> {
     if (c.consumedCents < 0 || l.consumedCents < 0) negativeToepfe++;
     neu.set(id, {
       uebertragVerbraucht: c.consumedCents, uebertragRest: c.remainingCents,
+      uebertragAlloc: c.allocatedCents, laufendAlloc: l.allocatedCents,
       uebertragBilled: c.consumedBilledCents, uebertragDok: c.consumedDocumentedCents,
       uebertragSonst: c.consumedOtherCents, uebertragPlanned: c.plannedCents,
       laufendVerbraucht: l.consumedCents, laufendRest: l.remainingCents,
@@ -141,7 +142,10 @@ async function main(): Promise<void> {
 
     if (alsCsv) {
       console.log([
-        id, `"${namen.get(id) ?? "?"}"`,
+        // Semikolon aus dem Namen entfernen (Gate 2 zu #190, Runde 2):
+        // der Parser splittet auf `;`, ein Name mit Semikolon haette die
+        // Zeile auf 17 Felder gebracht und sie waere still verworfen worden.
+        id, `"${(namen.get(id) ?? "?").replace(/;/g, ",")}"`,
         c.allocatedCents, c.consumedCents,
         c.consumedBilledCents, c.consumedDocumentedCents, c.consumedOtherCents,
         c.plannedCents, c.remainingCents,
@@ -183,6 +187,7 @@ async function main(): Promise<void> {
 
 type Zahlen = {
   uebertragVerbraucht: number; uebertragRest: number;
+  uebertragAlloc: number; laufendAlloc: number;
   uebertragBilled: number; uebertragDok: number;
   uebertragSonst: number; uebertragPlanned: number;
   laufendVerbraucht: number; laufendRest: number;
@@ -216,6 +221,7 @@ async function vergleiche(
    * wird. Deshalb bricht der Vergleich ab, statt eine Auswertung zu drucken.
    */
   let kopfGesehen = false;
+  let verworfen = 0;
   for (const zeile of readFileSync(datei, "utf8").split("\n")) {
     const t = zeile.split(";");
     if (t[0] === "kunde") {
@@ -230,8 +236,27 @@ async function vergleiche(
       }
       continue;
     }
-    if (t.length !== CSV_SPALTEN || !/^\d+$/.test(t[0])) continue;
+    if (zeile.trim() === "") continue;
+    if (t.length !== CSV_SPALTEN || !/^\d+$/.test(t[0])) {
+      /**
+       * NICHT still ueberspringen. Eine verworfene Zeile ist ein fehlender
+       * Kunde auf der Vorher-Seite, und „X von N verglichen" wuerde die
+       * Luecke nicht zeigen — dasselbe Muster, gegen das die Formatschranke
+       * oben gebaut ist, eine Ebene tiefer.
+       *
+       * Gezaehlt wird aber erst NACH der Kopfzeile. Davor steht Vorspann, der
+       * nicht zur Tabelle gehoert: der DB-Pool schreibt beim Import
+       * `[db] driver=pg pool configured …` auf **stdout**, landet also in der
+       * umgeleiteten CSV. Gemessen in der Generalprobe am 25.09.2026 — ohne
+       * diese Unterscheidung meldete jeder Lauf „1 Zeile nicht lesbar", und
+       * eine Warnung, die immer kommt, wird nach dem zweiten Mal nicht mehr
+       * gelesen.
+       */
+      if (kopfGesehen) verworfen++;
+      continue;
+    }
     alt.set(Number(t[0]), {
+      uebertragAlloc: Number(t[2]), laufendAlloc: Number(t[9]),
       uebertragVerbraucht: Number(t[3]), uebertragBilled: Number(t[4]),
       uebertragDok: Number(t[5]), uebertragSonst: Number(t[6]),
       uebertragPlanned: Number(t[7]), uebertragRest: Number(t[8]),
@@ -252,6 +277,9 @@ async function vergleiche(
     dZustand: number;
   }> = [];
   let negativVorher = 0;
+  let sonstNegativVorher = 0;
+  let sonstNegativNachher = 0;
+  const sonstNegativNeu: number[] = [];
   for (const id of kunden) {
     const a = alt.get(id);
     if (!a) continue;
@@ -260,6 +288,22 @@ async function vergleiche(
     const l = b.pots.find(p => p.potType === "current_year");
     if (!c || !l) continue;
     if (a.uebertragVerbraucht < 0 || a.laufendVerbraucht < 0) negativVorher++;
+    /**
+     * BEIDE Seiten zählen, nicht nur die neue.
+     *
+     * „Wie viele Kunden haben einen negativen `consumedOther`?" ist als
+     * Einzelzahl keine Aussage über eine URSACHE — sie sagt nicht, ob die
+     * Änderung ihn erzeugt hat oder ob er vorher schon da war. Genau daran ist
+     * die §45b-Messung am 23.09.2026 einen halben Tag hängengeblieben
+     * (CLAUDE.md, „Rot ohne Aussage").
+     *
+     * Deshalb vorher UND nachher, und im Befund getrennt ausgewiesen.
+     */
+    if (a.uebertragSonst < 0 || a.laufendSonst < 0) sonstNegativVorher++;
+    if (c.consumedOtherCents < 0 || l.consumedOtherCents < 0) {
+      sonstNegativNachher++;
+      if (a.uebertragSonst >= 0 && a.laufendSonst >= 0) sonstNegativNeu.push(id);
+    }
     /**
      * JE TOPF vergleichen, nicht die Summe.
      *
@@ -277,7 +321,12 @@ async function vergleiche(
      * bei dem sich die angezeigte Aufteilung vollstaendig verschoben hat.
      */
     const dZustand =
-      Math.abs(c.consumedBilledCents - a.uebertragBilled)
+      // `allocatedCents` gehoert dazu (Gate 2 zu #190, Runde 2): ohne sie
+      // meldet eine Aenderung, die NUR den Anspruch verschiebt — die
+      // #180-Achse — weiterhin „keine Aenderung".
+      Math.abs(c.allocatedCents - a.uebertragAlloc)
+      + Math.abs(l.allocatedCents - a.laufendAlloc)
+      + Math.abs(c.consumedBilledCents - a.uebertragBilled)
       + Math.abs(c.consumedDocumentedCents - a.uebertragDok)
       + Math.abs(c.consumedOtherCents - a.uebertragSonst)
       + Math.abs(c.plannedCents - a.uebertragPlanned)
@@ -303,8 +352,19 @@ async function vergleiche(
   console.log(`VORHER/NACHHER — §45b-Topfaufteilung zum ${stichtag}`);
   console.log("=".repeat(88));
   console.log(`  Kunden mit Aenderung:        ${aenderungen.length} von ${alt.size} verglichenen`);
+  if (verworfen > 0) {
+    console.log(`  ⚠ ${verworfen} Zeile(n) der Vorher-Datei nicht lesbar und NICHT verglichen`);
+  }
   console.log(`  Σ Verschiebung (Rest „laufendes Jahr"): ${formatEuroDE(summeRest)}`);
   console.log(`  Toepfe mit negativem Verbrauch VORHER: ${negativVorher}`);
+  console.log("");
+  console.log(`  Kunden mit NEGATIVEM \`consumedOther\` (Zustands-Aufteilung):`);
+  console.log(`      vorher (main):        ${sonstNegativVorher}`);
+  console.log(`      nachher (dieser Stand): ${sonstNegativNachher}`);
+  console.log(`      davon NEU durch die Aenderung: ${sonstNegativNeu.length}`
+    + (sonstNegativNeu.length > 0 ? `  -> Kunden ${sonstNegativNeu.join(", ")}` : ""));
+  console.log(`      (Ticket 6hcfP7xVj5R3Pg6p — die Zahl NACHHER zum heutigen`);
+  console.log(`       Stichtag entscheidet, ob es vorgezogen wird)`);
   const nurZustand = aenderungen.filter(
     a => a.dZustand !== 0 && !a.dUeRest && !a.dUeVerbr && !a.dLfRest && !a.dLfVerbr,
   );
