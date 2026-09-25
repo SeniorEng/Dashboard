@@ -203,6 +203,11 @@ describe("Nachberechnung nach Storno — kumuliert und chronologisch (Tabelle D)
       "Vorbedingung: nach dem Storno steht der Juni-Topf wieder voll auf dem Startwert",
     ).toBe(STARTWERT_JUNI);
 
+    // Ledger-Stand VOR Vorschau und Liste — beide fahren einen Probelauf der
+    // Neubuchung und müssen ihn zurückrollen (Gate 2 zu #193, S-2).
+    const buchungenVorher = (await db.select({ id: budgetTransactions.id }).from(budgetTransactions)
+      .where(eq(budgetTransactions.customerId, customerId))).length;
+
     // ── Vorschau: muss dasselbe zeigen wie das Erstellen ───────────────
     const vorschau = await apiGet<any>(`/api/billing/preview?customerId=${customerId}&month=6&year=${J}`);
     expect(vorschau.status, JSON.stringify(vorschau.data)).toBe(200);
@@ -224,6 +229,20 @@ describe("Nachberechnung nach Storno — kumuliert und chronologisch (Tabelle D)
       liste.data[String(customerId)]?.actualAmountCents,
       "die Liste „Bereit zum Abrechnen“ zeigt einen anderen Betrag als die Vorschau",
     ).toBe(BRUTTO);
+
+    // Der Probelauf bucht NICHTS: nach Vorschau und Liste steht der Ledger
+    // unverändert. Ohne diese Prüfung bliebe NB-1 grün, auch wenn der
+    // Probelauf dauerhaft schriebe — die Liste und das Erstellen fänden dann
+    // Live-Buchungen und kämen auf dieselben Beträge.
+    // Mutations-gegengeprüft: `throw new ProbelaufZurueckrollen()` entfernt → rot.
+    const buchungenNachher = (await db.select({ id: budgetTransactions.id }).from(budgetTransactions)
+      .where(eq(budgetTransactions.customerId, customerId))).length;
+    expect(buchungenNachher, "Vorschau/Liste haben Buchungen hinterlassen — der Probelauf rollt nicht zurück").toBe(buchungenVorher);
+    const nachVorschau = await readUnifiedBudgetAvailability(customerId, `${J}-06-30`);
+    expect(
+      nachVorschau.pots.entlastungsbetrag_45b.availableCents,
+      "Vorschau/Liste haben den Topf verbraucht — der Probelauf rollt nicht zurück",
+    ).toBe(STARTWERT_JUNI);
 
     // ── Erstellen ──────────────────────────────────────────────────────
     const neu = await generiere();

@@ -134,9 +134,12 @@ export async function computeDocumentedGrossCents(args: {
 }
 
 /**
- * Task #750: Pure read-only Helper, der dieselbe Build-Logik liefert wie
+ * Task #750: Helper, der dieselbe Build-Logik liefert wie
  * `generateInvoiceCore`, aber NICHTS persistiert — keine Rechnungsnummer,
- * keine Inserts, kein Audit-Log, kein PDF. Wird von `POST /billing/generate`
+ * kein Audit-Log, kein PDF. Seit #193 fährt er für netto-null belegte Termine
+ * einen Probelauf der Neubuchung (Inserts in einer Transaktion, die
+ * zurückgerollt wird — `probelaufNeubuchung`, `invoice-data.ts`); es bleibt
+ * nichts davon stehen. Wird von `POST /billing/generate`
  * UND `GET /billing/preview` aufgerufen, damit Vorschau-Werte und finale
  * Rechnungssumme garantiert übereinstimmen.
  *

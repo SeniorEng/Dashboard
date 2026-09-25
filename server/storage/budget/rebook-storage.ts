@@ -8,7 +8,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, or, inArray, isNotNull, gte, lte, ne } from "drizzle-orm";
 import { db } from "../../lib/db";
-import { badRequest } from "../../lib/errors";
+import { AppError, badRequest } from "../../lib/errors";
 import type { DbClient, CascadeResult } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
 import { todayISO, lastDayOfMonth } from "@shared/utils/datetime";
@@ -828,16 +828,21 @@ export async function rebookNetZeroAppointmentCore(
     customerId: number;
     appointmentId: number;
     /**
-     * `undefined` im PROBELAUF der Vorschau (`invoice-data.ts`) — dort wird
-     * alles zurueckgerollt, es gibt keinen Handelnden. Beim Erstellen immer
-     * gesetzt.
+     * Wer bucht. `"probelauf"` NUR fuer die Vorschau (`invoice-data.ts`,
+     * `probelaufNeubuchung`): dort wird alles zurueckgerollt, es gibt keinen
+     * Handelnden, und die Engine erfindet auch keinen (kein Audit-Eintrag auf
+     * einen fremden Nutzer, Gate 2 zu #193, S-1). Ausdruecklich statt eines
+     * optionalen `userId` (N-2): ein echter Buchungspfad kann den Handelnden
+     * so nicht unbemerkt weglassen.
      */
-    userId?: number;
+    handelnder: { userId: number } | "probelauf";
     overflowRestriction?: { allowedPots: string[] };
     privatePotOverride?: RebookPrivatePotOverride | null;
   },
 ): Promise<{ rebooked: boolean; cascade?: CascadeResult }> {
-  const { customerId, appointmentId, userId, overflowRestriction, privatePotOverride } = params;
+  const { customerId, appointmentId, handelnder, overflowRestriction, privatePotOverride } = params;
+  const probelauf = handelnder === "probelauf";
+  const userId = probelauf ? undefined : handelnder.userId;
 
   // Gleicher Advisory-Lock-Namespace wie createConsumptionTransaction /
   // rebookDisabledBudgetTransactions: serialisiert Re-Buchung und parallele
@@ -912,14 +917,29 @@ export async function rebookNetZeroAppointmentCore(
   const customerKm = appt.customerKilometers ?? 0;
   const txDate = typeof appt.date === "string" ? appt.date : String(appt.date);
 
-  const costs = await calculateAppointmentCost({
-    customerId,
-    hauswirtschaftMinutes: hwMinutes,
-    alltagsbegleitungMinutes: abMinutes,
-    travelKilometers: travelKm,
-    customerKilometers: customerKm,
-    date: txDate,
-  });
+  // Preis IM tx lesen (Gate 2 zu #193, S-5): ueber das globale `db` braeuchte
+  // jeder Probelauf eine zweite Verbindung, waehrend er die erste haelt — bei
+  // vielen parallelen Probelaeufen faehrt sich der Pool fest.
+  let costs: Awaited<ReturnType<typeof calculateAppointmentCost>>;
+  try {
+    costs = await calculateAppointmentCost({
+      customerId,
+      hauswirtschaftMinutes: hwMinutes,
+      alltagsbegleitungMinutes: abMinutes,
+      travelKilometers: travelKm,
+      customerKilometers: customerKm,
+      date: txDate,
+    }, tx);
+  } catch (err) {
+    // Fehlende Preisvereinbarung ist ein fachlicher Fehler (400), kein 500
+    // (S-4): die Liste „Bereit zum Abrechnen" setzt pro Kunde nur 400/404 auf
+    // „kein Betrag" — ein nacktes `Error` aus dem Probelauf risse den ganzen
+    // Stapel mit. Gleiche Umsetzung wie beim Dokumentieren
+    // (`appointment-documentation.ts`).
+    if (err instanceof AppError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw badRequest(`${msg}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);
+  }
   if (costs.totalCents <= 0) return { rebooked: false };
 
   // Privattopf: expliziter Override (Kürzungs-Ablauf) ODER Standard-Ableitung.
@@ -971,6 +991,7 @@ export async function rebookNetZeroAppointmentCore(
     customerKilometers: customerKm,
     customerKilometersCents: costs.customerKilometersCents,
     userId,
+    probelauf,
     skipExistingCheck: true,
     privatePot,
     overflowRestriction,
@@ -1042,7 +1063,7 @@ export async function rebookNetZeroAppointmentConsumption(params: {
   // Dieselbe Reihenfolge wie die Vorschau, damit beide dasselbe zeigen.
   for (const appointmentId of await chronologischeReihenfolge(appointmentIds)) {
     const { rebooked } = await db.transaction((tx) =>
-      rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, userId }),
+      rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, handelnder: { userId } }),
     );
     if (rebooked) rebookedAppointmentIds.push(appointmentId);
   }

@@ -854,9 +854,9 @@ export async function getBudgetSplitForAppointments(
   // Stolperfalle (Task #1011): Termine, die eine Konsumption HATTEN, deren
   // Buchungen aber ALLE storniert wurden (netto null, kein Live-Konsum mehr),
   // dürfen NICHT blind auf den private-Fallback fallen — das erzeugte eine
-  // falsche Selbstzahler-Rechnung. Stattdessen den Pot-Anteil aus der AKTUELLEN
-  // Allocation re-derivieren (read-only Cascade gegen die heute verfügbaren
-  // Töpfe). Termine, die NIE eine Konsumption hatten (echte Selbstzahler /
+  // falsche Selbstzahler-Rechnung. Stattdessen den Pot-Anteil über einen
+  // Probelauf DERSELBEN Neubuchung wie beim Erstellen ermitteln
+  // (`probelaufNeubuchung`, zurückgerollt). Termine, die NIE eine Konsumption hatten (echte Selbstzahler /
   // Alt-Daten), behalten das bestehende Verhalten (kein Eintrag → private).
   const apptsWithAnyConsumption = new Set<number>();
   for (const txn of txns) {
@@ -896,10 +896,15 @@ class ProbelaufZurueckrollen extends Error {}
  *
  * Reihenfolge wie beim Erstellen: `chronologischeReihenfolge`, dieselbe Funktion.
  *
- * Nebenwirkungen: keine — alles, was der Probelauf schreibt (Buchungen,
- * Advisory-Lock), faellt mit dem Zurueckrollen weg. Der Lock gilt nur fuer die
- * Dauer der Vorschau und haelt eine gleichzeitige Buchung desselben Kunden so
- * lange an.
+ * Nebenwirkungen: alles, was der Probelauf schreibt (Buchungen, Advisory-
+ * Lock), faellt mit dem Zurueckrollen weg. Der Lock gilt nur fuer die Dauer der
+ * Vorschau und haelt eine gleichzeitige Buchung desselben Kunden so lange an.
+ * Was bleibt: Sequenzwerte von `budget_transactions`/`budget_allocations`
+ * (Luecken in den IDs, keine Rechnungsnummern). Die einzige Stelle der Engine,
+ * die AUSSERHALB der Transaktion schreibt (Audit `budget_reconcile_skipped`),
+ * schreibt im Probelauf nur in die Konsole (`handelnder: "probelauf"`).
+ * Gesichert: NB-1 prueft nach Vorschau und Liste, dass der Ledger unveraendert
+ * ist (mutations-gegengeprueft: ohne das Zurueckrollen rot).
  */
 async function probelaufNeubuchung(
   customerId: number,
@@ -909,7 +914,7 @@ async function probelaufNeubuchung(
   try {
     await db.transaction(async (tx) => {
       for (const appointmentId of await chronologischeReihenfolge(apptIds, tx)) {
-        await rebookNetZeroAppointmentCore(tx, { customerId, appointmentId });
+        await rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, handelnder: "probelauf" });
       }
       const { txns, reversalRows } = await loadAppointmentConsumptionTxns(customerId, apptIds, tx);
       const live = buildBudgetSplitFromLedger(txns, reversalRows);

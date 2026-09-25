@@ -1,12 +1,12 @@
 /**
- * Ein Abrechnungs-Lauf über mehrere Termine: Reihenfolge und Topf-Fenster.
+ * Ein Abrechnungs-Lauf über mehrere Termine: die Reihenfolge.
  *
  * ── Warum es diese Datei gibt ───────────────────────────────────────────
  * Nach einem Voll-Storno kommen die Termine einer Rechnung auf zwei Wegen
  * zurück in eine neue Rechnung:
  *
- *   · die VORSCHAU (`rederiveSplitFromCurrentAllocation`, `invoice-data.ts`)
- *     leitet die Aufteilung read-only ab und bucht nichts,
+ *   · die VORSCHAU (bis #193 `rederiveSplitFromCurrentAllocation`, jetzt der
+ *     Probelauf `probelaufNeubuchung`, `invoice-data.ts`),
  *   · das ERSTELLEN (`rebookNetZeroAppointmentConsumption`,
  *     `rebook-storage.ts`) bucht Termin für Termin neu.
  *
