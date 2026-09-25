@@ -275,10 +275,22 @@ export const insertCareLevelHistorySchema = z.object({
 
 export const pflegegradEntfernenSchema = z.object({
   grund: z.string().trim().min(3, "Bitte einen Grund angeben (mindestens 3 Zeichen)").max(500, "Maximal 500 Zeichen"),
+  /**
+   * Im Dialog bestätigt: der vorige Eintrag lebt wieder auf (RK-10, Alrik:
+   * nicht automatisch). Kandidat: `vorgaengerZumWiederaufleben`.
+   */
+  vorigenWiederOeffnen: z.boolean().optional().default(false),
 });
 
 export const pflegegradBeendenSchema = z.object({
-  abDatum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum im Format JJJJ-MM-TT erwartet"),
+  abDatum: z.string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Datum im Format JJJJ-MM-TT erwartet")
+    // Kalendergültig: `2026-02-31` darf nicht still auf den 03.03. rollen.
+    .refine((s) => {
+      const [y, m, d] = s.split("-").map(Number);
+      const t = new Date(Date.UTC(y, m - 1, d));
+      return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+    }, "Kein gültiges Kalenderdatum"),
 });
 
 export type CustomerCareLevelHistory = typeof customerCareLevelHistory.$inferSelect;

@@ -304,12 +304,12 @@ router.post("/customers/:id/care-level/:historyId/entfernen", asyncHandler("Pfle
   if (customerId === null) return;
   const historyId = requireIntParam(req.params.historyId, res);
   if (historyId === null) return;
-  const { grund } = pflegegradEntfernenSchema.parse(req.body);
+  const { grund, vorigenWiederOeffnen } = pflegegradEntfernenSchema.parse(req.body);
 
   const ergebnis = await withAudit(async (tx, audit) => {
     const [vorher] = await customersRepo.selectColumnsFrom({ pflegegrad: customers.pflegegrad }, tx).where(eq(customers.id, customerId));
     const r = await customerManagementStorage.pflegegradAlsFehleintragEntfernen(
-      { customerId, historyId, grund, userId: req.user!.id }, tx,
+      { customerId, historyId, grund, userId: req.user!.id, vorigenWiederOeffnen }, tx,
     );
     audit.record({
       userId: req.user!.id,
@@ -322,6 +322,9 @@ router.post("/customers/:id/care-level/:historyId/entfernen", asyncHandler("Pfle
         grund,
         entfernterPflegegrad: r.eintrag.pflegegrad,
         entfernterZeitraum: { von: r.eintrag.validFrom, bis: r.eintrag.validTo },
+        wiederGeoeffnet: r.wiederGeoeffnet
+          ? { historyId: r.wiederGeoeffnet.id, pflegegrad: r.wiederGeoeffnet.pflegegrad, bis: r.wiederGeoeffnet.validTo }
+          : null,
         oldPflegegrad: vorher?.pflegegrad ?? null,
         newPflegegrad: r.pflegegradHeute,
       },

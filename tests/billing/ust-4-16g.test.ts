@@ -25,13 +25,13 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { budgetAllocations, customerCareLevelHistory, customers, invoiceLineItems, invoices } from "@shared/schema";
 import {
-  apiGet, apiPost, apiPut, apiPatch, apiDelete,
+  apiGet, apiPost, apiPut, apiPatch, apiDelete, apiPostAs, loginAs, createTestEmployee,
   getAuthCookie, uniqueId, cleanupCustomer, runCleanup,
 } from "../test-utils";
 import { assertTestClockActive, clearTestClock, useTestClock } from "../helpers/test-clock";
 import { storage } from "../../server/storage";
 import { buildInvoicePdfData } from "../../server/services/invoice-pdf-orchestrator";
-import { generateInvoiceHtml } from "../../server/lib/pdf-generator";
+import { generateInvoiceHtml, generateLeistungsnachweisHtml } from "../../server/lib/pdf-generator";
 import { generateZugferdXml } from "../../server/lib/zugferd";
 import { getCareLevelAt } from "../../server/storage/customer-mgmt/care-level";
 import { USTFREI_HINWEIS } from "@shared/domain/ust-texte";
@@ -51,6 +51,8 @@ const cleanup = { appts: [] as number[], srs: [] as number[], invoices: [] as nu
 interface Ausgabe {
   invoice: any;
   html: string;
+  /** Leistungsnachweis zur Rechnung (Gate 2 zu #194, B-1). */
+  ln: string;
   xml: string;
 }
 
@@ -72,15 +74,22 @@ async function neuerKunde(felder: Record<string, unknown>): Promise<{ id: number
   return { id: k.data.id, name: c.name };
 }
 
-/** Eigene Uhrzeit je Termin: derselbe Mitarbeiter, sonst Terminüberschneidung. */
-let slot = 0;
-function naechsteUhrzeit(): string {
-  const minuten = 7 * 60 + 90 * slot++;
+/**
+ * Eigene Uhrzeit je Termin UND Datum: derselbe Mitarbeiter, sonst
+ * Terminüberschneidung. Je Datum gezählt, damit der Tag nicht über
+ * Mitternacht hinausläuft (07:00, 08:30, … bis 20:30).
+ */
+const slotsJeDatum = new Map<string, number>();
+function naechsteUhrzeit(datum: string): string {
+  const n = slotsJeDatum.get(datum) ?? 0;
+  slotsJeDatum.set(datum, n + 1);
+  if (n > 9) throw new Error(`Zu viele Test-Termine am ${datum}`);
+  const minuten = 7 * 60 + 90 * n;
   return `${String(Math.floor(minuten / 60)).padStart(2, "0")}:${String(minuten % 60).padStart(2, "0")}`;
 }
 
 async function termin(customerId: number, datum: string, minuten = 60, km = 0): Promise<number> {
-  const start = naechsteUhrzeit();
+  const start = naechsteUhrzeit(datum);
   const r = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
     customerId, date: datum, scheduledStart: start, notes: `UStAbnahme-${datum}`,
     assignedEmployeeId: auth.user.id, services: [{ serviceId: hwId, durationMinutes: minuten }],
@@ -102,7 +111,7 @@ async function rendern(invoiceId: number): Promise<Ausgabe> {
   const { pdfData } = await buildInvoicePdfData(invoice!, settings);
   const xml = await generateZugferdXml(pdfData);
   expect(xml, "ZUGFeRD-XML wurde nicht erzeugt (Validierungsfehler)").toBeTruthy();
-  return { invoice, html: generateInvoiceHtml(pdfData), xml: xml! };
+  return { invoice, html: generateInvoiceHtml(pdfData), ln: generateLeistungsnachweisHtml(pdfData), xml: xml! };
 }
 
 /** Leistungsnachweis unterschreiben, abrechnen, je Rechnung rendern. */
@@ -161,6 +170,7 @@ function erwarte19(a: Ausgabe, netto: number, name: string, label: string) {
   expect(text, `${label}: kein Pflegegrad im Leistungsempfänger`).not.toMatch(new RegExp(`Leistungsempfänger: ${name}[^.]*Pflegegrad`));
   expect(positionsKategorien(a.xml), `${label}: XML-Kategorie je Position`).toEqual(["S"]);
   expect(aufschluesselung(a.xml).map(g => g.kategorie), `${label}: XML-Aufschlüsselung`).toEqual(["S"]);
+  expect(nurText(a.ln), `${label}: LN weist brutto aus`).toMatch(/Summe \(inkl\. MwSt\.\)/);
 }
 
 /** Pflichtfall 2/3 — die steuerfreie Ausgabe auf allen drei Ebenen. */
@@ -175,6 +185,9 @@ function erwarteFrei(a: Ausgabe, netto: number, label: string) {
   const g = aufschluesselung(a.xml);
   expect(g.map(x => x.kategorie), `${label}: XML-Aufschlüsselung`).toEqual(["E"]);
   expect(g[0].grund, `${label}: BT-120 = derselbe Text wie im PDF`).toBe(USTFREI_HINWEIS);
+  // Leistungsnachweis (B-1): netto = brutto, kein Brutto-Satz neben Netto-Betrag.
+  const ln = nurText(a.ln);
+  expect(ln, `${label}: LN ohne „(brutto)“`).not.toMatch(/\(brutto\)|inkl\. MwSt/);
 }
 
 beforeAll(async () => {
@@ -215,6 +228,9 @@ describe("§ 4 Nr. 16 g UStG — Abnahme (Tabelle D, Pflichtfälle 1–6, E3–E
     erwarteFrei(a, HW_60 + 1_40, "Fall 2");
     expect(nurText(a.html), "Fall 2: Leistungsempfänger mit Pflegegrad").toContain(`Leistungsempfänger: ${k.name} (Pflegegrad 2)`);
     expect(a.invoice.pflegegrad, "Fall 2: Stempel = Grad am Leistungstag (Historie)").toBe(2);
+    // B-1: der Nachweis zeigt den NETTO-Satz — vorher „45,22 €/Std." neben „38,00 €".
+    expect(nurText(a.ln), "Fall 2: LN Stundensatz netto").toMatch(/38,00\s*€\/Std\./);
+    expect(nurText(a.ln), "Fall 2: LN ohne hochgerechneten Satz").not.toMatch(/45,22/);
   }, 300_000);
 
   it("Pflichtfall 3 / E5 – Überlauf-Privatanteil eines Kassenkunden: Kasse UND privat steuerfrei (vorher privat 19 %)", async () => {
@@ -266,6 +282,10 @@ describe("§ 4 Nr. 16 g UStG — Abnahme (Tabelle D, Pflichtfälle 1–6, E3–E
     const g = await rendern(a.invoice.id);
     const text = nurText(g.html);
     expect(text, "Positionsbezug im Hinweis").toContain("Pos. 1 ist umsatzsteuerfrei nach § 4 Nr. 16 UStG.");
+    // RK-5: die Nummern, auf die der Hinweis verweist, stehen in der Tabelle.
+    expect(g.html, "Spalte „Pos.“").toContain("<th>Pos.</th>");
+    const tbody = g.html.split("<tbody>")[1].split("</tbody>")[0];
+    expect([...tbody.matchAll(/<tr>\s*<td[^>]*>(\d+)<\/td>/g)].map(m => m[1]), "Positionsnummern").toEqual(["1", "2"]);
     expect(text, "USt je Satz mit Basis").toMatch(/USt\. 19 % auf 38,00\s*€/);
     expect(positionsKategorien(g.xml), "XML: Kategorie je Position").toEqual(["E", "S"]);
     expect(aufschluesselung(g.xml), "XML: Aufschlüsselung je Satz").toEqual([
@@ -290,6 +310,11 @@ describe("§ 4 Nr. 16 g UStG — Abnahme (Tabelle D, Pflichtfälle 1–6, E3–E
     expect(text, "Leistungsempfänger mit Zeitraum").toContain(`Leistungsempfänger: ${k.name}, Pflegegrad 2 (bis 10.08.)`);
     expect(positionsKategorien(a.xml)).toEqual(["E", "S"]);
     expect(a.invoice.pflegegrad, "Stempel = Grad am LETZTEN Leistungstag (keiner)").toBeNull();
+    // B-1, gemischt: steuerfreie Zeile netto, 19-%-Zeile brutto, Summe = Rechnung.
+    const ln = nurText(a.ln);
+    expect(ln, "LN: steuerfreie Zeile 38,00").toMatch(/38,00\s*€\/Std\. 38,00\s*€/);
+    expect(ln, "LN: 19-%-Zeile 45,22").toMatch(/45,22\s*€\/Std\. 45,22\s*€/);
+    expect(ln, "LN: Summe = Rechnungsbetrag").toMatch(/Summe \(inkl\. MwSt\.\) 83,22\s*€/);
   }, 300_000);
 
   it("Pflichtfall 6 – Pflegegrad nur in den Stammdaten, NICHT in der Historie: 19 %", async () => {
@@ -362,5 +387,117 @@ describe("§ 4 Nr. 16 g UStG — Abnahme (Tabelle D, Pflichtfälle 1–6, E3–E
     expect(gespiegelt, "Storno-Positionen tragen Satz und Grad des Originals").toEqual(original);
     const g = await rendern(storno.id);
     expect(positionsKategorien(g.xml), "Storno-XML: dieselbe Kategorie").toEqual(["E"]);
+  }, 300_000);
+
+  it("Befund H (RK-9) – Entwurf mit Pflegegrad, danach ausgetragen: der Check meldet ihn", async () => {
+    const k = await neuerKunde({
+      billingType: "selbstzahler", acceptsPrivatePayment: true, pflegegrad: 3, pflegegradSeit: "2024-08-01",
+    });
+    await termin(k.id, `${J}-08-11`);
+    const [a] = await abrechnen(k.id);
+    expect(a.invoice.vatAmountCents, "Vorbedingung: der Entwurf ist steuerfrei").toBe(0);
+    const [eintrag] = await db.select().from(customerCareLevelHistory).where(eq(customerCareLevelHistory.customerId, k.id));
+    expect((await apiPost(`/api/admin/customers/${k.id}/care-level/${eintrag.id}/entfernen`, { grund: "nie bewilligt (Test H)" })).status).toBe(200);
+    const zeile = readFileSync(resolve(__dirname, "../../scripts/sql/ust-freigabe-check.sql"), "utf8");
+    const rows = (((await db.execute(sql.raw(zeile))) as any).rows ?? []) as Array<{ befund: string; customer_id: number; detail: string }>;
+    const meine = rows.filter(x => Number(x.customer_id) === k.id);
+    expect(meine.map(x => x.befund.slice(0, 1)), "nur Befund H").toEqual(["H"]);
+    expect(meine[0].detail).toContain("PG 3, Historie kein");
+  }, 300_000);
+
+  it("RK-10 – Fehleintrag entfernen: voriger Grad lebt NUR nach Bestätigung wieder auf", async () => {
+    const setup = async () => {
+      const k = await neuerKunde({
+        billingType: "selbstzahler", acceptsPrivatePayment: true, pflegegrad: 2, pflegegradSeit: "2024-01-01",
+      });
+      // Irrtümlich PG 3 ab 01.08. — addCareLevelHistory beendet PG 2 am 31.07.
+      expect((await apiPost(`/api/admin/customers/${k.id}/care-level`, { pflegegrad: 3, validFrom: `${J}-08-01` })).status).toBe(201);
+      const hist = await db.select().from(customerCareLevelHistory).where(eq(customerCareLevelHistory.customerId, k.id));
+      const falsch = hist.find(h => h.pflegegrad === 3)!;
+      expect(hist.find(h => h.pflegegrad === 2)!.validTo, "Vorbedingung").toBe(`${J}-07-31`);
+      return { k, falsch };
+    };
+
+    // Ohne Bestätigung: Lücke ab 01.08. (wie bisher entschieden: nicht automatisch).
+    const ohne = await setup();
+    expect((await apiPost(`/api/admin/customers/${ohne.k.id}/care-level/${ohne.falsch.id}/entfernen`, { grund: "Irrtum (Test)" })).status).toBe(200);
+    expect(await getCareLevelAt(ohne.k.id, `${J}-08-10`), "ohne Bestätigung: kein PG ab 01.08.").toBeNull();
+
+    // Mit Bestätigung: PG 2 gilt wieder ab 01.08., offen wie der entfernte Eintrag.
+    const mit = await setup();
+    const r = await apiPost<any>(`/api/admin/customers/${mit.k.id}/care-level/${mit.falsch.id}/entfernen`, { grund: "Irrtum (Test)", vorigenWiederOeffnen: true });
+    expect(r.status, JSON.stringify(r.data)).toBe(200);
+    expect(await getCareLevelAt(mit.k.id, `${J}-08-10`), "mit Bestätigung: PG 2 wieder ab 01.08.").toBe(2);
+    expect(await getCareLevelAt(mit.k.id, HEUTE)).toBe(2);
+    const [c] = await db.select({ pg: customers.pflegegrad }).from(customers).where(eq(customers.id, mit.k.id));
+    expect(c.pg, "Stammdaten folgen").toBe(2);
+  }, 300_000);
+
+  it("RK-11 – Mitarbeiter ohne Admin-Rechte: Pflegegrad nur ab heute, nicht rückwirkend", async () => {
+    const k = await neuerKunde({ billingType: "selbstzahler", acceptsPrivatePayment: true });
+    const ma = await createTestEmployee({ isAdmin: false, nachnamePrefix: "UStRK11" });
+    expect((await apiPatch(`/api/admin/customers/${k.id}/assign`, {
+      primaryEmployeeId: ma.id, backupEmployeeId: null, backupEmployeeId2: null,
+    })).status).toBe(200);
+    const maAuth = await loginAs(ma.email, ma.password);
+    const rueck = await apiPostAs<any>(maAuth, `/api/customers/${k.id}/care-level`, { pflegegrad: 2, seitDatum: `${J}-08-01` });
+    expect(rueck.status, "rückwirkend abgelehnt").toBe(400);
+    expect(await getCareLevelAt(k.id, `${J}-08-10`), "kein Nachweis entstanden").toBeNull();
+    const abHeute = await apiPostAs<any>(maAuth, `/api/customers/${k.id}/care-level`, { pflegegrad: 2, seitDatum: HEUTE });
+    expect(abHeute.status, JSON.stringify(abHeute.data)).toBe(200);
+  }, 300_000);
+
+  it("Kostenvoranschlag – Selbstzahler mit Pflegegrad: Satz 0, brutto = netto", async () => {
+    const k = await neuerKunde({
+      billingType: "selbstzahler", acceptsPrivatePayment: true, pflegegrad: 2, pflegegradSeit: "2024-01-01",
+    });
+    const kv = await apiGet<any>(`/api/budget/${k.id}/cost-estimate?date=${J}-08-12&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`);
+    expect(kv.status, JSON.stringify(kv.data)).toBe(200);
+    expect(kv.data.isSelbstzahler).toBe(true);
+    expect(kv.data.vatRate, "Kostenvoranschlag: Satz 0").toBe(0);
+    expect(kv.data.bruttoCents, "Kostenvoranschlag: brutto = netto").toBe(HW_60);
+  }, 300_000);
+
+  it("Liste „Bereit zum Abrechnen“ – Selbstzahler mit Pflegegrad: Betrag ohne USt", async () => {
+    const k = await neuerKunde({
+      billingType: "selbstzahler", acceptsPrivatePayment: true, pflegegrad: 2, pflegegradSeit: "2024-01-01",
+    });
+    await termin(k.id, `${J}-08-12`);
+    const sr = await apiPost<{ id: number }>("/api/service-records", { customerId: k.id, employeeId: auth.user.id, year: J, month: MONAT });
+    cleanup.srs.push(sr.data.id);
+    for (const signerType of ["employee", "customer"] as const) {
+      await apiPost(`/api/service-records/${sr.data.id}/sign`, { signerType, signatureData: validSignatureDataUrl() });
+    }
+    const liste = await apiGet<Record<string, { actualAmountCents: number | null }>>(
+      `/api/billing/customer-amounts?year=${J}&month=${MONAT}&customerIds=${k.id}`,
+    );
+    expect(liste.status, JSON.stringify(liste.data)).toBe(200);
+    expect(liste.data[String(k.id)]?.actualAmountCents, "Liste: ohne USt").toBe(HW_60);
+  }, 300_000);
+
+  it("E1/E2 auf PDF und XML – Rundung je Satz auf die Summe", async () => {
+    const k = await neuerKunde({ billingType: "selbstzahler", acceptsPrivatePayment: true });
+    await termin(k.id, `${J}-08-04`);
+    await termin(k.id, `${J}-08-05`);
+    await termin(k.id, `${J}-08-06`);
+    const [a] = await abrechnen(k.id);
+    const zeilen = await db.select().from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, a.invoice.id));
+    const setze = async (betraege: number[]) => {
+      for (const [i, z] of [...zeilen].sort((x, y) => x.id - y.id).entries()) {
+        await db.update(invoiceLineItems).set({ totalCents: betraege[i] }).where(eq(invoiceLineItems.id, z.id));
+      }
+    };
+    // E2: RE-2026-0378, netto 291,01 € — drei Positionen, deren Einzelrundung 55,30 € ergäbe.
+    await setze([10050, 10050, 9001]);
+    await db.update(invoices).set({ netAmountCents: 29101, vatAmountCents: 5529, grossAmountCents: 34630 }).where(eq(invoices.id, a.invoice.id));
+    const e2 = await rendern(a.invoice.id);
+    expect(nurText(e2.html), "E2 PDF").toMatch(/USt\. 19 % auf 291,01\s*€: 55,29\s*€/);
+    expect(aufschluesselung(e2.xml), "E2 XML").toEqual([{ kategorie: "S", basis: "291.01", steuer: "55.29", grund: null }]);
+    // E1: RE-2026-0595, netto 299,85 € → 56,97 €.
+    await setze([10000, 10000, 9985]);
+    await db.update(invoices).set({ netAmountCents: 29985, vatAmountCents: 5697, grossAmountCents: 35682 }).where(eq(invoices.id, a.invoice.id));
+    const e1 = await rendern(a.invoice.id);
+    expect(nurText(e1.html), "E1 PDF").toMatch(/USt\. 19 % auf 299,85\s*€: 56,97\s*€/);
+    expect(aufschluesselung(e1.xml), "E1 XML").toEqual([{ kategorie: "S", basis: "299.85", steuer: "56.97", grund: null }]);
   }, 300_000);
 });

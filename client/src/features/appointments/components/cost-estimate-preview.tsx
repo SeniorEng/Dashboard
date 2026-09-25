@@ -12,7 +12,8 @@ export type CostEstimate = {
   isSelbstzahler?: boolean;
   bruttoCents?: number;
   vatCents?: number;
-  vatRate?: number;
+  /** Einheitlicher Satz in Prozent; `null` = gemischte Sätze. */
+  vatRate?: number | null;
   /**
    * Task #875 — bereits durch andere geplante Termine reservierter Betrag
    * (Holds). > 0 nur wenn das Hard-Hold-Feature aktiv ist; sonst 0 ⇒ kein
@@ -51,13 +52,17 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
     // Rechnung (§ 4 Nr. 16 g UStG, mit Pflegegrad am Termindatum). Kein
     // eigener 19-%-Fallback mehr: fehlt der Wert, wird netto gezeigt.
     const bruttoEuro = formatEuroDE(cost.bruttoCents ?? cost.totalCents);
-    const vatPct = cost.vatRate ?? 0;
+    // `vatRate: null` = gemischte Sätze → nur „inkl. MwSt." (kein Mischsatz).
+    const vatPct = cost.vatRate;
+    const ustText = vatPct == null
+      ? "inkl. MwSt."
+      : vatPct > 0 ? `inkl. ${vatPct} % MwSt.` : "umsatzsteuerfrei nach § 4 Nr. 16 UStG";
     return (
       <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm flex items-start gap-3" data-testid="selbstzahler-cost-estimate">
         <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
         <div>
           <p className="text-blue-800 font-medium">
-            Kosten: {bruttoEuro} ({vatPct > 0 ? `inkl. ${vatPct} % MwSt.` : "umsatzsteuerfrei nach § 4 Nr. 16 UStG"})
+            Kosten: {bruttoEuro} ({ustText})
           </p>
           <p className="text-blue-600 text-xs mt-1">Privatabrechnung — wird dem Kunden direkt in Rechnung gestellt</p>
         </div>

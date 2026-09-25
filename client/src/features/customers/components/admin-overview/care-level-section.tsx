@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { PFLEGEGRAD_SELECT_OPTIONS } from "@shared/domain/customers";
+import { vorgaengerZumWiederaufleben } from "@shared/domain/pflegegrad-historie";
 import { SectionCard } from "@/components/patterns/section-card";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
   const [beendenAb, setBeendenAb] = useState<string>(todayISO());
   const [entfernenId, setEntfernenId] = useState<number | null>(null);
   const [entfernenGrund, setEntfernenGrund] = useState("");
+  // RK-10 (Alrik): lebt ein voriger Eintrag wieder auf, erst nachfragen.
+  const [wiederaufleben, setWiederaufleben] = useState<{ historyId: number; text: string } | null>(null);
 
   const beendenMutation = useMutation({
     mutationFn: async (data: { abDatum: string }) => {
@@ -45,8 +48,11 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
   });
 
   const entfernenMutation = useMutation({
-    mutationFn: async (data: { historyId: number; grund: string }) => {
-      const result = await api.post(`/admin/customers/${customerId}/care-level/${data.historyId}/entfernen`, { grund: data.grund });
+    mutationFn: async (data: { historyId: number; grund: string; vorigenWiederOeffnen: boolean }) => {
+      const result = await api.post(`/admin/customers/${customerId}/care-level/${data.historyId}/entfernen`, {
+        grund: data.grund,
+        vorigenWiederOeffnen: data.vorigenWiederOeffnen,
+      });
       return unwrapResult(result);
     },
     onSuccess: () => {
@@ -54,6 +60,7 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
       invalidateCustomer();
       setEntfernenId(null);
       setEntfernenGrund("");
+      setWiederaufleben(null);
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -266,19 +273,53 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
                           placeholder="z. B. Pflegegrad nie bewilligt, Eintrag irrtümlich angelegt"
                           data-testid={`input-entfernen-grund-${entry.id}`}
                         />
+                        {wiederaufleben?.historyId === entry.id ? (
+                          <div className="space-y-2" data-testid={`frage-wiederaufleben-${entry.id}`}>
+                            <p className="text-sm text-gray-700">{wiederaufleben.text}</p>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="destructive"
+                                onClick={() => entfernenMutation.mutate({ historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: true })}
+                                disabled={entfernenMutation.isPending}
+                                data-testid={`button-wiederaufleben-ja-${entry.id}`}
+                              >
+                                Ja, übernehmen
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => entfernenMutation.mutate({ historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: false })}
+                                disabled={entfernenMutation.isPending}
+                                data-testid={`button-wiederaufleben-nein-${entry.id}`}
+                              >
+                                Nein, ohne Pflegegrad
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
                         <div className="flex items-center gap-2">
                           <Button
                             variant="destructive"
-                            onClick={() => entfernenMutation.mutate({ historyId: entry.id, grund: entfernenGrund })}
+                            onClick={() => {
+                              const k = vorgaengerZumWiederaufleben(customer.careLevelHistory ?? [], entry.id);
+                              if (k) {
+                                setWiederaufleben({
+                                  historyId: entry.id,
+                                  text: `Pflegegrad ${k.eintrag.pflegegrad} gilt dann wieder ab ${formatDateForDisplay(k.giltWiederAb)}${k.neuesEnde ? ` bis ${formatDateForDisplay(k.neuesEnde)}` : ""} – übernehmen?`,
+                                });
+                                return;
+                              }
+                              entfernenMutation.mutate({ historyId: entry.id, grund: entfernenGrund, vorigenWiederOeffnen: false });
+                            }}
                             disabled={entfernenMutation.isPending || entfernenGrund.trim().length < 3}
                             data-testid={`button-entfernen-bestaetigen-${entry.id}`}
                           >
                             Entfernen
                           </Button>
-                          <Button variant="outline" onClick={() => { setEntfernenId(null); setEntfernenGrund(""); }}>
+                          <Button variant="outline" onClick={() => { setEntfernenId(null); setEntfernenGrund(""); setWiederaufleben(null); }}>
                             Abbrechen
                           </Button>
                         </div>
+                        )}
                       </div>
                     ) : (
                       <Button

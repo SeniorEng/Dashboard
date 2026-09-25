@@ -180,6 +180,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 
   let totalCostCents = 0;
   let weightedVatRate = 19;
+  let einheitlicherSatz: number | null = 19;
   // § 4 Nr. 16 g UStG (Ticket 6hcgffPJWm57p72p) — der Satz je Leistung kommt
   // aus DERSELBEN Regel wie die Rechnung (`ustSatzBP`, Tabelle D), mit dem
   // Pflegegrad AM TERMINDATUM aus der Historie. Der private Anteil ist der
@@ -274,11 +275,16 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       // Gewichteter Durchschnitt in Basispunkten → Prozent (classifyCostEstimate
       // erwartet Prozent). Die SSoT liefert BP, deshalb hier einmal /100.
       const hauptleistungen = costDetails.map(c => c.serviceCode).filter((c): c is string => c != null && !istKilometerPosition(c));
-      weightedVatRate = costDetails.reduce((s, c) => s + (ustSatzBP({
+      const saetze = costDetails.map(c => ustSatzBP({
         serviceCode: c.serviceCode,
         pflegegradAmLeistungstag: pflegegradAmTermin,
         hauptleistungenDesTermins: hauptleistungen,
-      }, { kassenTopf: false }) * c.costCents / totalCost), 0) / 100;
+      }, { kassenTopf: false }));
+      weightedVatRate = costDetails.reduce((s, c, i) => s + (saetze[i] * c.costCents / totalCost), 0) / 100;
+      // Gemischte Sätze (z. B. steuerfrei + 19 %): kein Satz in der Antwort —
+      // die Anzeige sagt dann nur „inkl. MwSt." statt eines Mischsatzes wie
+      // „inkl. 11 %" (Entscheidung Alrik, Gate 2 zu #194, Punkt 9).
+      einheitlicherSatz = new Set(saetze).size === 1 ? saetze[0] / 100 : null;
     }
   }
 
@@ -300,7 +306,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       isSelbstzahler: true,
       bruttoCents: outcome.bruttoCents,
       vatCents: outcome.vatCents,
-      vatRate: Math.round(weightedVatRate),
+      vatRate: einheitlicherSatz,
       warning: outcome.warning,
       isHardBlock: outcome.isHardBlock,
       privateCents: outcome.privateCents,
@@ -416,7 +422,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     projectedAvailableCents: dateAware.projectedTotalCents,
     privateCents: outcome.privateCents,
     vatCents: outcome.vatCents,
-    vatRate: Math.round(weightedVatRate),
+    vatRate: einheitlicherSatz,
     acceptsPrivatePayment,
     ...(process.env.NODE_ENV === "test" ? { _testBudgetQueriesExecuted: true } : {}),
   });

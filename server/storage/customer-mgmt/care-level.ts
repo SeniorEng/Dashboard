@@ -11,6 +11,7 @@ import { eq, and, isNull, desc, asc, lte, gte, or } from "drizzle-orm";
 import { parseLocalDate, formatDateISO, todayISO, addDays } from "@shared/utils/datetime";
 import { db, type DbOrTx } from "../../lib/db";
 import { badRequest, notFound } from "../../lib/errors";
+import { vorgaengerZumWiederaufleben } from "@shared/domain/pflegegrad-historie";
 
 /**
  * Nur Einträge, die NICHT als Fehleintrag entfernt sind (Ticket
@@ -181,9 +182,9 @@ async function stammdatenNachziehen(customerId: number, executor: DbOrTx): Promi
  * weiteren Eintrag also auf „kein Pflegegrad".
  */
 export async function pflegegradAlsFehleintragEntfernen(
-  params: { customerId: number; historyId: number; grund: string; userId: number },
+  params: { customerId: number; historyId: number; grund: string; userId: number; vorigenWiederOeffnen?: boolean },
   executor: DbOrTx,
-): Promise<{ eintrag: CustomerCareLevelHistory; pflegegradHeute: number | null }> {
+): Promise<{ eintrag: CustomerCareLevelHistory; pflegegradHeute: number | null; wiederGeoeffnet: CustomerCareLevelHistory | null }> {
   const [eintrag] = await executor
     .select()
     .from(customerCareLevelHistory)
@@ -194,13 +195,32 @@ export async function pflegegradAlsFehleintragEntfernen(
     .for("update");
   if (!eintrag) throw notFound("Pflegegrad-Eintrag nicht gefunden");
   if (eintrag.entferntAm != null) throw badRequest("Dieser Pflegegrad-Eintrag ist bereits als Fehleintrag entfernt.");
+  // Kandidat VOR dem Markieren bestimmen — auf der gesperrten Historie des
+  // Kunden, mit derselben Funktion, die der Dialog im Client zeigt.
+  let wiederGeoeffnet: CustomerCareLevelHistory | null = null;
+  if (params.vorigenWiederOeffnen) {
+    const historie = await executor
+      .select()
+      .from(customerCareLevelHistory)
+      .where(eq(customerCareLevelHistory.customerId, params.customerId))
+      .for("update");
+    const kandidat = vorgaengerZumWiederaufleben(historie, eintrag.id);
+    if (!kandidat) {
+      throw badRequest("Es gibt keinen vorigen Pflegegrad, der direkt vor diesem Eintrag endet — nichts wieder zu öffnen.");
+    }
+    [wiederGeoeffnet] = await executor
+      .update(customerCareLevelHistory)
+      .set({ validTo: kandidat.neuesEnde })
+      .where(eq(customerCareLevelHistory.id, kandidat.eintrag.id))
+      .returning();
+  }
   const [markiert] = await executor
     .update(customerCareLevelHistory)
     .set({ entferntAm: new Date(), entferntGrund: params.grund, entferntVonUserId: params.userId })
     .where(eq(customerCareLevelHistory.id, eintrag.id))
     .returning();
   const pflegegradHeute = await stammdatenNachziehen(params.customerId, executor);
-  return { eintrag: markiert, pflegegradHeute };
+  return { eintrag: markiert, pflegegradHeute, wiederGeoeffnet };
 }
 
 /**

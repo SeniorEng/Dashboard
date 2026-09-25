@@ -444,8 +444,13 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       ? ""
       : `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""}-${item.endTime ? item.endTime.slice(0, 5) : ""}</td>`;
+    // Spalte „Pos." nur bei neuen Rechnungen (Gate 2 zu #194, RK-5, Alrik):
+    // der Hinweis „Pos. 1–3 sind umsatzsteuerfrei …" verweist auf diese
+    // Nummern. Bestand bleibt byte-gleich.
+    const posCell = ust ? `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${idx + 1}</td>` : "";
     return `
     <tr>
+      ${posCell}
       ${dateTimeCells}
       <td class="col-service" style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}${freeHint}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${quantityDisplay}</td>
@@ -482,7 +487,9 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     .meta-table td:last-child { color: #111827; }
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
     table.items th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
-    table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }
+    ${ust && !aggregate
+      ? "table.items th:nth-child(5), table.items th:nth-child(6), table.items th:nth-child(7) { text-align: right; }"
+      : "table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }"}
     /* Task #1072 — Mengen-robuste Seitenumbrüche: Bei vielen Positionen bricht
        die Tabelle geordnet über mehrere Seiten um. table-header-group wiederholt
        den Spaltenkopf auf jeder Folgeseite, break-inside:avoid auf den Zeilen
@@ -590,6 +597,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   <table class="items">
     <thead>
       <tr>
+        ${ust ? "<th>Pos.</th>" : ""}
         ${aggregate ? "" : `<th>Datum</th>
         <th>Uhrzeit</th>`}
         <th class="col-service">Leistung</th>
@@ -707,11 +715,24 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   // (Largest-Remainder), Brutto je Zeile via Objekt-Referenz-Map (sortItems/
   // groupByAppointment erhalten die Referenzen). Steuerfrei → netto === brutto.
   const treatment = resolveVatTreatment({ billingType: data.billingType, budgetType: data.budgetType });
-  const isStandard = treatment === "standard";
+  // § 4 Nr. 16 g UStG (Gate 2 zu #194, B-1): trägt die Rechnung die
+  // USt-Entscheidung je Position, rechnet der Nachweis damit — dieselbe
+  // Verteilung wie die Rechnung (`zeilenUstJeSatz`). Bestand (keine Position
+  // mit Satz) bleibt unverändert beim Weg über die Rechnungs-Ebene.
+  const jePosition = data.lineItems.some(l => l.vatRateBp != null);
+  const positionsSaetze = data.lineItems.map(l => ({ totalCents: l.totalCents, vatRateBp: l.vatRateBp ?? 0 }));
+  const isStandard = jePosition
+    ? positionsSaetze.some(p => p.vatRateBp > 0 && p.totalCents !== 0)
+    : treatment === "standard";
   const lineNetCents = data.lineItems.map(i => i.totalCents);
-  const lineVatCents = isStandard
-    ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
-    : lineNetCents.map(() => 0);
+  const lineVatCents = jePosition
+    ? zeilenUstJeSatz(positionsSaetze)
+    : isStandard
+      ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
+      : lineNetCents.map(() => 0);
+  const bruttoSatz = (item: typeof data.lineItems[0]) => jePosition
+    ? Math.round((item.unitPriceCents * (10000 + (item.vatRateBp ?? 0))) / 10000)
+    : grossUpUnitPriceCents(item.unitPriceCents, treatment);
   const lineGrossByRef = new Map<typeof data.lineItems[0], number>();
   data.lineItems.forEach((it, idx) => lineGrossByRef.set(it, it.totalCents + lineVatCents[idx]));
   const grossOf = (item: typeof data.lineItems[0]) => lineGrossByRef.get(item) ?? item.totalCents;
@@ -766,7 +787,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       for (let i = 0; i < group.services.length; i++) {
         const svc = group.services[i];
         const showDateCol = i === 0;
-        const displayUnitPrice = grossUpUnitPriceCents(svc.unitPriceCents, treatment);
+        const displayUnitPrice = bruttoSatz(svc);
         const displayTotal = grossOf(svc);
         rows.push(`
         <tr>
@@ -781,7 +802,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       }
       for (const km of group.kmItems) {
         const kmLabel = km.serviceCode === "customer_km" ? "Fahrten für/mit Kunde" : "Anfahrt";
-        const displayKmUnitPrice = grossUpUnitPriceCents(km.unitPriceCents, treatment);
+        const displayKmUnitPrice = bruttoSatz(km);
         const displayKmTotal = grossOf(km);
         // Task #561: km-Anzeige via Helper — Menge × Satz = Summe konsistent.
         const kmQuantityDisplay = renderLineItemQuantity(km);
