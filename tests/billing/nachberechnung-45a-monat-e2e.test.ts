@@ -38,7 +38,7 @@ import {
 } from "../test-utils";
 import { assertTestClockActive, clearTestClock, useTestClock } from "../helpers/test-clock";
 import { getBudgetSplitForAppointments } from "../../server/services/invoice-data";
-import { rebookNetZeroAppointmentConsumption } from "../../server/storage/budget/rebook-storage";
+import { neubuchenFuerLauf } from "../../server/services/invoice-data";
 
 const J = 2026;
 const HEUTE = `${J}-09-25`;
@@ -170,7 +170,7 @@ describe("Nachberechnung nach Storno — §45a je Kalendermonat (Tabelle D)", ()
     expect((await ledgerJeTermin()).size, "die Vorschau hat gebucht").toBe(0);
 
     // ── Erstellen ──────────────────────────────────────────────────────
-    await rebookNetZeroAppointmentConsumption({ customerId, appointmentIds: ids, userId: auth.user.id });
+    await neubuchenFuerLauf(customerId, ids, auth.user.id);
     const ledger = await ledgerJeTermin();
     for (const datum of TERMINE) {
       expect(ledger.get(termin.get(datum)!), `Erstellen ${datum}`).toEqual(ERWARTET[datum]);

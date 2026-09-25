@@ -206,7 +206,7 @@ export const SSOT_REGISTRY: readonly SsotEntry[] = [
     question: "In welcher Reihenfolge rechnet ein Abrechnungs-Lauf über mehrere Termine?",
     // Gate 2 zu #193, S-7. Zwei Aufrufer lesen dieselbe Reihenfolge: die
     // Vorschau (Probelauf `probelaufNeubuchung`) und das Erstellen
-    // (`rebookNetZeroAppointmentConsumption`). Laufen sie auseinander, zeigt
+    // (`neubuchenFuerLauf`). Laufen sie auseinander, zeigt
     // die Vorschau etwas anderes, als gebucht wird — der Anlass dieses PRs.
     canonical: [
       { symbol: "chronologischeReihenfolge", module: "server/storage/budget/abrechnungs-lauf.ts" },

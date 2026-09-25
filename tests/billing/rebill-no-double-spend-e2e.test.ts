@@ -4,7 +4,7 @@
  *
  * Task #1014 hat die Lücke geschlossen, dass ein netto-null-belegter
  * (storniert-und-re-abgerechneter) Termin beim Re-Abrechnen frische
- * Consumption-Zeilen bucht (`rebookNetZeroAppointmentConsumption`, verdrahtet
+ * Consumption-Zeilen bucht (`neubuchenFuerLauf`, verdrahtet
  * in `generateInvoiceCore`). Die Unit-/Flow-Tests
  * (`rebook-net-zero-consumption.test.ts`, `storno-then-rebill.test.ts`) prüfen
  * den Re-Book direkt bzw. den Storno→Re-Rechnungs-Happy-Path. Es fehlte ein

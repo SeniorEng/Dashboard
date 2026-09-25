@@ -7,7 +7,7 @@
  * Rechnung pro Topf gesplittet (`generateInvoiceCore` → N Rechnungen mit
  * gemeinsamer `billingRunId`, Task #759); der Storno läuft als Cascade über
  * die Geschwister-Rechnungen (`cascadeRun: true`), und der Re-Book
- * (`rebookNetZeroAppointmentConsumption`, Task #1014) muss die Consumption in
+ * (`neubuchenFuerLauf`, Task #1014) muss die Consumption in
  * JEDEN betroffenen Topf zurückbuchen. Es fehlte ein End-to-End-Test, der das
  * volle Doppel-Spend-Szenario für mehrere Töpfe über die öffentlichen
  * Billing-Routen fährt:

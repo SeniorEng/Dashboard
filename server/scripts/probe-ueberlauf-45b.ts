@@ -106,8 +106,9 @@ export async function probeUeberlauf(customerId: number, jahr: number, monat: nu
 
 /** Alle Kunden/Monate eines Jahres, bei denen der Fix die nächste Rechnung ändert. */
 export async function zaehleUeberlauf(jahr: number): Promise<{ geprueft: number; treffer: Array<{ customerId: number; monat: number; probe: UeberlaufProbe }> }> {
+  // Alle Töpfe: die Auswahl erfasst auch §45a/§39 (Beträge rechnet das Werkzeug nur für §45b exakt).
   const kunden = await db.selectDistinct({ id: budgetTransactions.customerId }).from(budgetTransactions)
-    .where(and(eq(budgetTransactions.budgetType, TOPF), gte(budgetTransactions.transactionDate, `${jahr}-01-01`)));
+    .where(gte(budgetTransactions.transactionDate, `${jahr}-01-01`));
   const treffer: Array<{ customerId: number; monat: number; probe: UeberlaufProbe }> = [];
   for (const { id } of kunden) {
     for (let monat = 1; monat <= 12; monat++) {
@@ -132,7 +133,7 @@ async function main(): Promise<void> {
     for (const t of treffer) {
       console.log(`Kunde ${t.customerId} ${String(t.monat).padStart(2, "0")}/${jahr}: ${t.probe.termine.length} Termine, Kasse ${euro(t.probe.kasseCents)} / privat ${euro(t.probe.privatCents)}`);
     }
-    console.log(`\nFix greift bei ${new Set(treffer.map((t) => t.customerId)).size} Kunden in ${treffer.length} Monaten (${geprueft} Kunden mit §45b-Buchungen ${jahr} geprüft).`);
+    console.log(`\nFix greift bei ${new Set(treffer.map((t) => t.customerId)).size} Kunden in ${treffer.length} Monaten (${geprueft} Kunden mit Buchungen ${jahr} geprüft).`);
     return;
   }
   const p = await probeUeberlauf(Number(a), Number(b), Number(c));

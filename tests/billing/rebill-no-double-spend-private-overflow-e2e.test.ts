@@ -22,7 +22,7 @@
  *     steuerfrei, `billingType="selbstzahler"`, `vatRate=0`) — siehe
  *     `generateInvoiceCore` (Selbstzahler-Reklassifikation + USt-Verteilung).
  *   - Der Storno→Re-Book-Round-Trip muss BEIDE Anteile wiederherstellen: die
- *     §45a-Consumption UND den privaten Rest (`rebookNetZeroAppointmentConsumption`
+ *     §45a-Consumption UND den privaten Rest (`neubuchenFuerLauf`
  *     hängt den privaten uncapped-Topf immer als Terminal an).
  *
  * Flow:

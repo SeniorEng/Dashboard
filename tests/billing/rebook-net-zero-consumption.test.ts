@@ -9,7 +9,7 @@
  * weist die neue Rechnung einen Topf aus, den der Ledger weiter als verfügbar
  * führt → ein späterer Termin verbraucht denselben Topf erneut (Doppel-Spend).
  *
- * `rebookNetZeroAppointmentConsumption` schließt die Lücke: es bucht für netto-
+ * `neubuchenFuerLauf` (früher `rebookNetZeroAppointmentConsumption`) schließt die Lücke: es bucht für netto-
  * null-Termine frische GoBD-append-only `consumption`-Zeilen über die Standard-
  * Cascade. Dieser Test prüft:
  *  1) Ein netto-null-Termin bekommt nach dem Re-Book eine LIVE §45b-Konsumption
@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/lib/db";
 import { budgetTransactions, appointmentServices } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
-import { rebookNetZeroAppointmentConsumption } from "../../server/storage/budget/rebook-storage";
+import { neubuchenFuerLauf } from "../../server/services/invoice-data";
 import {
   apiGet,
   apiPost,
@@ -165,19 +165,15 @@ afterAll(async () => {
   await runCleanup();
 });
 
-describe("rebookNetZeroAppointmentConsumption (Task #1014)", () => {
+describe("neubuchenFuerLauf — netto null (Task #1014)", () => {
   it("bucht für netto-null-Termine frische §45b-Konsumption, idempotent, ignoriert Selbstzahler", async () => {
     // Vorher: netZeroAppt hat KEINE Live-Konsumption (alles storniert).
     expect(await liveConsumptions(netZeroAppt)).toHaveLength(0);
 
     // 1) Re-Book über beide Termine.
-    const first = await rebookNetZeroAppointmentConsumption({
-      customerId,
-      appointmentIds: [netZeroAppt, selbstzahlerAppt],
-      userId,
-    });
+    const first = await neubuchenFuerLauf(customerId, [netZeroAppt, selbstzahlerAppt], userId);
     // Nur der netto-null-Termin wird re-gebucht; der Selbstzahler-Termin nicht.
-    expect(first.rebookedAppointmentIds).toEqual([netZeroAppt]);
+    expect(first).toEqual([netZeroAppt]);
 
     const live = await liveConsumptions(netZeroAppt);
     expect(live).toHaveLength(1);
@@ -188,12 +184,8 @@ describe("rebookNetZeroAppointmentConsumption (Task #1014)", () => {
     expect(await liveConsumptions(selbstzahlerAppt)).toHaveLength(0);
 
     // 2) Idempotenz: zweiter Aufruf bucht NICHTS erneut.
-    const second = await rebookNetZeroAppointmentConsumption({
-      customerId,
-      appointmentIds: [netZeroAppt, selbstzahlerAppt],
-      userId,
-    });
-    expect(second.rebookedAppointmentIds).toEqual([]);
+    const second = await neubuchenFuerLauf(customerId, [netZeroAppt, selbstzahlerAppt], userId);
+    expect(second).toEqual([]);
     expect(await liveConsumptions(netZeroAppt)).toHaveLength(1);
   }, 120_000);
 });
@@ -206,7 +198,7 @@ describe("rebookNetZeroAppointmentConsumption (Task #1014)", () => {
  * verbotenen Privattopf zu buchen. Selbstzahler/`acceptsPrivatePayment=true`
  * bleiben unberührt (eigene Suiten).
  */
-describe("rebookNetZeroAppointmentConsumption Privat-Sperre (Task #1353)", () => {
+describe("neubuchenFuerLauf — Privat-Sperre (Task #1353)", () => {
   it("blockiert reinen Pflegekassen-Kunden mit echtem Rest, nennt die Termin-Nummer", async () => {
     // Eigener Kunde: Pflegekasse, KEIN Privatzahler, KEINE gesetzlichen Töpfe
     // (alle deaktiviert) → ein netto-null-Termin lässt sich nicht decken.
@@ -276,11 +268,7 @@ describe("rebookNetZeroAppointmentConsumption Privat-Sperre (Task #1353)", () =>
 
       // Re-Book MUSS laut abbrechen (kein Privattopf, echter Rest) und die
       // Termin-Nummer nennen.
-      await expect(rebookNetZeroAppointmentConsumption({
-        customerId: noPrivateCustomerId,
-        appointmentIds: [restAppt],
-        userId,
-      })).rejects.toThrow(new RegExp(`Termin #${restAppt}`));
+      await expect(neubuchenFuerLauf(noPrivateCustomerId, [restAppt], userId)).rejects.toThrow(new RegExp(`Termin #${restAppt}`));
 
       // Sperre rollt zurück → keine neue (private) Live-Konsumption gebucht.
       expect(await liveConsumptions(restAppt)).toHaveLength(0);

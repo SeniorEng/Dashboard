@@ -747,7 +747,7 @@ type ApptConsumptionTxn = {
  * IDs, auf die ein `reversal` zeigt (stornierte Original-Buchungen). Eine
  * `consumption`-Zeile, deren ID in `reversedIds` liegt, ist netto null belegt.
  * SSoT für die Netto-Null-Erkennung — geteilt von `getBudgetSplitForAppointments`
- * (Anzeige-Split) und `findNetZeroBilledAppointments` (Re-Buchungs-Trigger).
+ * (Anzeige-Split) und `neuzubuchendeTermine` (Re-Buchungs-Auslöser).
  */
 async function loadAppointmentConsumptionTxns(
   customerId: number,
@@ -817,41 +817,6 @@ function computeNetZeroApptIds(
 }
 
 /**
- * Task #1014 — Trigger für die Re-Buchung netto-null-belegter Termine bei der
- * tatsächlichen Rechnungs-ERSTELLUNG (nicht Preview). Liefert die Termine, die
- * eine Konsumption hatten, deren Buchungen aber komplett storniert wurden —
- * exakt die Termine, deren Pot-Anteil `getBudgetSplitForAppointments`
- * read-only aus der aktuellen Allocation re-deriviert. Beim Generieren werden
- * für diese Termine frische `consumption`-Zeilen gebucht (siehe
- * `rebookNetZeroAppointmentConsumption`), damit Ledger und Rechnung nicht
- * auseinanderlaufen.
- */
-export async function findNetZeroBilledAppointments(
-  customerId: number,
-  apptIds: number[],
-): Promise<number[]> {
-  if (apptIds.length === 0) return [];
-  const { txns, reversedIds } = await loadAppointmentConsumptionTxns(customerId, apptIds);
-  if (txns.length === 0) return [];
-  return computeNetZeroApptIds(txns, reversedIds);
-}
-
-/**
- * Task #759 — Variant C: liefert pro Termin die tatsächlich gebuchten
- * Pot-Anteile aus `budget_transactions` (`consumption`). Pot-Keys sind
- * die echten BudgetType-Werte (`entlastungsbetrag_45b` /
- * `umwandlung_45a` / `ersatzpflege_39_42a`) sowie `"private"` für den
- * Selbstzahler-Overflow — exakt das, was `consumption-engine.ts` schreibt.
- *
- * Task #1011 — nur die AKTIVE (nicht stornierte) Konsumption zählt. Eine
- * `consumption`-Zeile, auf die ein `reversal` zeigt (`reversedTransactionId`),
- * ist netto null belegt und darf KEINEN Pot-Anteil mehr erzeugen — sonst
- * entstünde eine Phantom-Folgerechnung für einen Topf, der real gar nicht
- * (mehr) belegt ist (z.B. eine §45a-Buchung, die am selben Tag wieder
- * storniert wurde). „Live"-Konsum = `consumption` minus die Zeilen, auf die
- * ein `reversal` verweist — dieselbe Projekt-SSoT wie im Storage-Layer.
- */
-/**
  * Welche Termine eines Laufs werden NEU gebucht — beim Erstellen echt, in der
  * Vorschau im Probelauf? EINE Antwort für beide Wege.
  *
@@ -864,7 +829,7 @@ export async function findNetZeroBilledAppointments(
  *     gebuchten Termine dieses Topfs im Lauf neu gebucht — chronologisch,
  *     frühere zuerst, der Überlauf geht in die Kaskade (privat).
  *
- * ERSETZT `findNetZeroBilledAppointments` als Auslöser beim Erstellen. Vorher
+ * ERSETZT `findNetZeroBilledAppointments` (entfernt) als Auslöser beim Erstellen. Vorher
  * übernahm die Rechnung gespeicherte Buchungen ungeprüft: bei Funke hingen
  * 194,20 € an einem inzwischen gelöschten Übertrag, der Reader zeigte Juni
  * überzogen, und RE-0696 ging trotzdem komplett an die Kasse.
@@ -876,7 +841,7 @@ export async function findNetZeroBilledAppointments(
 export async function neuzubuchendeTermine(
   customerId: number,
   apptIds: number[],
-  d: DbOrTx = db,
+  d: Tx | typeof db = db,
 ): Promise<{ nettoNull: number[]; ueberzogen: number[] }> {
   if (apptIds.length === 0) return { nettoNull: [], ueberzogen: [] };
   const { txns, reversedIds } = await loadAppointmentConsumptionTxns(customerId, apptIds, d);
@@ -897,7 +862,7 @@ export async function neuzubuchendeTermine(
     const datum = datumJeBuchung.get(t.id);
     if (!datum) continue;
     let r = cache.get(datum);
-    if (!r) { r = await readUnifiedBudgetAvailability(customerId, datum, d as never); cache.set(datum, r); }
+    if (!r) { r = await readUnifiedBudgetAvailability(customerId, datum, d); cache.set(datum, r); }
     // Zugewiesen minus Verbrauch, NICHT `availableCents`: das ist bei 0
     // gekappt (Funke: Reader zeigt „0,00 € frei" bei 85,18 € Überzug).
     const topf = (r.pots as Record<string, { allocatedCents: number; consumedNetCents: number } | undefined>)[t.budgetType];
@@ -915,8 +880,8 @@ export async function neuzubuchendeTermine(
  * werden. ALLE zuerst, dann neu buchen — sonst hielte ein späterer Termin
  * seinen alten Anteil fest, während ein früherer neu bucht.
  */
-export async function lebendeBuchungenStornieren(
-  tx: DbOrTx,
+async function lebendeBuchungenStornieren(
+  tx: Tx,
   customerId: number,
   apptIds: number[],
   userId: number | undefined,
@@ -925,10 +890,62 @@ export async function lebendeBuchungenStornieren(
   const { txns, reversedIds } = await loadAppointmentConsumptionTxns(customerId, apptIds, tx);
   for (const t of txns) {
     if (reversedIds.has(t.id)) continue;
-    await reverseBudgetTransaction(t.id, userId, tx as never);
+    await reverseBudgetTransaction(t.id, userId, tx);
   }
 }
 
+/**
+ * Neubuchung beim ERSTELLEN — alles in EINER Transaktion unter der
+ * Abrechnungs-Sperre des Kunden (Gate 2 zu #197, B-2/B-3):
+ *   1. Sperre wie die Rechnungs-Transaktion (`lockCustomerForBilling`), dann
+ *      prüfen, dass kein Termin inzwischen abgerechnet ist — ein paralleler
+ *      Lauf darf nie Buchungen abgerechneter Termine stornieren.
+ *   2. Auswahl (`neuzubuchendeTermine`) UNTER der Sperre neu treffen.
+ *   3. Lebende Buchungen der überzogenen Termine stornieren, dann alle
+ *      chronologisch neu buchen (`rebookNetZeroAppointmentCore`).
+ * Scheitert ein Termin (z. B. kein Privatanteil erlaubt), rollt ALLES zurück:
+ * das Ledger bleibt wie vorher, der Lauf bricht mit der Meldung der Engine ab.
+ *
+ * ERSETZT beim Erstellen `rebookNetZeroAppointmentConsumption` (entfernt; eine
+ * Transaktion je Termin — ein Fehler mittendrin ließ die früheren Termine
+ * gebucht und die späteren netto null zurück).
+ */
+export async function neubuchenFuerLauf(
+  customerId: number,
+  apptIds: number[],
+  userId: number,
+): Promise<number[]> {
+  if (apptIds.length === 0) return [];
+  return db.transaction(async (tx) => {
+    await lockCustomerForBilling(tx, customerId);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`);
+    await assertAppointmentsNotYetInvoiced(tx, apptIds);
+    const { nettoNull, ueberzogen } = await neuzubuchendeTermine(customerId, apptIds, tx);
+    await lebendeBuchungenStornieren(tx, customerId, ueberzogen, userId);
+    const neu: number[] = [];
+    for (const appointmentId of await chronologischeReihenfolge([...new Set([...nettoNull, ...ueberzogen])], tx)) {
+      const { rebooked } = await rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, handelnder: { userId } });
+      if (rebooked) neu.push(appointmentId);
+    }
+    return neu;
+  });
+}
+
+/**
+ * Task #759 — Variant C: liefert pro Termin die tatsächlich gebuchten
+ * Pot-Anteile aus `budget_transactions` (`consumption`). Pot-Keys sind
+ * die echten BudgetType-Werte (`entlastungsbetrag_45b` /
+ * `umwandlung_45a` / `ersatzpflege_39_42a`) sowie `"private"` für den
+ * Selbstzahler-Overflow — exakt das, was `consumption-engine.ts` schreibt.
+ *
+ * Task #1011 — nur die AKTIVE (nicht stornierte) Konsumption zählt. Eine
+ * `consumption`-Zeile, auf die ein `reversal` zeigt (`reversedTransactionId`),
+ * ist netto null belegt und darf KEINEN Pot-Anteil mehr erzeugen — sonst
+ * entstünde eine Phantom-Folgerechnung für einen Topf, der real gar nicht
+ * (mehr) belegt ist (z.B. eine §45a-Buchung, die am selben Tag wieder
+ * storniert wurde). „Live"-Konsum = `consumption` minus die Zeilen, auf die
+ * ein `reversal` verweist — dieselbe Projekt-SSoT wie im Storage-Layer.
+ */
 export async function getBudgetSplitForAppointments(
   customerId: number,
   apptIds: number[],
@@ -937,7 +954,7 @@ export async function getBudgetSplitForAppointments(
 
   // SSoT-Loader liefert die Konsumptionen, die storno-bereinigten Reversal-Zeilen
   // (link- UND note-basiert, Task #1012) und die abgeleitete Menge der netto-null
-  // belegten Original-IDs — geteilt mit findNetZeroBilledAppointments.
+  // belegten Original-IDs — geteilt mit neuzubuchendeTermine.
   const { txns, reversalRows } = await loadAppointmentConsumptionTxns(customerId, apptIds);
 
   if (txns.length === 0) return new Map();

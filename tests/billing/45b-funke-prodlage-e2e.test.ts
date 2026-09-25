@@ -4,30 +4,29 @@
  *
  * ── Befund Prod ──────────────────────────────────────────────────────────
  * Die Juni-Termine 1502/1553/1673 tragen AKTIVE Verbrauchs-Buchungen
- * 4013/4014/4015 (77,40 + 77,40 + 39,40 = 194,20 €), gebucht am 23.09. gegen
- * Zuweisung 61 (Automatik-Übertrag 1.179 €, inzwischen gelöscht). Weder das
- * Verwerfen/Stornieren von RE-0695 noch das Erstellen von RE-0696 hat eine
- * Buchung erzeugt; RE-0696 = 194,20 € komplett an die Kasse — mit Startwert
- * 184,60 € genauso wie mit 262,00 €.
+ * 4013/4014/4015 (77,40 + 77,40 + 39,40 = 194,20 €) an Zuweisung 61
+ * (Automatik-Übertrag 1.179 €, inzwischen gelöscht). Der Topf ist überzogen
+ * (der Reader kappt „frei" bei 0). Die Rechnung übernahm die gespeicherten
+ * Buchungen ungeprüft: RE-0696 = 194,20 € komplett Kasse, mit jedem Startwert.
  *
- * ── Was dieser Test sichert ──────────────────────────────────────────────
- * P-1  Bestätigung: Die Rechnung übernimmt gespeicherte, aktive Buchungen.
- *      Neu gebucht wird nur, was netto null steht (`findNetZeroBilledAppointments`);
- *      eine an einer GELÖSCHTEN Zuweisung hängende Buchung ist nicht netto null.
- *      Der Startwert spielt deshalb keine Rolle. Das Verwerfen eines Entwurfs
- *      (`/discard-drafts`) löscht nur die Rechnung, die Buchungen bleiben.
- * P-2  Der Weg: Termine über die bestehende Funktion
- *      `rebookAppointmentConsumption({ force: true })` (Storno + Neubuchung
- *      gegen das Budget am Termindatum) neu buchen. Probelauf in einer
- *      zurückgerollten Transaktion zeigt Kasse/privat VORHER; die echte
- *      Ausführung und die danach erstellte Rechnung zeigen dasselbe.
+ * ── Regel (Alrik, 26.09.2026) ────────────────────────────────────────────
+ * Überlauf über dem verfügbaren Budget → privat, auch bei bereits gebuchten
+ * Terminen. Umgesetzt in `neuzubuchendeTermine` / `neubuchenFuerLauf`
+ * (`server/services/invoice-data.ts`).
+ *
+ * F-3  Startwert 262,00 → 184,60 Kasse / 9,60 privat; 184,60 → 107,20 / 87,00.
+ *      Vorschau (derselbe Entwurf wie `GET /api/billing/preview`), read-only
+ *      Probelauf-Werkzeug, Rechnung und Ledger zeigen dasselbe; die bezahlte
+ *      Juni-Rechnung bleibt unberührt.
+ * F-4  Kunde OHNE Privatzahlung, Topf überzogen: Abbruch, Ledger unverändert
+ *      (alles in einer Transaktion). Fachlich offen (rote Karte an Alrik).
  *
  * Termin-Daten der drei Termine sind im Test gewählt (09./16./23.06.); die
  * Beträge sind die aus Prod. Der bezahlte Termin (77,40 €) liegt am 02.06.
  */
 import { validSignatureDataUrl } from "../helpers/valid-signature";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { budgetAllocations, budgetTransactions } from "@shared/schema";
 import {
@@ -35,8 +34,7 @@ import {
   getAuthCookie, uniqueId, cleanupCustomer, runCleanup,
 } from "../test-utils";
 import { assertTestClockActive, clearTestClock, useTestClock } from "../helpers/test-clock";
-import { rebookAppointmentConsumption } from "../../server/storage/budget/km-rebook";
-import { chronologischeReihenfolge } from "../../server/storage/budget/abrechnungs-lauf";
+import { buildInvoiceDraft } from "../../server/services/invoice-calc";
 import { appendFileSync } from "node:fs";
 import { probeUeberlauf, zaehleUeberlauf } from "../../server/scripts/probe-ueberlauf-45b";
 import { readUnifiedBudgetAvailability } from "../../server/storage/budget/unified-reader";
@@ -72,10 +70,9 @@ async function generiere(customerId: number): Promise<any[]> {
   return invoices;
 }
 
-async function ledgerZahl(customerId: number): Promise<number> {
-  const [r] = await db.select({ n: sql<number>`count(*)::int` }).from(budgetTransactions)
-    .where(eq(budgetTransactions.customerId, customerId));
-  return r.n;
+async function ledgerZeilen(customerId: number): Promise<number> {
+  return (await db.select({ id: budgetTransactions.id }).from(budgetTransactions)
+    .where(eq(budgetTransactions.customerId, customerId))).length;
 }
 
 /** Lebende (nicht stornierte) Verbrauchs-Summen je Topf über die Termine. */
@@ -104,13 +101,13 @@ async function lebendJeTopf(client: any, customerId: number, apptIds: number[]):
  * bezahlte Juni-Rechnung, drei dokumentierte Termine, die (wie in Prod am
  * 23.09.) auf 61 buchen — dann die Zeilen 829/841/850 und das Löschen von 61.
  */
-async function prodLage(startwertCents: number): Promise<{ customerId: number; z61: number; offen: number[] }> {
+async function prodLage(startwertCents: number, acceptsPrivatePayment = true): Promise<{ customerId: number; z61: number; offen: number[]; bezahltTermin: number }> {
   const k = await apiPost<{ id: number }>("/api/admin/customers", {
     vorname: "ProdLage", nachname: `Funke-${uniqueId()}`, geburtsdatum: "1938-04-02",
     email: `funke-prod-${uniqueId()}@test.local`, strasse: "Musterweg", nr: "1",
     plz: "09111", stadt: "Chemnitz", telefon: "+4917600000089",
     pflegegrad: 3, pflegegradSeit: "2024-01-01",
-    billingType: "pflegekasse_gesetzlich", acceptsPrivatePayment: true,
+    billingType: "pflegekasse_gesetzlich", acceptsPrivatePayment,
   });
   expect(k.status, JSON.stringify(k.data)).toBe(201);
   const customerId = k.data.id;
@@ -167,7 +164,7 @@ async function prodLage(startwertCents: number): Promise<{ customerId: number; z
   }
 
   // Bezahlte Juni-Rechnung 77,40 €.
-  await termin(BEZAHLT, start);
+  const bezahltTermin = await termin(BEZAHLT, start);
   await leistungsnachweis();
   const bezahlt = await generiere(customerId);
   expect(bezahlt.map(i => i.netAmountCents), "bezahlte Juni-Rechnung").toEqual([77_40]);
@@ -201,7 +198,7 @@ async function prodLage(startwertCents: number): Promise<{ customerId: number; z
   } as never);
 
   await leistungsnachweis();
-  return { customerId, z61: z61.id, offen };
+  return { customerId, z61: z61.id, offen, bezahltTermin };
 }
 
 beforeAll(async () => {
@@ -227,13 +224,18 @@ afterAll(async () => {
 });
 
 describe("Funke (89), Prod-Lage: aktive Buchungen an gelöschter Zuweisung 61", () => {
+  // [Startwert, Ledger Kasse, Ledger privat, Rechnung Kasse, Rechnung privat]
   it.each([
-    [262_00, 184_60, 9_60],
-    [184_60, 107_20, 87_00],
+    [262_00, 184_60, 9_60, 184_60, 9_60],
+    // Der Termin 16.06. teilt sich auf beide Töpfe; die Positions-Aufteilung
+    // rundet 1 Cent zur Kasse (bestehend, FINDING P2). Festgeschrieben, damit
+    // jede Änderung auffällt.
+    [184_60, 107_20, 87_00, 107_21, 86_99],
   ])(
     "F-3 – Startwert %i: gespeicherte Buchungen über dem verfügbaren Budget gehen in den Privatanteil (Kasse %i / privat %i) — Vorschau = Rechnung",
-    async (startwert, erwKasse, erwPrivat) => {
-      const { customerId, offen } = await prodLage(startwert);
+    async (startwert, erwKasse, erwPrivat, erwKasseRechnung, erwPrivatRechnung) => {
+      const { customerId, offen, bezahltTermin } = await prodLage(startwert);
+      const bezahltVorher = await lebendJeTopf(db, customerId, [bezahltTermin]);
 
       for (const d of [`${J}-06-09`, `${J}-06-16`, `${J}-06-23`, `${J}-06-30`]) {
         const r = await readUnifiedBudgetAvailability(customerId, d);
@@ -247,6 +249,11 @@ describe("Funke (89), Prod-Lage: aktive Buchungen an gelöschter Zuweisung 61", 
       expect(vorschau.data.splitInvoices, "Vorschau kündigt Aufteilung an").toBe(true);
       expect(vorschau.data.splitPots, "Vorschau zeigt Kasse und privat").toEqual(["entlastungsbetrag_45b", "private"]);
       expect(vorschau.data.totalCents).toBe(SUMME);
+      // Beträge je Topf: die Route liefert sie nicht aus (FINDING, Midlayer) —
+      // geprüft am selben Entwurf, aus dem sie `splitPots` baut.
+      const entwurf = await buildInvoiceDraft({ customerId, billingMonth: 6, billingYear: J, mode: "preview" });
+      const jeTopf = Object.fromEntries([...entwurf.potItems].map(([pot, items]) => [pot, items.reduce((n, i) => n + i.totalCents, 0)]));
+      expect(jeTopf, "Vorschau-Entwurf: Beträge je Topf").toEqual({ entlastungsbetrag_45b: erwKasseRechnung, private: erwPrivatRechnung });
       expect(await lebendJeTopf(db, customerId, offen), "Vorschau schreibt nichts").toMatchObject({ kasse: SUMME, privat: 0 });
 
       // Read-only-Probelauf für Prod (Werkzeug) = echtes Erstellen (unten).
@@ -262,13 +269,19 @@ describe("Funke (89), Prod-Lage: aktive Buchungen an gelöschter Zuweisung 61", 
       const privat = neu.filter(i => i.billingType === "selbstzahler");
       // Ledger = gebuchter Anspruch (auf den Cent).
       expect(await lebendJeTopf(db, customerId, offen), "Ledger nach dem Erstellen").toMatchObject({ kasse: erwKasse, privat: erwPrivat });
-      // Rechnung: bei 262,00 € auf den Cent. Bei 184,60 € teilt sich der Termin
-      // 16.06. auf beide Töpfe, und die Positions-Aufteilung rundet 1 Cent zur
-      // Kasse (107,21 / 86,99) — bestehend, auch ohne diesen Fix (FINDING im PR).
-      const tol = startwert === 262_00 ? 0 : 1;
-      expect(Math.abs(kasse.reduce((n, i) => n + i.netAmountCents, 0) - erwKasse), "Kasse").toBeLessThanOrEqual(tol);
-      expect(Math.abs(privat.reduce((n, i) => n + i.netAmountCents, 0) - erwPrivat), "privat").toBeLessThanOrEqual(tol);
+      expect(kasse.reduce((n, i) => n + i.netAmountCents, 0), "Rechnung Kasse").toBe(erwKasseRechnung);
+      expect(privat.reduce((n, i) => n + i.netAmountCents, 0), "Rechnung privat").toBe(erwPrivatRechnung);
       expect(privat.reduce((n, i) => n + i.vatAmountCents, 0), "privat steuerfrei").toBe(0);
       expect(neu.reduce((n, i) => n + i.grossAmountCents, 0), "gesamt").toBe(SUMME);
+      expect(await lebendJeTopf(db, customerId, [bezahltTermin]), "bezahlte Juni-Rechnung unberührt").toEqual(bezahltVorher);
     }, 300_000);
+
+  it("F-4 – Kunde ohne Privatzahlung, Topf überzogen: Abbruch, Ledger unverändert (fachlich offen)", async () => {
+    const { customerId } = await prodLage(262_00, false);
+    const vorher = await ledgerZeilen(customerId);
+    const gen = await apiPost<any>("/api/billing/generate", { customerId, billingMonth: 6, billingYear: J });
+    diag("F-4", gen.status, gen.data);
+    expect(gen.status, JSON.stringify(gen.data)).toBe(400);
+    expect(await ledgerZeilen(customerId), "nichts storniert, nichts gebucht").toBe(vorher);
+  }, 300_000);
 });
