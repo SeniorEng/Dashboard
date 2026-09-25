@@ -186,10 +186,31 @@ async function checkReversalChains(
 }
 
 /**
- * FIFO-Breakdown muss zu den Unified-Totals summieren (Σ pots === Totals). Das
- * ist heute konstruktiv erfüllt (der Breakdown leitet seine Totals aus dem
- * Unified-Reader ab) — der Check bleibt als billiger Regressions-Stolperdraht
- * gegen künftige Änderungen am Breakdown-Splitting bestehen.
+ * FIFO-Breakdown muss zu den Unified-Totals summieren (Σ pots === Totals).
+ *
+ * ── ACHTUNG: dieser Check KANN nicht fehlschlagen ──────────────────────
+ * Die frühere Beschreibung nannte ihn einen „billigen Regressions-
+ * Stolperdraht gegen künftige Änderungen am Breakdown-Splitting". Das ist
+ * gemessen falsch und wurde korrigiert (Gate 2 zu #190, S5), weil eine
+ * Beschreibung, die eine Absicherung behauptet, schlimmer ist als keine:
+ * sie wird als Beleg gelesen.
+ *
+ * Die vier Töpfe sind eine ABGELEITETE Aufteilung, keine zwei Messungen:
+ *
+ *     allocatedCur = A − allocatedCarry      consumedCur = C − consumedCarry
+ *     holdsCur     = H − holdsCarry          freeCur     = V − freeCarry
+ *
+ * Damit sind alle vier Summen Identitäten — `Σ pots === Totals` gilt für
+ * JEDE beliebige Aufteilung, auch für eine kaputte. Der Beleg ist dieser PR:
+ * `consumedCur` stand bei **−100,00 €** und der ausgewiesene Rest des
+ * laufenden Jahres bei 662,00 statt 562,00 €, während dieser Check grün
+ * blieb — er musste grün bleiben.
+ *
+ * Er bleibt vorerst stehen, weil er die POPULATION erhebt und ein Entfernen
+ * mehr ist als eine Zeile. Der Umbau auf eine Prüfung mit Aussage
+ * (Plausibilität der einzelnen Töpfe statt ihrer Summe) hat ein eigenes
+ * Ticket: `6hcVfPxVrCWVC8wp`. Bis dahin gilt: **wer hier grün sieht, hat
+ * nichts erfahren.**
  */
 async function checkFifoUnifiedEquality(
   exec: DbOrTx,

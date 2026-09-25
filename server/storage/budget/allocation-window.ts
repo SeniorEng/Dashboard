@@ -38,7 +38,7 @@
  * genau einen Aufrufer.
  */
 import { and, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
-import { budgetAllocations } from "@shared/schema";
+import { budgetAllocations, budgetTransactions } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
 export interface AllocationWindowRow {
@@ -224,6 +224,69 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
     gt(budgetAllocations.validFrom, reset.cutoffDate),
     gt(budgetAllocations.year, reset.year),
   );
+}
+
+/**
+ * Zaehlt diese Verbrauchs-Buchung zum Stichtag mit?
+ *
+ * Gilt fuer Buchungen, die an eine NICHT ausgeschlossene Allocation verlinkt
+ * sind — also genau den Fall, den die FIFO-Aufschluesselung pro Uebertrags-
+ * Zeile rechnet.
+ *
+ * ── Warum es diese Funktion gibt ────────────────────────────────────────
+ * `getExcluded45bConsumption` schneidet den Gesamt-Verbrauch mit drei Gliedern:
+ *   (a) `allocationId IN excludedSpecialAllocationIds`
+ *   (b) `transactionDate < resetAnchor.cutoffDate`
+ *   (c) `allocationId IS NULL AND transactionDate < accrualFloorDate`
+ *
+ * Die Pro-Allocation-Rechnung in `fifo-breakdown.ts` hatte **keines** davon —
+ * nicht einmal `transactionDate <= asOfDate`. Gemessen (24.09.2026): ein
+ * Verbrauch von 100,00 EUR vor dem Stichtag fiel aus dem Gesamt-Verbrauch
+ * heraus, blieb aber in der Uebertrags-Restrechnung stehen. Die Differenz
+ * `consumedCur = C − consumedCarry` wurde dadurch **−100,00 EUR**, und der
+ * ausgewiesene Rest des laufenden Jahres stieg auf 662,00 statt 562,00 EUR —
+ * also in die Richtung, in der gebucht wird.
+ *
+ * ⚠ Ein KUNDENWEITER Aufrufer bekommt nur (b) — siehe den Block unten.
+ *
+ * ── Warum nur zwei der drei Glieder — und WO diese Begruendung gilt ─────
+ * Fuer einen Aufrufer, der bereits auf eine Menge von Allocation-IDs
+ * eingeschraenkt hat (`inArray(allocationId, …)`), gilt:
+ *
+ * (a) trifft nicht zu: die Zeilen, fuer die diese Bedingung gilt, sind gerade
+ *     die NICHT ausgeschlossenen — `notDisplacedByResetWhere` hat sie
+ *     durchgelassen.
+ * (c) trifft nicht zu: es gilt ausdruecklich nur fuer `allocationId IS NULL`,
+ *     und dort ist die ID gesetzt.
+ *
+ * Das steht hier und nicht als Kommentar an der Aufrufstelle, weil sonst die
+ * naechste Person die fehlenden Glieder fuer ein Versehen haelt und sie
+ * „ergaenzt".
+ *
+ * ⚠ **FUER EINEN KUNDENWEITEN AUFRUFER GILT DIESE BEGRUENDUNG NICHT.**
+ * Beide Saetze haengen an der Einschraenkung auf Allocation-IDs. Wer diese
+ * Funktion ohne sie ruft, bekommt den as-of- und den Reset-Schnitt, aber
+ * WEDER die Ausschlussliste NOCH den `accrualFloorDate`-Boden — und beide
+ * fehlen dann wirklich.
+ *
+ * Genau so steht es heute in `classifyConsumedByState`
+ * (`fifo-breakdown.ts`): kundenweit, ohne `inArray`, `allocationId IS NULL`
+ * ausdruecklich eingeschlossen. Gemessen (Gate 2 zu #190, S-1) entsteht dort
+ * weiterhin ein negatives `consumedOtherCents` — bei einem dokumentierten
+ * Termin gegen einen zum Stichtag abgelaufenen Uebertrag ebenso wie bei einem
+ * Vorjahres-Termin auf dem NULL-Leg.
+ *
+ * Das ist **kein Regress von #190** (ohne Startwert ist der Anker `null` und
+ * die Bedingung zeichengleich mit der frueheren), aber es ist auch keine
+ * Deckung. Ticket: `6hcfP7xVj5R3Pg6p`.
+ */
+export function countedConsumptionWhere(
+  reset: ResetAnchor | null,
+  asOfDate: string,
+): SQL | undefined {
+  const bis = lte(budgetTransactions.transactionDate, asOfDate);
+  if (!reset) return bis;
+  return and(bis, gte(budgetTransactions.transactionDate, reset.cutoffDate));
 }
 
 /**
