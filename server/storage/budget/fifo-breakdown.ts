@@ -24,6 +24,7 @@ import {
   allocationValidAtWhere,
   notDisplacedByResetWhere,
   countedConsumptionWhere,
+  type ResetAnchor,
   RESET_DISPLACES_ALL_SOURCES_DEFAULT,
 } from "./allocation-window";
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
@@ -209,7 +210,7 @@ export async function readBudget45bFifoBreakdown(
     loadDocumentedAppointmentIds(customerId),
   ]);
 
-  const stateByPot = await classifyConsumedByState(customerId, asOfDate, new Set(carryoverIds), billedSet, documentedSet);
+  const stateByPot = await classifyConsumedByState(customerId, asOfDate, verbrauchsAnker, new Set(carryoverIds), billedSet, documentedSet);
 
   const carryStates = splitConsumed(consumedCarry, stateByPot.carryover);
   const curStates = splitConsumed(consumedCur, stateByPot.current);
@@ -285,6 +286,7 @@ async function loadDocumentedAppointmentIds(customerId: number): Promise<Set<num
 async function classifyConsumedByState(
   customerId: number,
   asOfDate: string,
+  verbrauchsAnker: ResetAnchor | null,
   carryoverIdSet: Set<number>,
   billedSet: Set<number>,
   documentedSet: Set<number>,
@@ -301,7 +303,30 @@ async function classifyConsumedByState(
       eq(budgetTransactions.customerId, customerId),
       eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
       sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off', 'reversal')`,
-      lte(budgetTransactions.transactionDate, asOfDate),
+      /**
+       * DERSELBE Schnitt wie oben (Gate 2 zu #190, B1).
+       *
+       * Hier stand nur `lte(transactionDate, asOfDate)` — die DRITTE Fassung
+       * von „zaehlt diese Buchung?", 140 Zeilen unter der zweiten, ohne
+       * Reset-Schnitt. Vor diesem PR waren beide Seiten UNgeschnitten und
+       * stimmten ueberein; der Fix schnitt `consumedCarry` und liess die
+       * Zustands-Aufteilung stehen.
+       *
+       * Gemessen (dokumentierter Termin 100,00 EUR am 20.01., Startwert Maerz,
+       * Stichtag 15.05.):
+       *
+       *     vorher  verbr 100,00  dok 100,00  sonst    0,00  rest 400,00
+       *     Fix     verbr   0,00  dok 100,00  sonst −100,00  rest 500,00
+       *
+       * `other = consumedTotal − billed − documented` wird negativ, und der
+       * Client verschluckt Negative (`value <= 0 → null`), rendert aber die
+       * positive `documented`-Zeile. Der Fehler wanderte damit aus dem
+       * unsichtbaren in den sichtbaren Topf — schlimmer als vorher.
+       *
+       * Glied (b) des Readers ist NICHT allocation-spezifisch, gilt also fuer
+       * beide Toepfe. Deshalb dieselbe Funktion, nicht eine vierte Fassung.
+       */
+      countedConsumptionWhere(verbrauchsAnker, asOfDate),
     ));
 
   const result = {

@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import {
-  budgetAllocations, budgetTransactions, customerBudgetTypeSettings, customerCareLevelHistory,
+  appointments, budgetAllocations, budgetTransactions,
+  customerBudgetTypeSettings, customerCareLevelHistory,
 } from "@shared/schema";
 import { createTestCustomer, cleanupCustomer, getAuthCookie } from "../test-utils";
+import { assertTestClockActive, clearTestClock, useTestClock } from "../helpers/test-clock";
 import { readBudget45bFifoBreakdown } from "../../server/storage/budget/fifo-breakdown";
 import { readUnifiedBudgetAvailability } from "../../server/storage/budget/unified-reader";
 
@@ -79,6 +81,29 @@ async function kundeMitLage(): Promise<{ id: number; uebertragId: number }> {
 }
 
 describe("§45b-FIFO — der Stichtags-Schnitt gilt für beide Töpfe", () => {
+  /**
+   * Die Uhr wird GESTELLT, statt sich auf das Kalenderjahr zu verlassen
+   * (Gate 2 zu #190, S3).
+   *
+   * `J = 2026` allein trug nicht: `calculateAllocated45b` erdet den
+   * Pflegegrad-Anker über `floorAutoAnchor45bToCurrentYear(iso, curYear)` auf
+   * das ECHTE Kalenderjahr. Gemessen durch Jahres-Verschiebung (`J = 2025` bei
+   * heutigem 2026 = derselbe Abstand wie `J = 2026` am 01.01.2027): **`FS-3`
+   * wird rot** — genau der Test, der gegen „beide Seiten liefern dasselbe
+   * Falsche" gebaut ist.
+   *
+   * Besonders unglücklich, weil die Begründung dieses PRs „vor dem 01.01.2027
+   * Pflicht" lautet: der Regressionsschutz wäre zum selben Datum verfallen.
+   *
+   * Der kanonische Weg steht in `tests/helpers/billing-month.ts`: Stichtag über
+   * `useTestClock` setzen, Jahreszahlen als Literale stehen lassen.
+   */
+  beforeEach(() => {
+    useTestClock(`${J}-05-15`);
+    assertTestClockActive();
+  });
+  afterEach(() => clearTestClock());
+
   it("FS-1 – kein Topf meldet negativen Verbrauch", async () => {
     const { id } = await kundeMitLage();
     try {
@@ -195,6 +220,134 @@ describe("§45b-FIFO — der Stichtags-Schnitt gilt für beide Töpfe", () => {
         carry.consumedCents,
         "eine Buchung nach dem Stichtag belastet den Topf rückwirkend",
       ).toBe(0);
+      expect(carry.remainingCents).toBe(UEBERTRAG);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
+  it("FS-6 – die Zustands-Aufteilung sieht dieselbe Menge wie der Verbrauch", async () => {
+    /**
+     * Der Gate-2-Blocker B1. `classifyConsumedByState` trug die **dritte**
+     * Fassung von „zählt diese Buchung?" — 140 Zeilen unter der zweiten, nur
+     * mit `lte(transactionDate, asOfDate)`, ohne Reset-Schnitt.
+     *
+     * Vor diesem PR waren beide Seiten UNgeschnitten und stimmten überein. Der
+     * erste Wurf des Fixes schnitt `consumedCarry` und liess die Aufteilung
+     * stehen — gemessen an einem dokumentierten Termin über 100,00 € vor dem
+     * Cutoff:
+     *
+     *     vorher (main)  verbr 100,00  dok 100,00  sonst    0,00  rest 400,00
+     *     erster Wurf    verbr   0,00  dok 100,00  sonst −100,00  rest 500,00
+     *     jetzt          verbr   0,00  dok   0,00  sonst    0,00  rest 500,00
+     *
+     * `other = consumedTotal − billed − documented` wurde negativ. Der Client
+     * verschluckt Negative (`budget-45b-fifo-breakdown.tsx`: `value <= 0 →
+     * null`), rendert aber die positive `documented`-Zeile — der Fehler wanderte
+     * aus dem unsichtbaren in den SICHTBAREN Topf. Schlimmer als vorher.
+     *
+     * Deshalb prüft dieser Test alle drei Teilbeträge, nicht nur `consumedCents`.
+     */
+    const { id, uebertragId } = await kundeMitLage();
+    try {
+      const [termin] = await db.insert(appointments).values({
+        customerId: id, date: `${J}-01-20`, scheduledStart: "09:00", durationPromised: 60,
+        status: "completed", signatureData: "data:image/png;base64,AAA",
+        appointmentType: "Betreuung",
+      } as never).returning({ id: appointments.id });
+
+      await db.insert(budgetTransactions).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "consumption",
+        amountCents: -100_00, transactionDate: `${J}-01-20`,
+        allocationId: uebertragId, appointmentId: termin.id,
+        description: "FS6-dokumentiert-vor-cutoff",
+      } as never);
+
+      const fifo = await readBudget45bFifoBreakdown(id, `${J}-05-15`);
+      const carry = fifo.pots.find(p => p.potType === "carryover")!;
+
+      expect(
+        carry.consumedDocumentedCents,
+        "die Zustands-Aufteilung zählt eine Buchung, die der Verbrauch nicht zählt",
+      ).toBe(0);
+      expect(
+        carry.consumedOtherCents,
+        "`other` ist negativ — der Client verschluckt das und zeigt trotzdem "
+        + "eine Dokumentiert-Zeile",
+      ).toBe(0);
+      expect(
+        carry.consumedBilledCents + carry.consumedDocumentedCents + carry.consumedOtherCents,
+        "die drei Teilbeträge ergeben nicht den Gesamt-Verbrauch des Topfes",
+      ).toBe(carry.consumedCents);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
+
+  it("FS-7 – ein Storno NACH dem Stichtag zählt nicht mit", async () => {
+    /**
+     * Der `reversal`-Zweig war ungeprüft (Gate 2 zu #190, S4): der
+     * Mutations-Gegencheck kippte FS-1..FS-3 über den `consumption`-Zweig, nie
+     * über diesen. Ein Storno in der Zukunft hätte den Übertrags-Topf in jeder
+     * Stichtagssicht künstlich aufgefüllt.
+     *
+     * Gerechnet: Verbrauch 80,00 € am 10.04. (nach dem Cutoff, zählt), Storno
+     * am 20.06. (nach dem Stichtag 15.05., zählt NICHT). Der Topf trägt also
+     * weiter 80,00 € Verbrauch.
+     */
+    const { id, uebertragId } = await kundeMitLage();
+    try {
+      await db.insert(budgetTransactions).values([
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "consumption",
+          amountCents: -80_00, transactionDate: `${J}-04-10`,
+          allocationId: uebertragId, description: "FS7-verbrauch",
+        },
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "reversal",
+          amountCents: 80_00, transactionDate: `${J}-06-20`,
+          allocationId: uebertragId, description: "FS7-storno-nach-stichtag",
+        },
+      ] as never);
+
+      const fifo = await readBudget45bFifoBreakdown(id, `${J}-05-15`);
+      const carry = fifo.pots.find(p => p.potType === "carryover")!;
+      expect(
+        carry.consumedCents,
+        "ein Storno nach dem Stichtag hat den Verbrauch rückwirkend aufgehoben",
+      ).toBe(80_00);
+      expect(carry.remainingCents).toBe(UEBERTRAG - 80_00);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
+
+  it("FS-8 – ein Storno VOR dem Reset-Cutoff zählt nicht mit", async () => {
+    /**
+     * Die andere Hälfte von S4. Verbrauch 60,00 € am 20.01. und Storno am
+     * 25.01. — beide vor dem Cutoff 01.03., beide geschnitten. Der Topf ist
+     * unberührt.
+     *
+     * Ohne den Schnitt am `reversal`-Zweig wäre der Verbrauch geschnitten und
+     * das Storno nicht: der Topf hätte 60,00 € MEHR gezeigt als er hat.
+     */
+    const { id, uebertragId } = await kundeMitLage();
+    try {
+      await db.insert(budgetTransactions).values([
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "consumption",
+          amountCents: -60_00, transactionDate: `${J}-01-20`,
+          allocationId: uebertragId, description: "FS8-verbrauch-vor-reset",
+        },
+        {
+          customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "reversal",
+          amountCents: 60_00, transactionDate: `${J}-01-25`,
+          allocationId: uebertragId, description: "FS8-storno-vor-reset",
+        },
+      ] as never);
+
+      const fifo = await readBudget45bFifoBreakdown(id, `${J}-05-15`);
+      const carry = fifo.pots.find(p => p.potType === "carryover")!;
+      expect(carry.consumedCents, "der geschnittene Bereich wirkt doch").toBe(0);
       expect(carry.remainingCents).toBe(UEBERTRAG);
     } finally {
       await cleanupCustomer(id);
