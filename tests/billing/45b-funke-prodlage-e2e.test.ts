@@ -18,6 +18,8 @@
  *      Vorschau (derselbe Entwurf wie `GET /api/billing/preview`), read-only
  *      Probelauf-Werkzeug, Rechnung und Ledger zeigen dasselbe; die bezahlte
  *      Juni-Rechnung bleibt unberührt.
+ * F-5  Neubuchung eines bereits abgerechneten Termins bricht ab, Ledger unverändert.
+ * F-6  §45a überzogen löst (noch) KEINE Neubuchung aus — nur §45b bis RÜ-4.
  * F-4  Kunde OHNE Privatzahlung, Topf überzogen: Abbruch, Ledger unverändert
  *      (alles in einer Transaktion). Fachlich offen (rote Karte an Alrik).
  *
@@ -35,7 +37,7 @@ import {
 } from "../test-utils";
 import { assertTestClockActive, clearTestClock, useTestClock } from "../helpers/test-clock";
 import { buildInvoiceDraft } from "../../server/services/invoice-calc";
-import { neubuchenFuerLauf } from "../../server/services/invoice-data";
+import { neubuchenFuerLauf, neuzubuchendeTermine } from "../../server/services/invoice-data";
 import { appendFileSync } from "node:fs";
 import { probeUeberlauf, zaehleUeberlauf } from "../../server/scripts/probe-ueberlauf-45b";
 import { readUnifiedBudgetAvailability } from "../../server/storage/budget/unified-reader";
@@ -288,5 +290,51 @@ describe("Funke (89), Prod-Lage: aktive Buchungen an gelöschter Zuweisung 61", 
     // Neubuchung sind EINE Transaktion — kein halb stornierter Stand.
     await expect(neubuchenFuerLauf(customerId, offen, auth.user.id)).rejects.toThrow(/Re-Abrechnung nicht möglich/);
     expect(await ledgerZeilen(customerId), "Neubuchung rollt vollständig zurück").toBe(vorher);
+  }, 300_000);
+
+  it("F-5 – Neubuchung mit einem bereits abgerechneten Termin bricht ab, Ledger unverändert", async () => {
+    const { customerId, offen, bezahltTermin } = await prodLage(262_00);
+    const vorher = await ledgerZeilen(customerId);
+    await expect(neubuchenFuerLauf(customerId, [...offen, bezahltTermin], auth.user.id)).rejects.toThrow();
+    expect(await ledgerZeilen(customerId), "nichts storniert, nichts gebucht").toBe(vorher);
+  }, 300_000);
+
+  it("F-6 – überzogener §45a-Topf löst keine Neubuchung aus (nur §45b bis RÜ-4)", async () => {
+    const k = await apiPost<{ id: number }>("/api/admin/customers", {
+      vorname: "Ueberlauf", nachname: `A45-${uniqueId()}`, geburtsdatum: "1938-04-02",
+      email: `ueberlauf-45a-${uniqueId()}@test.local`, strasse: "Musterweg", nr: "1",
+      plz: "09111", stadt: "Chemnitz", telefon: "+4917600000045",
+      pflegegrad: 3, pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich", acceptsPrivatePayment: true,
+    });
+    expect(k.status, JSON.stringify(k.data)).toBe(201);
+    const customerId = k.data.id;
+    cleanup.customers.push(customerId);
+    expect((await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: auth.user.id, backupEmployeeId: null, backupEmployeeId2: null,
+    })).status).toBe(200);
+    const settings = (limit: number) => ({ settings: [
+      { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      { budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: limit, yearlyLimitCents: null, validFrom: null, validTo: null },
+      { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+    ] });
+    expect((await apiPut(`/api/budget/${customerId}/type-settings`, settings(50_00))).status).toBe(200);
+    const start = `${String(8 + 3 * laufNr++).padStart(2, "0")}:00`;
+    const r = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+      customerId, date: `${J}-06-10`, scheduledStart: start, notes: "A45", assignedEmployeeId: auth.user.id,
+      services: [{ serviceId: hwId, durationMinutes: 60 }],
+    });
+    expect(r.status, JSON.stringify(r.data)).toBe(201);
+    cleanup.appts.push(r.data.id);
+    expect((await apiPost(`/api/appointments/${r.data.id}/document`, {
+      actualStart: start, travelOriginType: "home", travelKilometers: 0, customerKilometers: 0,
+      services: [{ serviceId: hwId, actualDurationMinutes: 60, details: "A45" }],
+    })).status).toBe(200);
+    // Anspruch nachträglich gesenkt → §45a im Juni überzogen.
+    expect((await apiPut(`/api/budget/${customerId}/type-settings`, settings(10_00))).status).toBe(200);
+    const t = (await readUnifiedBudgetAvailability(customerId, `${J}-06-10`)).pots.umwandlung_45a;
+    diag("F-6", t);
+    expect(t.allocatedCents - t.consumedNetCents, "Vorbedingung: §45a überzogen").toBeLessThan(0);
+    expect((await neuzubuchendeTermine(customerId, [r.data.id])).ueberzogen).toEqual([]);
   }, 300_000);
 });

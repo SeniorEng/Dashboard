@@ -611,12 +611,13 @@ doppelt belegt (Doppel-Spend, GoBD-/Finanz-Drift).
 ### Lösung (Trigger: Generate, nicht Preview)
 
 In `generateInvoiceCore` (`server/services/invoice-calc.ts`) werden VOR dem
-Bauen des finalen Drafts die netto-null-Termine ermittelt
-(`findNetZeroBilledAppointments`, SSoT-Detektion via
+Bauen des finalen Drafts die neu zu buchenden Termine ermittelt
+(`neuzubuchendeTermine`, SSoT-Detektion via
 `loadAppointmentConsumptionTxns` + `computeNetZeroApptIds` in
-`invoice-data.ts`). Für diese Termine bucht
-`rebookNetZeroAppointmentConsumption`
-(`server/storage/budget/rebook-storage.ts`) frische GoBD-append-only
+`invoice-data.ts`): netto-null-Termine und — seit #197 — lebend gebuchte
+Termine in einem überzogenen §45b-Topf (deren Buchungen werden zuerst
+storniert). Für diese Termine bucht `neubuchenFuerLauf` (`invoice-data.ts`,
+eine Transaktion unter der Abrechnungs-Sperre) frische GoBD-append-only
 `consumption`-Zeilen über `createCascadeConsumption` — gegen die heute
 verfügbaren Töpfe in derselben Standard-Priorität §45b → §45a → §39/§42a,
 Rest → privater uncapped-Topf. Danach wird der Draft NEU gebaut, sodass der

@@ -823,7 +823,8 @@ function computeNetZeroApptIds(
  *   · `nettoNull`   — alle Buchungen storniert (Task #1014, unverändert).
  *   · `ueberzogen`  — NEU (Funke, Kunde 89, 26.09.2026; Regel Alrik:
  *     „Überlauf über dem verfügbaren Budget → privat, auch bei bereits
- *     gebuchten Terminen"). Termine mit LEBENDER Buchung in einem Topf, der an
+ *     gebuchten Terminen"). Termine mit LEBENDER Buchung in einem Topf (vorerst
+ *     nur §45b, `UEBERLAUF_TOEPFE`), der an
  *     einem ihrer Buchungstage überzogen ist (zugewiesen − Verbrauch < 0 im Reader,
  *     Stichtag = Buchungstag = Leistungstag). Dann werden ALLE lebend
  *     gebuchten Termine dieses Topfs im Lauf neu gebucht — chronologisch,
@@ -838,6 +839,16 @@ function computeNetZeroApptIds(
  * abgerechnete (auch bezahlte) Termine werden nie angefasst (GoBD); sie
  * zählen nur als Verbrauch, der den Topf belegt.
  */
+/**
+ * Töpfe, für die der Überzug eine Neubuchung auslöst. NUR §45b, bis Alrik
+ * RÜ-4 entschieden hat (Gate 2 zu #197, B-4): §45a rechnet seinen Anspruch
+ * ohne `monthlyLimitCents` mit dem HEUTIGEN Pflegegrad
+ * (`calculateAllocated45a`) — nach einer Herabstufung erschiene ein früherer
+ * Monat überzogen und würde fälschlich nach privat umgebucht. §39/§42a ist
+ * nicht geprüft.
+ */
+const UEBERLAUF_TOEPFE: ReadonlySet<string> = new Set(["entlastungsbetrag_45b"]);
+
 export async function neuzubuchendeTermine(
   customerId: number,
   apptIds: number[],
@@ -858,7 +869,7 @@ export async function neuzubuchendeTermine(
   const ueberzogeneToepfe = new Set<string>();
   const cache = new Map<string, Awaited<ReturnType<typeof readUnifiedBudgetAvailability>>>();
   for (const t of lebend) {
-    if (ueberzogeneToepfe.has(t.budgetType)) continue;
+    if (!UEBERLAUF_TOEPFE.has(t.budgetType) || ueberzogeneToepfe.has(t.budgetType)) continue;
     const datum = datumJeBuchung.get(t.id);
     if (!datum) continue;
     let r = cache.get(datum);

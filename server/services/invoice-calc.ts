@@ -605,6 +605,23 @@ export async function generateInvoiceCore(
   // Pfad. Verhindert Drift zwischen „Vorschau im Dialog" und finaler Rechnung.
   let draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo });
 
+  // Task #1883 — Guard gegen stille Unterabrechnung. Dokumentierte Termine, die
+  // mangels Kundenunterschrift (nur `employee_signed`) ODER mangels Leistungsnachweis
+  // NICHT auf die Rechnung kommen, dürfen nicht STILL fallen. Ohne explizites
+  // `confirmPartial` bricht die Erstellung ab und meldet die betroffenen Termine
+  // (Datum + Grund). `already_billed` (bewusst/bekannt) triggert NICHT. Eine SSoT:
+  // dieselbe `excludedAppointments` wie Preview/`buildInvoiceDraft` — kein zweiter
+  // Ausschluss-Begriff, insb. NICHT `isPartiallyDocumented` (das zählt
+  // `employee_signed` als covered und verfehlte den 669-€-Fall).
+  const silentlyDroppedAppointments = draft.excludedAppointments.filter(
+    (e) => e.reason !== "already_billed",
+  );
+  if (silentlyDroppedAppointments.length > 0 && !confirmPartial) {
+    throw new PartialBillingConfirmationRequiredError(silentlyDroppedAppointments);
+  }
+  // Steht VOR der Neubuchung (Gate 2 zu #197, S-2): ein abgebrochener Lauf
+  // darf keine Buchungen umbuchen. Die Ausschlüsse hängen nicht am Budget.
+
   // Task #1014: Netto-null-belegte Termine (alle Konsum-Buchungen storniert,
   // z.B. nach Rechnungs-Storno) werden bei der ERSTELLUNG — nicht in der
   // read-only Preview — frisch gebucht (GoBD-append-only Cascade). Sonst weist
@@ -621,20 +638,6 @@ export async function generateInvoiceCore(
   const neuGebucht = await neubuchenFuerLauf(customerId, draft.apptIds, ctx.userId);
   if (neuGebucht.length > 0) {
     draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo });
-  }
-  // Task #1883 — Guard gegen stille Unterabrechnung. Dokumentierte Termine, die
-  // mangels Kundenunterschrift (nur `employee_signed`) ODER mangels Leistungsnachweis
-  // NICHT auf die Rechnung kommen, dürfen nicht STILL fallen. Ohne explizites
-  // `confirmPartial` bricht die Erstellung ab und meldet die betroffenen Termine
-  // (Datum + Grund). `already_billed` (bewusst/bekannt) triggert NICHT. Eine SSoT:
-  // dieselbe `excludedAppointments` wie Preview/`buildInvoiceDraft` — kein zweiter
-  // Ausschluss-Begriff, insb. NICHT `isPartiallyDocumented` (das zählt
-  // `employee_signed` als covered und verfehlte den 669-€-Fall).
-  const silentlyDroppedAppointments = draft.excludedAppointments.filter(
-    (e) => e.reason !== "already_billed",
-  );
-  if (silentlyDroppedAppointments.length > 0 && !confirmPartial) {
-    throw new PartialBillingConfirmationRequiredError(silentlyDroppedAppointments);
   }
 
   const {

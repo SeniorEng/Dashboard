@@ -27,7 +27,7 @@
  */
 import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
-import { appointments, budgetTransactions } from "@shared/schema";
+import { appointments, budgetTransactions, customers } from "@shared/schema";
 import { neuzubuchendeTermine } from "../services/invoice-data";
 import { readUnifiedBudgetAvailability } from "../storage/budget/unified-reader";
 import { activeInvoicedAppointmentIdsSqlRaw } from "../lib/appointment-invoiced";
@@ -105,15 +105,18 @@ export async function probeUeberlauf(customerId: number, jahr: number, monat: nu
 }
 
 /** Alle Kunden/Monate eines Jahres, bei denen der Fix die nächste Rechnung ändert. */
-export async function zaehleUeberlauf(jahr: number): Promise<{ geprueft: number; treffer: Array<{ customerId: number; monat: number; probe: UeberlaufProbe }> }> {
+export async function zaehleUeberlauf(jahr: number): Promise<{ geprueft: number; treffer: Array<{ customerId: number; monat: number; privatErlaubt: boolean; probe: UeberlaufProbe }> }> {
   // Alle Töpfe: die Auswahl erfasst auch §45a/§39 (Beträge rechnet das Werkzeug nur für §45b exakt).
   const kunden = await db.selectDistinct({ id: budgetTransactions.customerId }).from(budgetTransactions)
     .where(gte(budgetTransactions.transactionDate, `${jahr}-01-01`));
-  const treffer: Array<{ customerId: number; monat: number; probe: UeberlaufProbe }> = [];
+  const treffer: Array<{ customerId: number; monat: number; privatErlaubt: boolean; probe: UeberlaufProbe }> = [];
   for (const { id } of kunden) {
     for (let monat = 1; monat <= 12; monat++) {
       const probe = await probeUeberlauf(id, jahr, monat);
-      if (probe.termine.length > 0) treffer.push({ customerId: id, monat, probe });
+      if (probe.termine.length === 0) continue;
+      // Ohne Privatzahlung bricht das Erstellen ab (RÜ-1) — getrennt ausweisen.
+      const [k] = await db.select({ ok: customers.acceptsPrivatePayment }).from(customers).where(eq(customers.id, id));
+      treffer.push({ customerId: id, monat, privatErlaubt: k?.ok === true, probe });
     }
   }
   return { geprueft: kunden.length, treffer };
@@ -131,8 +134,9 @@ async function main(): Promise<void> {
     const jahr = Number(b);
     const { geprueft, treffer } = await zaehleUeberlauf(jahr);
     for (const t of treffer) {
-      console.log(`Kunde ${t.customerId} ${String(t.monat).padStart(2, "0")}/${jahr}: ${t.probe.termine.length} Termine, Kasse ${euro(t.probe.kasseCents)} / privat ${euro(t.probe.privatCents)}`);
+      console.log(`Kunde ${t.customerId} ${String(t.monat).padStart(2, "0")}/${jahr}: ${t.probe.termine.length} Termine, Kasse ${euro(t.probe.kasseCents)} / privat ${euro(t.probe.privatCents)}${t.privatErlaubt ? "" : "  — KEINE Privatzahlung: Erstellen bricht ab (RÜ-1)"}`);
     }
+    console.log(`davon ohne Privatzahlung (nach Deploy nicht abrechenbar): ${new Set(treffer.filter((t) => !t.privatErlaubt).map((t) => t.customerId)).size} Kunden`);
     console.log(`\nFix greift bei ${new Set(treffer.map((t) => t.customerId)).size} Kunden in ${treffer.length} Monaten (${geprueft} Kunden mit Buchungen ${jahr} geprüft).`);
     return;
   }
