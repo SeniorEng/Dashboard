@@ -276,15 +276,36 @@ async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<v
 
     const anker = await readResetAnchor(id, stichtag);
 
+    /**
+     * NETTO, nicht brutto (Gate 2 zu #190, N3).
+     *
+     * Die erste Fassung summierte nur `consumption`/`write_off`. Die
+     * gemessene Verschiebung ist aber netto — der Reader zieht Stornos ab.
+     * Eine Brutto-Ursachenzahl neben einer Netto-Verschiebung liest sich wie
+     * dieselbe Groesse und ist es nicht; sie kann die Verschiebung sogar
+     * UEBERSTEIGEN, und dann sieht der Befund nach einem Widerspruch aus, wo
+     * nur zwei verschiedene Begriffe nebeneinanderstehen.
+     */
+    const nettoSumme = async (...zeitFilter: unknown[]) => {
+      const [verbrauch] = await db.select({
+        total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(und(
+        inArray(budgetTransactions.allocationId, ueIds),
+        roh`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+        ...(zeitFilter as never[]),
+      ));
+      const [storno] = await db.select({
+        total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+      }).from(budgetTransactions).where(und(
+        inArray(budgetTransactions.allocationId, ueIds),
+        ist(budgetTransactions.transactionType, "reversal"),
+        ...(zeitFilter as never[]),
+      ));
+      return Math.max(0, Number(verbrauch?.total ?? 0) - Number(storno?.total ?? 0));
+    };
+
     // (a) as-of-Anteil: Buchungen NACH dem Stichtag.
-    const [nachher] = await db.select({
-      total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(und(
-      inArray(budgetTransactions.allocationId, ueIds),
-      roh`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
-      gt(budgetTransactions.transactionDate, stichtag),
-    ));
-    const a = Number(nachher?.total ?? 0);
+    const a = await nettoSumme(gt(budgetTransactions.transactionDate, stichtag));
     if (a > 0) { summeAsOf += a; kundenAsOf++; }
 
     if (!anker) continue;
@@ -317,14 +338,7 @@ async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<v
       istNull(budgetAllocations.deletedAt),
     ));
 
-    const [vorReset] = await db.select({
-      total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(und(
-      inArray(budgetTransactions.allocationId, ueIds),
-      roh`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
-      lt(budgetTransactions.transactionDate, anker.cutoffDate),
-    ));
-    const r = Number(vorReset?.total ?? 0);
+    const r = await nettoSumme(lt(budgetTransactions.transactionDate, anker.cutoffDate));
     if (r <= 0) continue;
 
     const eingetragen = startwert?.createdAt
@@ -340,6 +354,14 @@ async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<v
   console.log("");
   console.log(`URSACHEN der Verschiebung zum ${stichtag}`);
   console.log("=".repeat(78));
+  // Die ANTWORT vor die Zahlen (Gate 2 zu #190, N3): wer die Tabelle zuerst
+  // sieht, hat die Summe schon gebildet, bevor er liest, dass er sie nicht
+  // bilden darf.
+  console.log("");
+  console.log(`  ANTWORT: von den drei Anteilen kann NUR (b) damals real auf dem`);
+  console.log(`  Schirm gestanden haben — ${formatEuroDE(summeResetDamals)} bei ${kundenResetDamals} Kunden.`);
+  console.log("");
+  console.log("-".repeat(78));
   console.log(`  (a) as-of-Schnitt — Buchung NACH dem Stichtag`);
   console.log(`      ${formatEuroDE(summeAsOf).padStart(14)}  bei ${kundenAsOf} Kunden`);
   console.log("");
@@ -355,8 +377,21 @@ async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<v
   console.log("  Ergebnis als „so viel stand falsch auf dem Schirm\" liest, macht");
   console.log("  aus einer Teilmenge eine Gesamtzahl — zeitlich statt raeumlich.");
   console.log("");
-  console.log("  Einschraenkung zu (b): `created_at` sagt, wann die ZEILE entstand,");
-  console.log("  nicht ob ihr Betrag seither geaendert wurde (In-Place-Upsert).");
+  console.log("  EINSCHRAENKUNGEN — was diese drei Zahlen NICHT sind:");
+  console.log("");
+  console.log("  1. Sie sind NETTO (Verbrauch minus Storno), damit sie mit der");
+  console.log("     gemessenen Verschiebung dieselbe Groesse sind. Bis 25.09.2026");
+  console.log("     waren sie brutto und konnten die Verschiebung uebersteigen.");
+  console.log("");
+  console.log("  2. Die Grundmenge ist WEITER als der Schnitt: gezaehlt wird ueber");
+  console.log("     ALLE Uebertragszeilen des Kunden, geschnitten wird nur ueber die");
+  console.log("     nicht verdraengten. Solange das Verdraengungs-Flag AUS ist, sind");
+  console.log("     beide Mengen identisch und die Zahlen exakt. Mit eingeschaltetem");
+  console.log("     Flag werden sie zur OBERGRENZE.");
+  console.log("");
+  console.log("  3. Zu (b): `created_at` sagt, wann die ZEILE entstand, nicht ob ihr");
+  console.log("     Betrag seither geaendert wurde (In-Place-Upsert). Richtig fuer");
+  console.log("     „stand etwas auf dem Schirm\", zu grob fuer „stand DIESE Zahl\".");
   console.log("");
 }
 
