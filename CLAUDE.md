@@ -582,6 +582,19 @@ CI) läuft **autonom**. Ein Mensch klinkt sich nur an diesen vier Punkten ein:
    Vorgabe, die es nicht gibt, und der Blocker heißt „zurück zu A–E", nicht
    „hier eine Zeile ändern".
 3. **Merge + Deploy** — Admin-Merge nach `main` + Prod-Publish. → Alrik bestätigt.
+
+   **Kein PR geht an Alrik zum Merge, dessen Basis nicht `main` ist.**
+   Gestapelte PRs (Basis = ein anderer Feature-Branch) sind zum Arbeiten
+   erlaubt. Bevor sie als „bereit für Gate 3“ gemeldet werden, stellt CC sie
+   auf `main` um: Basis im PR ändern, oder ein Nachzug-PR vom vollständigen
+   Stand mit `origin/main` hineingemergt. Vor der Meldung wird geprüft:
+   `gh pr view <n> --json baseRefName` ergibt `main`, und der Diff gegen `main`
+   enthält genau die gemeldeten Änderungen.
+
+   *Anlass (25.09.2026):* #193 und #194 wurden als „bereit, erst #193, dann
+   #194“ gemeldet. Beide hatten eine Feature-Branch-Basis und landeten nach dem
+   Merge **nicht** in `main`. Ein grüner Merge-Knopf sagt nichts darüber, wohin
+   gemergt wird. Behoben mit dem Nachzug #195.
 4. **Prod-Schreiboperation** — Dry-Run zuerst, dann ausdrückliche Freigabe je
    Schritt. → Alrik bestätigt.
 
