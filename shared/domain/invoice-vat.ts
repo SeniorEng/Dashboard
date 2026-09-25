@@ -16,6 +16,7 @@
  * die Einzelzeilen verteilt wird, sodass Σ(Zeilen) === Gesamtbetrag gilt.
  */
 import { BUDGET_TYPES } from "./budgets";
+import { SERVICE_CATALOG } from "../config/services";
 
 /** Anzeige-USt-Behandlung einer Rechnung/eines Leistungsnachweises. */
 export type VatTreatment = "exempt" | "standard";
@@ -138,4 +139,165 @@ export function distributeVatAcrossLines(lineNetCents: number[], totalVatCents: 
 export function grossUpUnitPriceCents(netCents: number, treatment: VatTreatment): number {
   if (treatment !== "standard") return netCents;
   return Math.round((netCents * (10000 + STANDARD_VAT_RATE_BP)) / 10000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// § 4 Nr. 16 Buchst. g UStG — die USt-Regel je Rechnungsposition
+// (Ticket 6hcgffPJWm57p72p, Tabelle D bestätigt von Alrik am 25.09.2026).
+//
+// ERSETZT die Zahlertyp-Regel „19 % genau dann, wenn die Rechnung
+// `selbstzahler` ist", die an drei Stellen stand (`invoice-data.ts`,
+// `invoice-calc.ts` Mehrtopf + Einzeltopf, `summarizePotAmounts`). Die
+// Befreiung hängt an LEISTUNG und EMPFÄNGER, nicht am Zahler (UStAE 4.16.1
+// Abs. 8): steuerfrei ist eine Leistung der Anerkennungsliste an eine Person,
+// deren Pflegegrad am Leistungstag nachgewiesen ist. In jedem anderen Fall
+// gilt der Leistungs-Satz (Leitplanke Alrik: „sichere Voreinstellung").
+//
+// „Nachgewiesen" liest der Aufrufer über `getCareLevelAt` (Historie zum
+// Leistungsdatum) — NIE aus `customers.pflegegrad` (Stammdaten, Stand heute;
+// Begründung im Ticket-Kommentar `6hcgvG95Cxj46G5p`).
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Position, die keine Leistung ist: Ausfall-/No-Show-Pauschale (D8). */
+export const NO_SHOW_CHARGE_CODE = "no_show_charge";
+
+const KATALOG = new Map(SERVICE_CATALOG.map((s) => [s.code, s]));
+
+/** Steht die Leistung auf der Anerkennungsliste (Katalogfeld `ustFreiMitPflegegrad`)? */
+export function istAufAnerkennungsliste(serviceCode: string | null | undefined): boolean {
+  return serviceCode != null && KATALOG.get(serviceCode)?.ustFreiMitPflegegrad === true;
+}
+
+/** Kilometer sind Nebenleistung (D6/D7) — erkannt an der Katalog-Einheit. */
+export function istKilometerPosition(serviceCode: string | null | undefined): boolean {
+  return serviceCode != null && KATALOG.get(serviceCode)?.unitType === "kilometers";
+}
+
+/** Steuerpflichtiger Satz einer Leistung in Basispunkten; unbekannt → Regelsatz. */
+function steuerpflichtigerSatzBP(serviceCode: string | null | undefined): number {
+  const eintrag = serviceCode != null ? KATALOG.get(serviceCode) : undefined;
+  // Prozent → Basispunkte über die eine Umrechnung (`serviceVatRateBP`).
+  return eintrag ? serviceVatRateBP(eintrag) : STANDARD_VAT_RATE_BP;
+}
+
+/** Was die Regel über eine Position wissen muss. */
+export interface UstPosition {
+  serviceCode: string | null;
+  /** Pflegegrad, der am Leistungstag in der Historie nachgewiesen ist — sonst `null`. */
+  pflegegradAmLeistungstag: number | null;
+  /** Codes der Hauptleistungen desselben Termins (nur für Kilometer, D6/RK-2). */
+  hauptleistungenDesTermins: readonly string[];
+}
+
+/**
+ * Tabelle D — USt-Satz einer Position in Basispunkten (0 = steuerfrei).
+ *
+ *   D8  Ausfall-/No-Show-Pauschale                      → 0
+ *   D1/D4/D5 Kassen-Topf                                → 0 (RK-1: auch ohne
+ *        nachgewiesenen PG; der Freigabe-Check meldet das als Datenfehler)
+ *   D6/D7 Kilometer: 0, wenn PG nachgewiesen UND ALLE Hauptleistungen des
+ *        Termins auf der Liste stehen (RK-2), sonst Leistungs-Satz
+ *   D1  Hauptleistung auf der Liste + PG nachgewiesen   → 0
+ *   D2/D3 sonst                                         → Leistungs-Satz
+ *
+ * `privatTopfSteuerbar === false` ist der Anzeige-Fall eines Privat-Topfs, der
+ * nur aus einer fehlenden Buchung entstand (`summarizePotAmounts`) — dort wird
+ * keine USt ausgewiesen, wie bisher.
+ */
+export function ustSatzBP(
+  p: UstPosition,
+  topf: { kassenTopf: boolean; privatTopfSteuerbar?: boolean },
+): number {
+  if (p.serviceCode === NO_SHOW_CHARGE_CODE) return 0;
+  if (topf.kassenTopf) return 0;
+  if (topf.privatTopfSteuerbar === false) return 0;
+  const pgNachgewiesen = p.pflegegradAmLeistungstag != null
+    && p.pflegegradAmLeistungstag >= 1 && p.pflegegradAmLeistungstag <= 5;
+  if (istKilometerPosition(p.serviceCode)) {
+    const befreit = pgNachgewiesen
+      && p.hauptleistungenDesTermins.length > 0
+      && p.hauptleistungenDesTermins.every(istAufAnerkennungsliste);
+    return befreit ? 0 : steuerpflichtigerSatzBP(p.serviceCode);
+  }
+  if (pgNachgewiesen && istAufAnerkennungsliste(p.serviceCode)) return 0;
+  return steuerpflichtigerSatzBP(p.serviceCode);
+}
+
+/**
+ * USt-Satz in PROZENT für die Preis-ANZEIGE im Kundenprofil (Brutto-Preise bei
+ * Selbstzahlern). Dieselbe Regel wie die Rechnung (`ustSatzBP`), mit dem
+ * Pflegegrad, der HEUTE nachgewiesen ist — die Anzeige beschreibt den
+ * laufenden Preis. Kassen-Kunden: 0 (Preise netto, wie bisher).
+ * ERSETZT den festen Katalog-Satz (`service.vatRate`), mit dem die Anzeige
+ * jeden Selbstzahler brutto rechnete — auch einen mit Pflegegrad, der netto
+ * zahlt (Entscheidung Alrik, Schritt A Punkt 2).
+ */
+export function preisanzeigeSatzProzent(p: {
+  billingType: string | null | undefined;
+  pflegegradHeute: number | null | undefined;
+  serviceCode: string | null | undefined;
+}): number {
+  if (p.billingType !== "selbstzahler") return 0;
+  const code = p.serviceCode ?? null;
+  return ustSatzBP({
+    serviceCode: code,
+    pflegegradAmLeistungstag: p.pflegegradHeute ?? null,
+    // Preisanzeige je Leistung: ein Kilometer-Preis folgt der Hauptleistung;
+    // ohne Termin gelten die Leistungen der Anerkennungsliste als Hauptleistung.
+    hauptleistungenDesTermins: SERVICE_CATALOG.filter((s) => s.ustFreiMitPflegegrad).map((s) => s.code),
+  }, { kassenTopf: false }) / 100;
+}
+
+export interface UstGruppe {
+  satzBP: number;
+  basisCents: number;
+  ustCents: number;
+}
+
+/**
+ * USt je Steuersatz: je Satz EINMAL auf die Summe gerundet (EN 16931: Steuer
+ * je Kategorie = Basis × Satz). ERSETZT die zeilenweise Rundung des früheren
+ * Einzeltopf-Wegs (`invoice-data.ts`), die bei mehreren Positionen um Cent
+ * abweichen konnte (E2: RE-2026-0378, 291,01 € → 55,29 € statt 55,33 €).
+ * Gruppen aufsteigend nach Satz, damit die Ausgabe deterministisch ist.
+ */
+export function ustJeSatz(positionen: ReadonlyArray<{ totalCents: number; vatRateBp: number }>): {
+  gruppen: UstGruppe[];
+  ustCents: number;
+} {
+  const basis = new Map<number, number>();
+  for (const p of positionen) basis.set(p.vatRateBp, (basis.get(p.vatRateBp) ?? 0) + p.totalCents);
+  const gruppen = [...basis.entries()]
+    .sort(([a], [b]) => a - b)
+    // Vorzeichen-symmetrisch gerundet: eine Stornorechnung (negative Basis)
+    // ergibt exakt das Negative der Original-USt, auch bei x,5 Cent.
+    .map(([satzBP, basisCents]) => ({
+      satzBP,
+      basisCents,
+      ustCents: Math.sign(basisCents) * Math.round((Math.abs(basisCents) * satzBP) / 10000),
+    }));
+  return { gruppen, ustCents: gruppen.reduce((n, g) => n + g.ustCents, 0) };
+}
+
+/**
+ * Satz der Rechnung als Ganzes (`invoices.vat_rate`): der höchste Satz mit
+ * Basis ≠ 0, sonst 0. Nur noch Kopf-Information für Bestands-Leser; die
+ * Entscheidung trägt jede Position selbst (`invoice_line_items.vat_rate_bp`).
+ */
+export function rechnungsSatzBP(gruppen: readonly UstGruppe[]): number {
+  return gruppen.reduce((m, g) => (g.basisCents !== 0 && g.satzBP > m ? g.satzBP : m), 0);
+}
+
+/**
+ * Pflegegrad im Rechnungskopf (`invoices.pflegegrad`): der am LETZTEN
+ * Leistungstag der Rechnung nachgewiesene Grad, sonst `null`. ERSETZT den
+ * Stempel aus `customers.pflegegrad` (Stand heute, nicht Leistungsdatum).
+ * Den vollständigen Verlauf im Monat liefert `pflegegradZeitraeume`.
+ */
+export function pflegegradFuerRechnung(
+  positionen: ReadonlyArray<{ appointmentDate: string; pflegegradAmLeistungstag: number | null }>,
+): number | null {
+  let letzte: { appointmentDate: string; pflegegradAmLeistungstag: number | null } | null = null;
+  for (const p of positionen) if (letzte == null || p.appointmentDate > letzte.appointmentDate) letzte = p;
+  return letzte?.pflegegradAmLeistungstag ?? null;
 }

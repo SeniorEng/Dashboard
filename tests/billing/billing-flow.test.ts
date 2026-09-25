@@ -280,8 +280,9 @@ function szPayload(tag: string) {
     nr: "1",
     plz: "10115",
     stadt: "Berlin",
-    pflegegrad: 2,
-    pflegegradSeit: "2024-01-01",
+    // OHNE Pflegegrad: diese Suite sichert die 19-%-Selbstzahler-Rechnung
+    // (§ 4 Nr. 16 g UStG, Pflichtfall 1). Ein Selbstzahler MIT Pflegegrad ist
+    // steuerfrei — der Fall steht in `tests/billing/ust-4-16g.test.ts`.
     billingType: "selbstzahler",
     acceptsPrivatePayment: true,
     contacts: [
@@ -539,14 +540,16 @@ describe("BF-2: Split-Rechnung (Kasse + Privat bei Budgetüberschreitung)", () =
     expect(kasse).toBeDefined();
     expect(privat).toBeDefined();
 
-    // Privatanteil hat 19 % MwSt, Kassenanteil 0 % — nur Netto vergleichen.
+    // Beide Anteile steuerfrei: Kasse ohnehin, der Überlauf-Privatanteil,
+    // weil der Kunde Pflegegrad 3 hat (§ 4 Nr. 16 g UStG, Pflichtfall 3).
+    // Bis zur Umstellung trug der Privatanteil 19 % (Zahlertyp-Regel).
     const detailKasse = await loadInvoiceWithLineItems(kasse.id);
     const detailPrivat = await loadInvoiceWithLineItems(privat.id);
 
     expect(detailKasse.vatRate).toBe(0);
     expect(detailKasse.vatAmountCents).toBe(0);
-    expect(detailPrivat.vatRate).toBe(1900);
-    expect(detailPrivat.vatAmountCents).toBeGreaterThan(0);
+    expect(detailPrivat.vatRate).toBe(0);
+    expect(detailPrivat.vatAmountCents).toBe(0);
 
     const lineSumKasse = detailKasse.lineItems.reduce((s: number, li: any) => s + li.totalCents, 0);
     const lineSumPrivat = detailPrivat.lineItems.reduce((s: number, li: any) => s + li.totalCents, 0);
@@ -682,7 +685,8 @@ describe("BF-2: Split-Rechnung (Kasse + Privat bei Budgetüberschreitung)", () =
     expect(invoices.length).toBe(1);
     const detail = await loadInvoiceWithLineItems(invoices[0].id);
     expect(detail.billingType).toBe("selbstzahler");
-    expect(detail.vatRate).toBe(1900);
+    // Kassenkunde mit Pflegegrad: der Privatanteil ist steuerfrei (Pflichtfall 3).
+    expect(detail.vatRate).toBe(0);
     // Komplette Leistung muss verrechnet sein (keine 0-Cent-Rechnung).
     expect(detail.netAmountCents).toBeGreaterThan(0);
     const apptIds = detail.lineItems.map((li: any) => li.appointmentId);

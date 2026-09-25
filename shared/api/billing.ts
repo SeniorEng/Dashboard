@@ -192,6 +192,8 @@ interface InvoiceLineItem {
   totalCents: number;
   unitPriceCents: number;
   employeeName: string | null;
+  /** USt-Satz der Position in Basispunkten (§ 4 Nr. 16 g UStG); `null` = Bestand. */
+  vatRateBp: number | null;
 }
 
 export interface InvoiceDetail extends InvoiceItem {

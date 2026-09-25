@@ -48,6 +48,12 @@ export interface AggregatableInvoiceLine {
   employeeName: string | null;
   appointmentNotes: string | null;
   serviceDetails: string | null;
+  /**
+   * USt-Satz der Position in Basispunkten (§ 4 Nr. 16 g UStG, Tabelle D);
+   * `null`/fehlend = Bestand vor der Umstellung. Gebündelt wird nur innerhalb
+   * EINES Satzes — eine gemischte Rechnung behält getrennte Zeilen je Satz.
+   */
+  vatRateBp?: number | null;
 }
 
 /**
@@ -79,6 +85,7 @@ interface LineGroup {
   unitPriceCents: number;
   quantitySum: number;
   totalCents: number;
+  vatRateBp: number | null;
 }
 
 function quantityOf(item: AggregatableInvoiceLine, unit: "hours" | "km"): number {
@@ -105,6 +112,9 @@ function groupToLine(g: LineGroup): AggregatableInvoiceLine {
     employeeName: null,
     appointmentNotes: null,
     serviceDetails: null,
+    // Nur setzen, wenn vorhanden — Bestands-Zeilen bleiben objektgleich
+    // (versiegelte Render-Snapshots).
+    ...(g.vatRateBp != null ? { vatRateBp: g.vatRateBp } : {}),
   };
 }
 
@@ -132,7 +142,7 @@ export function aggregateInvoiceLineItems<T extends AggregatableInvoiceLine>(
     }
 
     if (isKmLineItem(item.serviceCode)) {
-      const key = String(item.unitPriceCents);
+      const key = `${item.unitPriceCents}|${item.vatRateBp ?? ""}`;
       let g = kmGroups.get(key);
       if (!g) {
         g = {
@@ -142,6 +152,7 @@ export function aggregateInvoiceLineItems<T extends AggregatableInvoiceLine>(
           unitPriceCents: item.unitPriceCents,
           quantitySum: 0,
           totalCents: 0,
+          vatRateBp: item.vatRateBp ?? null,
         };
         kmGroups.set(key, g);
         kmOrder.push(key);
@@ -152,7 +163,7 @@ export function aggregateInvoiceLineItems<T extends AggregatableInvoiceLine>(
     }
 
     const unit: "hours" | "km" = item.quantityUnit === "km" ? "km" : "hours";
-    const key = `${item.serviceCode ?? item.serviceDescription}|${item.unitPriceCents}|${unit}`;
+    const key = `${item.serviceCode ?? item.serviceDescription}|${item.unitPriceCents}|${unit}|${item.vatRateBp ?? ""}`;
     let g = serviceGroups.get(key);
     if (!g) {
       g = {
@@ -162,6 +173,7 @@ export function aggregateInvoiceLineItems<T extends AggregatableInvoiceLine>(
         unitPriceCents: item.unitPriceCents,
         quantitySum: 0,
         totalCents: 0,
+        vatRateBp: item.vatRateBp ?? null,
       };
       serviceGroups.set(key, g);
       serviceOrder.push(key);

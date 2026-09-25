@@ -10,6 +10,7 @@ import {
 } from "./invoice-data";
 import { buildInvoiceDraft, computeDocumentedGrossCents } from "./invoice-calc";
 import type { CustomerAmounts } from "@shared/api/billing";
+import { planBruttoCents } from "@shared/domain/invoice-amounts";
 
 /**
  * **IST- und PLAN-Betrag je Kunde** (Task #1905) — herausgelöst aus
@@ -156,7 +157,7 @@ export async function computeCustomerAmounts(
             ? Promise.resolve(0)
             : billableOrNull(() =>
                 buildLineItemsFromAppointments(openIds, id, billingType).then(
-                  (r) => r.totalNetCents + r.totalVatCents,
+                  (r) => planBruttoCents(r.lineItems, billingType),
                 ),
               ),
         ]);

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@shared/utils/format";
 import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { displayPriceCents, netFromInputCents } from "@shared/domain/customers";
+import { preisanzeigeSatzProzent } from "@shared/domain/invoice-vat";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, unwrapResult, ApiError } from "@/lib/api";
@@ -85,6 +86,8 @@ interface PricingSectionProps {
   customerId: number;
   customerName: string;
   billingType?: string;
+  /** Heute nachgewiesener Pflegegrad (Server, Historie) — steuert Brutto/Netto der Anzeige. */
+  pflegegradHeute?: number | null;
   onRefresh: () => void;
 }
 
@@ -95,10 +98,16 @@ interface PendingReplaceState {
   existing: { id: number; priceCents: number; validFrom: string; serviceName: string };
 }
 
-export function PricingSection({ customerId, customerName, billingType, onRefresh }: PricingSectionProps) {
-  const displayPrice = (priceCents: number, vatRate: number = 19) => displayPriceCents(priceCents, billingType, vatRate);
-  const netFromInput = (inputCents: number, vatRate: number = 19) => netFromInputCents(inputCents, billingType, vatRate);
-  const getVatRate = (serviceId: number) => services?.find(s => s.id === serviceId)?.vatRate ?? 19;
+export function PricingSection({ customerId, customerName, billingType, pflegegradHeute, onRefresh }: PricingSectionProps) {
+  const displayPrice = (priceCents: number, vatRate: number) => displayPriceCents(priceCents, billingType, vatRate);
+  const netFromInput = (inputCents: number, vatRate: number) => netFromInputCents(inputCents, billingType, vatRate);
+  // Satz aus derselben USt-Regel wie die Rechnung (§ 4 Nr. 16 g UStG): ein
+  // Selbstzahler mit Pflegegrad sieht und gibt Preise NETTO ein (er zahlt netto).
+  const getVatRate = (serviceId: number) => preisanzeigeSatzProzent({
+    billingType,
+    pflegegradHeute,
+    serviceCode: services?.find(s => s.id === serviceId)?.code ?? null,
+  });
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
@@ -512,13 +521,13 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                 </div>
                 {isCustom && (
                   <div className="text-[11px] text-gray-500 mt-0.5">
-                    Katalog: {formatCurrency(displayPrice(service.defaultPriceCents, service.vatRate))}{unitLabel}
+                    Katalog: {formatCurrency(displayPrice(service.defaultPriceCents, getVatRate(service.id)))}{unitLabel}
                   </div>
                 )}
                 {serviceFuturePrices.map(fp => (
                   <div key={fp.id} className="text-[11px] text-blue-600 mt-0.5 flex items-center gap-1" data-testid={`future-price-${fp.id}`}>
                     <Calendar className="h-3 w-3" />
-                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(displayPrice(fp.priceCents, service.vatRate))}{unitLabel}
+                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(displayPrice(fp.priceCents, getVatRate(service.id)))}{unitLabel}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -549,7 +558,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                   />
                 ) : (
                   <>
-                    <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(displayPrice(effectivePrice, service.vatRate))}</span>
+                    <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(displayPrice(effectivePrice, getVatRate(service.id)))}</span>
                     <span className="text-xs text-gray-500">{unitLabel}</span>
                     {isCustom && customPrice && customPrice.priceCents === 0 && (
                       <span
@@ -638,7 +647,9 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
 
       <div className="px-2 pt-2 space-y-2">
         <p className="text-[11px] text-gray-500">
-          {billingType === "selbstzahler" ? "Preise inkl. MwSt." : "Preise zzgl. MwSt."} Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
+          {billingType === "selbstzahler"
+            ? (pflegegradHeute != null ? "Preise netto — mit Pflegegrad umsatzsteuerfrei nach § 4 Nr. 16 UStG." : "Preise inkl. MwSt.")
+            : "Preise zzgl. MwSt."} Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
           {" "}Über das Datumsfeld können Sie einen zukünftigen Gültigkeitszeitpunkt festlegen.
           {hasCustomPrices ? " Der Pfeil setzt den Preis auf den Katalogpreis zurück." : ""}
           {" "}In der Preishistorie können Sie Preis, Gültig-ab und Gültig-bis bestehender Einträge nachträglich anpassen.

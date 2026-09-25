@@ -59,9 +59,12 @@ const PRIVAT = 9_60;
 /**
  * Tabelle D (Alrik, 25.09.2026): gegen alle Töpfe wird NETTO gerechnet, USt
  * entsteht nur auf der Privatrechnung und verbraucht nie Budget.
- * 184,60 Kasse + 9,60 privat netto + 1,82 USt (19 % auf 9,60) = 196,02 €.
+ *
+ * § 4 Nr. 16 g UStG (Ticket 6hcgffPJWm57p72p, E5): der Kunde hat Pflegegrad 3,
+ * der Privat-Anteil ist deshalb STEUERFREI — 184,60 Kasse + 9,60 privat =
+ * 194,20 €. Bis zur USt-Umstellung stand hier 196,02 € (1,82 € USt auf 9,60).
  */
-const BRUTTO = 196_02;
+const BRUTTO = 194_20;
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let hwId: number;

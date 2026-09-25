@@ -273,11 +273,12 @@ export default function AdminCustomerDetail() {
                 {customer.billingType && (
                   <StatusBadge type="billingType" value={customer.billingType} data-testid="badge-billingtype" />
                 )}
-                {!isSelbstzahler && customer.pflegegrad !== null && customer.pflegegrad > 0 && (
+                {/* Auch bei Selbstzahlern: der Pflegegrad entscheidet über die USt (Ticket 6hcgffPJWm57p72p). */}
+                {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                   <>
                     <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
                     {(() => {
-                      const current = customer.careLevelHistory?.find((h: { validTo: string | null }) => !h.validTo);
+                      const current = customer.careLevelHistory?.find((h: { validTo: string | null; entferntAm?: unknown }) => !h.validTo && !h.entferntAm);
                       if (current?.validFrom) {
                         return (
                           <span className="text-xs text-gray-500" data-testid="text-pflegegrad-seit">

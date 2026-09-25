@@ -51,14 +51,18 @@ export function InvoiceDetail({ invoice, expandedDetail, detailLoading, delivery
                   <th className="pb-2 pr-3">Leistung</th>
                   <th className="pb-2 pr-3 text-right">Dauer</th>
                   <th className="pb-2 pr-3 text-right">
-                    Betrag{expandedDetail.billingType === "selbstzahler" ? " (brutto)" : ""}
+                    Betrag{expandedDetail.vatAmountCents !== 0 ? " (brutto)" : ""}
                   </th>
                   <th className="pb-2">Mitarbeiter</th>
                 </tr>
               </thead>
               <tbody>
                 {expandedDetail.lineItems.map((item) => {
-                  const displayTotal = displayPriceCents(item.totalCents, expandedDetail.billingType);
+                  // Gespeicherter Satz je Position (§ 4 Nr. 16 g UStG); Bestand ohne
+                  // Satz bleibt beim bisherigen Weg über den Zahlertyp.
+                  const displayTotal = item.vatRateBp != null
+                    ? Math.round((item.totalCents * (10000 + item.vatRateBp)) / 10000)
+                    : displayPriceCents(item.totalCents, expandedDetail.billingType);
                   return (
                   <tr key={item.id} className="border-b last:border-0">
                     <td className="py-2 pr-3">{formatDate(item.appointmentDate)}</td>
@@ -82,7 +86,7 @@ export function InvoiceDetail({ invoice, expandedDetail, detailLoading, delivery
               <tfoot>
                 <tr className="border-t-2 font-medium">
                   <td colSpan={4} className="pt-2 pr-3 text-right">
-                    Gesamt{expandedDetail.billingType === "selbstzahler" ? " (inkl. MwSt.)" : ""}:
+                    Gesamt{expandedDetail.vatAmountCents !== 0 ? " (inkl. MwSt.)" : ""}:
                   </td>
                   <td className={`pt-2 pr-3 text-right ${expandedDetail.grossAmountCents < 0 ? "text-red-600" : ""}`}>
                     {formatAmount(expandedDetail.grossAmountCents)}

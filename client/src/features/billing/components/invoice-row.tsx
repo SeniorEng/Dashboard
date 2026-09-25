@@ -183,7 +183,8 @@ export function InvoiceRow({
   const amountNode = (
     <span className={`font-medium tabular-nums ${invoice.grossAmountCents < 0 ? "text-red-600" : "text-gray-900"}`}>
       {formatAmount(invoice.grossAmountCents)}
-      {invoice.billingType === "selbstzahler" && (
+      {/* Am USt-Betrag, nicht am Zahlertyp: ein Selbstzahler mit Pflegegrad zahlt ohne USt (§ 4 Nr. 16 g UStG). */}
+      {invoice.vatAmountCents !== 0 && (
         <span className="text-xs text-gray-400 font-normal ml-1 hidden sm:inline">inkl. MwSt.</span>
       )}
     </span>

@@ -1,14 +1,19 @@
 import { Router, Request, Response } from "express";
+import { eq } from "drizzle-orm";
 import { customerManagementStorage } from "../../../storage/customer-management";
 import { storage } from "../../../storage";
 import { asyncHandler, notFound } from "../../../lib/errors";
 import { requireIntParam } from "../../../lib/params";
 import { withAudit } from "../../../lib/with-audit";
+import { customersRepo } from "../../../repos";
 import {
   insertCustomerInsuranceSchema,
   updateCustomerInsuranceSchema,
   insertCustomerContactSchema,
   insertCareLevelHistorySchema,
+  pflegegradEntfernenSchema,
+  pflegegradBeendenSchema,
+  customers,
 } from "@shared/schema";
 import { pickVersichertennummerSchema } from "@shared/schema/common";
 
@@ -285,6 +290,73 @@ router.post("/customers/:id/care-level", asyncHandler("Pflegegrad konnte nicht a
   });
 
   res.status(201).json(careLevel);
+}));
+
+/**
+ * „Als Fehleintrag entfernen" / „ab Datum beenden" (Ticket 6hcgffPJWm57p72p,
+ * Entscheidung Alrik 25.09.2026). Beide führen die Stammdaten mit und
+ * protokollieren über dieselbe Audit-Aktion wie das Ändern — die Art steht in
+ * den Metadaten. ERSETZEN den früheren Weg über ein frei gesetztes `validTo`
+ * an `POST /customers/:id/care-level`, bei dem die Stammdaten stehen blieben.
+ */
+router.post("/customers/:id/care-level/:historyId/entfernen", asyncHandler("Pflegegrad-Eintrag konnte nicht entfernt werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
+  const historyId = requireIntParam(req.params.historyId, res);
+  if (historyId === null) return;
+  const { grund } = pflegegradEntfernenSchema.parse(req.body);
+
+  const ergebnis = await withAudit(async (tx, audit) => {
+    const [vorher] = await customersRepo.selectColumnsFrom({ pflegegrad: customers.pflegegrad }, tx).where(eq(customers.id, customerId));
+    const r = await customerManagementStorage.pflegegradAlsFehleintragEntfernen(
+      { customerId, historyId, grund, userId: req.user!.id }, tx,
+    );
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_care_level_changed",
+      entityType: "customer",
+      entityId: customerId,
+      metadata: {
+        art: "als_fehleintrag_entfernt",
+        historyId,
+        grund,
+        entfernterPflegegrad: r.eintrag.pflegegrad,
+        entfernterZeitraum: { von: r.eintrag.validFrom, bis: r.eintrag.validTo },
+        oldPflegegrad: vorher?.pflegegrad ?? null,
+        newPflegegrad: r.pflegegradHeute,
+      },
+      ipAddress: req.ip,
+    });
+    return r;
+  });
+  res.json(ergebnis);
+}));
+
+router.post("/customers/:id/care-level/beenden", asyncHandler("Pflegegrad konnte nicht beendet werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
+  const { abDatum } = pflegegradBeendenSchema.parse(req.body);
+
+  const ergebnis = await withAudit(async (tx, audit) => {
+    const [vorher] = await customersRepo.selectColumnsFrom({ pflegegrad: customers.pflegegrad }, tx).where(eq(customers.id, customerId));
+    const r = await customerManagementStorage.pflegegradBeenden({ customerId, abDatum }, tx);
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_care_level_changed",
+      entityType: "customer",
+      entityId: customerId,
+      metadata: {
+        art: "beendet",
+        historyId: r.eintrag.id,
+        abDatum,
+        oldPflegegrad: vorher?.pflegegrad ?? null,
+        newPflegegrad: r.pflegegradHeute,
+      },
+      ipAddress: req.ip,
+    });
+    return r;
+  });
+  res.json(ergebnis);
 }));
 
 export default router;

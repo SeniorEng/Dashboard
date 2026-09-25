@@ -3,6 +3,8 @@ import { log } from "./log";
 import { parseLocalDate, parseTimestamp } from "@shared/utils/datetime";
 import { centsToEuroNumber } from "@shared/utils/money";
 import { aggregateInvoiceLineItems } from "@shared/domain/invoice-line-aggregation";
+import { ustJeSatz } from "@shared/domain/invoice-vat";
+import { ZUGFERD_BEFREIUNGSGRUND } from "@shared/domain/ust-texte";
 
 interface ZugferdInvoice {
   toXML(): Promise<string>;
@@ -222,6 +224,16 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
       ? aggregateInvoiceLineItems(data.lineItems, data.fahrtkostenLabel)
       : data.lineItems;
 
+  // § 4 Nr. 16 g UStG (Ticket 6hcgffPJWm57p72p): trägt die Rechnung die
+  // USt-Entscheidung je Position, kommt die Kategorie JE POSITION daraus —
+  // nicht mehr aus „USt-Betrag = 0". Bestand (keine Position mit Satz) bleibt
+  // byte-gleich beim bisherigen Weg.
+  const jePosition = data.lineItems.some((l) => l.vatRateBp != null);
+  const ustGruppen = jePosition
+    ? ustJeSatz(sourceLineItems.map((l) => ({ totalCents: l.totalCents, vatRateBp: l.vatRateBp ?? 0 })))
+        .gruppen.filter((g) => g.basisCents !== 0)
+    : [];
+
   const lineItems = sourceLineItems.map((item, index) => {
     const isKm = item.serviceCode === "travel_km" || item.serviceCode === "customer_km";
     const unitCode = isKm ? "KMT" : "HUR";
@@ -252,11 +264,17 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
         },
       },
       tradeSettlement: {
-        tradeTax: {
-          typeCode: "VAT" as const,
-          categoryCode: taxCategoryCode,
-          rateApplicablePercent: taxPercent,
-        },
+        tradeTax: jePosition
+          ? {
+              typeCode: "VAT" as const,
+              categoryCode: (item.vatRateBp ?? 0) === 0 ? "E" : "S",
+              rateApplicablePercent: (item.vatRateBp ?? 0) / 100,
+            }
+          : {
+              typeCode: "VAT" as const,
+              categoryCode: taxCategoryCode,
+              rateApplicablePercent: taxPercent,
+            },
         // Task #1098 — BT-131 (`lineTotalAmount`) für neue Rechnungen. Bestände
         // ohne BT-131 (Snapshot ohne `includeLineTotalAmount`) re-rendern weiter
         // mit dem alten `totalAmount`-Schlüssel, den node-zugferd ignoriert,
@@ -375,15 +393,27 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
                 typeCode: "58",
                 transfers: [{ paymentAccountIdentifier: data.iban }],
               },
-              vatBreakdown: [{
-                calculatedAmount: centsToDecimal(data.vatAmountCents),
-                typeCode: "VAT" as const,
-                basisAmount: centsToDecimal(data.netAmountCents),
-                categoryCode: taxCategoryCode,
-                rateApplicablePercent: taxPercent,
-                // BT-120 — Befreiungsgrund-Text (Pflicht bei Kategorie E, BR-E-10).
-                ...(vatExempt ? { exemptionReasonText: "Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG" } : {}),
-              }],
+              vatBreakdown: jePosition
+                // Eine Aufschlüsselung je Satz (BG-23), Beträge aus derselben
+                // Rundung wie die Rechnung (`ustJeSatz`). BT-120 aus der
+                // gemeinsamen Textquelle mit dem PDF.
+                ? ustGruppen.map((g) => ({
+                    calculatedAmount: centsToDecimal(g.ustCents),
+                    typeCode: "VAT" as const,
+                    basisAmount: centsToDecimal(g.basisCents),
+                    categoryCode: g.satzBP === 0 ? "E" : "S",
+                    rateApplicablePercent: g.satzBP / 100,
+                    ...(g.satzBP === 0 ? { exemptionReasonText: ZUGFERD_BEFREIUNGSGRUND } : {}),
+                  }))
+                : [{
+                    calculatedAmount: centsToDecimal(data.vatAmountCents),
+                    typeCode: "VAT" as const,
+                    basisAmount: centsToDecimal(data.netAmountCents),
+                    categoryCode: taxCategoryCode,
+                    rateApplicablePercent: taxPercent,
+                    // BT-120 — Befreiungsgrund-Text (Pflicht bei Kategorie E, BR-E-10).
+                    ...(vatExempt ? { exemptionReasonText: "Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG" } : {}),
+                  }],
             }
           : {
               paymentMeans: {

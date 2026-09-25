@@ -7,7 +7,8 @@ import { auditService } from "../../services/audit";
 import { notificationService } from "../../services/notification-service";
 import { geocodeCustomer } from "../../services/geocoding";
 import { refreshDraftInvoicesForCustomerAddress } from "../../services/invoice-address-refresh";
-import { validateGeburtsdatum } from "@shared/utils/datetime";
+import { validateGeburtsdatum, todayISO } from "@shared/utils/datetime";
+import { getCareLevelAt } from "../../storage/customer-mgmt/care-level";
 import { isPflegekasseCustomer, isSelbstzahlerCustomer } from "@shared/domain/customers";
 import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
 import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-validator";
@@ -279,6 +280,8 @@ router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen we
       notes: customer.contract.notes,
     } : null,
     activeContractCount: customer.contract ? 1 : 0,
+    // Aus der Historie, nicht aus `customers.pflegegrad` (Ticket 6hcgffPJWm57p72p).
+    pflegegradHeute: await getCareLevelAt(id, todayISO()),
   };
   
   res.json(response as unknown as CustomerDetail);

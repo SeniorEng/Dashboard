@@ -438,6 +438,7 @@ const invoiceLineItemSchema = z.object({
   totalCents: z.number().int(),
   unitPriceCents: z.number().int(),
   employeeName: nullableString(),
+  vatRateBp: z.number().int().nullable(),
 });
 
 export const InvoiceDetailSchema = component(

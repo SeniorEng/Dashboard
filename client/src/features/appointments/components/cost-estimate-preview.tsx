@@ -1,6 +1,5 @@
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { formatEuroDE } from "@shared/utils/money";
-import { displayPriceCents } from "@shared/domain/customers";
 
 export type CostEstimate = {
   totalCents: number;
@@ -48,20 +47,26 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
   const isSelbstzahler = cost.isSelbstzahler || billingType === "selbstzahler";
 
   if (isSelbstzahler) {
-    const bruttoEuro = formatEuroDE(cost.bruttoCents ?? displayPriceCents(cost.totalCents, "selbstzahler"));
-    const vatPct = cost.vatRate ?? 19;
+    // Brutto und Satz kommen vom Server — aus derselben USt-Regel wie die
+    // Rechnung (§ 4 Nr. 16 g UStG, mit Pflegegrad am Termindatum). Kein
+    // eigener 19-%-Fallback mehr: fehlt der Wert, wird netto gezeigt.
+    const bruttoEuro = formatEuroDE(cost.bruttoCents ?? cost.totalCents);
+    const vatPct = cost.vatRate ?? 0;
     return (
       <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm flex items-start gap-3" data-testid="selbstzahler-cost-estimate">
         <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
         <div>
-          <p className="text-blue-800 font-medium">Kosten: {bruttoEuro} (inkl. {vatPct} % MwSt.)</p>
+          <p className="text-blue-800 font-medium">
+            Kosten: {bruttoEuro} ({vatPct > 0 ? `inkl. ${vatPct} % MwSt.` : "umsatzsteuerfrei nach § 4 Nr. 16 UStG"})
+          </p>
           <p className="text-blue-600 text-xs mt-1">Privatabrechnung — wird dem Kunden direkt in Rechnung gestellt</p>
         </div>
       </div>
     );
   }
 
-  const displayCents = displayPriceCents(cost.totalCents, billingType);
+  // Kein Selbstzahler (der Zweig oben): Anzeige netto — Kassen-Anteile sind steuerfrei.
+  const displayCents = cost.totalCents;
   const costEuro = formatEuroDE(displayCents, { withCurrency: false });
   const availEuro = cost.availableCents !== undefined ? formatEuroDE(cost.availableCents, { withCurrency: false }) : null;
   const holdsCents = cost.holdsActiveCents ?? 0;
