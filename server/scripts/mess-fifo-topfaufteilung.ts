@@ -1,5 +1,23 @@
 /**
- * Schritt B zu PR #190 — Vorher/Nachher der §45b-Topfaufteilung.
+ * Messinstrument: §45b-Topfaufteilung je Kunde und Stichtag.
+ *
+ * ── Bleibender Zweck ────────────────────────────────────────────────────
+ * Entstanden als Schritt B zu PR #190, aber NICHT an ihn gebunden (Gate 2 zu
+ * #190, N-5): das Werkzeug beantwortet „wie teilt sich der §45b-Topf eines
+ * Kunden zum Stichtag auf, und was ändert eine Code-Änderung daran".
+ *
+ * Es ERSETZT die Einzelabfragen von Hand, mit denen diese Frage bis dahin
+ * beantwortet wurde. Vier Modi:
+ *
+ *   (ohne)                 Tabelle je Kunde zum Stichtag
+ *   --csv                  maschinenlesbar, 16 Spalten (siehe `CSV_SPALTEN`)
+ *   --vergleich <datei>    eine frühere `--csv`-Ausgabe gegenstellen
+ *   --ursachen             woher eine Verschiebung kommt (a/b/c)
+ *   --diagnose <kundeId>   ein Einzelfall, von Hand nachvollziehbar
+ *
+ * Der `--vergleich`-Modus braucht ZWEI Läufe auf verschiedenen Ständen; wie
+ * man sie herstellt, hängt am jeweiligen Anlass und steht deshalb nicht mehr
+ * hier fest verdrahtet. Das Muster:
  *
  * ── Wie der Vergleich zustande kommt ────────────────────────────────────
  * Es gibt **kein Flag**, das die alte und die neue Rechnung nebeneinander
@@ -34,7 +52,7 @@
  * (Wirkungskarte, Abschnitt 1). Deshalb ist der Aufruf hier unbedenklich; wer
  * das Skript um eine Übersichts-Zahl erweitert, hebt diese Eigenschaft auf.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, type SQL } from "drizzle-orm";
 import { db } from "../lib/db";
 import { budgetAllocations, customers } from "@shared/schema";
 import { readBudget45bFifoBreakdown } from "../storage/budget/fifo-breakdown";
@@ -73,7 +91,24 @@ async function main(): Promise<void> {
       .map(k => [k.id, k.name] as const),
   );
 
-  if (alsCsv) console.log("kunde;name;uebertrag_alloc;uebertrag_consumed;uebertrag_rest;laufend_alloc;laufend_consumed;laufend_rest");
+  /**
+   * VOLLSTAENDIGE Feldliste, nicht die drei naheliegenden.
+   *
+   * Bis 25.09.2026 trug die CSV je Topf nur `alloc/consumed/rest`. Der
+   * Gate-2-Blocker B1 veraenderte aber `consumedBilled`, `consumedDocumented`
+   * und `consumedOther` — **die Messung konnte ihn per Konstruktion nicht
+   * sehen**, und der bereits gegen Prod gefahrene Lauf hat ihn nicht gesehen.
+   *
+   * Gemessen sind es sieben Felder je Topf; `plannedCents` kommt dazu, weil
+   * es im selben DTO steht und der Client es rendert. Wer drei davon misst,
+   * misst eine Teilmenge und schreibt „Vorher/Nachher" darueber.
+   */
+  const CSV_KOPF = [
+    "kunde", "name",
+    "ue_alloc", "ue_consumed", "ue_billed", "ue_dok", "ue_sonst", "ue_planned", "ue_rest",
+    "lf_alloc", "lf_consumed", "lf_billed", "lf_dok", "lf_sonst", "lf_planned", "lf_rest",
+  ].join(";");
+  if (alsCsv) console.log(CSV_KOPF);
   else {
     console.log("");
     console.log(`§45b-Topfaufteilung zum ${stichtag} — ${kunden.length} Kunden mit aktiver Zuweisung`);
@@ -96,15 +131,23 @@ async function main(): Promise<void> {
     if (c.consumedCents < 0 || l.consumedCents < 0) negativeToepfe++;
     neu.set(id, {
       uebertragVerbraucht: c.consumedCents, uebertragRest: c.remainingCents,
+      uebertragBilled: c.consumedBilledCents, uebertragDok: c.consumedDocumentedCents,
+      uebertragSonst: c.consumedOtherCents, uebertragPlanned: c.plannedCents,
       laufendVerbraucht: l.consumedCents, laufendRest: l.remainingCents,
+      laufendBilled: l.consumedBilledCents, laufendDok: l.consumedDocumentedCents,
+      laufendSonst: l.consumedOtherCents, laufendPlanned: l.plannedCents,
     });
     if (vergleichsDatei) continue;
 
     if (alsCsv) {
       console.log([
         id, `"${namen.get(id) ?? "?"}"`,
-        c.allocatedCents, c.consumedCents, c.remainingCents,
-        l.allocatedCents, l.consumedCents, l.remainingCents,
+        c.allocatedCents, c.consumedCents,
+        c.consumedBilledCents, c.consumedDocumentedCents, c.consumedOtherCents,
+        c.plannedCents, c.remainingCents,
+        l.allocatedCents, l.consumedCents,
+        l.consumedBilledCents, l.consumedDocumentedCents, l.consumedOtherCents,
+        l.plannedCents, l.remainingCents,
       ].join(";"));
     } else {
       console.log(
@@ -140,8 +183,15 @@ async function main(): Promise<void> {
 
 type Zahlen = {
   uebertragVerbraucht: number; uebertragRest: number;
+  uebertragBilled: number; uebertragDok: number;
+  uebertragSonst: number; uebertragPlanned: number;
   laufendVerbraucht: number; laufendRest: number;
+  laufendBilled: number; laufendDok: number;
+  laufendSonst: number; laufendPlanned: number;
 };
+
+/** Spalten der `--csv`-Ausgabe, in genau dieser Reihenfolge. */
+const CSV_SPALTEN = 16;
 
 /**
  * Liest die `--csv`-Ausgabe des VORHER-Laufs und stellt die Auswertung auf.
@@ -157,18 +207,49 @@ async function vergleiche(
 ): Promise<void> {
   const { readFileSync } = await import("node:fs");
   const alt = new Map<number, Zahlen>();
+  /**
+   * FORMAT PRUEFEN, nicht raten.
+   *
+   * Die CSV trug bis 25.09.2026 acht Spalten, jetzt sechzehn. Eine alte Datei
+   * still nach den neuen Positionen zu lesen, ergaebe Zahlen — falsche, ohne
+   * jede Fehlermeldung. `ue_rest` stuende dann dort, wo `lf_billed` erwartet
+   * wird. Deshalb bricht der Vergleich ab, statt eine Auswertung zu drucken.
+   */
+  let kopfGesehen = false;
   for (const zeile of readFileSync(datei, "utf8").split("\n")) {
     const t = zeile.split(";");
-    if (t.length < 8 || !/^\d+$/.test(t[0])) continue;
+    if (t[0] === "kunde") {
+      kopfGesehen = true;
+      if (t.length !== CSV_SPALTEN) {
+        console.error("");
+        console.error(`ABBRUCH: ${datei} hat ${t.length} Spalten, erwartet sind ${CSV_SPALTEN}.`);
+        console.error("Die Datei stammt aus einer aelteren Fassung dieses Skripts (8 Spalten).");
+        console.error("Den VORHER-Lauf mit dem heutigen Stand wiederholen — eine Auswertung");
+        console.error("aus der alten Datei waere zahlenmaessig falsch und sieht richtig aus.");
+        process.exit(1);
+      }
+      continue;
+    }
+    if (t.length !== CSV_SPALTEN || !/^\d+$/.test(t[0])) continue;
     alt.set(Number(t[0]), {
-      uebertragVerbraucht: Number(t[3]), uebertragRest: Number(t[4]),
-      laufendVerbraucht: Number(t[6]), laufendRest: Number(t[7]),
+      uebertragVerbraucht: Number(t[3]), uebertragBilled: Number(t[4]),
+      uebertragDok: Number(t[5]), uebertragSonst: Number(t[6]),
+      uebertragPlanned: Number(t[7]), uebertragRest: Number(t[8]),
+      laufendVerbraucht: Number(t[10]), laufendBilled: Number(t[11]),
+      laufendDok: Number(t[12]), laufendSonst: Number(t[13]),
+      laufendPlanned: Number(t[14]), laufendRest: Number(t[15]),
     });
+  }
+  if (!kopfGesehen) {
+    console.error("");
+    console.error(`ABBRUCH: ${datei} hat keine Kopfzeile — das Format ist nicht pruefbar.`);
+    process.exit(1);
   }
 
   const { readBudget45bFifoBreakdown: lies } = await import("../storage/budget/fifo-breakdown");
   const aenderungen: Array<{
     id: number; dUeRest: number; dUeVerbr: number; dLfRest: number; dLfVerbr: number;
+    dZustand: number;
   }> = [];
   let negativVorher = 0;
   for (const id of kunden) {
@@ -188,14 +269,31 @@ async function vergleiche(
      * Die erste Fassung meldete „0 von 1 geaendert" fuer einen Fall, der sich
      * nachweislich aendert.
      */
+    /**
+     * Die ZUSTANDS-Aufteilung getrennt fuehren (`consumedBilled/Documented/
+     * Other`). Sie ist die Achse, auf der der Gate-2-Blocker B1 lag — und die
+     * frueherere Fassung dieses Skripts hat sie nicht gemessen. Ein Lauf, der
+     * nur `consumed` vergleicht, meldet „keine Aenderung" fuer einen Kunden,
+     * bei dem sich die angezeigte Aufteilung vollstaendig verschoben hat.
+     */
+    const dZustand =
+      Math.abs(c.consumedBilledCents - a.uebertragBilled)
+      + Math.abs(c.consumedDocumentedCents - a.uebertragDok)
+      + Math.abs(c.consumedOtherCents - a.uebertragSonst)
+      + Math.abs(c.plannedCents - a.uebertragPlanned)
+      + Math.abs(l.consumedBilledCents - a.laufendBilled)
+      + Math.abs(l.consumedDocumentedCents - a.laufendDok)
+      + Math.abs(l.consumedOtherCents - a.laufendSonst)
+      + Math.abs(l.plannedCents - a.laufendPlanned);
     const d = {
       id,
       dUeRest: c.remainingCents - a.uebertragRest,
       dUeVerbr: c.consumedCents - a.uebertragVerbraucht,
       dLfRest: l.remainingCents - a.laufendRest,
       dLfVerbr: l.consumedCents - a.laufendVerbraucht,
+      dZustand,
     };
-    if (d.dUeRest || d.dUeVerbr || d.dLfRest || d.dLfVerbr) aenderungen.push(d);
+    if (d.dUeRest || d.dUeVerbr || d.dLfRest || d.dLfVerbr || d.dZustand) aenderungen.push(d);
   }
 
   const summeRest = aenderungen.reduce((n, a) => n + a.dLfRest, 0);
@@ -207,6 +305,12 @@ async function vergleiche(
   console.log(`  Kunden mit Aenderung:        ${aenderungen.length} von ${alt.size} verglichenen`);
   console.log(`  Σ Verschiebung (Rest „laufendes Jahr"): ${formatEuroDE(summeRest)}`);
   console.log(`  Toepfe mit negativem Verbrauch VORHER: ${negativVorher}`);
+  const nurZustand = aenderungen.filter(
+    a => a.dZustand !== 0 && !a.dUeRest && !a.dUeVerbr && !a.dLfRest && !a.dLfVerbr,
+  );
+  console.log(`  davon NUR in der Zustands-Aufteilung: ${nurZustand.length}`);
+  console.log(`      (abgerechnet / dokumentiert / sonstiger Verbrauch / geplant —`);
+  console.log(`       die Achse, auf der B1 lag und die frueher nicht gemessen wurde)`);
   console.log("");
   if (groesste.length === 0) {
     console.log("  Keine Aenderung — auf diesem Bestand tritt der Fall nicht auf.");
@@ -286,20 +390,20 @@ async function ursachenAufteilung(kunden: number[], stichtag: string): Promise<v
      * UEBERSTEIGEN, und dann sieht der Befund nach einem Widerspruch aus, wo
      * nur zwei verschiedene Begriffe nebeneinanderstehen.
      */
-    const nettoSumme = async (...zeitFilter: unknown[]) => {
+    const nettoSumme = async (...zeitFilter: (SQL | undefined)[]) => {
       const [verbrauch] = await db.select({
         total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
       }).from(budgetTransactions).where(und(
         inArray(budgetTransactions.allocationId, ueIds),
         roh`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
-        ...(zeitFilter as never[]),
+        ...zeitFilter,
       ));
       const [storno] = await db.select({
         total: roh<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
       }).from(budgetTransactions).where(und(
         inArray(budgetTransactions.allocationId, ueIds),
         ist(budgetTransactions.transactionType, "reversal"),
-        ...(zeitFilter as never[]),
+        ...zeitFilter,
       ));
       return Math.max(0, Number(verbrauch?.total ?? 0) - Number(storno?.total ?? 0));
     };

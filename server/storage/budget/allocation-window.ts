@@ -247,16 +247,36 @@ export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undef
  * ausgewiesene Rest des laufenden Jahres stieg auf 662,00 statt 562,00 EUR —
  * also in die Richtung, in der gebucht wird.
  *
- * ── Warum nur zwei der drei Glieder ─────────────────────────────────────
+ * ── Warum nur zwei der drei Glieder — und WO diese Begruendung gilt ─────
+ * Fuer einen Aufrufer, der bereits auf eine Menge von Allocation-IDs
+ * eingeschraenkt hat (`inArray(allocationId, …)`), gilt:
+ *
  * (a) trifft nicht zu: die Zeilen, fuer die diese Bedingung gilt, sind gerade
  *     die NICHT ausgeschlossenen — `notDisplacedByResetWhere` hat sie
  *     durchgelassen.
  * (c) trifft nicht zu: es gilt ausdruecklich nur fuer `allocationId IS NULL`,
- *     und hier ist die ID gesetzt.
+ *     und dort ist die ID gesetzt.
  *
  * Das steht hier und nicht als Kommentar an der Aufrufstelle, weil sonst die
  * naechste Person die fehlenden Glieder fuer ein Versehen haelt und sie
  * „ergaenzt".
+ *
+ * ⚠ **FUER EINEN KUNDENWEITEN AUFRUFER GILT DIESE BEGRUENDUNG NICHT.**
+ * Beide Saetze haengen an der Einschraenkung auf Allocation-IDs. Wer diese
+ * Funktion ohne sie ruft, bekommt den as-of- und den Reset-Schnitt, aber
+ * WEDER die Ausschlussliste NOCH den `accrualFloorDate`-Boden — und beide
+ * fehlen dann wirklich.
+ *
+ * Genau so steht es heute in `classifyConsumedByState`
+ * (`fifo-breakdown.ts`): kundenweit, ohne `inArray`, `allocationId IS NULL`
+ * ausdruecklich eingeschlossen. Gemessen (Gate 2 zu #190, S-1) entsteht dort
+ * weiterhin ein negatives `consumedOtherCents` — bei einem dokumentierten
+ * Termin gegen einen zum Stichtag abgelaufenen Uebertrag ebenso wie bei einem
+ * Vorjahres-Termin auf dem NULL-Leg.
+ *
+ * Das ist **kein Regress von #190** (ohne Startwert ist der Anker `null` und
+ * die Bedingung zeichengleich mit der frueheren), aber es ist auch keine
+ * Deckung. Ticket: `6hcfP7xVj5R3Pg6p`.
  */
 export function countedConsumptionWhere(
   reset: ResetAnchor | null,

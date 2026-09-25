@@ -28,7 +28,7 @@ import {
   RESET_DISPLACES_ALL_SOURCES_DEFAULT,
 } from "./allocation-window";
 import { budgetAllocations, budgetTransactions, invoiceLineItems, invoices, appointments } from "@shared/schema";
-import { and, eq, lte, isNull, inArray, sql } from "drizzle-orm";
+import { and, eq, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { appointmentsRepo, budgetAllocationsRepo } from "../../repos";
 import { todayISO } from "@shared/utils/datetime";
@@ -338,6 +338,23 @@ async function classifyConsumedByState(
        *
        * Glied (b) des Readers ist NICHT allocation-spezifisch, gilt also fuer
        * beide Toepfe. Deshalb dieselbe Funktion, nicht eine vierte Fassung.
+       *
+       * ⚠ **HIER FEHLEN (a) UND (c) WIRKLICH** (Gate 2 zu #190, S-1).
+       * Die Begruendung im Docblock von `countedConsumptionWhere`, warum die
+       * beiden anderen Glieder entfallen duerfen, haengt an der
+       * Einschraenkung auf Allocation-IDs. Diese Abfrage hat sie NICHT: sie
+       * laeuft kundenweit und nimmt `allocationId IS NULL` ausdruecklich mit.
+       *
+       * Gemessen entsteht deshalb weiterhin ein negatives
+       * `consumedOtherCents` — bei einem dokumentierten Termin gegen einen zum
+       * Stichtag abgelaufenen Uebertrag (Glied a) ebenso wie bei einem
+       * Vorjahres-Termin auf dem NULL-Leg (Glied c).
+       *
+       * Kein Regress von #190: ohne Startwert ist der Anker `null`, und die
+       * Bedingung ist dann zeichengleich mit der frueheren. Aber auch keine
+       * Deckung. Der Fix braucht `excludedSpecialAllocationIds` und
+       * `accrualFloorDate` aus dem Reader — das ist der inverse-Formulierungs-
+       * Fall der Wirkungskarte und ein eigener Schritt: `6hcfP7xVj5R3Pg6p`.
        */
       countedConsumptionWhere(verbrauchsAnker, asOfDate),
     ));

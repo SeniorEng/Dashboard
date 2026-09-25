@@ -49,6 +49,12 @@ import { collectScanFiles, stripComments } from "./guard-helpers";
  * derselben Frage sind ein Zweitbegriff; textlich ist er nicht zu fassen.
  * Er steht als offener Punkt in der Wirkungskarte (`#188`), nicht als stille
  * Lücke hier.
+ *
+ * Und die Zusage deckt heute **genau eine Datei** ab, weil nur eine den
+ * Schnitt ruft. Wandert `classifyConsumedByState` später in eine eigene
+ * Datei, ohne die SSoT zu importieren, **schweigt dieser Wächter** — er
+ * findet niemanden, den er prüfen könnte. `VS-1` fängt genau das über
+ * `PFLICHT_MITGLIED` ab, aber nur für die heute bekannte Datei.
  */
 
 const SSOT = "server/storage/budget/allocation-window.ts";
@@ -79,12 +85,24 @@ const PFLICHT_MITGLIED = "server/storage/budget/fifo-breakdown.ts";
 function nackteSchranken(inhalt: string): string[] {
   const text = stripComments(inhalt).replace(/\s+/g, " ");
   const treffer: string[] = [];
-  // Drizzle-Form.
-  for (const m of text.matchAll(/lte\(\s*budgetTransactions\.transactionDate[^)]*\)/g)) {
+  // Drizzle-Form, `lte(` und `lt(` — beide sind eine obere Schranke.
+  for (const m of text.matchAll(/\blte?\(\s*budgetTransactions\.transactionDate[^)]*\)/g)) {
     treffer.push(m[0].trim());
   }
-  // TS-Form — dieselbe Frage ohne Drizzle, wie die SIEBTE Fenster-Fassung.
-  for (const m of text.matchAll(/budgetTransactions\.transactionDate\s*<=[^;,)]*/g)) {
+  /**
+   * TS- UND `sql`-Template-Form.
+   *
+   * Die Template-Form war in der ersten Fassung nicht erkannt (Gate 2 zu
+   * #190, S-2) — und sie ist nicht theoretisch: **so schreibt der kanonische
+   * Reader genau dieses Praedikat** (`unified-reader.ts:134` und `:142`), und
+   * `fifo-breakdown.ts` benutzt `sql`-Templates direkt daneben. Ein Verstoss
+   * in der Datei, die den Schnitt ruft, waere in dieser Schreibweise gruen
+   * geblieben.
+   *
+   *     sql`${budgetTransactions.transactionDate} <= ${asOfDate}`
+   *                                             ^^ hier steht ein `}`
+   */
+  for (const m of text.matchAll(/budgetTransactions\.transactionDate\s*\}?\s*<=?[^;,)]*/g)) {
     treffer.push(m[0].trim());
   }
   return treffer;
@@ -143,6 +161,19 @@ describe("§45b-Verbrauchs-Schnitt — eine SSoT, kein Nachbau", () => {
     expect(
       nackteSchranken(`const zaehlt = budgetTransactions.transactionDate <= asOfDate;`),
       "die TS-Form wird nicht erkannt",
+    ).toHaveLength(1);
+
+    // Die `sql`-Template-Form — so schreibt der kanonische Reader das
+    // Praedikat. Sie blieb in der ersten Fassung unerkannt (S-2).
+    expect(
+      nackteSchranken("const w = sql`${budgetTransactions.transactionDate} <= ${asOfDate}`;"),
+      "die sql-Template-Form wird nicht erkannt",
+    ).toHaveLength(1);
+
+    // `lt(` statt `lte(` — dieselbe Frage, eine Grenze weiter.
+    expect(
+      nackteSchranken(`lt(budgetTransactions.transactionDate, reset.cutoffDate)`),
+      "die `lt`-Form wird nicht erkannt",
     ).toHaveLength(1);
 
     // Eine reine Erwähnung im Kommentar ist KEIN Verstoß — sonst wäre der

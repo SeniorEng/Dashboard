@@ -114,6 +114,20 @@ describe("§45b-FIFO — der Stichtags-Schnitt gilt für beide Töpfe", () => {
           `Topf „${topf.potType}" meldet negativen Verbrauch (${topf.consumedCents}) — `
           + "das erhöht den ausgewiesenen Rest",
         ).toBeGreaterThanOrEqual(0);
+        /**
+         * Auch die ZUSTANDS-Aufteilung darf nicht negativ werden (Gate 2 zu
+         * #190, S-3). `other = consumedTotal − billed − documented` kippt ins
+         * Minus, sobald die Aufteilung mehr sieht als der Verbrauch — das war
+         * die B1-Form, und sie bleibt an der kundenweiten Abfrage erreichbar
+         * (`6hcfP7xVj5R3Pg6p`). Der Client verschluckt den negativen Wert und
+         * zeigt die positive Zeile daneben, also fällt es dort nicht auf.
+         */
+        expect(
+          topf.consumedOtherCents,
+          `Topf „${topf.potType}" meldet negativen „sonstigen Verbrauch" `
+          + `(${topf.consumedOtherCents}) — die Zustands-Aufteilung zählt mehr `
+          + "als der Verbrauch",
+        ).toBeGreaterThanOrEqual(0);
       }
     } finally {
       await cleanupCustomer(id);
@@ -278,6 +292,54 @@ describe("§45b-FIFO — der Stichtags-Schnitt gilt für beide Töpfe", () => {
         carry.consumedBilledCents + carry.consumedDocumentedCents + carry.consumedOtherCents,
         "die drei Teilbeträge ergeben nicht den Gesamt-Verbrauch des Topfes",
       ).toBe(carry.consumedCents);
+    } finally {
+      await cleanupCustomer(id);
+    }
+  }, 120_000);
+
+  it("FS-9 – die Zustands-Aufteilung ZÄHLT auch, sie nullt nicht nur", async () => {
+    /**
+     * Die Gegenrichtung zu `FS-6` (Gate 2 zu #190, S-3).
+     *
+     * `FS-6` sichert, dass eine Buchung AUSSERHALB des Fensters nicht in der
+     * Aufteilung landet — alle drei Teilbeträge sind dort 0. Damit stand die
+     * Zusage „die Aufteilung sieht dieselbe Menge wie der Verbrauch" **nur auf
+     * einer Seite**: eine Mutation, die `classifyConsumedByState` leer
+     * zurückgeben lässt, hätte FS-1 bis FS-8 grün gehalten.
+     *
+     * Gerechnet: dokumentierter Termin über 100,00 € am 10.04. — nach dem
+     * Cutoff 01.03., vor dem Stichtag 15.05. Er MUSS als „dokumentiert"
+     * erscheinen, nicht als „sonstiger Verbrauch".
+     */
+    const { id, uebertragId } = await kundeMitLage();
+    try {
+      const [termin] = await db.insert(appointments).values({
+        customerId: id, date: `${J}-04-10`, scheduledStart: "09:00", durationPromised: 60,
+        status: "completed", signatureData: "data:image/png;base64,AAA",
+        appointmentType: "Betreuung",
+      } as never).returning({ id: appointments.id });
+
+      await db.insert(budgetTransactions).values({
+        customerId: id, budgetType: "entlastungsbetrag_45b", transactionType: "consumption",
+        amountCents: -100_00, transactionDate: `${J}-04-10`,
+        allocationId: uebertragId, appointmentId: termin.id,
+        description: "FS9-dokumentiert-im-fenster",
+      } as never);
+
+      const fifo = await readBudget45bFifoBreakdown(id, `${J}-05-15`);
+      const carry = fifo.pots.find(p => p.potType === "carryover")!;
+
+      expect(
+        carry.consumedCents,
+        "der Verbrauch im Fenster wird gar nicht gezählt",
+      ).toBe(100_00);
+      expect(
+        carry.consumedDocumentedCents,
+        "ein dokumentierter Termin IM Fenster erscheint nicht als dokumentiert — "
+        + "die Zustands-Aufteilung zählt nur noch nach unten",
+      ).toBe(100_00);
+      expect(carry.consumedOtherCents, "er landet fälschlich in „sonstiges\"").toBe(0);
+      expect(carry.consumedBilledCents).toBe(0);
     } finally {
       await cleanupCustomer(id);
     }
