@@ -599,3 +599,181 @@ Mutations-Gegencheck: das Entfernen des `as-of`-Glieds ließ `FS-1`…`FS-4` gr�
 Das ist der Punkt aus CLAUDE.md („ein Wächter braucht eine Selbstprobe") auf
 einen gewöhnlichen Fix angewandt: der Gegencheck fragt nicht, ob die Zusage
 plausibel ist, sondern ob ihr Test rot werden kann.
+
+---
+
+# Anhang 4: Die Feldliste — wer liest welche Zahl, und mit welchem Schnitt
+
+Erhoben am 25.09.2026, gemessen am Code (Greps über `server/`, `client/src/`,
+`shared/`), nicht aus dem Gedächtnis.
+
+**Warum diese Liste existiert.** Anhang 3 hat gezeigt, dass derselbe Feldname
+(`consumedCents`) an zwei Stellen zwei verschiedene Größen bezeichnet. Der
+Gate-2-Blocker B1 zu #190 hat gezeigt, dass ein Feld verändert werden kann,
+ohne dass die Messung es sieht — weil die Messung es nicht ausgewiesen hat.
+Beide Fälle haben dieselbe Ursache: **es gab keine Liste, die sagt, welche
+Zahl wo herkommt und wer sie liest.**
+
+## Teil 1 — Die FIFO-Aufschlüsselung (`Budget45bFifoPot`)
+
+Endpunkt `GET /budget/:id/fifo-breakdown` (`server/routes/budget.ts:142`),
+Erzeuger `server/storage/budget/fifo-breakdown.ts`.
+
+| Feld | Client-Leser | Server-Leser | Geltender Schnitt |
+|---|---|---|---|
+| `potType` | `budget-45b-fifo-breakdown.tsx` (Beschriftung) | — | — |
+| `allocatedCents` | ebd. (angezeigter Topfbetrag) | `invariants.ts` (Summenprüfung) | Verdrängung (**flag-gegatet**) |
+| `consumedCents` | **keiner** | `invariants.ts`, Mess-Skript | as-of + Reset (`countedConsumptionWhere`) |
+| `consumedBilledCents` | ebd. (Segment „Abgerechnet") | — | dito, **plus** Rechnungs-Zustand ohne Stichtags-Schranke |
+| `consumedDocumentedCents` | ebd. (Segment „Dokumentiert") | — | dito |
+| `consumedOtherCents` | ebd. (Segment „Sonstiger Verbrauch") | — | Rest-Differenz, **kann negativ werden** |
+| `plannedCents` | ebd. (Segment „Geplant/blockiert") | — | Holds des Übertrags-Fensters |
+| `remainingCents` | ebd. | `invariants.ts` | abgeleitet |
+| `carryoverExpiresAt` | ebd. (Verfallshinweis) | — | frühestes `expiresAt` |
+| `totalAllocatedCents` | ebd. („von X frei") | `invariants.ts` | = `A` des Readers |
+| `totalConsumedCents` | **keiner** | `invariants.ts` | = `C` |
+| `totalPlannedCents` | **keiner** | `invariants.ts` | = `H` |
+| `totalAvailableCents` | ebd. („X von … frei") | `invariants.ts` | = `V` |
+
+**Drei Felder haben keinen Client-Leser** (`consumedCents` je Topf,
+`totalConsumedCents`, `totalPlannedCents`). Ihr einziger nennenswerter
+Verbraucher ist `checkFifoUnifiedEquality` — und der kann per Konstruktion
+nicht fehlschlagen (Anhang 3, Ticket `6hcVfPxVrCWVC8wp`). Nach der
+Ersetzungs-Regel ist das der Hinweis, den man ernst nehmen sollte: ein Feld,
+dessen einziger Verbraucher eine wirkungslose Prüfung ist, trägt nichts.
+
+**Der einzige Aufrufer ruft ohne Stichtag.** `customer-detail.tsx:132-134`
+holt den Endpunkt **ohne `?date=`** — also immer „heute". Keine Oberfläche hat
+je eine Stichtagssicht ≠ heute gezeigt. Das ist der Grund, warum die
+Prod-Messungen zum 29.06. und 31.03. keine Aussage darüber sind, was jemand
+gesehen hat.
+
+## Teil 2 — Verfügbarkeit: vier Fassungen derselben Frage
+
+Das ist der Teil, der zählt. „Wie viel ist verfügbar?" wird an **vier**
+Stellen beantwortet, mit **verschiedenen** Formeln.
+
+### (1) `netAvailable45bAt` — die benannte SSoT
+
+`server/storage/budget/net-available-45b.ts`
+
+```
+max(0, allocated(D) − holds(D) − max(0, rohVerbrauch(D) − excluded(D)))
+```
+
+Der Aufruf-Rand ist **bewacht**: der Registry-Eintrag
+`budget-availability-45b` führt eine Allow-List aus vier Modulen
+(`shared/ssot-registry.ts:216-226`), durchgesetzt vom Einzel-Leser-Wächter.
+
+| Aufrufer | Kontext |
+|---|---|
+| `unified-reader.ts:258` | der reguläre Lesepfad |
+| `summary-queries.ts:269` / `:443` | Forecast-Vorausschau (#1366) |
+| `invoice-45b-reduction.ts:306` | nachträgliche §45b-Rechnungs-Kürzung |
+
+Wer eine fünfte Stelle hinzufügt, fällt auf. Das ist der Unterschied zu (3)
+und (4) weiter unten: die haben **keinen** solchen Rand.
+
+### (2) `PotAvailability.availableCents` — was der Reader ausliefert
+
+`server/storage/budget/unified-reader.ts:98`
+
+Für §45b = (1), zusätzlich gekappt auf `capRemainingCents`. Für §45a/§39
+`min(potRemaining, capRemaining)` über das **Cap-Fenster**, nicht bis zum
+Stichtag — `consumedNetCents` bedeutet dort also etwas anderes als bei §45b
+(`unified-reader.ts:91-92` sagt das ausdrücklich).
+
+Produktive Leser, alle über `readUnifiedBudgetAvailability`:
+
+| Stelle | Stichtag | Rolle |
+|---|---|---|
+| `reservation-storage.ts:241` | `transactionDate` | **Reservierungs-Tor**, innerhalb des Locks |
+| `reservation-storage.ts:453` | Datum der ersten Konsumzeile | Reconcile-Headroom |
+| `invoice-data.ts:929` | Termindatum | **Kaskade der Rechnungsstellung** |
+| `rebook-storage.ts:492` | **Monatsende** | Ziel-Topf-Berechtigung beim Umbuchen |
+| `import-availability.ts:66` | `transactionDate` | Import-Tor |
+| `summary-queries.ts:691`/`:702` | Stichtag der Übersicht | Anzeige |
+| `fifo-breakdown.ts:84` | Stichtag | Teil 1 oben |
+| `budget-conservation.ts:200` | Stichtag | Invarianten |
+| `routes/budget.ts:374` | `?date=` | Endpunkt |
+
+### (3) `totalAvailable` im BUCHUNGS-Pfad — eine eigene Formel
+
+`server/storage/budget/consumption-engine.ts:349`
+
+```
+max(0, totalAllocated − totalNetConsumed)
+```
+
+**Ohne Holds und ohne Cap.** `totalAllocated` kommt aus derselben SSoT
+(`calculateAllocatedCents`, `:208`), und `totalNetConsumed` zieht
+`excludedConsumedNetCents` ab — die Ausschluss-Glieder sind also dieselben.
+Der Unterschied ist, dass **eine Reservierung die Buchungs-Kapazität nicht
+mindert**.
+
+Ob das so gewollt ist, ist eine fachliche Frage und steht nirgends
+geschrieben. **Sie gehört beantwortet, bevor Hard-Holds scharf geschaltet
+werden** — heute ist `holdsActiveCents` in Phase 4 stets 0
+(`unified-reader.ts:93-94`), und solange das gilt, sind (2) und (3) bis auf den
+Cap deckungsgleich. Der Unterschied ist latent, nicht wirksam.
+
+### (4) `projected45bAvailableCents` — das ANLEGE-Tor
+
+`server/storage/budget/net-available-45b.ts:264-283`
+
+```
+max(0, projectedAllocated(Monatsende) − pot.consumedNetCents − pot.holdsActiveCents)
+```
+
+**Zwei verschiedene Fenster in einer Formel:** der Anspruch wird auf das
+**Monatsende** projiziert (`projectFuture: true`), der Verbrauch stammt aus
+`pot`, das zum **Termindatum** gelesen wurde. Das ist die Absicht des Tores
+(„reicht das Budget bis Monatsende?"), aber es heißt, dass die
+Exklusions-Glieder auf beiden Seiten mit **unterschiedlichem**
+`projectFuture` gerechnet wurden — genau die Symmetrie, die
+`netAvailable45bAt` ausdrücklich herstellt (`net-available-45b.ts:33-35`).
+
+Das ist die bereits in #166 benannte Landmine: **wer hier das
+Verdrängungs-Flag durchreicht, bricht die Symmetrie.** Leser:
+`reservation-storage.ts:274` und `import-availability.ts:88`.
+
+## Teil 3 — Die Übersicht (`BudgetOverview45bDTO`)
+
+`shared/api/openapi.ts:717-736`, erzeugt in `summary-queries.ts`.
+
+| Feld | Server-Formel | Client-Leser |
+|---|---|---|
+| `totalAllocatedCents` | Reader `A` | `BudgetLedgerSection.tsx:321,325,329,340` |
+| `totalUsedCents` | **ROHE** Allocation-Sicht (`:194`), inkl. `manual_adjustment` | ebd. `:310,322,366` |
+| `availableCents` | `pot.availableCents`, aber `isCurrentlyActive ? … : 0` (`:355`) | ebd. `:312,321,323,398` |
+| `plannedCents` | Holds/Planung | ebd. `:330,336,420` |
+| `availableAfterPlannedCents` | `availableCents − plannedCents` (`:346`) | ebd. `:337,384,398` |
+| `currentMonthAvailableCents` | `max(0, pot.availableCents)` (`:652`) | ebd. `:398,585` · `customer-detail.tsx:82,89` |
+| `currentYearAvailableCents` | `pot.availableCents` (`:667`) | ebd. `:671` · `customer-detail.tsx:96,122,466` |
+| `carryoverCents` / `carryoverVerdraengtCents` | Übertrag und verdrängter Anteil | ebd. `:367,468,493,495,501` |
+
+**Die Falle sitzt bei `totalUsedCents`.** Es ist die **rohe** Verbrauchssumme
+inklusive `manual_adjustment` — nicht der `consumedNetCents` des Readers, der
+`manual_adjustment` ausdrücklich NICHT enthält (`unified-reader.ts:115`).
+Der Client rechnet daraus ab (`attributedUsedCents`, `expiredUsedCents`,
+`BudgetLedgerSection.tsx:321-323`). Zwei Felder mit dem Wortstamm „used" in
+derselben Antwort, die verschiedene Mengen meinen — dieselbe Form wie die
+`consumedCents`-Falle aus Anhang 3.
+
+**Und `availableCents` trägt eine Fallunterscheidung, die kein anderer Weg
+kennt:** `isCurrentlyActive ? availableCents : 0`. Ein inaktiver Topf meldet
+hier 0, während der Reader denselben Topf mit seinem tatsächlichen Wert
+ausweist. Wer die beiden Zahlen vergleicht, findet einen Unterschied, der
+keiner ist.
+
+## Was daraus folgt
+
+1. **Vor dem Klammer-PR:** die Vorbelegung des Kassenauskunft-Formulars muss
+   benennen, **welche** der vier Fassungen sie anzeigt. „Aktueller
+   Systemstand" ist keine Angabe.
+2. `consumedCents` je Topf, `totalConsumedCents` und `totalPlannedCents`
+   haben keinen Client-Leser — Kandidaten für die Ersetzungs-Regel, sobald
+   `6hcVfPxVrCWVC8wp` den tautologischen Wächter ersetzt.
+3. Der Unterschied zwischen (2) und (3) ist **latent**, weil Hard-Holds in
+   Phase 4 stets 0 sind. Er wird wirksam, sobald sie scharf geschaltet
+   werden — das gehört ins Hard-Holds-Ticket, nicht hierher entschieden.
