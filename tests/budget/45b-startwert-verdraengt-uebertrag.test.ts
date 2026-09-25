@@ -73,11 +73,13 @@ async function kundeFunke(): Promise<number> {
 }
 
 describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung", () => {
-  it("VD-1 – der Übertrag zählt ohne Flag mit und mit Flag nicht mehr", async () => {
+  it("VD-1 – der Übertrag zählt nach der alten Regel mit und nach der neuen nicht mehr", async () => {
     const id = await kundeFunke();
     try {
       const stichtag = `${ANKER_JAHR}-06-15`;
-      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+      // Seit dem Flip ist die neue Regel der Standard — die alte Seite wird
+      // AUSDRÜCKLICH mit `false` gerechnet (sonst verglichen beide Seiten dasselbe).
+      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: false });
       const neu = await calculateAllocatedCents(
         id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
       );
@@ -121,7 +123,7 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       const typeSettings = await readBudgetTypeSettings(
         id, { kind: "forDate", asOfDate: todayISO() },
       );
-      const exHeute = await getExcluded45bConsumption(id, stichtag, db, typeSettings);
+      const exHeute = await getExcluded45bConsumption(id, stichtag, db, typeSettings, { resetDisplacesAllSources: false });
       const exNeu = await getExcluded45bConsumption(
         id, stichtag, db, typeSettings, { resetDisplacesAllSources: true },
       );
@@ -140,18 +142,27 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
     }
   });
 
-  it("VD-4 – ohne Flag ändert sich nichts", async () => {
-    // Der Default muss das heutige Verhalten sein — sonst wäre die Messung
-    // aus Schritt 2 keine Messung, sondern schon die Änderung.
+  it("VD-4 – der Standard ist die neue Regel (Flip)", async () => {
+    // Bis zum Flip sicherte VD-4 „ohne Flag ändert sich nichts" (Standard =
+    // alte Regel, damit die Messung aus Schritt 2 eine Messung blieb). Mit dem
+    // Flip (Tabelle D, Alrik 25.09.2026) kehrt sich das um: ohne Angabe gilt
+    // die neue Regel. Geänderte Zusage — im PR aufgeführt.
     const id = await kundeFunke();
     try {
       for (const stichtag of [`${ANKER_JAHR}-03-15`, `${ANKER_JAHR}-06-15`, `${ANKER_JAHR}-08-15`]) {
         const ohneOpt = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
-        const explizitFalse = await calculateAllocatedCents(
-          id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: false },
+        const explizitTrue = await calculateAllocatedCents(
+          id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
         );
-        expect(explizitFalse, `Default weicht ab bei ${stichtag}`).toBe(ohneOpt);
+        expect(ohneOpt, `Standard ist nicht die neue Regel bei ${stichtag}`).toBe(explizitTrue);
       }
+      // Und die neue Regel unterscheidet sich hier wirklich von der alten —
+      // sonst sagte der Vergleich oben nichts (Übertrag automatisch, 1. Hj.).
+      const alt = await calculateAllocatedCents(
+        id, "entlastungsbetrag_45b", { asOfDate: `${ANKER_JAHR}-06-15`, resetDisplacesAllSources: false },
+      );
+      const standard = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: `${ANKER_JAHR}-06-15` });
+      expect(alt - standard, "Standard = alte Regel — der Flip ist nicht wirksam").toBe(1_179_00);
     } finally {
       await cleanupCustomer(id);
     }
@@ -265,7 +276,7 @@ describe("§45b — der Startwert verdrängt jede früher beginnende Zuweisung",
       ]);
 
       const stichtag = `${ANKER_JAHR}-03-15`;
-      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag });
+      const heute = await calculateAllocatedCents(id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: false });
       const neu = await calculateAllocatedCents(
         id, "entlastungsbetrag_45b", { asOfDate: stichtag, resetDisplacesAllSources: true },
       );

@@ -56,6 +56,12 @@ async function kundeMitLage(): Promise<{ id: number; uebertragId: number }> {
     customerId: id, budgetType: "entlastungsbetrag_45b", year: J, month: null,
     amountCents: UEBERTRAG, source: "carryover",
     validFrom: `${J}-01-01`, expiresAt: `${J}-06-30`, notes: "FS-uebertrag",
+    // Von Hand eingetragen, am selben Tag wie der Startwert (beide in diesem
+    // Aufbau): nach der Flip-Regel zählen dann BEIDE (Tabelle D, 25.09.2026).
+    // Gegenstand dieser Tests ist der Stichtags-Schnitt des Verbrauchs, nicht
+    // die Verdrängung — ohne Ersteller gälte der Übertrag als Automatik und
+    // fiele weg.
+    createdByUserId: (await getAuthCookie()).user.id,
   }).returning({ id: budgetAllocations.id });
 
   await db.insert(budgetTransactions).values([

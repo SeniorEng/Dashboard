@@ -37,7 +37,7 @@
  * beantworten andere Fragen (Reset-Baseline bzw. Doppelzaehlung) und haben je
  * genau einen Aufrufer.
  */
-import { and, eq, gt, gte, isNotNull, isNull, lte, ne, notInArray, or, type SQL } from "drizzle-orm";
+import { and, eq, gt, gte, isNotNull, isNull, lt, lte, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { budgetAllocations, budgetTransactions } from "@shared/schema";
 
 /** Zeitliche Gueltigkeit einer Zuweisung — die Felder, die beide Welten lesen. */
@@ -69,6 +69,17 @@ export interface ResetAnchor {
    * haelt nur so lange, wie das Datumsformat bleibt.
    */
   month: number;
+  /**
+   * Tag, an dem dieser Startwert EINGETRAGEN wurde (`created_at::date` aus
+   * Postgres, als `yyyy-mm-dd`). `null` nur, wenn die Quelle ihn nicht kennt.
+   *
+   * Gebraucht fuer die Flip-Regel (Tabelle D, Alrik 25.09.2026): ein von Hand
+   * eingetragener Uebertrag wird nur verdraengt, wenn der Startwert an einem
+   * SPAETEREN Tag eingetragen wurde. Aus Postgres statt aus einem JS-`Date`,
+   * damit ein Eintrag kurz vor Mitternacht nicht je nach Zeitzone auf den
+   * Nachbartag kippt — derselbe Vergleich wie in Alriks Bestands-Abfrage.
+   */
+  eingetragenAm: string | null;
 }
 
 /**
@@ -124,7 +135,7 @@ export function allocationValidAtWhere(asOfDate: string): SQL | undefined {
  *
  * Umschalten heisst: diese Zeile. Nicht neun.
  */
-export const RESET_DISPLACES_ALL_SOURCES_DEFAULT = false;
+export const RESET_DISPLACES_ALL_SOURCES_DEFAULT = true;
 
 /**
  * Verdraengt der Startwert-Reset diese Zuweisung?
@@ -161,7 +172,13 @@ export const RESET_DISPLACES_ALL_SOURCES_DEFAULT = false;
  * die Messung deshalb eine Untergrenze. Sie ist es nicht.
  */
 export function displacedByReset(
-  row: AllocationWindowRow & { year: number },
+  row: AllocationWindowRow & {
+    year: number;
+    /** `null` = von der Jahreswechsel-Automatik angelegt. */
+    createdByUserId: number | null;
+    /** `created_at::date` der Zeile. */
+    eingetragenAm: string | null;
+  },
   reset: ResetAnchor | null,
 ): boolean {
   if (!reset) return false;
@@ -180,7 +197,47 @@ export function displacedByReset(
    * **`<=` verdraengt MEHR als `<`.** Jede Messung, die mit `<` gefahren
    * wurde, ist damit eine Untergrenze.
    */
-  return row.validFrom <= reset.cutoffDate && row.year <= reset.year;
+  if (!(row.validFrom <= reset.cutoffDate && row.year <= reset.year)) return false;
+  /**
+   * WELCHE Uebertraege ein Startwert verdraengt (Tabelle D, Alrik 25.09.2026,
+   * am Prod-Bestand geprueft):
+   *
+   *   Ein Startwert im 1. Halbjahr verdraengt einen Uebertrag desselben
+   *   Jahres, WENN
+   *     (a) der Uebertrag automatisch erzeugt wurde (kein Ersteller), ODER
+   *     (b) der Startwert an einem SPAETEREN TAG eingetragen wurde als der
+   *         Uebertrag.
+   *   Am selben Tag von Hand eingetragen → beide zaehlen.
+   *
+   * „Was ich eingetragen habe, gilt": wer Uebertrag und Startwert gemeinsam
+   * eintraegt, meint beide (die #1395-Zusagen). Wer den Startwert spaeter
+   * nachtraegt, stellt einen neuen Bestand fest, der den alten Uebertrag
+   * einschliesst.
+   *
+   * ERSETZT die vorige Fassung dieser Funktion, die JEDEN Uebertrag mit
+   * `validFrom <= cutoffDate` verdraengte. Die Zeitbedingung darueber bleibt
+   * unveraendert (`<=`, Alriks Weiche zu #166).
+   *
+   * Das Merkmal „automatisch" ist `created_by_user_id IS NULL`. Seit #193 setzt
+   * der Update-Zweig von `upsertCarryoverAllocation` den Ersteller mit; davor
+   * von Hand ueberschriebene Automatik-Zeilen tragen weiter keinen — fuer sie
+   * greift (b), weil der Startwert fast immer spaeter eingetragen wird. Alrik hat
+   * den Bestand dazu geprueft (FINDING in #193).
+   */
+  if (reset.month > 6) return false;
+  /**
+   * Schon VOR dem Stichtag verfallen → „verfallen", nicht „ersetzt" (Glossar,
+   * CLAUDE.md §4; Zusage EK-2 aus Gate 2 zu #166, B1). Was am Stichtag nicht
+   * mehr gilt, kann der Startwert nicht einschliessen. Solange die Verdraengung
+   * automatischer Uebertraege hinter dem Flag lag, fiel das nicht auf; mit dem
+   * Flip traf sie auch den am 31.01. verfallenen Uebertrag. Auf Prod-Daten
+   * folgenlos: echte Uebertraege verfallen zum 30.06., ein Startwert im
+   * 1. Halbjahr trifft sie also immer noch gueltig an.
+   */
+  if (row.expiresAt != null && row.expiresAt < reset.cutoffDate) return false;
+  if (row.createdByUserId == null) return true;
+  return reset.eingetragenAm != null && row.eingetragenAm != null
+    && reset.eingetragenAm > row.eingetragenAm;
 }
 
 /**
@@ -219,10 +276,32 @@ export function displacedByReset(
  */
 export function notDisplacedByResetWhere(reset: ResetAnchor | null): SQL | undefined {
   if (!reset) return undefined;
-  // Negation von `validFrom <= cutoff AND year <= resetYear`.
+  // Startwert im 2. Halbjahr verdraengt nichts (Tabelle D) — keine Bedingung.
+  if (reset.month > 6) return undefined;
+  /**
+   * Negation von `displacedByReset`:
+   *   verdraengt  ⇔  validFrom <= cutoff ∧ year <= resetYear
+   *                  ∧ (Ersteller leer ∨ Startwert spaeter eingetragen)
+   *   bleibt      ⇔  validFrom > cutoff ∨ year > resetYear
+   *                  ∨ expiresAt < cutoff (vor dem Stichtag verfallen)
+   *                  ∨ (Ersteller gesetzt ∧ Uebertrag NICHT frueher eingetragen)
+   *
+   * Das Eintragsdatum als `created_at::date` — derselbe Vergleich wie im
+   * TS-Pfad (`eingetragenAm` kommt dort ebenfalls aus Postgres) und in Alriks
+   * Bestands-Abfrage. Ohne bekanntes Startwert-Datum gilt ein von Hand
+   * eingetragener Uebertrag als nicht verdraengt, wie im TS-Pfad.
+   */
+  const vonHandNichtFrueher = reset.eingetragenAm == null
+    ? isNotNull(budgetAllocations.createdByUserId)
+    : and(
+        isNotNull(budgetAllocations.createdByUserId),
+        sql`(${budgetAllocations.createdAt})::date >= ${reset.eingetragenAm}::date`,
+      );
   return or(
     gt(budgetAllocations.validFrom, reset.cutoffDate),
     gt(budgetAllocations.year, reset.year),
+    lt(budgetAllocations.expiresAt, reset.cutoffDate),
+    vonHandNichtFrueher,
   );
 }
 
@@ -371,7 +450,7 @@ export function countedConsumptionWhere(
  * ueber die Zuweisungen.
  */
 export function resetAnchorFrom(
-  initialBalanceMonths: readonly { year: number; month: number }[],
+  initialBalanceMonths: readonly { year: number; month: number; eingetragenAm: string | null }[],
   resetDateLimit: string,
 ): ResetAnchor | null {
   let jahr = 0;
@@ -387,9 +466,18 @@ export function resetAnchorFrom(
     }
   }
   if (!gefunden) return null;
+  // Eintragsdatum DIESES Startwerts. Stehen fuer denselben Monat mehrere
+  // Zeilen (sollte der Upsert verhindern), zaehlt die juengste Eintragung —
+  // sie ist die, die den heutigen Bestand festgestellt hat.
+  let eingetragenAm: string | null = null;
+  for (const ib of initialBalanceMonths) {
+    if (ib.year !== jahr || ib.month !== monat || ib.eingetragenAm == null) continue;
+    if (eingetragenAm == null || ib.eingetragenAm > eingetragenAm) eingetragenAm = ib.eingetragenAm;
+  }
   return {
     cutoffDate: `${jahr}-${String(monat).padStart(2, "0")}-01`,
     year: jahr,
     month: monat,
+    eingetragenAm,
   };
 }

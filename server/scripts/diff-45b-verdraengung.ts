@@ -274,6 +274,9 @@ async function main() {
   console.log("");
 
   let betroffen = 0;
+  const geaendert = new Set<number>();
+  const anspruchGeaendert = new Set<number>();
+  const verfuegbarGeaendert = new Set<number>();
   let summeDifferenz = 0;
   let summeVerfuegbarkeit = 0;
   const kundenMitNegativemTopf = new Set<number>();
@@ -301,8 +304,11 @@ async function main() {
       const typeSettings = await readBudgetTypeSettings(
         customerId, { kind: "forDate", asOfDate },
       );
+      // Seit dem Flip ist die neue Regel der Standard. Die „heute"-Seite
+      // rechnet die ALTE Regel deshalb AUSDRÜCKLICH (`false`) — ohne Angabe
+      // verglichen beide Seiten dasselbe und jede Differenz wäre 0.
       const heute = await calculateAllocatedCents(
-        customerId, BUDGET_TYPE, { asOfDate }, undefined, undefined, typeSettings,
+        customerId, BUDGET_TYPE, { asOfDate, resetDisplacesAllSources: false }, undefined, undefined, typeSettings,
       );
       const neu = await calculateAllocatedCents(
         customerId, BUDGET_TYPE, { asOfDate, resetDisplacesAllSources: true },
@@ -314,7 +320,7 @@ async function main() {
       // den `allocStart`, aendert sich `accrualFloorDate`. Ohne diese Spalte
       // ist eine Differenz nicht von der Nebenwirkung zu unterscheiden.
       const diagHeute = await read45bAllocationDiagnostics(
-        customerId, { asOfDate }, undefined, typeSettings,
+        customerId, { asOfDate, resetDisplacesAllSources: false }, undefined, typeSettings,
       );
       const diagNeu = await read45bAllocationDiagnostics(
         customerId, { asOfDate, resetDisplacesAllSources: true }, undefined, typeSettings,
@@ -325,7 +331,7 @@ async function main() {
       // Verbrauch gegen eine ausgeschlossene Allocation ist ABSICHTLICH
       // neutralisiert (Symmetrie-Anker); wer ihn als fehlenden Abzug zählt,
       // findet eine Lücke, die eine Zusage ist.
-      const exHeute = await getExcluded45bConsumption(customerId, asOfDate, db, typeSettings);
+      const exHeute = await getExcluded45bConsumption(customerId, asOfDate, db, typeSettings, { resetDisplacesAllSources: false });
       const exNeu = await getExcluded45bConsumption(
         customerId, asOfDate, db, typeSettings, { resetDisplacesAllSources: true },
       );
@@ -340,7 +346,7 @@ async function main() {
 
       // Die dritte Groesse: was am Ende auf der Karte steht.
       const verfHeute = (await netAvailable45bAt(
-        customerId, asOfDate, { typeSettings },
+        customerId, asOfDate, { typeSettings, resetDisplacesAllSources: false },
       )).availableCents;
       const verfNeu = (await netAvailable45bAt(
         customerId, asOfDate, { typeSettings, resetDisplacesAllSources: true },
@@ -359,7 +365,7 @@ async function main() {
        * an den Anfang. Deshalb jetzt beide Seiten: nur ein Topf, der OHNE Flag
        * nicht negativ ist, geht auf die Verdraengung.
        */
-      const bdOhne = await readBudget45bFifoBreakdown(customerId, asOfDate);
+      const bdOhne = await readBudget45bFifoBreakdown(customerId, asOfDate, { resetDisplacesAllSources: false });
       const bdMit = await readBudget45bFifoBreakdown(customerId, asOfDate, {
         resetDisplacesAllSources: true,
       });
@@ -393,8 +399,9 @@ async function main() {
           + `  | resetCutoff ${diagNeu.resetAnchor?.cutoffDate ?? "—"}`,
         );
       }
-      if (diff !== 0) summeDifferenz += diff;
-      if (diffVerf !== 0) summeVerfuegbarkeit += diffVerf;
+      if (diff !== 0) { summeDifferenz += diff; anspruchGeaendert.add(customerId); }
+      if (diffVerf !== 0) { summeVerfuegbarkeit += diffVerf; verfuegbarGeaendert.add(customerId); }
+      if (diff !== 0 || diffVerf !== 0 || zusaetzlichAusgeschlossen.length > 0) geaendert.add(customerId);
       if (negativNeu.length > 0) kundenMitNegativemTopf.add(customerId);
       if (negativeToepfe.length > 0 && negativNeu.length === 0) kundenMitBestandsTopf.add(customerId);
     }
@@ -406,7 +413,14 @@ async function main() {
     }
   }
 
+  // Die Mengen zum direkten Abgleich mit der Erwartung (Flip-Messung, Alrik
+  // 25.09.2026: geändert genau {89, 153, 159, 186}, bei 186 Verfügbarkeit
+  // unverändert). „Geändert" = Anspruch, Verfügbarkeit oder Ausschlussliste.
+  const liste = (m: Set<number>) => `{${[...m].sort((a, b) => a - b).join(", ")}}`;
   console.log("");
+  console.log(`GEÄNDERT (Anspruch, Verfügbarkeit oder Ausschluss): ${liste(geaendert)}`);
+  console.log(`  davon Anspruch geändert:      ${liste(anspruchGeaendert)}`);
+  console.log(`  davon Verfügbarkeit geändert: ${liste(verfuegbarGeaendert)}`);
   console.log(`Kunden mit Differenz: ${betroffen} von ${kunden.length}`);
   console.log(`Summe der ANSPRUCHS-Differenzen über alle Stichtage: ${euro(summeDifferenz)} €`);
   console.log(`Summe der VERFÜGBARKEITS-Differenzen über alle Stichtage: ${euro(summeVerfuegbarkeit)} €`);
