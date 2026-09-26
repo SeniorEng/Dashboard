@@ -271,6 +271,12 @@ describe("Funke (89), Prod-Lage: aktive Buchungen an gelöschter Zuweisung 61", 
       diag("F-3", startwert, "werkzeug", ausgabe);
       expect(ausgabe, "Startwert Juni ausgegeben").toMatch(new RegExp(`Startwert #\\d+  ${(startwert / 100).toFixed(2).replace(".", ",")}  ab ${J}-06-01 .*aktiv   <- Startwert 06/${J}`));
       expect(ausgabe).toContain(`SUMME  Kasse ${(erwKasse / 100).toFixed(2).replace(".", ",")} / privat ${(erwPrivat / 100).toFixed(2).replace(".", ",")}`);
+      const alle = execFileSync("npx", ["tsx", "server/scripts/probe-ueberlauf-45b.ts", "--alle", String(J)], {
+        env: { ...process.env, PGOPTIONS: "-c default_transaction_read_only=on" }, encoding: "utf-8",
+      });
+      diag("F-3", startwert, "alle", alle);
+      expect(alle, "--alle: Fortschritt je Paar, Funke Juni überzogen").toMatch(new RegExp(`\\[\\d+/\\d+\\] Kunde ${customerId} 06/${J}: ÜBERZOGEN`));
+      expect(alle).toMatch(/davon ohne Privatzahlung \(nach Deploy nicht abrechenbar\): \d+ Kunden/);
       const zaehlung = await zaehleUeberlauf(J);
       expect(zaehlung.treffer.filter(t => t.customerId === customerId).map(t => t.monat), "Zählung findet Funke im Juni").toEqual([6]);
 

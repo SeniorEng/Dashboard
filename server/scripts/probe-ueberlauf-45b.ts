@@ -23,7 +23,7 @@
  *
  * Aufruf:
  *   npx tsx server/scripts/probe-ueberlauf-45b.ts <kundeId> <jahr> <monat>
- *   npx tsx server/scripts/probe-ueberlauf-45b.ts --alle <jahr>   (Zählung: bei wem greift der Fix?)
+ *   npx tsx server/scripts/probe-ueberlauf-45b.ts --alle <jahr>   (Zählung: bei wem greift der Fix? Fortschritt je Kunde/Monat)
  */
 import { and, asc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
@@ -104,22 +104,52 @@ export async function probeUeberlauf(customerId: number, jahr: number, monat: nu
   return ergebnis;
 }
 
-/** Alle Kunden/Monate eines Jahres, bei denen der Fix die nächste Rechnung ändert. */
-export async function zaehleUeberlauf(jahr: number): Promise<{ geprueft: number; treffer: Array<{ customerId: number; monat: number; privatErlaubt: boolean; probe: UeberlaufProbe }> }> {
-  // Alle Töpfe: die Auswahl erfasst auch §45a/§39 (Beträge rechnet das Werkzeug nur für §45b exakt).
-  const kunden = await db.selectDistinct({ id: budgetTransactions.customerId }).from(budgetTransactions)
-    .where(gte(budgetTransactions.transactionDate, `${jahr}-01-01`));
+/**
+ * Alle Kunden/Monate eines Jahres, bei denen der Fix die nächste Rechnung ändert.
+ *
+ * Vorauswahl in EINER Abfrage: nur Paare (Kunde, Monat) mit OFFENEN
+ * (nicht abgerechneten, nicht gelöschten) Terminen, die eine lebende
+ * §45b-Buchung tragen — nur dort kann `neuzubuchendeTermine` etwas finden
+ * (`UEBERLAUF_TOEPFE` = §45b). Erst diese Paare werden durchgerechnet.
+ * ERSETZT die Schleife über alle Kunden × 12 Monate (in Prod > 5 min ohne
+ * Ausgabe, abgebrochen am 26.09.2026). `fortschritt` meldet jedes Paar.
+ */
+export async function zaehleUeberlauf(
+  jahr: number,
+  fortschritt: (zeile: string) => void = () => {},
+): Promise<{ geprueft: number; treffer: Array<{ customerId: number; monat: number; privatErlaubt: boolean; probe: UeberlaufProbe }> }> {
+  const zeilen = await db.selectDistinct({ customerId: budgetTransactions.customerId, datum: appointments.date })
+    .from(budgetTransactions)
+    .innerJoin(appointments, eq(appointments.id, budgetTransactions.appointmentId))
+    .where(and(
+      eq(budgetTransactions.transactionType, "consumption"),
+      eq(budgetTransactions.budgetType, TOPF),
+      isNull(appointments.deletedAt),
+      gte(appointments.date, `${jahr}-01-01`),
+      lte(appointments.date, `${jahr}-12-31`),
+      sql`NOT EXISTS (SELECT 1 FROM budget_transactions r WHERE r.transaction_type = 'reversal' AND r.reversed_transaction_id = ${budgetTransactions.id})`,
+      sql`${appointments.id} NOT IN (${activeInvoicedAppointmentIdsSqlRaw()})`,
+    ));
+  const paare = [...new Set(zeilen.map((z) => `${z.customerId}:${Number(String(z.datum).slice(5, 7))}`))]
+    .map((k) => k.split(":").map(Number) as [number, number])
+    .sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  fortschritt(`${paare.length} Kunde/Monat-Paare mit offenen §45b-Terminen (${new Set(paare.map((p) => p[0])).size} Kunden) — prüfe …`);
+
   const treffer: Array<{ customerId: number; monat: number; privatErlaubt: boolean; probe: UeberlaufProbe }> = [];
-  for (const { id } of kunden) {
-    for (let monat = 1; monat <= 12; monat++) {
-      const probe = await probeUeberlauf(id, jahr, monat);
-      if (probe.termine.length === 0) continue;
-      // Ohne Privatzahlung bricht das Erstellen ab (RÜ-1) — getrennt ausweisen.
-      const [k] = await db.select({ ok: customers.acceptsPrivatePayment }).from(customers).where(eq(customers.id, id));
-      treffer.push({ customerId: id, monat, privatErlaubt: k?.ok === true, probe });
+  let n = 0;
+  for (const [id, monat] of paare) {
+    n++;
+    const probe = await probeUeberlauf(id, jahr, monat);
+    if (probe.termine.length === 0) {
+      fortschritt(`[${n}/${paare.length}] Kunde ${id} ${String(monat).padStart(2, "0")}/${jahr}: nicht überzogen`);
+      continue;
     }
+    // Ohne Privatzahlung bricht das Erstellen ab (RÜ-1) — getrennt ausweisen.
+    const [k] = await db.select({ ok: customers.acceptsPrivatePayment }).from(customers).where(eq(customers.id, id));
+    treffer.push({ customerId: id, monat, privatErlaubt: k?.ok === true, probe });
+    fortschritt(`[${n}/${paare.length}] Kunde ${id} ${String(monat).padStart(2, "0")}/${jahr}: ÜBERZOGEN, ${probe.termine.length} Termine, Kasse ${euro(probe.kasseCents)} / privat ${euro(probe.privatCents)}${k?.ok ? "" : "  — KEINE Privatzahlung: Erstellen bricht ab (RÜ-1)"}`);
   }
-  return { geprueft: kunden.length, treffer };
+  return { geprueft: new Set(paare.map((p) => p[0])).size, treffer };
 }
 
 const euro = (c: number) => (c / 100).toFixed(2).replace(".", ",");
@@ -132,12 +162,10 @@ async function main(): Promise<void> {
   if (wert !== "on") throw new Error("Abbruch: Verbindung ist nicht read-only (PGOPTIONS='-c default_transaction_read_only=on' setzen).");
   if (a === "--alle") {
     const jahr = Number(b);
-    const { geprueft, treffer } = await zaehleUeberlauf(jahr);
-    for (const t of treffer) {
-      console.log(`Kunde ${t.customerId} ${String(t.monat).padStart(2, "0")}/${jahr}: ${t.probe.termine.length} Termine, Kasse ${euro(t.probe.kasseCents)} / privat ${euro(t.probe.privatCents)}${t.privatErlaubt ? "" : "  — KEINE Privatzahlung: Erstellen bricht ab (RÜ-1)"}`);
-    }
+    const t0 = Date.now();
+    const { geprueft, treffer } = await zaehleUeberlauf(jahr, (z) => console.log(z));
+    console.log(`\nFix greift bei ${new Set(treffer.map((t) => t.customerId)).size} Kunden in ${treffer.length} Monaten (${geprueft} Kunden mit offenen §45b-Terminen ${jahr} geprüft, ${Math.round((Date.now() - t0) / 1000)} s).`);
     console.log(`davon ohne Privatzahlung (nach Deploy nicht abrechenbar): ${new Set(treffer.filter((t) => !t.privatErlaubt).map((t) => t.customerId)).size} Kunden`);
-    console.log(`\nFix greift bei ${new Set(treffer.map((t) => t.customerId)).size} Kunden in ${treffer.length} Monaten (${geprueft} Kunden mit Buchungen ${jahr} geprüft).`);
     return;
   }
   const kundeId = Number(a); const jahr = Number(b); const monat = Number(c);
