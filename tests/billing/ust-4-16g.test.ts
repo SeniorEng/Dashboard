@@ -28,7 +28,7 @@ import {
   apiGet, apiPost, apiPut, apiPatch, apiDelete, apiPostAs, loginAs, createTestEmployee,
   getAuthCookie, uniqueId, cleanupCustomer, runCleanup,
 } from "../test-utils";
-import { assertTestClockActive, clearTestClock, useTestClock } from "../helpers/test-clock";
+import { TEST_CLOCK_HEADER, assertTestClockActive, clearTestClock, useTestClock } from "../helpers/test-clock";
 import { storage } from "../../server/storage";
 import { buildInvoicePdfData } from "../../server/services/invoice-pdf-orchestrator";
 import { generateInvoiceHtml, generateLeistungsnachweisHtml } from "../../server/lib/pdf-generator";
@@ -466,10 +466,14 @@ describe("§ 4 Nr. 16 g UStG — Abnahme (Tabelle D, Pflichtfälle 1–6, E3–E
       primaryEmployeeId: ma.id, backupEmployeeId: null, backupEmployeeId2: null,
     })).status).toBe(200);
     const maAuth = await loginAs(ma.email, ma.password);
-    const rueck = await apiPostAs<any>(maAuth, `/api/customers/${k.id}/care-level`, { pflegegrad: 2, seitDatum: `${J}-08-01` });
+    // `apiPostAs` setzt die Test-Uhr nicht selbst (test-utils.ts) — ohne den
+    // Header prüft der Server gegen das echte Datum, und der Test kippt am Tag
+    // nach HEUTE (gemessen am 26.09.2026).
+    const uhr = { [TEST_CLOCK_HEADER]: HEUTE };
+    const rueck = await apiPostAs<any>(maAuth, `/api/customers/${k.id}/care-level`, { pflegegrad: 2, seitDatum: `${J}-08-01` }, uhr);
     expect(rueck.status, "rückwirkend abgelehnt").toBe(400);
     expect(await getCareLevelAt(k.id, `${J}-08-10`), "kein Nachweis entstanden").toBeNull();
-    const abHeute = await apiPostAs<any>(maAuth, `/api/customers/${k.id}/care-level`, { pflegegrad: 2, seitDatum: HEUTE });
+    const abHeute = await apiPostAs<any>(maAuth, `/api/customers/${k.id}/care-level`, { pflegegrad: 2, seitDatum: HEUTE }, uhr);
     expect(abHeute.status, JSON.stringify(abHeute.data)).toBe(200);
   }, 300_000);
 
