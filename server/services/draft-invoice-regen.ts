@@ -92,7 +92,7 @@ export async function discardAndRegenerateDrafts(params: {
   // erzeugen (außerhalb jeder DB-Transaktion; Render läuft im Hintergrund).
   try {
     const regenerated = await generateInvoiceCore(
-      { customerId, billingMonth: month, billingYear: year },
+      { customerId, billingMonth: month, billingYear: year, gezielteUmbuchung: true },
       { userId, ipAddress, testFaults: testFaults ?? new Set<string>() },
     );
     return { discardedInvoiceNumbers, regenerated };

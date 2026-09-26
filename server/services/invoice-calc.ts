@@ -235,8 +235,10 @@ export async function buildInvoiceDraft(input: {
   // weiterhin ab (keine leeren Rechnungen). Der Termin-genaue Ausschluss-Block
   // unten ist der einzige Ableitungspfad ⇒ Review ⇔ Generate bleiben spiegelbildlich.
   mode?: "generate" | "preview";
+  /** Siehe `generateInvoiceCore` — nach gezielter Umbuchung keine Überlauf-Neubuchung, auch nicht im Aufteilungs-Probelauf. */
+  gezielteUmbuchung?: boolean;
 }): Promise<InvoiceDraft> {
-  const { customerId, billingMonth, billingYear, dateFrom, dateTo, mode } = input;
+  const { customerId, billingMonth, billingYear, dateFrom, dateTo, mode, gezielteUmbuchung } = input;
   const isPreview = mode === "preview";
 
   const customer = await storage.getCustomer(customerId);
@@ -452,7 +454,7 @@ export async function buildInvoiceDraft(input: {
   // Pot belegt ist, fällt der Generator auf den Legacy-Single-Invoice-Pfad
   // zurück (Bestandskunden ohne Mehrtopf-Konfiguration sehen 0 Verhaltens-
   // änderung).
-  const budgetSplit = await getBudgetSplitForAppointments(customerId, apptIds);
+  const budgetSplit = await getBudgetSplitForAppointments(customerId, apptIds, { ueberlauf: !gezielteUmbuchung });
   const { lineItems: allLineItems, totalNetCents: singleNetCents } =
     await buildLineItemsFromAppointments(apptIds, customerId, billingType);
 
@@ -583,10 +585,19 @@ export class PartialBillingConfirmationRequiredError extends AppError {
 }
 
 export async function generateInvoiceCore(
-  input: { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string; confirmPartial?: boolean },
+  input: {
+    customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string; confirmPartial?: boolean;
+    /**
+     * Aufruf direkt nach einer GEZIELTEN Umbuchung (§45b-Kürzung,
+     * „Monat umbuchen"). Dann bucht der Überlauf-Weg nichts neu — die gewählte
+     * Aufteilung darf nicht überschrieben werden (Entscheidung Alrik,
+     * 26.09.2026). Netto-null-Termine werden weiter neu gebucht.
+     */
+    gezielteUmbuchung?: boolean;
+  },
   ctx: { userId: number; ipAddress?: string; testFaults: Set<string> },
 ): Promise<GenerateInvoiceResult> {
-  const { customerId, billingMonth, billingYear, dateFrom, dateTo, confirmPartial } = input;
+  const { customerId, billingMonth, billingYear, dateFrom, dateTo, confirmPartial, gezielteUmbuchung } = input;
   // Lokales Shadow-`req`-Objekt, damit der unten kopierte Body unverändert
   // bleibt (`req.user!.id`, `req.ip`, `readTestFaults(req)` lesen weiterhin).
   const req = {
@@ -603,7 +614,7 @@ export async function generateInvoiceCore(
 
   // Task #750: gemeinsame Berechnung mit Preview — derselbe Helper, derselbe
   // Pfad. Verhindert Drift zwischen „Vorschau im Dialog" und finaler Rechnung.
-  let draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo });
+  let draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo, gezielteUmbuchung });
 
   // Task #1883 — Guard gegen stille Unterabrechnung. Dokumentierte Termine, die
   // mangels Kundenunterschrift (nur `employee_signed`) ODER mangels Leistungsnachweis
@@ -635,9 +646,9 @@ export async function generateInvoiceCore(
   // überzogenen Topf werden storniert und neu gebucht — dieselbe Auswahl wie
   // die Vorschau (`neuzubuchendeTermine`), alles in einer Transaktion unter
   // der Abrechnungs-Sperre (`neubuchenFuerLauf`).
-  const neuGebucht = await neubuchenFuerLauf(customerId, draft.apptIds, ctx.userId);
+  const neuGebucht = await neubuchenFuerLauf(customerId, draft.apptIds, ctx.userId, { ueberlauf: !gezielteUmbuchung });
   if (neuGebucht.length > 0) {
-    draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo });
+    draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo, gezielteUmbuchung });
   }
 
   const {

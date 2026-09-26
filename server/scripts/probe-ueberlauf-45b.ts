@@ -25,9 +25,9 @@
  *   npx tsx server/scripts/probe-ueberlauf-45b.ts <kundeId> <jahr> <monat>
  *   npx tsx server/scripts/probe-ueberlauf-45b.ts --alle <jahr>   (Zählung: bei wem greift der Fix?)
  */
-import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
-import { appointments, budgetTransactions, customers } from "@shared/schema";
+import { appointments, budgetAllocations, budgetTransactions, customers } from "@shared/schema";
 import { neuzubuchendeTermine } from "../services/invoice-data";
 import { readUnifiedBudgetAvailability } from "../storage/budget/unified-reader";
 import { activeInvoicedAppointmentIdsSqlRaw } from "../lib/appointment-invoiced";
@@ -140,7 +140,23 @@ async function main(): Promise<void> {
     console.log(`\nFix greift bei ${new Set(treffer.map((t) => t.customerId)).size} Kunden in ${treffer.length} Monaten (${geprueft} Kunden mit Buchungen ${jahr} geprüft).`);
     return;
   }
-  const p = await probeUeberlauf(Number(a), Number(b), Number(c));
+  const kundeId = Number(a); const jahr = Number(b); const monat = Number(c);
+  const [kunde] = await db.select({ name: customers.name, privat: customers.acceptsPrivatePayment })
+    .from(customers).where(eq(customers.id, kundeId));
+  console.log(`Kunde ${kundeId}: ${kunde?.name ?? "?"} — Privatzahlung ${kunde?.privat ? "aktiviert" : "NICHT aktiviert"}`);
+  // Startwerte und Überträge §45b des Jahres (auch gelöschte), damit klar ist, womit gerechnet wird.
+  const zeilen = await db.select().from(budgetAllocations).where(and(
+    eq(budgetAllocations.customerId, kundeId),
+    eq(budgetAllocations.budgetType, TOPF),
+    eq(budgetAllocations.year, jahr),
+    inArray(budgetAllocations.source, ["initial_balance", "carryover"]),
+  )).orderBy(asc(budgetAllocations.validFrom), asc(budgetAllocations.id));
+  for (const z of zeilen) {
+    const art = z.source === "initial_balance" ? "Startwert" : "Übertrag ";
+    const monatsTreffer = z.source === "initial_balance" && z.month === monat ? `   <- Startwert ${String(monat).padStart(2, "0")}/${jahr}` : "";
+    console.log(`  ${art} #${z.id}  ${euro(z.amountCents)}  ab ${z.validFrom}  eingetragen ${z.createdAt?.toISOString().slice(0, 10)}  ${z.createdByUserId == null ? "automatisch" : "von Hand"}  ${z.deletedAt ? `GELÖSCHT ${z.deletedAt.toISOString().slice(0, 10)}` : "aktiv"}${monatsTreffer}`);
+  }
+  const p = await probeUeberlauf(kundeId, jahr, monat);
   if (p.termine.length === 0) {
     console.log("Kein überzogener Topf — der Fix ändert an der Rechnung nichts.");
   }

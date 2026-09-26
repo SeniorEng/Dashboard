@@ -11,7 +11,7 @@ import { db } from "../../lib/db";
 import { AppError, badRequest } from "../../lib/errors";
 import type { DbClient, CascadeResult } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
-import { todayISO, lastDayOfMonth } from "@shared/utils/datetime";
+import { todayISO, lastDayOfMonth, formatDateForDisplay } from "@shared/utils/datetime";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "./unified-reader";
@@ -1011,12 +1011,18 @@ export async function rebookNetZeroAppointmentCore(
     // fahren (#193), zaehlt das: die Liste faengt pro Kunde nur 400/404 ab
     // (`billing-customer-amounts.ts`), ein nacktes `Error` risse den ganzen
     // Stapel mit.
+    // Wortlaut nach Entscheidung Alrik (RÜ-1, 26.09.2026): klar sagen, WAS
+    // fehlt (Budget) und WAS der Ausweg ist (Privatzahlung beim Kunden).
+    // Vorschau (Probelauf) und Erstellen zeigen dieselbe Meldung.
+    const [kunde] = await customersRepo
+      .selectColumnsFrom({ name: customers.name }, tx)
+      .where(eq(customers.id, customerId))
+      .limit(1);
     throw badRequest(
-      `Re-Abrechnung nicht möglich: Termin #${appointmentId} kann nicht ` +
-      `vollständig aus den gesetzlichen Pflegekassen-Töpfen abgerechnet ` +
-      `werden (${formatEuroDE(cascadeResult.outstandingCents)} ohne ` +
-      `Deckung). Eine Privatabrechnung ist für diesen Kunden nicht ` +
-      `zulässig. Bitte prüfen Sie die Budget-Konfiguration und Buchungen.`,
+      `Budget reicht nicht: Termin #${appointmentId} vom ${formatDateForDisplay(txDate)} ` +
+      `ist mit ${formatEuroDE(cascadeResult.outstandingCents)} nicht aus den ` +
+      `Pflegekassen-Töpfen gedeckt. Privatzahlung bei Kunde ${kunde?.name ?? `#${customerId}`} ` +
+      `nicht aktiviert. Bitte Privatzahlung aktivieren oder Budget und Buchungen prüfen.`,
     );
   }
 

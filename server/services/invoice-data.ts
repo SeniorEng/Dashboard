@@ -925,13 +925,17 @@ export async function neubuchenFuerLauf(
   customerId: number,
   apptIds: number[],
   userId: number,
+  opts: { ueberlauf: boolean } = { ueberlauf: true },
 ): Promise<number[]> {
   if (apptIds.length === 0) return [];
   return db.transaction(async (tx) => {
     await lockCustomerForBilling(tx, customerId);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`);
     await assertAppointmentsNotYetInvoiced(tx, apptIds);
-    const { nettoNull, ueberzogen } = await neuzubuchendeTermine(customerId, apptIds, tx);
+    const auswahl = await neuzubuchendeTermine(customerId, apptIds, tx);
+    const nettoNull = auswahl.nettoNull;
+    // Nach einer gezielten Umbuchung (Kürzung, „Monat umbuchen") nichts überschreiben.
+    const ueberzogen = opts.ueberlauf ? auswahl.ueberzogen : [];
     await lebendeBuchungenStornieren(tx, customerId, ueberzogen, userId);
     const neu: number[] = [];
     for (const appointmentId of await chronologischeReihenfolge([...new Set([...nettoNull, ...ueberzogen])], tx)) {
@@ -960,6 +964,7 @@ export async function neubuchenFuerLauf(
 export async function getBudgetSplitForAppointments(
   customerId: number,
   apptIds: number[],
+  opts: { ueberlauf: boolean } = { ueberlauf: true },
 ): Promise<Map<number, BudgetSplitForAppointment>> {
   if (apptIds.length === 0) return new Map();
 
@@ -978,7 +983,8 @@ export async function getBudgetSplitForAppointments(
 
   // Überzogene Töpfe (siehe `neuzubuchendeTermine`): die gespeicherte
   // Aufteilung gilt nicht, der Probelauf bucht diese Termine neu.
-  const { ueberzogen } = await neuzubuchendeTermine(customerId, apptIds);
+  // Nach gezielter Umbuchung (Kürzung, „Monat umbuchen") nicht — wie `neubuchenFuerLauf`.
+  const ueberzogen = opts.ueberlauf ? (await neuzubuchendeTermine(customerId, apptIds)).ueberzogen : [];
   for (const id of ueberzogen) out.delete(id);
 
   // Stolperfalle (Task #1011): Termine, die eine Konsumption HATTEN, deren

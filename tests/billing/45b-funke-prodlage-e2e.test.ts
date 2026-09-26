@@ -39,6 +39,7 @@ import { assertTestClockActive, clearTestClock, useTestClock } from "../helpers/
 import { buildInvoiceDraft } from "../../server/services/invoice-calc";
 import { neubuchenFuerLauf, neuzubuchendeTermine } from "../../server/services/invoice-data";
 import { appendFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { probeUeberlauf, zaehleUeberlauf } from "../../server/scripts/probe-ueberlauf-45b";
 import { readUnifiedBudgetAvailability } from "../../server/storage/budget/unified-reader";
 
@@ -263,6 +264,13 @@ describe("Funke (89), Prod-Lage: aktive Buchungen an gelöschter Zuweisung 61", 
       const probe = await probeUeberlauf(customerId, J, 6);
       diag("F-3", startwert, "probe", probe);
       expect({ kasse: probe.kasseCents, privat: probe.privatCents }, "Probelauf").toEqual({ kasse: erwKasse, privat: erwPrivat });
+      // Das Werkzeug so, wie es gegen Prod läuft: eigener Prozess, read-only-Verbindung.
+      const ausgabe = execFileSync("npx", ["tsx", "server/scripts/probe-ueberlauf-45b.ts", String(customerId), String(J), "6"], {
+        env: { ...process.env, PGOPTIONS: "-c default_transaction_read_only=on" }, encoding: "utf-8",
+      });
+      diag("F-3", startwert, "werkzeug", ausgabe);
+      expect(ausgabe, "Startwert Juni ausgegeben").toMatch(new RegExp(`Startwert #\\d+  ${(startwert / 100).toFixed(2).replace(".", ",")}  ab ${J}-06-01 .*aktiv   <- Startwert 06/${J}`));
+      expect(ausgabe).toContain(`SUMME  Kasse ${(erwKasse / 100).toFixed(2).replace(".", ",")} / privat ${(erwPrivat / 100).toFixed(2).replace(".", ",")}`);
       const zaehlung = await zaehleUeberlauf(J);
       expect(zaehlung.treffer.filter(t => t.customerId === customerId).map(t => t.monat), "Zählung findet Funke im Juni").toEqual([6]);
 
@@ -282,13 +290,20 @@ describe("Funke (89), Prod-Lage: aktive Buchungen an gelöschter Zuweisung 61", 
   it("F-4 – Kunde ohne Privatzahlung, Topf überzogen: Abbruch, Ledger unverändert (fachlich offen)", async () => {
     const { customerId, offen } = await prodLage(262_00, false);
     const vorher = await ledgerZeilen(customerId);
+    // RÜ-1 (Alrik): Abbruch, aber mit klarer Meldung — in Vorschau UND Erstellen.
+    const meldung = /^Budget reicht nicht: Termin #\d+ vom \d\d\.\d\d\.2026 .*Privatzahlung bei Kunde .*Funke-.* nicht aktiviert/;
+    const vorschau = await apiGet<any>(`/api/billing/preview?customerId=${customerId}&month=6&year=${J}`);
+    diag("F-4", "vorschau", vorschau.status, vorschau.data);
+    expect(vorschau.status, JSON.stringify(vorschau.data)).toBe(400);
+    expect(vorschau.data.message ?? vorschau.data.error, "Vorschau-Meldung").toMatch(meldung);
     const gen = await apiPost<any>("/api/billing/generate", { customerId, billingMonth: 6, billingYear: J });
     diag("F-4", gen.status, gen.data);
     expect(gen.status, JSON.stringify(gen.data)).toBe(400);
+    expect(gen.data.message ?? gen.data.error, "Erstellen-Meldung").toMatch(meldung);
     expect(await ledgerZeilen(customerId), "nichts storniert, nichts gebucht").toBe(vorher);
     // Die Neubuchung selbst (die Vorschau bricht schon vorher ab): Storno und
     // Neubuchung sind EINE Transaktion — kein halb stornierter Stand.
-    await expect(neubuchenFuerLauf(customerId, offen, auth.user.id)).rejects.toThrow(/Re-Abrechnung nicht möglich/);
+    await expect(neubuchenFuerLauf(customerId, offen, auth.user.id)).rejects.toThrow(/Budget reicht nicht/);
     expect(await ledgerZeilen(customerId), "Neubuchung rollt vollständig zurück").toBe(vorher);
   }, 300_000);
 
