@@ -1,0 +1,426 @@
+# Pseudonymisierung prod_mirror — Zuordnung JEDER Text-/JSON-Spalte (+ Personenbezug in Datum/Zahl).
+# regel: bleibt | null | scrub (JSON: Struktur bleibt, Werte ersetzt) | =<SQL-Ausdruck>
+# Das Skript bricht ab, wenn die Quell-DB eine Text-/JSON-Spalte hat, die hier fehlt.
+tabelle	spalte	regel	begruendung
+admin_permissions	permission_key	bleibt	Konfiguration/Katalog, kein Personenbezug
+appointment_series	frequency	bleibt	Fachwert
+appointment_series	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+appointment_series	status	bleibt	Fachwert
+appointment_series	weekdays	bleibt	Fachwert
+appointment_services	details	null	Leistungsdokumentation (Freitext)
+appointments	appointment_type	bleibt	Fachwert
+appointments	co_visit_group_id	bleibt	technische Gruppen-ID
+appointments	doctor_latitude	null	Geo-Koordinate der Arztpraxis (verweist auf Behandlung)
+appointments	doctor_longitude	null	Geo-Koordinate der Arztpraxis
+appointments	doctor_name	null	Arzt (Behandlungsbezug)
+appointments	doctor_nr	null	Anschrift Arzt
+appointments	doctor_plz	null	Anschrift Arzt
+appointments	doctor_stadt	null	Anschrift Arzt
+appointments	doctor_strasse	null	Anschrift Arzt
+appointments	no_show_charge_suppression_reason	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+appointments	no_show_notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+appointments	no_show_reason	bleibt	Fachwert (Enum)
+appointments	no_show_reason_text	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+appointments	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+appointments	signature_data	null	Unterschrift (Bild)
+appointments	signature_hash	bleibt	Hash, nicht umkehrbar
+appointments	status	bleibt	Fachwert
+appointments	travel_origin_type	bleibt	Fachwert
+audit_log	action	bleibt	Fachwert
+audit_log	entity_type	bleibt	Fachwert
+audit_log	ip_address	null	IP-Adresse
+audit_log	metadata	scrub	Audit-Details; Struktur bleibt, Werte außer Fachschlüsseln ersetzt
+birthday_card_tracking	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+birthday_card_tracking	person_type	bleibt	Fachwert
+budget_allocations	budget_type	bleibt	Fachwert
+budget_allocations	notes	=NULLIF(concat_ws(' ', CASE WHEN notes ~ 'Storno\y.*?Transaktion #[0-9]+\y' THEN 'Storno von Transaktion #' || substring(notes from 'Storno\y.*?Transaktion #([0-9]+)\y') WHEN notes ~ 'Transaktion #[0-9]+\y' THEN 'Umbuchung (Transaktion #' || substring(notes from 'Transaktion #([0-9]+)\y') || ')' END, substring(notes from '(Storno-Storno-Zeile #[0-9]+ \()'), substring(notes from '(verwaisten Storno #[0-9]+ \()')), '')	Freitext; nur die kanonischen Verweise bleiben, die Code liest: Storno-Bezug (parseStornoReference, Waisen-Suche), Transaktion #N (Monats-Umbuchung), Idempotenz-Marker der Reconcile-Skripte (Test: tests/tools/mirror-pseudonymisierung.test.ts)
+budget_allocations	source	bleibt	Fachwert
+budget_migrations	name	bleibt	Migrationsname (System)
+budget_migrations	summary	null	Freitext
+budget_migrations	version	bleibt	System
+budget_reservations	budget_type	bleibt	Fachwert
+budget_reservations	idempotency_key	bleibt	technischer Schlüssel
+budget_reservations	occurrence_id	bleibt	technische ID
+budget_reservations	period	bleibt	Fachwert
+budget_reservations	state	bleibt	Fachwert
+budget_transactions	budget_type	bleibt	Fachwert
+budget_transactions	notes	=NULLIF(concat_ws(' ', CASE WHEN notes ~ 'Storno\y.*?Transaktion #[0-9]+\y' THEN 'Storno von Transaktion #' || substring(notes from 'Storno\y.*?Transaktion #([0-9]+)\y') WHEN notes ~ 'Transaktion #[0-9]+\y' THEN 'Umbuchung (Transaktion #' || substring(notes from 'Transaktion #([0-9]+)\y') || ')' END, substring(notes from '(Storno-Storno-Zeile #[0-9]+ \()'), substring(notes from '(verwaisten Storno #[0-9]+ \()')), '')	Freitext; nur die kanonischen Verweise bleiben, die Code liest: Storno-Bezug (parseStornoReference, Waisen-Suche), Transaktion #N (Monats-Umbuchung), Idempotenz-Marker der Reconcile-Skripte (Test: tests/tools/mirror-pseudonymisierung.test.ts)
+budget_transactions	transaction_type	bleibt	Fachwert
+company_settings	bank_account_holder	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	bank_name	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	bic	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	company_name	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	delivery_cover_letter_text	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	delivery_email_subject	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	email	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	email_provider	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	geschaeftsfuehrer	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	graph_client_id	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	graph_client_secret	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	graph_sender_upn	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	graph_tenant_id	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	hausnummer	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	iban	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	ik_nummer	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	latitude	bleibt	Firmensitz, kein Personenbezug; für km-Berechnung
+company_settings	lead_auto_reply_attachment_name	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	lead_auto_reply_attachment_path	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	lead_auto_reply_body	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	lead_auto_reply_subject	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	lead_call_bridge_phone	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	letterxpress_api_key	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	letterxpress_username	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	logo_url	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	lohnart_alltagsbegleitung	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	lohnart_hauswirtschaft	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	lohnart_krankheit	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	lohnart_urlaub	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	longitude	bleibt	Firmensitz, kein Personenbezug
+company_settings	pdf_logo_url	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	plz	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	qonto_additional_ibans	='{}'	IBANs
+company_settings	qonto_iban	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	qonto_login	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	qonto_secret_key	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	smtp_from_email	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	smtp_from_name	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	smtp_host	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	smtp_pass	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	smtp_port	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	smtp_user	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	stadt	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	steuernummer	bleibt	Steuernummer der UG (juristische Person), kein Personenbezug
+company_settings	strasse	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	telefon	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	twilio_account_sid	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	twilio_auth_token	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	twilio_phone_number	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	ust_id	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	website	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	whatsapp_access_token	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	whatsapp_business_account_id	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	whatsapp_from_or_service	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+company_settings	whatsapp_phone_number_id	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
+customer_assignment_history	changed_by_role	bleibt	Fachwert
+customer_assignment_history	role	bleibt	Fachwert
+customer_budget_preferences	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_budget_recipients	budget_type	bleibt	Fachwert
+customer_budget_recipients	ik_nummer	bleibt	IK der Kasse (Institution)
+customer_budget_recipients	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_budget_recipients	recipient_address	null	Anschrift
+customer_budget_recipients	recipient_name	='Empfänger '||id	Name des Empfängers (kann Person sein)
+customer_budget_recipients	versichertennummer	=CASE WHEN versichertennummer IS NULL THEN NULL ELSE 'V'||lpad(id::text,9,'0') END	Versichertennummer
+customer_budget_type_settings	budget_type	bleibt	Fachwert
+customer_budget_type_settings	initial_balance_month	bleibt	Fachwert
+customer_care_level_history	entfernt_grund	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_care_level_history	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_contacts	contact_type	bleibt	Fachwert (Enum)
+customer_contacts	email	null	Kontakt
+customer_contacts	festnetz	null	Kontakt
+customer_contacts	mobilnummer	null	Kontakt
+customer_contacts	nachname	='Nr'||id	Klarname
+customer_contacts	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_contacts	vorname	='Kontakt'	Klarname
+customer_contracts	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_contracts	period_type	bleibt	Fachwert
+customer_contracts	status	bleibt	Fachwert
+customer_contracts	vereinbarte_leistungen	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_creation_idempotency_keys	idempotency_key	bleibt	technischer Schlüssel
+customer_creation_idempotency_keys	payload_hash	bleibt	Hash, nicht umkehrbar
+customer_documents	batch_label	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_documents	file_name	='datei-'||id	Dateiname kann Namen enthalten
+customer_documents	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_documents	object_path	='mirror/customer_documents/'||id	Speicherpfad kann Namen enthalten; Dateien sind nicht im Mirror
+customer_insurance_history	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customer_insurance_history	versichertennummer	='V'||lpad(id::text,9,'0')	Versichertennummer (personenbezogene Kennung)
+customer_needs_assessments	anamnese	null	Gesundheitsdaten
+customer_needs_assessments	sonstige_leistungen	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customers	address	='Musterstraße 1, 00000 Musterstadt'	Anschrift
+customers	billing_type	bleibt	Fachwert (Enum)
+customers	cancellation_policy_type	bleibt	Fachwert (Enum)
+customers	deactivation_note	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customers	deactivation_reason	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customers	document_delivery_method	bleibt	Fachwert (Enum)
+customers	email	null	Kontakt
+customers	festnetz	null	Kontakt
+customers	geburtsdatum	=make_date(extract(year from geburtsdatum)::int,1,1)	Geburtsdatum personenbezogen; Jahr bleibt (Alter), Tag/Monat → 01.01.
+customers	haustier_details	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+customers	inaktiv_ab	bleibt	Datum als Text, fachlich
+customers	latitude	null	Geo-Koordinate der Wohnadresse
+customers	longitude	null	Geo-Koordinate der Wohnadresse
+customers	nachname	='Kunde'||id	Klarname
+customers	name	='Kunde '||id	Klarname
+customers	nr	='1'	Anschrift
+customers	plz	='00000'	Anschrift (PLZ quasi-identifizierend)
+customers	setup_pending_payloads	scrub	JSON mit Anlagedaten (Namen, Kontakte)
+customers	stadt	='Musterstadt'	Anschrift
+customers	status	bleibt	Fachwert (Enum)
+customers	strasse	='Musterstraße'	Anschrift
+customers	telefon	null	Kontakt
+customers	vorerkrankungen	null	Gesundheitsdaten
+customers	vorname	='Vorname'||id	Klarname
+document_deliveries	delivery_method	bleibt	Fachwert
+document_deliveries	document_file_names	null	Dateinamen
+document_deliveries	error_message	null	Fehlertext kann Adressen enthalten
+document_deliveries	letterxpress_letter_id	bleibt	technische ID
+document_deliveries	recipient_address	null	Anschrift
+document_deliveries	recipient_email	null	Kontakt
+document_deliveries	recipient_name	null	Name
+document_deliveries	status	bleibt	Fachwert
+document_signing_tokens	token_hash	='mirror-'||id	Token (Hash)
+document_template_billing_types	billing_type	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_template_billing_types	requirement	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_templates	context	bleibt	Konfiguration
+document_templates	description	bleibt	Konfiguration
+document_templates	html_content	='[entfernt]'	Vorlage, kann Firmen-/Personennamen enthalten; für Messungen nicht nötig
+document_templates	name	bleibt	Konfiguration
+document_templates	slug	bleibt	Konfiguration
+document_templates	target_type	bleibt	Konfiguration
+document_type_triggers	condition_field	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_type_triggers	condition_operator	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_type_triggers	condition_value	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_type_triggers	entity_type	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_type_triggers	requirement	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_type_triggers	trigger_type	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_types	context	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_types	description	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_types	input_method	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_types	name	bleibt	Konfiguration/Katalog, kein Personenbezug
+document_types	target_type	bleibt	Konfiguration/Katalog, kein Personenbezug
+employee_document_proofs	file_name	=CASE WHEN file_name IS NULL THEN NULL ELSE 'datei-'||id END	Dateiname
+employee_document_proofs	object_path	=CASE WHEN object_path IS NULL THEN NULL ELSE 'mirror/employee_document_proofs/'||id END	Speicherpfad
+employee_document_proofs	rejection_reason	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+employee_document_proofs	status	bleibt	Fachwert
+employee_documents	batch_label	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+employee_documents	file_name	='datei-'||id	Dateiname
+employee_documents	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+employee_documents	object_path	='mirror/employee_documents/'||id	Speicherpfad
+employee_hours_accounts	category	bleibt	Fachwert
+employee_hours_accounts	opening_balance_type	bleibt	Fachwert
+employee_time_entries	entry_type	bleibt	Fachwert
+employee_time_entries	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+employee_vacation_allowance	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+generated_documents	customer_signature_data	null	Unterschrift
+generated_documents	employee_signature_data	null	Unterschrift
+generated_documents	file_name	='dokument-'||id	Dateiname
+generated_documents	integrity_hash	bleibt	Hash
+generated_documents	object_path	='mirror/generated_documents/'||id	Pfad
+generated_documents	rendered_html	null	Dokument mit Namen
+generated_documents	signing_ip	null	IP-Adresse
+generated_documents	signing_location	null	Ort
+generated_documents	signing_status	bleibt	Fachwert
+import_batches	file_hash	bleibt	Hash
+import_batches	file_name	null	Dateiname
+insurance_providers	anschrift	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	ansprechpartner	null	Person
+insurance_providers	datenannahme_ik	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	email	null	E-Mail (Abnahme 3: keine E-Mail-Muster)
+insurance_providers	email_verhinderungspflege	null	E-Mail
+insurance_providers	empfaenger	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	empfaenger_zeile2	null	kann eine Person nennen („z.H. Herrn …“, Schema-Kommentar)
+insurance_providers	fax	null	Kontakt
+insurance_providers	hausnummer	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	ik_nummer	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	kim_adresse	null	E-Mail-artige Adresse
+insurance_providers	name	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	plz	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	plz_ort	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	stadt	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	strasse	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	telefon	null	Kontakt, ggf. Durchwahl einer Person
+insurance_providers	zahlungsart	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	zahlungsbedingungen	bleibt	Kasse (Institution), kein Personenbezug
+invoice_line_items	appointment_notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+invoice_line_items	employee_name	='Mitarbeiter'	Klarname
+invoice_line_items	quantity_unit	bleibt	Fachwert
+invoice_line_items	service_code	bleibt	Fachwert
+invoice_line_items	service_description	bleibt	Leistungsbezeichnung (Katalog)
+invoice_line_items	service_details	null	Leistungsdokumentation
+invoices	assignment_declaration_ref	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+invoices	billing_run_id	bleibt	technische Lauf-ID
+invoices	billing_type	bleibt	Fachwert
+invoices	budget_type	bleibt	Fachwert
+invoices	buyer_reference	=CASE WHEN buyer_reference IS NULL THEN NULL ELSE 'V'||lpad(customer_id::text,9,'0') END	= Versichertennummer
+invoices	customer_name	=CASE WHEN customer_name IS NULL THEN NULL ELSE 'Kunde '||customer_id END	Klarname (Kopie)
+invoices	insurance_ik_nummer	bleibt	IK der Kasse
+invoices	insurance_provider_name	bleibt	Name der Kasse (Institution)
+invoices	invoice_number	bleibt	Rechnungsnummer
+invoices	invoice_type	bleibt	Fachwert
+invoices	leistungsnachweis_data_fingerprint	bleibt	Hash
+invoices	leistungsnachweis_hash	bleibt	Hash
+invoices	leistungsnachweis_path	=CASE WHEN leistungsnachweis_path IS NULL THEN NULL ELSE 'mirror/ln/'||id||'.pdf' END	Pfad
+invoices	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+invoices	pdf_data_fingerprint	bleibt	Hash
+invoices	pdf_hash	bleibt	Hash
+invoices	pdf_path	=CASE WHEN pdf_path IS NULL THEN NULL ELSE 'mirror/invoices/'||id||'.pdf' END	Pfad kann Namen enthalten
+invoices	recipient_address	null	Anschrift
+invoices	recipient_name	='Empfänger '||id	Empfänger (Person oder Kasse)
+invoices	render_snapshot	scrub	Darstellungs-Snapshot mit Namen
+invoices	status	bleibt	Fachwert
+invoices	versichertennummer	=CASE WHEN versichertennummer IS NULL THEN NULL ELSE 'V'||lpad(customer_id::text,9,'0') END	Versichertennummer
+invoices	zugferd_xml	null	E-Rechnung mit Namen/Anschrift
+monthly_service_records	customer_signature_data	null	Unterschrift
+monthly_service_records	customer_signature_hash	bleibt	Hash
+monthly_service_records	customer_signing_ip	null	IP-Adresse
+monthly_service_records	customer_signing_location	null	Ort
+monthly_service_records	employee_signature_data	null	Unterschrift
+monthly_service_records	employee_signature_hash	bleibt	Hash
+monthly_service_records	employee_signing_ip	null	IP-Adresse
+monthly_service_records	employee_signing_location	null	Ort
+monthly_service_records	record_type	bleibt	Fachwert
+monthly_service_records	status	bleibt	Fachwert
+notifications	message	='[entfernt]'	Freitext, kann Namen/Gesundheitsdaten enthalten
+notifications	reference_type	bleibt	Fachwert
+notifications	title	='[entfernt]'	Freitext, kann Namen/Gesundheitsdaten enthalten
+notifications	type	bleibt	Fachwert
+password_reset_tokens	token_hash	='mirror-'||id	Token (Hash)
+payment_advice_items	beleg_nr	bleibt	Belegnummer
+payment_advice_items	buchungs_datum	bleibt	Datum
+payment_advice_items	rechnungs_datum	bleibt	Datum
+payment_advice_items	rechnungs_nummer	bleibt	Rechnungsnummer
+payment_advice_items	verwendungszweck	null	Verwendungszweck kann Namen enthalten
+payment_advice_items	vorgangs_nr	bleibt	Vorgangsnummer
+payment_advices	avis_nummer	bleibt	Belegnummer
+payment_advices	beleg_nummer	bleibt	Belegnummer
+payment_advices	file_name	='avis-'||id	Dateiname
+payment_advices	format	bleibt	Fachwert
+payment_advices	ik_nummer	bleibt	IK
+payment_advices	insurance_provider_name	bleibt	Kasse
+payment_advices	kostentraeger_ik	bleibt	IK
+payment_advices	kostentraeger_name	bleibt	Kasse
+payment_advices	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+payment_advices	object_path	null	Speicherpfad
+payment_advices	zahlungs_datum	bleibt	Datum
+payment_advices	zahlungsempfaenger_iban	null	IBAN
+payment_advices	zahlungsempfaenger_ik	bleibt	IK
+prices	origin	bleibt	Konfiguration/Katalog, kein Personenbezug
+prices	scope	bleibt	Konfiguration/Katalog, kein Personenbezug
+prospect_notes	note_text	='[entfernt]'	Freitext, kann Namen/Gesundheitsdaten enthalten
+prospect_notes	note_type	bleibt	Fachwert
+prospect_offers	status	bleibt	Fachwert
+prospect_offers	wizard_data	scrub	Angebotsdaten mit Namen
+prospects	disqualification_reason	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+prospects	email	null	Kontakt
+prospects	nachname	='Interessent'||id	Klarname
+prospects	nr	='1'	Anschrift
+prospects	plz	='00000'	Anschrift
+prospects	quelle	bleibt	Fachwert (Kanal)
+prospects	quelle_details	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+prospects	raw_email_content	null	Original-E-Mail
+prospects	stadt	='Musterstadt'	Anschrift
+prospects	status	bleibt	Fachwert
+prospects	status_notiz	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+prospects	strasse	='Musterstraße'	Anschrift
+prospects	telefon	null	Kontakt
+prospects	vorname	='Vorname'||id	Klarname
+qonto_hide_rules	rule_type	bleibt	Fachwert
+qonto_hide_rules	value	='[entfernt]'	Regelwert kann Namen/IBAN enthalten
+qonto_transactions	billing_irrelevant_source	bleibt	Fachwert
+qonto_transactions	counterparty_name	='Gegenpartei '||id	Name
+qonto_transactions	currency	bleibt	Fachwert
+qonto_transactions	label	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+qonto_transactions	match_confidence	bleibt	Fachwert
+qonto_transactions	qonto_transaction_id	bleibt	technische ID
+qonto_transactions	raw_data	null	Bank-Rohdaten
+qonto_transactions	reference	null	Verwendungszweck
+qonto_transactions	side	bleibt	Fachwert
+qonto_transactions	source_iban	null	IBAN
+qonto_transactions	status	bleibt	Fachwert
+qualifications	description	bleibt	Konfiguration/Katalog, kein Personenbezug
+qualifications	name	bleibt	Konfiguration/Katalog, kein Personenbezug
+role_wage_rates	role	bleibt	Konfiguration/Katalog, kein Personenbezug
+scheduled_calls	last_error	null	Fehlertext kann Kontaktdaten enthalten
+scheduled_calls	lead_name	='Lead '||id	Klarname
+scheduled_calls	lead_phone	='+490000000000'	Kontakt
+scheduled_calls	quelle	bleibt	Fachwert
+scheduled_calls	reason	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+scheduled_calls	status	bleibt	Fachwert
+service_budget_pots	budget_type	bleibt	Fachwert
+services	code	bleibt	Konfiguration/Katalog, kein Personenbezug
+services	description	bleibt	Konfiguration/Katalog, kein Personenbezug
+services	lohnart_kategorie	bleibt	Konfiguration/Katalog, kein Personenbezug
+services	name	bleibt	Konfiguration/Katalog, kein Personenbezug
+services	unit_type	bleibt	Konfiguration/Katalog, kein Personenbezug
+sessions	token_hash	='mirror-'||id	Sitzungs-Token (Hash); ersetzt, Zeilenzahl bleibt
+tasks	description	null	Freitext, kann Namen/Gesundheitsdaten enthalten
+tasks	priority	bleibt	Fachwert
+tasks	status	bleibt	Fachwert
+tasks	title	='[entfernt]'	Freitext, kann Namen/Gesundheitsdaten enthalten
+user_roles	role	bleibt	Fachwert
+user_whatsapp_preferences	whatsapp_number	null	Kontakt
+users	display_name	='Mitarbeiter '||id	Klarname
+users	email	='user'||id||'@mirror.invalid'	Kontakt/Login
+users	employment_status	bleibt	Fachwert
+users	employment_type	bleibt	Fachwert
+users	geburtsdatum	=make_date(extract(year from geburtsdatum)::int,1,1)	wie customers.geburtsdatum
+users	hausnummer	null	Anschrift
+users	latitude	null	Geo-Koordinate der Wohnadresse
+users	longitude	null	Geo-Koordinate der Wohnadresse
+users	nachname	='Mitarbeiter'||id	Klarname
+users	notfallkontakt_beziehung	null	Dritte Person
+users	notfallkontakt_name	null	Dritte Person
+users	notfallkontakt_telefon	null	Dritte Person
+users	password_hash	='!'	Zugangsdaten; ungültig, kein Login möglich
+users	plz	null	Anschrift
+users	stadt	null	Anschrift
+users	strasse	null	Anschrift
+users	telefon	null	Kontakt
+users	vorname	='Vorname'||id	Klarname
+whatsapp_message_log	error_message	null	Fehlertext
+whatsapp_message_log	event_type	bleibt	Fachwert
+whatsapp_message_log	meta_message_id	bleibt	technische ID
+whatsapp_message_log	phone_number	='+490000000000'	Kontakt
+whatsapp_message_log	status	bleibt	Fachwert
+whatsapp_message_log	template_name	bleibt	Konfiguration
+whatsapp_notification_rules	description	bleibt	Konfiguration/Katalog, kein Personenbezug
+whatsapp_notification_rules	event_type	bleibt	Konfiguration/Katalog, kein Personenbezug
+whatsapp_notification_rules	template_name	bleibt	Konfiguration/Katalog, kein Personenbezug
+appointment_series	end_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+appointment_series	start_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+appointments	customer_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+appointments	date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+appointments	no_show_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+appointments	travel_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+budget_allocations	expires_at	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+budget_allocations	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+budget_reservations	customer_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+budget_reservations	travel_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+budget_transactions	customer_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+budget_transactions	transaction_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+budget_transactions	travel_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+customer_assignment_history	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_assignment_history	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_budget_recipients	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_budget_recipients	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_budget_type_settings	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_budget_type_settings	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_care_level_history	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_care_level_history	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_contracts	contract_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_contracts	contract_end	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_contracts	contract_start	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_documents	document_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_documents	review_due_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_insurance_history	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_insurance_history	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_needs_assessments	assessment_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+employee_documents	document_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+employee_documents	review_due_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+employee_hours_accounts	anfangsbestand	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+employee_hours_accounts	bezahlt	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+employee_time_entries	entry_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+employee_time_entries	kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+employee_vacation_allowance	total_days	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+invoice_line_items	appointment_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+invoice_line_items	quantity_raw	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+invoices	assignment_declaration_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+invoices	due_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+prices	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+prices	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+prospects	wiedervorlage_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+role_wage_rates	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+role_wage_rates	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+tasks	due_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+users	austritts_datum	bleibt	Beschäftigungszeitraum; für Lohn-/Stunden-Messungen, Person pseudonymisiert
+users	eintrittsdatum	bleibt	Beschäftigungszeitraum; für Lohn-/Stunden-Messungen, Person pseudonymisiert
+users	monthly_work_hours	bleibt	Menge (km, Stunden, Tage), kein Personenbezug

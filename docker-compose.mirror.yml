@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------------------
+# Pseudonymisierter Prod-Mirror (Ticket 6hf36pRXqr2FR8JG) — eigener
+# Postgres-Cluster, GETRENNT vom Test-Stack (docker-compose.test.yml).
+#
+# Warum ein eigener Cluster und nicht eine DB im Test-Postgres: dessen
+# Superuser-Passwort ist ein Wegwerf-Wert und steht in `.env.test.local`.
+# Läge der Mirror dort, wäre die read-only Rolle für CC wirkungslos, und die
+# Rohdaten der Staging-DB wären während des Abzugs für jeden mit diesem
+# Passwort lesbar. Hier kennt nur Alrik das Admin-Passwort; CC bekommt die
+# Rolle `cc_readonly` (nur SELECT, default read-only).
+#
+# - Bindet nur auf 127.0.0.1:5433.
+# - Daten auf einem benannten Volume (überlebt Neustarts), NICHT tmpfs.
+# - postgres:18 = Version von pg_dump auf engeldesk-01; muss ≥ Prod-Version sein.
+#
+# Einrichtung (einmalig, administrativ): docs/prod-mirror.md
+# ---------------------------------------------------------------------------
+# Eigener Projektname: sonst teilt sich der Stack den Projektnamen (Verzeichnis)
+# mit docker-compose.test.yml, und ein `down --remove-orphans` dort räumte den Mirror mit ab.
+name: prod-mirror
+
+services:
+  prod-mirror:
+    image: postgres:18
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      # Nur beim ERSTEN Start nötig (legt den Admin an); danach leer lassen.
+      POSTGRES_PASSWORD: ${MIRROR_ADMIN_PW:-}
+    volumes:
+      - prod_mirror_daten:/var/lib/postgresql
+
+volumes:
+  prod_mirror_daten:
