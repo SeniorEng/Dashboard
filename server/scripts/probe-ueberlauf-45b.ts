@@ -28,7 +28,8 @@
 import { and, asc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { appointments, budgetAllocations, budgetTransactions, customers } from "@shared/schema";
-import { neuzubuchendeTermine } from "../services/invoice-data";
+import { neuzubuchendeTermine, getServiceRecordsForPeriod, getAppointmentIdsFromServiceRecords, getAlreadyInvoicedAppointmentIds } from "../services/invoice-data";
+import { isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
 import { readUnifiedBudgetAvailability } from "../storage/budget/unified-reader";
 import { activeInvoicedAppointmentIdsSqlRaw } from "../lib/appointment-invoiced";
 
@@ -39,28 +40,54 @@ export interface UeberlaufProbe {
   kasseCents: number;
   privatCents: number;
   nettoNullOhneProbe: number[];
+  /** Auswahl wie `buildInvoiceDraft`: Termine unter signierten LN, davon abgerechnet, davon im Lauf. */
+  auswahl: { lnTermine: number; abgerechnet: number; lauf: number[] };
+  /** Rechenweg je Buchungstag der lebenden §45b-Buchungen der Lauf-Termine (Reader, wie `neuzubuchendeTermine`). */
+  rechenweg: Array<{ datum: string; zugewiesenCents: number; verbrauchCents: number; saldoCents: number }>;
+  /** Lebende §45b-Buchungen der Lauf-Termine. */
+  buchungen: Array<{ id: number; terminId: number; datum: string; betragCents: number; zuweisungId: number | null }>;
 }
 
-/** Nicht abgerechnete Termine des Monats mit (lebender oder stornierter) Buchung. */
-async function laufTermine(customerId: number, jahr: number, monat: number): Promise<number[]> {
-  const von = `${jahr}-${String(monat).padStart(2, "0")}-01`;
-  const bis = new Date(Date.UTC(jahr, monat, 0)).toISOString().slice(0, 10);
-  const zeilen = await db.selectDistinct({ id: appointments.id }).from(appointments)
-    .innerJoin(budgetTransactions, eq(budgetTransactions.appointmentId, appointments.id))
-    .where(and(
-      eq(appointments.customerId, customerId),
-      isNull(appointments.deletedAt),
-      gte(appointments.date, von),
-      lte(appointments.date, bis),
-      sql`${appointments.id} NOT IN (${activeInvoicedAppointmentIdsSqlRaw()})`,
-    ));
-  return zeilen.map((z) => z.id);
+/**
+ * Die Termine, die ein Abrechnungslauf für (Kunde, Monat) anfassen würde —
+ * DIESELBE Auswahl wie `buildInvoiceDraft` (`invoice-calc.ts`): Termine unter
+ * abrechnungsreif signierten Leistungsnachweisen des Monats, minus die bereits
+ * abgerechneten. ERSETZT „jeder Termin des Monats ohne aktive Rechnungszeile"
+ * (Prod-Messung 26.09.2026: 267 Paare, fast alle längst abgerechnete Monate).
+ */
+async function laufTermine(customerId: number, jahr: number, monat: number): Promise<{ lnTermine: number; abgerechnet: number; lauf: number[] }> {
+  const [kunde] = await db.select({ billingType: customers.billingType }).from(customers).where(eq(customers.id, customerId));
+  const lns = (await getServiceRecordsForPeriod(customerId, jahr, monat))
+    .filter((sr) => isServiceRecordSignedForBilling(kunde?.billingType, sr.status));
+  if (lns.length === 0) return { lnTermine: 0, abgerechnet: 0, lauf: [] };
+  const alle = await getAppointmentIdsFromServiceRecords(lns.map((sr) => sr.id));
+  const abgerechnet = new Set(await getAlreadyInvoicedAppointmentIds(alle));
+  return { lnTermine: alle.length, abgerechnet: abgerechnet.size, lauf: alle.filter((id) => !abgerechnet.has(id)) };
 }
 
 export async function probeUeberlauf(customerId: number, jahr: number, monat: number): Promise<UeberlaufProbe> {
-  const ids = await laufTermine(customerId, jahr, monat);
+  const auswahl = await laufTermine(customerId, jahr, monat);
+  const ids = auswahl.lauf;
   const { nettoNull, ueberzogen } = await neuzubuchendeTermine(customerId, ids);
-  const leer: UeberlaufProbe = { termine: [], kasseCents: 0, privatCents: 0, nettoNullOhneProbe: nettoNull };
+
+  // Rechenweg: lebende §45b-Buchungen der Lauf-Termine und der Reader an ihren Buchungstagen.
+  const alleBuchungen = ids.length === 0 ? [] : await db.select().from(budgetTransactions).where(and(
+    eq(budgetTransactions.customerId, customerId),
+    inArray(budgetTransactions.appointmentId, ids),
+    inArray(budgetTransactions.transactionType, ["consumption", "reversal"]),
+  ));
+  const storniertAlle = new Set(alleBuchungen.filter((b) => b.transactionType === "reversal").map((b) => b.reversedTransactionId));
+  const lebend45b = alleBuchungen
+    .filter((b) => b.transactionType === "consumption" && b.budgetType === TOPF && !storniertAlle.has(b.id))
+    .map((b) => ({ id: b.id, terminId: b.appointmentId as number, datum: String(b.transactionDate), betragCents: -b.amountCents, zuweisungId: b.allocationId }))
+    .sort((x, y) => x.datum.localeCompare(y.datum) || x.id - y.id);
+  const rechenweg: UeberlaufProbe["rechenweg"] = [];
+  for (const datum of [...new Set(lebend45b.map((b) => b.datum))]) {
+    const t = (await readUnifiedBudgetAvailability(customerId, datum)).pots.entlastungsbetrag_45b;
+    rechenweg.push({ datum, zugewiesenCents: t.allocatedCents, verbrauchCents: t.consumedNetCents, saldoCents: t.allocatedCents - t.consumedNetCents });
+  }
+
+  const leer: UeberlaufProbe = { termine: [], kasseCents: 0, privatCents: 0, nettoNullOhneProbe: nettoNull, auswahl, rechenweg, buchungen: lebend45b };
   if (ueberzogen.length === 0) return leer;
 
   const buchungen = await db.select().from(budgetTransactions).where(and(
@@ -177,14 +204,23 @@ async function main(): Promise<void> {
     eq(budgetAllocations.customerId, kundeId),
     eq(budgetAllocations.budgetType, TOPF),
     eq(budgetAllocations.year, jahr),
-    inArray(budgetAllocations.source, ["initial_balance", "carryover"]),
+    inArray(budgetAllocations.source, ["initial_balance", "carryover", "manual_adjustment"]),
   )).orderBy(asc(budgetAllocations.validFrom), asc(budgetAllocations.id));
   for (const z of zeilen) {
-    const art = z.source === "initial_balance" ? "Startwert" : "Übertrag ";
+    const art = z.source === "initial_balance" ? "Startwert" : z.source === "carryover" ? "Übertrag " : "Korrektur";
     const monatsTreffer = z.source === "initial_balance" && z.month === monat ? `   <- Startwert ${String(monat).padStart(2, "0")}/${jahr}` : "";
     console.log(`  ${art} #${z.id}  ${euro(z.amountCents)}  ab ${z.validFrom}  eingetragen ${z.createdAt?.toISOString().slice(0, 10)}  ${z.createdByUserId == null ? "automatisch" : "von Hand"}  ${z.deletedAt ? `GELÖSCHT ${z.deletedAt.toISOString().slice(0, 10)}` : "aktiv"}${monatsTreffer}`);
   }
   const p = await probeUeberlauf(kundeId, jahr, monat);
+  const mm = `${String(monat).padStart(2, "0")}/${jahr}`;
+  console.log(`Termine unter signiertem LN ${mm}: ${p.auswahl.lnTermine}, davon abgerechnet ${p.auswahl.abgerechnet}, im Lauf ${p.auswahl.lauf.length}`);
+  for (const b of p.buchungen) {
+    console.log(`  Buchung #${b.id}  Termin ${b.terminId}  ${b.datum}  ${euro(b.betragCents)}  Zuweisung ${b.zuweisungId ?? "–"}`);
+  }
+  console.log(`Rechenweg §45b (Reader, je Buchungstag): zugewiesen − Verbrauch = Saldo`);
+  for (const r of p.rechenweg) {
+    console.log(`  ${r.datum}: ${euro(r.zugewiesenCents)} − ${euro(r.verbrauchCents)} = ${euro(r.saldoCents)}${r.saldoCents < 0 ? "   ÜBERZOGEN" : ""}`);
+  }
   if (p.termine.length === 0) {
     console.log("Kein überzogener Topf — der Fix ändert an der Rechnung nichts.");
   }
