@@ -5,7 +5,10 @@ Erzeugt das Pseudonymisierungs-SQL für den Prod-Mirror aus der Spaltenliste
 
 Fail-closed (Ticket 6hf36pRXqr2FR8JG, „Nicht geprüft ist keine zulässige
 Antwort"): Bricht mit Exit-Code 2 ab, wenn
-  · die DB eine Text-/JSON-/Binär-Spalte hat, die in der Liste fehlt,
+  · die DB eine Spalte hat, die in der Liste fehlt und deren Typ NICHT in
+    `HARMLOSE_TYPEN` steht (Gate 2 zu #198, S-4: umgedreht — vorher wurden nur
+    Text/JSON/bytea verlangt; citext, inet, xml, Enums, Datum, numeric liefen
+    ungeprüft durch),
   · die Liste eine Spalte nennt, die es in der DB nicht gibt,
   · eine Spalte mit Regel `null` in der DB NOT NULL ist.
 Ausgegeben werden nur Tabellen-/Spaltennamen, nie Werte.
@@ -16,8 +19,14 @@ Ausgabe (stdout): SQL (eine UPDATE-Anweisung je Tabelle).
 import sys
 from pathlib import Path
 
-TEXTARTIG = {"text", "character varying", "character", "json", "jsonb", "bytea"}
-TEXT_UDT_ARRAYS = {"_text", "_varchar", "_bpchar", "_json", "_jsonb"}
+# Typen, die ohne Eintrag in der Liste durchgehen dürfen: IDs, Zähler, Cent-Beträge,
+# Schalter, System-Zeitstempel. JEDE andere Spalte muss in spalten.tsv stehen.
+HARMLOSE_TYPEN = {
+    "integer", "bigint", "smallint", "boolean", "uuid",
+    "timestamp with time zone", "timestamp without time zone",
+    "time without time zone", "time with time zone", "interval",
+}
+HARMLOSE_ARRAYS = {"_int2", "_int4", "_int8", "_bool", "_uuid"}
 
 
 def lade_liste(pfad: Path):
@@ -50,8 +59,8 @@ def main() -> None:
 
     fehler = []
     for (t, s), (typ, udt, _) in sorted(db.items()):
-        textartig = typ in TEXTARTIG or (typ == "ARRAY" and udt in TEXT_UDT_ARRAYS)
-        if textartig and (t, s) not in regeln:
+        harmlos = typ in HARMLOSE_TYPEN or (typ == "ARRAY" and udt in HARMLOSE_ARRAYS)
+        if not harmlos and (t, s) not in regeln:
             fehler.append(f"NICHT ZUGEORDNET: {t}.{s} ({typ})")
     for (t, s), regel in sorted(regeln.items()):
         if (t, s) not in db:

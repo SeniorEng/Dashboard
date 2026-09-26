@@ -1,10 +1,13 @@
 -- Hilfsobjekte für den Prod-Mirror-Abzug. Werden in der STAGING-DB angelegt
 -- und vor dem Umbenennen in prod_mirror wieder entfernt.
 
--- JSON pseudonymisieren: Struktur (Schlüssel, Verschachtelung, Zahlen, Wahrheitswerte)
--- bleibt. Zeichenketten werden durch "[x]" ersetzt, AUSSER
---   · unter fachlichen Schlüsseln (Status, Topf, Rechnungsnummer …) und
---   · wenn sie nur eine Zahl oder ein Datum/Zeitstempel sind.
+-- JSON pseudonymisieren: Struktur (Schlüssel, Verschachtelung) bleibt.
+--   · Zeichenketten bleiben NUR unter fachlichen Schlüsseln (Status, Topf,
+--     Rechnungsnummer …), sonst "[x]" — auch wenn sie wie Zahl oder Datum
+--     aussehen (Gate 2 zu #198, B-1: Geburtsdatum, PLZ, Telefon als Text).
+--   · Zahlen bleiben (Beträge, IDs), AUSSER unter Schlüsseln mit Personenbezug
+--     (PLZ, Hausnummer, Telefon, Geo, Geburt, Versichertennummer, IBAN) → null.
+--   · Wahrheitswerte und null bleiben.
 -- Bewusst NICHT in der Liste: freie Felder wie "reason", "notes", "name".
 CREATE OR REPLACE FUNCTION mirror_scrub(j jsonb) RETURNS jsonb
 LANGUAGE plpgsql IMMUTABLE AS $$
@@ -16,6 +19,7 @@ DECLARE
     'task','format','deliveryMethod','eventType','field','fields','changedFields','budgetTypes',
     'splitPots','appointmentType','serviceCode','code','unit','quantityUnit','period','state'
   ];
+  zahl_personenbezug CONSTANT text := '(plz|postleitzahl|zip|nr$|hausnummer|telefon|phone|mobil|fax|lat|lng|lon|geburt|birth|versicherten|iban)';
   k text; v jsonb; res jsonb;
 BEGIN
   IF j IS NULL THEN RETURN NULL; END IF;
@@ -28,6 +32,8 @@ BEGIN
         ELSIF k = ANY (schluessel_bleiben) AND jsonb_typeof(v) = 'array'
               AND NOT jsonb_path_exists(v, '$[*] ? (@.type() == "object" || @.type() == "array")') THEN
           res := res || jsonb_build_object(k, v);
+        ELSIF jsonb_typeof(v) = 'number' AND lower(k) ~ zahl_personenbezug THEN
+          res := res || jsonb_build_object(k, NULL);
         ELSE
           res := res || jsonb_build_object(k, mirror_scrub(v));
         END IF;
@@ -38,9 +44,6 @@ BEGIN
         FROM jsonb_array_elements(j) WITH ORDINALITY AS a(e, n);
       RETURN res;
     WHEN 'string' THEN
-      IF (j #>> '{}') ~ '^(-?[0-9]+([.,][0-9]+)?|[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9:.]+(Z|[+-][0-9:]+)?)?)$' THEN
-        RETURN j;
-      END IF;
       RETURN to_jsonb('[x]'::text);
     ELSE
       RETURN j;
@@ -82,11 +85,11 @@ BEGIN
       IF n > 0 THEN tabelle := r.t; spalte := r.s; art := 'name'; anzahl := n; RETURN NEXT; END IF;
     END IF;
     EXECUTE format($q$SELECT count(*) FROM public.%I
-                     WHERE regexp_replace(%s, '[A-Za-z0-9._%%+-]+@mirror\.invalid', '', 'g')
-                           ~ '[A-Za-z0-9._%%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'$q$, r.t, ausdruck) INTO n;
+                     WHERE regexp_replace(%s, '[A-Za-z0-9._%%+-]+@mirror\.invalid', '', 'gi')
+                           ~* '[A-Z0-9._%%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'$q$, r.t, ausdruck) INTO n;
     IF n > 0 THEN tabelle := r.t; spalte := r.s; art := 'email'; anzahl := n; RETURN NEXT; END IF;
     EXECUTE format($q$SELECT count(*) FROM public.%I
-                     WHERE %s ~ '\m[A-Z]{2}[0-9]{2} ?([0-9A-Z]{4} ?){3,7}[0-9A-Z]{1,4}\M'$q$, r.t, ausdruck) INTO n;
+                     WHERE %s ~* '\m[A-Z]{2}[0-9]{2} ?([0-9A-Z]{4} ?){3,7}[0-9A-Z]{1,4}\M'$q$, r.t, ausdruck) INTO n;
     IF n > 0 THEN tabelle := r.t; spalte := r.s; art := 'iban'; anzahl := n; RETURN NEXT; END IF;
   END LOOP;
 END $$;

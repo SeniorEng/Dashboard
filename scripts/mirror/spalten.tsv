@@ -33,7 +33,7 @@ audit_log	metadata	scrub	Audit-Details; Struktur bleibt, Werte außer Fachschlü
 birthday_card_tracking	notes	null	Freitext, kann Namen/Gesundheitsdaten enthalten
 birthday_card_tracking	person_type	bleibt	Fachwert
 budget_allocations	budget_type	bleibt	Fachwert
-budget_allocations	notes	=substring(notes from 'Storno[^#]*Transaktion #[0-9]+')	Freitext; nur ein Storno-Verweis bliebe
+budget_allocations	notes	=NULLIF(concat_ws(' ', CASE WHEN notes ~ 'Storno\y.*?Transaktion #[0-9]+\y' THEN 'Storno von Transaktion #' || substring(notes from 'Storno\y.*?Transaktion #([0-9]+)\y') WHEN notes ~ 'Transaktion #[0-9]+\y' THEN 'Umbuchung (Transaktion #' || substring(notes from 'Transaktion #([0-9]+)\y') || ')' END, substring(notes from '(Storno-Storno-Zeile #[0-9]+ \()'), substring(notes from '(verwaisten Storno #[0-9]+ \()')), '')	Freitext; nur die kanonischen Verweise bleiben, die Code liest: Storno-Bezug (parseStornoReference, Waisen-Suche), Transaktion #N (Monats-Umbuchung), Idempotenz-Marker der Reconcile-Skripte (Test: tests/tools/mirror-pseudonymisierung.test.ts)
 budget_allocations	source	bleibt	Fachwert
 budget_migrations	name	bleibt	Migrationsname (System)
 budget_migrations	summary	null	Freitext
@@ -44,7 +44,7 @@ budget_reservations	occurrence_id	bleibt	technische ID
 budget_reservations	period	bleibt	Fachwert
 budget_reservations	state	bleibt	Fachwert
 budget_transactions	budget_type	bleibt	Fachwert
-budget_transactions	notes	=substring(notes from 'Storno[^#]*Transaktion #[0-9]+')	Freitext; nur der Storno-Verweis bleibt (wird fachlich gelesen: parseStornoReference)
+budget_transactions	notes	=NULLIF(concat_ws(' ', CASE WHEN notes ~ 'Storno\y.*?Transaktion #[0-9]+\y' THEN 'Storno von Transaktion #' || substring(notes from 'Storno\y.*?Transaktion #([0-9]+)\y') WHEN notes ~ 'Transaktion #[0-9]+\y' THEN 'Umbuchung (Transaktion #' || substring(notes from 'Transaktion #([0-9]+)\y') || ')' END, substring(notes from '(Storno-Storno-Zeile #[0-9]+ \()'), substring(notes from '(verwaisten Storno #[0-9]+ \()')), '')	Freitext; nur die kanonischen Verweise bleiben, die Code liest: Storno-Bezug (parseStornoReference, Waisen-Suche), Transaktion #N (Monats-Umbuchung), Idempotenz-Marker der Reconcile-Skripte (Test: tests/tools/mirror-pseudonymisierung.test.ts)
 budget_transactions	transaction_type	bleibt	Fachwert
 company_settings	bank_account_holder	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
 company_settings	bank_name	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
@@ -89,7 +89,7 @@ company_settings	smtp_pass	null	Geheimnis (Zugangsdaten/Token) oder Person/Konta
 company_settings	smtp_port	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
 company_settings	smtp_user	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
 company_settings	stadt	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
-company_settings	steuernummer	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
+company_settings	steuernummer	bleibt	Steuernummer der UG (juristische Person), kein Personenbezug
 company_settings	strasse	bleibt	Firmenstammdaten/Konfiguration, kein Personenbezug
 company_settings	telefon	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
 company_settings	twilio_account_sid	null	Geheimnis (Zugangsdaten/Token) oder Person/Kontakt
@@ -217,7 +217,7 @@ insurance_providers	datenannahme_ik	bleibt	Kasse (Institution), kein Personenbez
 insurance_providers	email	null	E-Mail (Abnahme 3: keine E-Mail-Muster)
 insurance_providers	email_verhinderungspflege	null	E-Mail
 insurance_providers	empfaenger	bleibt	Kasse (Institution), kein Personenbezug
-insurance_providers	empfaenger_zeile2	bleibt	Kasse (Institution), kein Personenbezug
+insurance_providers	empfaenger_zeile2	null	kann eine Person nennen („z.H. Herrn …“, Schema-Kommentar)
 insurance_providers	fax	null	Kontakt
 insurance_providers	hausnummer	bleibt	Kasse (Institution), kein Personenbezug
 insurance_providers	ik_nummer	bleibt	Kasse (Institution), kein Personenbezug
@@ -375,3 +375,52 @@ whatsapp_message_log	template_name	bleibt	Konfiguration
 whatsapp_notification_rules	description	bleibt	Konfiguration/Katalog, kein Personenbezug
 whatsapp_notification_rules	event_type	bleibt	Konfiguration/Katalog, kein Personenbezug
 whatsapp_notification_rules	template_name	bleibt	Konfiguration/Katalog, kein Personenbezug
+appointment_series	end_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+appointment_series	start_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+appointments	customer_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+appointments	date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+appointments	no_show_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+appointments	travel_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+budget_allocations	expires_at	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+budget_allocations	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+budget_reservations	customer_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+budget_reservations	travel_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+budget_transactions	customer_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+budget_transactions	transaction_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+budget_transactions	travel_kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+customer_assignment_history	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_assignment_history	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_budget_recipients	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_budget_recipients	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_budget_type_settings	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_budget_type_settings	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_care_level_history	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_care_level_history	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_contracts	contract_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_contracts	contract_end	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_contracts	contract_start	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_documents	document_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_documents	review_due_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_insurance_history	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_insurance_history	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+customer_needs_assessments	assessment_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+employee_documents	document_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+employee_documents	review_due_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+employee_hours_accounts	anfangsbestand	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+employee_hours_accounts	bezahlt	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+employee_time_entries	entry_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+employee_time_entries	kilometers	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+employee_vacation_allowance	total_days	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+invoice_line_items	appointment_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+invoice_line_items	quantity_raw	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
+invoices	assignment_declaration_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+invoices	due_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+prices	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+prices	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+prospects	wiedervorlage_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+role_wage_rates	valid_from	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+role_wage_rates	valid_to	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+tasks	due_date	bleibt	Fach-Datum (Leistung, Gültigkeit, Frist), kein Personenbezug
+users	austritts_datum	bleibt	Beschäftigungszeitraum; für Lohn-/Stunden-Messungen, Person pseudonymisiert
+users	eintrittsdatum	bleibt	Beschäftigungszeitraum; für Lohn-/Stunden-Messungen, Person pseudonymisiert
+users	monthly_work_hours	bleibt	Menge (km, Stunden, Tage), kein Personenbezug
