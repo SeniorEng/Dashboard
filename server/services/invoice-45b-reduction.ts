@@ -356,7 +356,7 @@ export async function reduceInvoice45bToPaidAmount(
   let reissue: Reduce45bInvoiceResult["reissue"];
   try {
     const result = await generateInvoiceCore(
-      { customerId, billingMonth, billingYear },
+      { customerId, billingMonth, billingYear, gezielteUmbuchung: true },
       { userId: actor.userId, ipAddress: actor.ipAddress, testFaults: testFaults ?? new Set<string>() },
     );
     const invoiceList = "splitInvoices" in result ? result.invoices : [result];

@@ -11,7 +11,7 @@ import { db } from "../../lib/db";
 import { AppError, badRequest } from "../../lib/errors";
 import type { DbClient, CascadeResult } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
-import { todayISO, lastDayOfMonth } from "@shared/utils/datetime";
+import { todayISO, lastDayOfMonth, formatDateForDisplay } from "@shared/utils/datetime";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "./unified-reader";
@@ -807,7 +807,7 @@ export type RebookPrivatePotOverride = {
  * erneute Anfordern im selben Tx ist unschädlich.
  *
  * Zwei optionale Steuer-Parameter — beide vom Standard-Aufrufer
- * (`rebookNetZeroAppointmentConsumption`) NICHT gesetzt ⇒ unverändertes
+ * (`neubuchenFuerLauf`) NICHT gesetzt ⇒ unverändertes
  * Verhalten:
  *   - `overflowRestriction`: Positivliste erlaubter Töpfe; wird an die Cascade
  *     durchgereicht (nicht gelistete gesetzliche Töpfe erhalten Kapazität 0),
@@ -1011,66 +1011,21 @@ export async function rebookNetZeroAppointmentCore(
     // fahren (#193), zaehlt das: die Liste faengt pro Kunde nur 400/404 ab
     // (`billing-customer-amounts.ts`), ein nacktes `Error` risse den ganzen
     // Stapel mit.
+    // Wortlaut nach Entscheidung Alrik (RÜ-1, 26.09.2026): klar sagen, WAS
+    // fehlt (Budget) und WAS der Ausweg ist (Privatzahlung beim Kunden).
+    // Vorschau (Probelauf) und Erstellen zeigen dieselbe Meldung.
+    const [kunde] = await customersRepo
+      .selectColumnsFrom({ name: customers.name }, tx)
+      .where(eq(customers.id, customerId))
+      .limit(1);
     throw badRequest(
-      `Re-Abrechnung nicht möglich: Termin #${appointmentId} kann nicht ` +
-      `vollständig aus den gesetzlichen Pflegekassen-Töpfen abgerechnet ` +
-      `werden (${formatEuroDE(cascadeResult.outstandingCents)} ohne ` +
-      `Deckung). Eine Privatabrechnung ist für diesen Kunden nicht ` +
-      `zulässig. Bitte prüfen Sie die Budget-Konfiguration und Buchungen.`,
+      `Budget reicht nicht: Termin #${appointmentId} vom ${formatDateForDisplay(txDate)} ` +
+      `ist mit ${formatEuroDE(cascadeResult.outstandingCents)} nicht aus den ` +
+      `Pflegekassen-Töpfen gedeckt. Privatzahlung bei Kunde ${kunde?.name ?? `#${customerId}`} ` +
+      `nicht aktiviert. Bitte Privatzahlung aktivieren oder Budget und Buchungen prüfen.`,
     );
   }
 
   return { rebooked: true, cascade: cascadeResult };
 }
 
-/**
- * Task #1014 — Re-Buchung netto-null-belegter Termine bei der Rechnungs-
- * ERSTELLUNG (nicht Preview).
- *
- * Hintergrund: Wird eine Rechnung storniert, läuft pro Termin ein Budget-
- * Reversal — der Termin wird wieder abrechenbar und seine Konsumption ist
- * netto null (alle `consumption`-Zeilen storniert). Beim Re-Abrechnen
- * ermittelt `getBudgetSplitForAppointments` den Pot-Anteil (seit #193 als
- * zurueckgerollter Probelauf DIESER Neubuchung), bucht aber nichts, was
- * stehen bleibt. Ohne Re-Buchung weist
- * die neue Rechnung also einen Pott aus (z.B. §45b), während der Ledger den
- * Topf weiterhin als „verfügbar" führt → ein späterer Termin verbraucht
- * denselben Topf erneut → derselbe Topf ist über ZWEI aktive Rechnungen
- * doppelt belegt (GoBD-/Finanz-Drift).
- *
- * Lösung: Vor dem Bauen des finalen Rechnungs-Drafts werden für die netto-
- * null-Termine frische Cascade-`consumption`-Zeilen GoBD-append-only gebucht
- * (gegen die jetzt verfügbaren Töpfe, identische Standard-Priorität §45b →
- * §45a → §39/§42a, Rest → privater uncapped-Topf). Danach liest der Draft den
- * Split aus diesen Live-Zeilen — Ledger und Rechnung sind per Konstruktion
- * deckungsgleich (eine Quelle: die gebuchten Zeilen).
- *
- * Kein Doppel-Verbrauch: Es wird ausschließlich für Termine OHNE Live-Konsum
- * gebucht. Nach erfolgreicher Buchung ist der Termin nicht mehr netto-null →
- * ein erneuter Generate-Lauf erkennt ihn nicht mehr als netto-null und bucht
- * nicht erneut (idempotent). Die Netto-Null-Prüfung läuft UNTER dem
- * Pro-Kunde-Advisory-Lock erneut, damit parallele Läufe nicht doppelt buchen.
- */
-export async function rebookNetZeroAppointmentConsumption(params: {
-  customerId: number;
-  appointmentIds: number[];
-  userId: number;
-}): Promise<{ rebookedAppointmentIds: number[] }> {
-  const { customerId, appointmentIds, userId } = params;
-  const rebookedAppointmentIds: number[] = [];
-  if (appointmentIds.length === 0) return { rebookedAppointmentIds };
-
-  // CHRONOLOGISCH (Tabelle D). Vorher kam die Reihenfolge aus
-  // `computeNetZeroApptIds`, also aus der Ladereihenfolge der Buchungen. Das
-  // Buchen hier ist kumulativ (jede Buchung ist für die nächste schon im
-  // Ledger) — WELCHER Termin den Rest privat bekommt, hing damit am Zufall.
-  // Dieselbe Reihenfolge wie die Vorschau, damit beide dasselbe zeigen.
-  for (const appointmentId of await chronologischeReihenfolge(appointmentIds)) {
-    const { rebooked } = await db.transaction((tx) =>
-      rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, handelnder: { userId } }),
-    );
-    if (rebooked) rebookedAppointmentIds.push(appointmentId);
-  }
-
-  return { rebookedAppointmentIds };
-}

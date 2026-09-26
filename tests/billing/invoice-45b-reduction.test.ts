@@ -290,6 +290,36 @@ describe("§45b-Kürzung: Storno + Reset + Umbuchung + Re-Rechnung (Task #1785 P
     expect(net45a, "§45a: Σ Rechnungen === Ledger").toBe(ledger45a);
   }, 180_000);
 
+  it("Ziel privat, obwohl §45a Budget hätte: die Überlauf-Neubuchung beim Erstellen überschreibt die gezielte Umbuchung nicht (#197)", async () => {
+    // Entscheidung Alrik (26.09.2026): Die Neubuchung darf eine gezielte
+    // Umbuchung/Kürzung NICHT überschreiben. Die Standard-Kaskade würde den
+    // Überhang in §45a legen (Prio 2, reichlich Budget) — die Kürzung hat
+    // „privat" gewählt. Nach der Re-Rechnung muss es dabei bleiben.
+    const { handle, year, month } = await setupScenario({
+      prefix: "Reduce45b-privat-trotz-45a",
+      acceptsPrivatePayment: true,
+      targetType: { type: POT_45A, monthlyLimitCents: 50_000 },
+    });
+    const customerId = handle.customerId;
+    await createAndSignSr(customerId, handle.employeeId, year, month);
+    const inv45b = await generateAndGet45bInvoice(customerId, year, month);
+    await markIssued(inv45b.id);
+
+    const result = await reduceInvoice45bToPaidAmount({
+      rootInvoiceId: inv45b.id,
+      paidCents: PAID_CENTS,
+      targetPot: "private",
+      actor: { userId: auth.user.id, isSuperAdmin: auth.user.isSuperAdmin, ipAddress: "127.0.0.1" },
+    });
+    expect(result.reissue.ok, `Re-Rechnung ok: ${JSON.stringify(result.reissue)}`).toBe(true);
+    expect(await liveConsumptionCents(customerId, POT_45B), "§45b = Y").toBe(PAID_CENTS);
+    expect(await liveConsumptionCents(customerId, POT_45A), "§45a bleibt leer").toBe(0);
+    expect(await liveConsumptionCents(customerId, "private"), "privat = Überhang").toBe(OVERFLOW_CENTS);
+    const active = await activeInvoices(customerId);
+    expect(active.find((i) => i.budgetType === POT_45A), "keine §45a-Rechnung").toBeUndefined();
+    expect(active.find((i) => i.billingType === "selbstzahler")?.netAmountCents).toBe(OVERFLOW_CENTS);
+  }, 180_000);
+
   it("Ziel privat: Überhang wird Selbstzahler-Rechnung (19% USt), §45b-Kasse-Rechnung auf Y gekürzt", async () => {
     const { handle, year, month } = await setupScenario({
       prefix: "Reduce45b-privat",

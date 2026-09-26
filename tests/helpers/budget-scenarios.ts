@@ -8,6 +8,7 @@ import {
   createTestCustomer,
   createTestEmployee,
   deactivateTestEmployee,
+  getAuthCookie,
 } from "../test-utils";
 import {
   BUDGET_39_42A_MAX_YEARLY_CENTS,
@@ -327,7 +328,7 @@ export async function setupBudgetScenario(
     });
   }
 
-  async function seed45bCarryoverDirect(sourceYear: number, amountCents: number): Promise<void> {
+  async function seed45bCarryoverDirect(sourceYear: number, amountCents: number, userId?: number): Promise<void> {
     const { upsertCarryoverAllocation } = await import(
       "../../server/storage/budget/allocation-storage"
     );
@@ -336,7 +337,7 @@ export async function setupBudgetScenario(
       budgetType: "entlastungsbetrag_45b",
       sourceYear,
       amountCents,
-    });
+    }, userId);
   }
 
   if (ib && carry) {
@@ -355,7 +356,13 @@ export async function setupBudgetScenario(
     // carryover ist per Invariante (oben) immer §45b → beide Anteile als
     // direkte Fixture seeden (umgeht den §45b-Startwert-Cap der Route).
     await seed45bInitialBalanceDirect(ib.validFrom, ib.amountCents);
-    await seed45bCarryoverDirect(carry.year, carry.amountCents);
+    // Startwert UND Übertrag gemeinsam erfasst = der echte Anlage-Weg
+    // (`applyInitialBudget`), der den Übertrag MIT Ersteller schreibt. Ohne
+    // Ersteller gälte er als Jahreswechsel-Automatik und würde seit dem Flip
+    // vom Startwert verdrängt (Tabelle D, Alrik 25.09.2026: „am selben Tag von
+    // Hand → beide zählen"; die #1395-Zusagen bleiben unverändert).
+    const { user } = await getAuthCookie();
+    await seed45bCarryoverDirect(carry.year, carry.amountCents, user.id);
   } else if (ib && ib.type === "entlastungsbetrag_45b") {
     await seed45bInitialBalanceDirect(ib.validFrom, ib.amountCents);
   } else if (ib) {

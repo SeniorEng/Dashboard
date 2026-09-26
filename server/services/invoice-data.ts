@@ -13,6 +13,8 @@ import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import { chronologischeReihenfolge } from "../storage/budget/abrechnungs-lauf";
 import { rebookNetZeroAppointmentCore } from "../storage/budget/rebook-storage";
+import { reverseBudgetTransaction } from "../storage/budget/transaction-storage";
+import { readUnifiedBudgetAvailability } from "../storage/budget/unified-reader";
 import { loadCustomerPriceContext } from "../storage/pricing/price-for";
 import { monthlyServiceRecordsRepo, appointmentsRepo } from "../repos";
 import { resolveCustomerInsuranceAt } from "../storage/customer-mgmt/insurance";
@@ -745,7 +747,7 @@ type ApptConsumptionTxn = {
  * IDs, auf die ein `reversal` zeigt (stornierte Original-Buchungen). Eine
  * `consumption`-Zeile, deren ID in `reversedIds` liegt, ist netto null belegt.
  * SSoT für die Netto-Null-Erkennung — geteilt von `getBudgetSplitForAppointments`
- * (Anzeige-Split) und `findNetZeroBilledAppointments` (Re-Buchungs-Trigger).
+ * (Anzeige-Split) und `neuzubuchendeTermine` (Re-Buchungs-Auslöser).
  */
 async function loadAppointmentConsumptionTxns(
   customerId: number,
@@ -815,23 +817,133 @@ function computeNetZeroApptIds(
 }
 
 /**
- * Task #1014 — Trigger für die Re-Buchung netto-null-belegter Termine bei der
- * tatsächlichen Rechnungs-ERSTELLUNG (nicht Preview). Liefert die Termine, die
- * eine Konsumption hatten, deren Buchungen aber komplett storniert wurden —
- * exakt die Termine, deren Pot-Anteil `getBudgetSplitForAppointments`
- * read-only aus der aktuellen Allocation re-deriviert. Beim Generieren werden
- * für diese Termine frische `consumption`-Zeilen gebucht (siehe
- * `rebookNetZeroAppointmentConsumption`), damit Ledger und Rechnung nicht
- * auseinanderlaufen.
+ * Welche Termine eines Laufs werden NEU gebucht — beim Erstellen echt, in der
+ * Vorschau im Probelauf? EINE Antwort für beide Wege.
+ *
+ *   · `nettoNull`   — alle Buchungen storniert (Task #1014, unverändert).
+ *   · `ueberzogen`  — NEU (Funke, Kunde 89, 26.09.2026; Regel Alrik:
+ *     „Überlauf über dem verfügbaren Budget → privat, auch bei bereits
+ *     gebuchten Terminen"). Termine mit LEBENDER Buchung in einem Topf (vorerst
+ *     nur §45b, `UEBERLAUF_TOEPFE`), der an
+ *     einem ihrer Buchungstage überzogen ist (zugewiesen − Verbrauch < 0 im Reader,
+ *     Stichtag = Buchungstag = Leistungstag). Dann werden ALLE lebend
+ *     gebuchten Termine dieses Topfs im Lauf neu gebucht — chronologisch,
+ *     frühere zuerst, der Überlauf geht in die Kaskade (privat).
+ *
+ * ERSETZT `findNetZeroBilledAppointments` (entfernt) als Auslöser beim Erstellen. Vorher
+ * übernahm die Rechnung gespeicherte Buchungen ungeprüft: bei Funke hingen
+ * 194,20 € an einem inzwischen gelöschten Übertrag, der Reader zeigte Juni
+ * überzogen, und RE-0696 ging trotzdem komplett an die Kasse.
+ *
+ * `apptIds` sind die Termine des Laufs, also NICHT abgerechnete. Bereits
+ * abgerechnete (auch bezahlte) Termine werden nie angefasst (GoBD); sie
+ * zählen nur als Verbrauch, der den Topf belegt.
  */
-export async function findNetZeroBilledAppointments(
+/**
+ * Töpfe, für die der Überzug eine Neubuchung auslöst. NUR §45b, bis Alrik
+ * RÜ-4 entschieden hat (Gate 2 zu #197, B-4): §45a rechnet seinen Anspruch
+ * ohne `monthlyLimitCents` mit dem HEUTIGEN Pflegegrad
+ * (`calculateAllocated45a`) — nach einer Herabstufung erschiene ein früherer
+ * Monat überzogen und würde fälschlich nach privat umgebucht. §39/§42a ist
+ * nicht geprüft.
+ */
+const UEBERLAUF_TOEPFE: ReadonlySet<string> = new Set(["entlastungsbetrag_45b"]);
+
+export async function neuzubuchendeTermine(
   customerId: number,
   apptIds: number[],
+  d: Tx | typeof db = db,
+): Promise<{ nettoNull: number[]; ueberzogen: number[] }> {
+  if (apptIds.length === 0) return { nettoNull: [], ueberzogen: [] };
+  const { txns, reversedIds } = await loadAppointmentConsumptionTxns(customerId, apptIds, d);
+  if (txns.length === 0) return { nettoNull: [], ueberzogen: [] };
+  const nettoNull = computeNetZeroApptIds(txns, reversedIds);
+
+  const lebend = txns.filter((t) => t.appointmentId != null && !reversedIds.has(t.id));
+  if (lebend.length === 0) return { nettoNull, ueberzogen: [] };
+  const datumsZeilen = await d.select({ id: budgetTransactions.id, datum: budgetTransactions.transactionDate })
+    .from(budgetTransactions)
+    .where(inArray(budgetTransactions.id, lebend.map((t) => t.id)));
+  const datumJeBuchung = new Map(datumsZeilen.map((z) => [z.id, String(z.datum)]));
+
+  const ueberzogeneToepfe = new Set<string>();
+  const cache = new Map<string, Awaited<ReturnType<typeof readUnifiedBudgetAvailability>>>();
+  for (const t of lebend) {
+    if (!UEBERLAUF_TOEPFE.has(t.budgetType) || ueberzogeneToepfe.has(t.budgetType)) continue;
+    const datum = datumJeBuchung.get(t.id);
+    if (!datum) continue;
+    let r = cache.get(datum);
+    if (!r) { r = await readUnifiedBudgetAvailability(customerId, datum, d); cache.set(datum, r); }
+    // Zugewiesen minus Verbrauch, NICHT `availableCents`: das ist bei 0
+    // gekappt (Funke: Reader zeigt „0,00 € frei" bei 85,18 € Überzug).
+    const topf = (r.pots as Record<string, { allocatedCents: number; consumedNetCents: number } | undefined>)[t.budgetType];
+    if (topf && topf.allocatedCents - topf.consumedNetCents < 0) ueberzogeneToepfe.add(t.budgetType);
+  }
+  const ueberzogen = [...new Set(lebend
+    .filter((t) => ueberzogeneToepfe.has(t.budgetType))
+    .map((t) => t.appointmentId as number))];
+  return { nettoNull, ueberzogen };
+}
+
+/**
+ * Storniert die lebenden Buchungen der Termine (append-only, `reversal`), damit
+ * sie netto null stehen und über `rebookNetZeroAppointmentCore` neu gebucht
+ * werden. ALLE zuerst, dann neu buchen — sonst hielte ein späterer Termin
+ * seinen alten Anteil fest, während ein früherer neu bucht.
+ */
+async function lebendeBuchungenStornieren(
+  tx: Tx,
+  customerId: number,
+  apptIds: number[],
+  userId: number | undefined,
+): Promise<void> {
+  if (apptIds.length === 0) return;
+  const { txns, reversedIds } = await loadAppointmentConsumptionTxns(customerId, apptIds, tx);
+  for (const t of txns) {
+    if (reversedIds.has(t.id)) continue;
+    await reverseBudgetTransaction(t.id, userId, tx);
+  }
+}
+
+/**
+ * Neubuchung beim ERSTELLEN — alles in EINER Transaktion unter der
+ * Abrechnungs-Sperre des Kunden (Gate 2 zu #197, B-2/B-3):
+ *   1. Sperre wie die Rechnungs-Transaktion (`lockCustomerForBilling`), dann
+ *      prüfen, dass kein Termin inzwischen abgerechnet ist — ein paralleler
+ *      Lauf darf nie Buchungen abgerechneter Termine stornieren.
+ *   2. Auswahl (`neuzubuchendeTermine`) UNTER der Sperre neu treffen.
+ *   3. Lebende Buchungen der überzogenen Termine stornieren, dann alle
+ *      chronologisch neu buchen (`rebookNetZeroAppointmentCore`).
+ * Scheitert ein Termin (z. B. kein Privatanteil erlaubt), rollt ALLES zurück:
+ * das Ledger bleibt wie vorher, der Lauf bricht mit der Meldung der Engine ab.
+ *
+ * ERSETZT beim Erstellen `rebookNetZeroAppointmentConsumption` (entfernt; eine
+ * Transaktion je Termin — ein Fehler mittendrin ließ die früheren Termine
+ * gebucht und die späteren netto null zurück).
+ */
+export async function neubuchenFuerLauf(
+  customerId: number,
+  apptIds: number[],
+  userId: number,
+  opts: { ueberlauf: boolean } = { ueberlauf: true },
 ): Promise<number[]> {
   if (apptIds.length === 0) return [];
-  const { txns, reversedIds } = await loadAppointmentConsumptionTxns(customerId, apptIds);
-  if (txns.length === 0) return [];
-  return computeNetZeroApptIds(txns, reversedIds);
+  return db.transaction(async (tx) => {
+    await lockCustomerForBilling(tx, customerId);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`);
+    await assertAppointmentsNotYetInvoiced(tx, apptIds);
+    const auswahl = await neuzubuchendeTermine(customerId, apptIds, tx);
+    const nettoNull = auswahl.nettoNull;
+    // Nach einer gezielten Umbuchung (Kürzung, „Monat umbuchen") nichts überschreiben.
+    const ueberzogen = opts.ueberlauf ? auswahl.ueberzogen : [];
+    await lebendeBuchungenStornieren(tx, customerId, ueberzogen, userId);
+    const neu: number[] = [];
+    for (const appointmentId of await chronologischeReihenfolge([...new Set([...nettoNull, ...ueberzogen])], tx)) {
+      const { rebooked } = await rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, handelnder: { userId } });
+      if (rebooked) neu.push(appointmentId);
+    }
+    return neu;
+  });
 }
 
 /**
@@ -852,12 +964,13 @@ export async function findNetZeroBilledAppointments(
 export async function getBudgetSplitForAppointments(
   customerId: number,
   apptIds: number[],
+  opts: { ueberlauf: boolean } = { ueberlauf: true },
 ): Promise<Map<number, BudgetSplitForAppointment>> {
   if (apptIds.length === 0) return new Map();
 
   // SSoT-Loader liefert die Konsumptionen, die storno-bereinigten Reversal-Zeilen
   // (link- UND note-basiert, Task #1012) und die abgeleitete Menge der netto-null
-  // belegten Original-IDs — geteilt mit findNetZeroBilledAppointments.
+  // belegten Original-IDs — geteilt mit neuzubuchendeTermine.
   const { txns, reversalRows } = await loadAppointmentConsumptionTxns(customerId, apptIds);
 
   if (txns.length === 0) return new Map();
@@ -867,6 +980,12 @@ export async function getBudgetSplitForAppointments(
   // Phantom-§45a-Aufteilung), fallen hier weg und erzeugen keine eigene
   // Folge-Rechnung mehr (Task #1012).
   const out = buildBudgetSplitFromLedger(txns, reversalRows);
+
+  // Überzogene Töpfe (siehe `neuzubuchendeTermine`): die gespeicherte
+  // Aufteilung gilt nicht, der Probelauf bucht diese Termine neu.
+  // Nach gezielter Umbuchung (Kürzung, „Monat umbuchen") nicht — wie `neubuchenFuerLauf`.
+  const ueberzogen = opts.ueberlauf ? (await neuzubuchendeTermine(customerId, apptIds)).ueberzogen : [];
+  for (const id of ueberzogen) out.delete(id);
 
   // Stolperfalle (Task #1011): Termine, die eine Konsumption HATTEN, deren
   // Buchungen aber ALLE storniert wurden (netto null, kein Live-Konsum mehr),
@@ -881,7 +1000,7 @@ export async function getBudgetSplitForAppointments(
   }
   const netZeroApptIds = [...apptsWithAnyConsumption].filter((id) => !out.has(id));
   if (netZeroApptIds.length > 0) {
-    const probe = await probelaufNeubuchung(customerId, netZeroApptIds);
+    const probe = await probelaufNeubuchung(customerId, netZeroApptIds, ueberzogen);
     for (const [apptId, split] of probe) out.set(apptId, split);
   }
 
@@ -926,10 +1045,13 @@ class ProbelaufZurueckrollen extends Error {}
 async function probelaufNeubuchung(
   customerId: number,
   apptIds: number[],
+  ueberzogen: number[] = [],
 ): Promise<Map<number, BudgetSplitForAppointment>> {
   let ergebnis = new Map<number, BudgetSplitForAppointment>();
   try {
     await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`);
+      await lebendeBuchungenStornieren(tx, customerId, ueberzogen, undefined);
       for (const appointmentId of await chronologischeReihenfolge(apptIds, tx)) {
         await rebookNetZeroAppointmentCore(tx, { customerId, appointmentId, handelnder: "probelauf" });
       }

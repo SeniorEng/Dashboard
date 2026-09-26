@@ -7,8 +7,8 @@
  *
  *   · die VORSCHAU (bis #193 `rederiveSplitFromCurrentAllocation`, jetzt der
  *     Probelauf `probelaufNeubuchung`, `invoice-data.ts`),
- *   · das ERSTELLEN (`rebookNetZeroAppointmentConsumption`,
- *     `rebook-storage.ts`) bucht Termin für Termin neu.
+ *   · das ERSTELLEN (`neubuchenFuerLauf`,
+ *     `invoice-data.ts`) bucht Termin für Termin neu.
  *
  * Die Vorschau prüfte jeden Termin gegen die VOLLE Verfügbarkeit. Was ein
  * früherer Termin desselben Laufs schon beansprucht hatte, zog sie nicht ab.

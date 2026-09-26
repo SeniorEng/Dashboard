@@ -8,7 +8,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lt, lte, gte, isNull, isNotNull, desc, asc, inArray, or } from "drizzle-orm";
+import { eq, and, sql, lt, lte, gte, isNull, isNotNull, desc, asc, inArray, or, getTableColumns } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth, addDays } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
@@ -827,6 +827,8 @@ export async function readResetAnchor(
   const zeilen = await budgetAllocationsRepo.selectColumnsFrom({
     year: budgetAllocations.year,
     month: budgetAllocations.month,
+    // Eintragsdatum aus Postgres — siehe `ResetAnchor.eingetragenAm`.
+    eingetragenAm: sql<string>`(${budgetAllocations.createdAt})::date::text`,
   }, d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
@@ -835,8 +837,8 @@ export async function readResetAnchor(
       isNull(budgetAllocations.deletedAt),
     ));
   const monate = zeilen
-    .filter((z): z is { year: number; month: number } => z.month != null)
-    .map((z) => ({ year: z.year, month: z.month }));
+    .filter((z): z is { year: number; month: number; eingetragenAm: string } => z.month != null)
+    .map((z) => ({ year: z.year, month: z.month, eingetragenAm: z.eingetragenAm }));
   return resetAnchorFrom(monate, asOfDate);
 }
 
@@ -848,7 +850,15 @@ async function calculateAllocated45b(
 ): Promise<Allocated45bResult> {
   const { year: curYear, month: curMonth } = currentYearAndMonth();
 
-  const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
+  // Alle Spalten PLUS das Eintragsdatum aus Postgres (`created_at::date`).
+  // Gebraucht fuer die Flip-Regel in `displacedByReset` („Startwert an einem
+  // spaeteren Tag eingetragen als der Uebertrag", Tabelle D). Aus Postgres,
+  // nicht aus dem JS-`Date` — kein Tageskippen an der Zeitzonen-Grenze.
+  // Dieselbe Abfrage, kein zusaetzlicher Roundtrip.
+  const existingAllocations = await budgetAllocationsRepo.selectColumnsFrom({
+    ...getTableColumns(budgetAllocations),
+    eingetragenAm: sql<string>`(${budgetAllocations.createdAt})::date::text`,
+  }, d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
@@ -923,7 +933,7 @@ async function calculateAllocated45b(
   // aktiv ist.
   const initialBalanceMonths = existingAllocations
     .filter(a => a.source === "initial_balance" && a.month != null)
-    .map(a => ({ year: a.year, month: a.month! }));
+    .map(a => ({ year: a.year, month: a.month!, eingetragenAm: a.eingetragenAm }));
 
   // ── Task #1812, hochgezogen (P1 6hXp9qMrXH2WGVVG) ──────────────────────
   // Der SPAETESTE zum Stichtag bereits wirksame Startwert-Monat M ist die neue
@@ -1044,7 +1054,7 @@ async function calculateAllocated45b(
    */
   const fensterBis = opts.asOfDate ?? `${curYear}-12-31`;
   const verfallAb = opts.asOfDate ?? `${curYear}-01-01`;
-  const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null; year: number }) =>
+  const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null; year: number; createdByUserId: number | null; eingetragenAm: string | null }) =>
     a.source === "carryover" &&
     allocationValidAt({ validFrom: a.validFrom, expiresAt: a.expiresAt }, fensterBis, verfallAb) &&
     (!(opts.resetDisplacesAllSources ?? RESET_DISPLACES_ALL_SOURCES_DEFAULT)
@@ -1412,7 +1422,7 @@ async function calculateAllocated45b(
   const echtFrueherAlsAnker = (a: { year: number; month: number | null }) =>
     resetAnchor != null && a.month != null
     && (a.year < resetAnchor.year || (a.year === resetAnchor.year && a.month < resetAnchor.month));
-  const vomStartwertErsetzt = (a: { source: string; validFrom: string; expiresAt: string | null; year: number; month: number | null }) =>
+  const vomStartwertErsetzt = (a: { source: string; validFrom: string; expiresAt: string | null; year: number; month: number | null; createdByUserId: number | null; eingetragenAm: string | null }) =>
     a.source === "initial_balance"
       ? echtFrueherAlsAnker(a)
       : verdraengungAn && displacedByReset(a, resetAnchor);
